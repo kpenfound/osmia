@@ -56,11 +56,14 @@ The charter is a trace document, and every change to it is a revision.
 Creation records the template as revision 1. `osmia edit charter <project-id>`
 opens the latest revision in `$VISUAL` or `$EDITOR`, or reads it from a file
 with `--from <file>`, and records what you save as the next revision, with the
-owner as actor and cause `owner-edit`. The web UI's charter editor records an
-edit the same way. Each edit names the revision it started from; if another
+owner as actor and cause `owner-edit`. The web UI's **Project management** view records an
+edit the same way through the project's one charter editor. Each edit names the revision it started from; if another
 revision was recorded since, the edit is refused as a conflict and nothing is
 recorded, so you edit again from the latest. Saving unchanged content records
-nothing. See the [command line](cli.md).
+nothing. An untouched web editor follows new revisions live. An editor with
+unsaved edits keeps its draft and original pin, shows that the charter changed
+elsewhere, and keeps a stale-save refusal until **Read charter** explicitly
+loads the latest text. See the [command line](cli.md).
 
 ## Rules from your rulings
 

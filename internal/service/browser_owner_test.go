@@ -45,6 +45,7 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	p.click("#project-edit [type=submit]")
 	p.awaitText("#project-edit .result", "Saved charter revision")
 	p.click("#new-workstream")
+	p.click(`#create-menu [data-open="handin"]`)
 	p.await("the new workstream view", `!document.querySelector('.view[data-view="handin"]').hidden`)
 	p.choose("#handin-form [name=project]", string(id))
 	p.typeInto("#handin-form [name=content]", "Make durable documents")

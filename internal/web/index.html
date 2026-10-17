@@ -28,7 +28,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2 7 4-14 2 7h6"/></svg>
       <span id="activity-count" class="count"></span>
     </button>
-    <button type="button" id="new-workstream" class="icon" aria-label="New workstream" title="New workstream">
+    <button type="button" id="new-workstream" class="icon" aria-label="Create" title="Create" popovertarget="create-menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
     </button>
     <button type="button" id="settings-button" class="icon" popovertarget="settings-menu" aria-label="Settings" data-lit="false">
@@ -62,9 +62,17 @@
   <ul id="activity-list" class="activity-entries"></ul>
 </div>
 
+<div id="create-menu" class="popover menu" popover data-anchor="new-workstream">
+  <button type="button" data-open="project-add">Create project</button>
+  <button type="button" data-open="repo-add">Add repo</button>
+  <button type="button" data-open="handin">Hand in a feature</button>
+  <button type="button" data-open="design-add">Open a design session</button>
+  <button type="button" data-open="session-add">Open an exploratory session</button>
+</div>
+
 <div id="settings-menu" class="popover menu" popover data-anchor="settings-button">
-  <button type="button" data-open="project-add">New project</button>
-  <button type="button" data-open="projects">Projects and charters</button>
+  <button type="button" data-open="project-add">Create project</button>
+  <button type="button" data-open="projects">Project management</button>
   <button type="button" data-open="priority">Priority</button>
   <button type="button" data-open="profiles">Profiles and usage</button>
   <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>
@@ -89,15 +97,17 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <button type="button" id="sidebar-new" class="new">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New workstream
+    <button type="button" id="sidebar-new" class="new" data-open="handin">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Hand in a feature
     </button>
     <button type="button" id="sidebar-new-session" class="new" data-open="session-add">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New session
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Open an exploratory session
     </button>
     <button type="button" id="sidebar-new-design" class="new" data-open="design-add">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New design session
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Open a design session
     </button>
+    <button type="button" class="new" data-open="project-add">Create project</button>
+    <button type="button" class="new" data-open="repo-add">Add repo</button>
     <ul id="workstream-list" class="rows"></ul>
     <details id="archived" class="archived" hidden>
       <summary>Archived <span id="archived-count" class="meta"></span></summary>
@@ -111,7 +121,7 @@
     </section>
 
     <section class="view" data-view="project-pane" aria-labelledby="project-pane-title">
-      <div class="view-head"><h2 id="project-pane-title">Projects</h2><button type="button" data-open="project-add">New project</button></div>
+      <div class="view-head"><h2 id="project-pane-title">Projects</h2><button type="button" data-open="project-add">Create project</button></div>
       <div id="project-pane"></div>
     </section>
 
@@ -205,12 +215,12 @@
     </section>
 
     <section class="view" data-view="session-add" aria-labelledby="session-add-title" hidden>
-      <div class="view-head"><h2 id="session-add-title">New session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="session-add-title">Open an exploratory session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="session-add-form" class="control">
-        <label>Project <select name="project" data-project-select required></select></label>
+        <label>Repo <select name="project" data-repo-select required></select></label>
         <label>Profile <select name="profile" required></select></label>
         <label>Title (optional) <input name="title" type="text"></label>
-        <div class="actions"><button type="submit">Open session</button></div>
+        <div class="actions"><button type="submit">Open an exploratory session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -257,11 +267,11 @@
     </section>
 
     <section class="view" data-view="design-add" aria-labelledby="design-add-title" hidden>
-      <div class="view-head"><h2 id="design-add-title">New design session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="design-add-title">Open a design session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="design-add-form" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
         <p class="meta">The agent reads the project's charter and every repo's knowledge base, read-only. It cannot write, use version control, or start any work itself.</p>
-        <div class="actions"><button type="submit">Open design session</button></div>
+        <div class="actions"><button type="submit">Open a design session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -288,51 +298,61 @@
     </section>
 
     <section class="view" data-view="handin" aria-labelledby="handin-title" hidden>
-      <div class="view-head"><h2 id="handin-title">New workstream</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="handin-title">Hand in a feature</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="handin-form" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
         <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
         <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
         <label>Feature description or issue URL <textarea name="content" rows="8" required></textarea></label>
         <label class="check"><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
-        <div class="actions"><button type="submit">Hand in feature</button></div>
+        <div class="actions"><button type="submit">Hand in a feature</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
 
     <section class="view" data-view="project-add" aria-labelledby="project-add-title" hidden>
-      <div class="view-head"><h2 id="project-add-title">New project</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="project-add-title">Create project</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="project-add" class="control">
         <label>Name <input name="name" type="text" required></label>
         <label>Upstream repository <input name="upstream" type="text" placeholder="owner/repository" required></label>
         <label>Your fork (optional) <input name="fork" type="text" placeholder="Omit to push feature branches to upstream"></label>
         <label>Clone path on the service machine <input name="clone" type="text" required></label>
         <label>Base branch <input name="base_branch" type="text" value="main" required></label>
-        <div class="actions"><button type="submit">Register project</button></div>
+        <div class="actions"><button type="submit">Create project</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
 
     <section class="view" data-view="projects" aria-labelledby="projects-title" hidden>
-      <div class="view-head"><h2 id="projects-title">Projects and charters</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="projects-title">Project management</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="project-edit" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
+        <p id="charter-state" class="meta" role="status"></p>
+        <h3>Project charter</h3>
         <div class="actions"><button type="button" data-action="read-charter">Read charter</button></div>
+        <p id="charter-revision" class="meta"></p>
+        <p id="charter-changed" role="status" hidden>Charter changed elsewhere. Your draft and its revision are kept. Read charter to load the latest revision.</p>
         <label>Numbered contributor rules <textarea name="content" rows="10"></textarea></label>
         <div class="actions">
           <button type="submit" disabled>Save charter</button>
-          <button type="button" data-action="extract">Extract knowledge</button>
-          <button type="button" data-action="rebase">Rebase workstreams</button>
-          <button type="button" data-action="remove">Remove project from active work</button>
         </div>
         <p class="result" role="status"></p>
       </form>
+      <div class="control">
+        <div class="actions">
+          <button type="button" id="project-add-repo">Add repo</button>
+          <button type="button" id="project-remove">Remove project from active work</button>
+        </div>
+        <p id="project-result" class="result" role="status"></p>
+        <h3>Repos</h3>
+        <div id="project-repos"></div>
+      </div>
     </section>
 
     <section class="view" data-view="priority" aria-labelledby="priority-title" hidden>
       <div class="view-head"><h2 id="priority-title">Priority</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="priority-form" class="control">
-        <label>Project <select id="priority-project" name="project"></select></label>
+        <label>Repo <select id="priority-project" name="project"></select></label>
         <p id="priority-current" class="meta"></p>
         <ol id="priority-list" class="priority"></ol>
         <div class="actions">

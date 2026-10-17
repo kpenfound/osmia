@@ -100,9 +100,9 @@ updates live from the service's event stream. The browser tab shows the bee
 emoji (🐝) as the page's favicon.
 
 The project pane is the main entry point. It lists each project's repos and
-workgroups, their member workstreams and any named wait. **New project**
+workgroups, their member workstreams and any named wait. **Create project**
 creates a one-repo project; **Add repo** extends it using a separate clone and
-the shared charter. **New design session** opens the read-only project chat;
+the shared charter. **Open a design session** opens the read-only project chat;
 **Start workgroup from brief** hands the latest brief to the architect in one
 owner action. **Hand in a feature** takes the document fast path instead.
 With several active repos, both entry points let the architect select the
@@ -116,7 +116,31 @@ or merge), PR open, delivered (merged) and cancelled. Expected merge waits
 create no inbox entry or notification. The workstream graph appears only for
 several members or recorded edges. Exploratory sessions appear under their
 project outside workgroups and retain their direct writable-worktree chat.
-The **Osmia** heading returns to the project pane.
+The **Osmia** heading returns to the project pane. **Create project**, **Add
+repo**, **Hand in a feature**, **Open a design session** and **Open an exploratory
+session** use the same forms from the header's **+**, the sidebar and project
+cards wherever offered. Card actions choose that project; global actions ask
+for a project. Hand-in, design and add-repo choices list each project once.
+Exploratory sessions choose any repo, including a non-default repo. Repo labels
+use the project name and repo name together when a project has several repos.
+
+**Project management**, from the cog menu or a project card, shows the chosen
+project's shared charter and whether it is ready for hand-in. **Read charter**
+loads the current revision; **Save charter** saves against that revision. An
+untouched editor follows another client's save live. Unsaved edits keep their
+text and revision, with a notice that the charter changed elsewhere; a stale
+save is refused and keeps the draft and error until **Read charter** explicitly
+loads the latest text.
+
+Each repo in Project management shows its name, upstream, optional fork, clone
+path, base branch, default marker and reported knowledge extraction state.
+**Extract knowledge**, **Rebase workstreams** and **Remove repo from active
+work** affect that row's repo only and show their outcome on the row. **Add
+repo** opens the shared form with the project chosen. **Remove project from
+active work** shows the service's refusal while the project still has other
+repos; remove those repos first. Removing a non-default repo keeps its project
+and sibling repos. Project and repo changes, charter saves and extraction
+state updates arrive live, including changes made through the API.
 
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,

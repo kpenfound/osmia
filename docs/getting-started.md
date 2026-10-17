@@ -163,8 +163,8 @@ and write numbered rules under the template's headings:
 Save and quit. The command records your edit as the next charter revision and
 prints its number; there is nothing further to ratify, and `osmia status` then
 shows `Charter: ready (2 rules, revision 2)`. To write the charter from a file
-instead, use `osmia edit charter p_… --from charter.md`; the project pane's
-charter editor does the same. Rules later proposed by the chief of
+instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the cog menu
+opens the same revision-pinned charter editor and shows readiness for hand-in. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 

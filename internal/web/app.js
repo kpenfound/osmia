@@ -217,10 +217,20 @@
         dirty.clear();
         await Promise.all(names.map(async (name) => {
           try {
-            views[name] = await request('GET', '/' + name);
+            const pin = charterRead;
+            const out = await request('GET', '/' + name);
+            views[name] = out;
+            if (name.startsWith('projects/charter/')) {
+              const project = name.slice('projects/charter/'.length);
+              if (byId('project-edit').elements.project.value === project && charterRead === pin) {
+                receiveCharter(project, out);
+              }
+            }
             delete failures[name];
           } catch (err) {
-            failures[name] = 'Cannot read /' + name + ': ' + err.message;
+            if (!name.startsWith('projects/charter/') || name === 'projects/charter/' + byId('project-edit').elements.project.value) {
+              failures[name] = 'Cannot read /' + name + ': ' + err.message;
+            }
           }
         }));
         if (views.status) {
@@ -280,6 +290,10 @@
           }
         }
         render();
+        if (names.some(name => ['status', 'config', 'charter'].includes(name))) {
+          const project = byId('project-edit').elements.project.value;
+          if (project) dirty.add('projects/charter/' + project);
+        }
       }
     } finally {
       reading = false;
@@ -374,7 +388,7 @@
     } catch (err) {
       show(result, err.code === 'unavailable' ? 'unavailable' : 'error', err.message);
       if (refused) {
-        refused();
+        refused(err);
       }
     } finally {
       delete button.dataset.busy;
@@ -434,7 +448,7 @@
       case 'factory':
         return 'The factory';
       case 'project':
-        return 'Project ' + target.project;
+        return repoLabel(target.project);
       case 'workstream':
         return 'Workstream ' + target.workstream;
       case 'role':
@@ -454,7 +468,11 @@
 
   function projectName(id) {
     const p = projects().find((p) => p.id === id);
-    return p?.name || configuredRepos().find(r => r.id === id)?.label || id;
+    return p?.name || id;
+  }
+
+  function repoLabel(id) {
+    return configuredRepos().find(r => r.id === id)?.label || id;
   }
 
   function goal(w) {
@@ -511,13 +529,13 @@
   }
 
   // pauseTargets are the scopes the pause form offers: the factory, the
-  // active projects and each project's workstreams.
+  // active repos and each repo's workstreams.
   function pauseTargets() {
     const targets = [['factory', 'The factory', { scope: 'factory' }]];
     for (const p of configuredRepos()) {
-      targets.push(['project:' + p.id, 'Project ' + projectName(p.id), { scope: 'project', project: p.id }]);
+      targets.push(['project:' + p.id, repoLabel(p.id), { scope: 'project', project: p.id }]);
       for (const w of views.status ? views.status.workstreams.filter((w) => w.project === p.id && !w.archived) : []) {
-        targets.push(['workstream:' + w.workstream, projectName(p.id) + ': ' + goal(w),
+        targets.push(['workstream:' + w.workstream, repoLabel(p.id) + ': ' + goal(w),
           { scope: 'workstream', project: p.id, workstream: w.workstream }]);
       }
     }
@@ -578,7 +596,7 @@
     }
     list.replaceChildren(...entries.map((e) => {
       const blocked = activityBlocked(e);
-      const where = [e.workstream ? activityWorkstream(e.workstream) : null, !e.workstream && e.project ? projectName(e.project) : null].filter((s) => s);
+      const where = [e.workstream ? activityWorkstream(e.workstream) : null, e.project ? repoLabel(e.project) : null].filter((s) => s);
       return el('li', { class: 'activity-entry', 'data-activity': e.id, 'data-blocked': String(blocked) },
         el('div', { class: 'line' },
           el('strong', { 'data-field': 'kind' }, e.kind),
@@ -795,7 +813,7 @@
       const label = w.kind === 'session' ? (w.title || w.workstream) : w.kind === 'design' ? w.workstream : goal(w);
       r.title.textContent = label;
       r.title.title = label;
-      r.project.textContent = projectName(w.project);
+      r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
       r.state.textContent = w.archived ? (w.trace_deleted ? 'archived · trace deleted' : 'archived · cleanup pending') : (w.state || 'handed');
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
@@ -830,16 +848,11 @@
     const action = (label, view, project) => {
       const button = el('button', { type: 'button', 'data-project-action': view }, label);
       button.addEventListener('click', () => {
-        openView(view);
-        const form = document.querySelector('[data-view="' + view + '"] form');
-        if (form?.elements.project) {
-          form.elements.project.value = project;
-          form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+        openView(view, project);
       });
       return button;
     };
-    const entry = (w, p) => {
+    const entry = (w) => {
       let row = paneEntries.get(w.workstream);
       if (!row) {
         row = {
@@ -853,9 +866,8 @@
         row.node = el('li', { 'data-pane-workstream': w.workstream }, row.button, row.wait, row.needs, row.archive);
         paneEntries.set(w.workstream, row);
       }
-      const repo = (p.repos || []).find(r => r.id === w.project);
       row.title.textContent = w.kind === 'session' ? (w.title || w.workstream) : goal(w);
-      row.repo.textContent = repo?.name || w.project;
+      row.repo.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
       row.state.textContent = w.display_state || w.state || w.kind || 'planning';
       row.button.disabled = !!w.archived;
       const needs = inboxOf(w.workstream).filter(e => !e.workgroup).length;
@@ -893,14 +905,14 @@
         row.inbox.hidden = !waiting.length;
         if (waiting.length) row.inbox.dataset.groupInbox = g.id;
         else delete row.inbox.dataset.groupInbox;
-        place(row.members, members.map(w => entry(w, p)));
+        place(row.members, members.map(entry));
         const graphKey = JSON.stringify([g.members, g.edges, p.repos]);
         if (row.graphKey !== graphKey) {
           row.graphKey = graphKey;
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
-              (p.repos || []).find(r => r.id === work.find(w => w.workstream === id)?.project)?.name || id, ' · ', id))),
+              repoLabel(work.find(w => w.workstream === id)?.project || id), ' · ', id))),
             ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
@@ -916,24 +928,24 @@
           return node;
         });
         row.node = el('article', { class: 'project-card', 'data-project': p.id }, row.name,
-          el('div', { class: 'actions' }, action('Design a workgroup', 'design-add', p.id),
+          el('div', { class: 'actions' }, action('Open a design session', 'design-add', p.id),
             action('Hand in a feature', 'handin', p.id), action('Add repo', 'repo-add', p.id),
-            action('Charter', 'projects', p.id), action('New exploratory session', 'session-add', p.id)),
+            action('Project management', 'projects', p.id), action('Open an exploratory session', 'session-add', p.id)),
           el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
         paneProjects.set(p.id, row);
       }
       row.name.textContent = p.name;
-      const repoKey = JSON.stringify(p.repos);
+      const repoKey = JSON.stringify([p.name, p.repos]);
       if (row.repoKey !== repoKey) {
         row.repoKey = repoKey;
-        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id }, el('strong', {}, r.name), ' · ', r.upstream)));
+        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id }, el('strong', {}, repoLabel(r.id)), ' · ', r.upstream)));
       }
       place(row.groups, groupsView);
       row.none.hidden = !!groupsView.length;
-      place(row.ungrouped, work.filter(w => !w.workgroup && !w.kind).map(w => entry(w, p)));
+      place(row.ungrouped, work.filter(w => !w.workgroup && !w.kind).map(entry));
       row.ungrouped.hidden = !row.ungrouped.children.length;
       for (const section of row.sessions) {
-        place(section.list, work.filter(w => w.kind === section.kind && !w.workgroup).map(w => entry(w, p)));
+        place(section.list, work.filter(w => w.kind === section.kind && !w.workgroup).map(entry));
         section.node.hidden = !section.list.children.length;
       }
       return row.node;
@@ -987,25 +999,17 @@
 
   // openView shows a view in the main area: the selected workstream or
   // session, or one of the views the header opens.
-  function openView(view) {
+  function openView(view, project = '') {
     for (const popover of document.querySelectorAll('[popover]')) {
       if (popover.matches(':popover-open')) {
         popover.hidePopover();
       }
     }
-    if (view === 'handin') {
-      const w = shown();
-      const project = byId('handin-form').elements.project;
-      if (w && project.value === '') {
-        project.value = w.project;
-      }
-    }
-    if (view === 'session-add') {
-      const w = shown();
-      const project = byId('session-add-form').elements.project;
-      if (w && project.value === '') {
-        project.value = w.project;
-      }
+    if (['handin', 'design-add', 'session-add', 'repo-add'].includes(view) || (view === 'projects' && project)) {
+      const form = document.querySelector('[data-view="' + view + '"] form');
+      const changedProject = form.elements.project.value !== project;
+      form.elements.project.value = project;
+      if (view !== 'projects' || changedProject) form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
     }
     const changed = ui.view !== view;
     if (changed && ['project-pane', 'workstream', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
@@ -1268,7 +1272,7 @@
         el('h2', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
         w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'archived') : ''),
-      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       renderUnitCounts(w.units)].filter((node) => node !== null));
   }
 
@@ -1519,7 +1523,7 @@
     }
     byId('session-title').textContent = w.title || w.workstream;
     byId('session-meta').replaceChildren(
-      el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · profile ',
+      el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · profile ',
       el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' · ',
       el('span', { class: 'tag', 'data-field': 'state' }, w.state));
     renderSessionFeed(w.workstream);
@@ -1819,9 +1823,6 @@
       setPicker(false);
       render();
     });
-    for (const id of ['new-workstream', 'sidebar-new']) {
-      byId(id).addEventListener('click', () => openView('handin'));
-    }
     for (const button of document.querySelectorAll('[data-open]')) {
       button.addEventListener('click', () => openView(button.dataset.open));
     }
@@ -2389,7 +2390,7 @@
     block(byId('priority-form').querySelector('button[type=submit]'), !id);
     block(byId('priority-clear'), !id);
     if (!id) {
-      current.textContent = 'No project is configured.';
+      current.textContent = 'No repo is configured.';
       list.replaceChildren();
       priority.inForce = null;
       priority.shown = null;
@@ -2455,7 +2456,7 @@
     const id = priorityProject();
     const workstreams = priority.order.filter((w) => priority.chosen.has(w));
     if (!id) {
-      show(result, 'error', 'No project is configured.');
+      show(result, 'error', 'No repo is configured.');
       return;
     }
     if (workstreams.length === 0) {
@@ -2470,7 +2471,7 @@
     const result = byId('priority-result');
     const id = priorityProject();
     if (!id) {
-      show(result, 'error', 'No project is configured.');
+      show(result, 'error', 'No repo is configured.');
       return;
     }
     act(result, byId('priority-clear'), () => request('DELETE', '/runtime/priority', { project: id }), () => 'Priority order cleared.');
@@ -2623,6 +2624,101 @@
 
 
   let charterRead = null;
+  let charterProject = '';
+  const managementRepos = new Map();
+
+  function receiveCharter(project, out, explicit = false) {
+    const form = byId('project-edit');
+    if (!explicit && charterRead && (charterRead.conflict || form.elements.content.value !== charterRead.content)) {
+      if (out.revision !== charterRead.revision) charterRead.conflict = true;
+    } else {
+      charterRead = { project, revision: out.revision, content: out.content, conflict: false };
+      form.elements.content.value = out.content;
+    }
+    renderCharterPin();
+  }
+
+  function renderCharterPin() {
+    const form = byId('project-edit');
+    block(form.querySelector('[type=submit]'), !charterRead || charterRead.project !== form.elements.project.value);
+    byId('charter-changed').hidden = !charterRead?.conflict;
+    byId('charter-revision').textContent = charterRead ? 'Editing revision ' + charterRead.revision + '.' : '';
+    byId('project-edit').dataset.revision = charterRead ? charterRead.revision : '';
+  }
+
+  function selectManagedProject() {
+    const form = byId('project-edit');
+    const project = form.elements.project.value;
+    if (charterProject === project) return;
+    charterProject = project;
+    charterRead = null;
+    form.elements.content.value = '';
+    show(form.querySelector('.result'), '', '');
+    for (const [id, row] of managementRepos) {
+      if (project || !row.retain) managementRepos.delete(id);
+    }
+    for (const name of Object.keys(failures)) {
+      if (name.startsWith('projects/charter/')) delete failures[name];
+    }
+    renderCharterPin();
+    if (project) mark(['projects/charter/' + project]);
+  }
+
+  function renderProjectManagement() {
+    selectManagedProject();
+    const project = byId('project-edit').elements.project.value;
+    const configured = projects().find(p => p.id === project);
+    const state = configured?.charter_state;
+    byId('charter-state').textContent = state ? (state.ready ? 'Ready for hand-in' : 'Not ready for hand-in') +
+      ' · ' + state.rules + ' rules · revision ' + state.revision + '.' : (project ? 'Charter readiness not reported.' : 'Choose a project to manage its charter and repos.');
+    block(byId('project-add-repo'), !configured);
+    block(byId('project-remove'), !configured);
+    const repos = configured?.repos || [];
+    const active = new Set(repos.map(r => r.id));
+    for (const [id, row] of managementRepos) {
+      if (!active.has(id) && !row.retain) managementRepos.delete(id);
+    }
+    for (const repo of repos) {
+      let row = managementRepos.get(repo.id);
+      if (!row) {
+        row = { title: el('h4'), details: el('dl'), extraction: el('p', {class: 'meta', 'data-field': 'extraction'}),
+          result: el('p', {class: 'result', role: 'status'}), buttons: [] };
+        for (const [action, label] of [['extract', 'Extract knowledge'], ['rebase', 'Rebase workstreams'], ['remove', 'Remove repo from active work']]) {
+          const button = el('button', {type: 'button', 'data-action': action}, label);
+          button.addEventListener('click', () => {
+            if (action === 'remove') row.retain = true;
+            act(row.result, button, () => request(action === 'remove' ? 'DELETE' : 'POST',
+              action === 'remove' ? '/projects' : '/projects/' + action, {project: repo.id}), out => {
+              if (action === 'remove') {
+                row.buttons.forEach(b => block(b, true));
+              }
+              mark(['status', 'config']);
+              return action === 'remove' ? 'Repo removed from active work; its trace and clone are retained.' :
+                (action === 'extract' ? 'Knowledge extraction requested.' : 'Workstream rebase: ' + out.covered.length + ' requested, ' + out.skipped.length + ' skipped.' +
+                  out.skipped.map(skip => ' ' + skip.workstream + ': ' + skip.reason + '.').join(''));
+            }, () => { row.retain = false; });
+          });
+          row.buttons.push(button);
+        }
+        row.node = el('article', {class: 'managed-repo', 'data-managed-repo': repo.id}, row.title, row.details,
+          row.extraction, el('div', {class: 'actions'}, ...row.buttons), row.result);
+        managementRepos.set(repo.id, row);
+      }
+      row.title.textContent = repoLabel(repo.id) + (repo.default ? ' · Default repo' : '');
+      const fields = [['Name', repo.name], ['Upstream', repo.upstream], ...(repo.fork ? [['Fork', repo.fork]] : []),
+        ['Clone path', repo.clone], ['Base branch', repo.base_branch]];
+      const key = JSON.stringify(fields);
+      if (row.key !== key) {
+        row.key = key;
+        row.details.replaceChildren(...fields.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, value)]));
+      }
+      const extraction = repo.extraction;
+      row.extraction.hidden = !extraction;
+      row.extraction.textContent = extraction ? 'Knowledge extraction ' + extraction.extraction + ': ' + extraction.state +
+        (extraction.reason ? ' · ' + extraction.reason : '') : '';
+    }
+    place(byId('project-repos'), [...managementRepos.values()].map(row => row.node));
+  }
   let draftRead = null;
   let baseRead = null;
   let handinRetry = null;
@@ -2667,6 +2763,9 @@
     const options = [['', 'Choose a project'], ...projects().map(p => [p.id, projectName(p.id)])];
     for (const select of document.querySelectorAll('[data-project-select]')) {
       setOptions(select, options);
+    }
+    for (const select of document.querySelectorAll('[data-repo-select]')) {
+      setOptions(select, [['', 'Choose a repo'], ...configuredRepos().map(r => [r.id, r.label])]);
     }
     const all = streams();
     const handin = byId('handin-form');
@@ -2731,7 +2830,7 @@
     add.addEventListener('submit', event => {
       event.preventDefault();
       const body = Object.fromEntries(new FormData(add));
-      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter in Projects and charters before handing in work.', { reset: true });
+      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter in Project management before handing in work.', { reset: true });
     });
     const handin = byId('handin-form');
     handin.elements.project.addEventListener('change', renderOwnerForms);
@@ -2752,18 +2851,17 @@
     });
     const charter = byId('project-edit');
     charter.elements.project.addEventListener('change', () => {
-      charterRead = null;
-      charter.elements.content.value = '';
+      selectManagedProject();
+      show(byId('project-result'), '', '');
       renderOwnerForms();
+      renderProjectManagement();
     });
     charter.querySelector('[data-action=read-charter]').addEventListener('click', event => {
+      selectManagedProject();
       const project = charter.elements.project.value;
       if (!project) { show(charter.querySelector('.result'), 'error', 'Choose a project.'); return; }
-      formAction(charter, event.target, () => request('GET', '/projects/charter/' + project), out => {
-        if (charter.elements.project.value === project) {
-          charterRead = {project, revision: out.revision};
-          charter.elements.content.value = out.content;
-        }
+      act(charter.querySelector('.result'), event.target, () => request('GET', '/projects/charter/' + project), out => {
+        if (charter.elements.project.value === project) receiveCharter(project, out, true);
         renderOwnerForms();
         return 'Read charter revision ' + out.revision + '.';
       });
@@ -2772,21 +2870,30 @@
       event.preventDefault();
       if (!charterRead || charterRead.project !== charter.elements.project.value) { return; }
       const pin = charterRead;
-      formAction(charter, event.submitter, () => request('PUT', '/projects/charter/' + pin.project,
-        {revision: pin.revision, content: charter.elements.content.value}), out => {
-          if (charterRead === pin) { charterRead = {project: pin.project, revision: out.revision}; }
+      const content = charter.elements.content.value;
+      act(charter.querySelector('.result'), event.submitter, () => request('PUT', '/projects/charter/' + pin.project,
+        {revision: pin.revision, content}), out => {
+          if (charterRead === pin) {
+            charterRead = {project: pin.project, revision: out.revision, content, conflict: false};
+            renderCharterPin();
+          }
+          renderOwnerForms();
+          mark(['status', 'config', 'charter']);
           return 'Saved charter revision ' + out.revision + '.';
+        }, err => {
+          // Keep a stale draft pinned until the owner explicitly rereads.
+          if (charterRead === pin && err.code === 'conflict') { pin.conflict = true; renderCharterPin(); }
         });
     });
-    for (const action of ['extract', 'rebase', 'remove']) {
-      charter.querySelector('[data-action=' + action + ']').addEventListener('click', event => {
-        const project = charter.elements.project.value;
-        if (!project) { show(charter.querySelector('.result'), 'error', 'Choose a project.'); return; }
-        formAction(charter, event.target, () => request(action === 'remove' ? 'DELETE' : 'POST',
-          action === 'remove' ? '/projects' : '/projects/' + action, {project}),
-          () => action === 'remove' ? 'Project removed; its trace and clone are retained.' : 'Project ' + action + ' requested.');
+    byId('project-add-repo').addEventListener('click', () => openView('repo-add', charter.elements.project.value));
+    byId('project-remove').addEventListener('click', event => {
+      const project = charter.elements.project.value;
+      if (!project) return;
+      act(byId('project-result'), event.target, () => request('DELETE', '/projects', {project}), () => {
+        mark(['status', 'config']);
+        return 'Project removed from active work; its trace and clone are retained.';
       });
-    }
+    });
     const documents = byId('documents-form');
     documents.querySelector('[data-action=read]').addEventListener('click', event => readDocuments(event.target));
     documents.addEventListener('submit', event => {
@@ -2850,7 +2957,7 @@
     });
   }
 
-  // setupSessionForms wires the "New session" form and the session view's
+  // setupSessionForms wires the exploratory-session form and the session view's
   // chat, stop, commit, check, push and end controls. Each control's action
   // runs against the session the view shows, read again at the moment it is
   // used, since only one session is shown at a time.
@@ -2918,7 +3025,7 @@
     });
   }
 
-  // setupDesignForms wires the "New design session" form, the design view's
+  // setupDesignForms wires the "Open a design session" form, the design view's
   // chat and the one owner action that starts a workgroup from its brief.
   function setupDesignForms() {
     const add = byId('design-add-form');
@@ -2969,6 +3076,7 @@
     markSeen();
     renderViews();
     renderOwnerForms();
+    renderProjectManagement();
     renderProblems();
     renderHeader();
     renderSidebar();
