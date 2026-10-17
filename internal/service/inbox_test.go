@@ -284,10 +284,17 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	list, err := repo.Questions(stream)
 	must(t, err)
+	masonQuestion := ""
 	for _, q := range list {
+		if q.Asked.AskedBy.ID == demoAgent {
+			masonQuestion = q.Asked.ID
+		}
 		if r := q.Ruling; q.State != trace.QuestionRuled || r == nil || r.OwnerResponse != "Both are part of the contract." || r.ReturnedAnswer != "" || r.Actor != ownerActor || r.Decision != trace.DecisionRuling {
 			t.Fatalf("ruled question %s: %+v", q.Asked.ID, q)
 		}
+	}
+	if masonQuestion == "" {
+		t.Fatal("mason's question was not recorded")
 	}
 	// The turns of this workstream's askers are held from here on.
 	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
@@ -330,7 +337,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	queuedBy := time.Now().Add(demoTimeout)
 	for {
 		th := thread(repo, stream, demoAgent)
-		if len(th.Turns) == 2 && th.Turns[1].Request.TurnID == questions.TurnID("1") && th.Turns[1].Request.Actor == questions.Actor {
+		if len(th.Turns) == 2 && th.Turns[1].Request.TurnID == questions.TurnID(masonQuestion) && th.Turns[1].Request.Actor == questions.Actor {
 			break
 		}
 		if len(th.Turns) > 2 || time.Now().After(queuedBy) {

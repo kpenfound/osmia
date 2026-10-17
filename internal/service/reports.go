@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -106,7 +107,30 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		if err != nil {
 			return nil, err
 		}
-		if state.Value != UnitImplementing {
+		canReport := state.Value == UnitImplementing
+		if state.Value == UnitWaiting {
+			stream := config.WorkstreamID(scope.Workstream)
+			own, err := questionWaitOwner(repository, stream, scope.Unit, scope.Thread, masonActor)
+			if err != nil {
+				return nil, err
+			}
+			if own {
+				th, err := repository.Thread(stream, scope.Thread)
+				if err != nil {
+					return nil, err
+				}
+				asked, err := repository.Questions(stream)
+				if err != nil {
+					return nil, err
+				}
+				waited, delivered, reason, err := waitedQuestion(repository, stream, scope.Unit, th, asked)
+				if err != nil {
+					return nil, err
+				}
+				canReport = delivered && reason == "" && scope.Role == masonRole && scope.Thread == masonAgent(scope.Unit) && scope.Turn == questions.TurnID(waited.Asked.ID)
+			}
+		}
+		if !canReport {
 			return refuseReport("unit %s is %s, not implementing", scope.Unit, state.Value)
 		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}

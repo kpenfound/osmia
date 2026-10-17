@@ -694,8 +694,16 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &faults{}
-	f, _ := newAskingFixture(t, 1, 1, p)
+	f, c := newAskingFixture(t, 1, 1, p)
 	defer f.stop(t)
+	// The first lifetime leaves the choice for the chief turn planted
+	// between lifetimes. Its ordinary event turns finish but cannot
+	// escalate the question before that direct answer is recorded.
+	f.engine.mu.Lock()
+	f.engine.turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		return questionResult(req, "session-chief", "Choice left for the planted turn"), nil
+	}
+	f.engine.mu.Unlock()
 	member := committeeAgent(1)
 	asked := make(chan struct{})
 	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
@@ -721,6 +729,9 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
 	})
 	f.stop(t)
+	f.engine.mu.Lock()
+	f.engine.turns["*"] = c.turn
+	f.engine.mu.Unlock()
 	// Between lifetimes a second attempt is reserved on the member's thread
 	// as a crash would leave it, the chief of staff answers, and the answer
 	// is queued behind the reservation.

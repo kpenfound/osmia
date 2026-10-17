@@ -194,10 +194,10 @@ func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Reposit
 	if err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read contested transition"}
 	}
-	if moveContest(contest, unit) || checksContest(contest, unit) {
-		// A unit moved to contested, or whose checks kept failing to
-		// complete, has no findings to rule on: a ruling moves it on, and a
-		// move to reviewing runs its checks before review.
+	if moveContest(contest, unit) || checksContest(contest, unit) || contest.Cause == questionWaitContestCause {
+		// A move, incomplete checks or an uncertain question wait leaves no
+		// findings to rule on. A ruling moves the unit on, and a move to
+		// reviewing runs its checks before review.
 		to := map[string]string{"review": UnitReviewing, "revise": UnitImplementing}[req.Decision]
 		out, api := s.moveUnit(ctx, repo, stream, unit, UnitMoveRequest{To: to, Note: req.Note}, actor, "")
 		if api != nil {

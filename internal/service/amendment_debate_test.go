@@ -53,7 +53,16 @@ func TestAmendmentShedPresentation(t *testing.T) {
 	}{{"consensus", "", "ratify: no objection"}, {"charter-veto", shed.Charter, "do not ratify"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f := newDebateFixture(t, 2, 3)
+			// Keep the ordinary debate from moving past sketched before the
+			// amendment is planted in the stopped service.
+			var committee *Committee
+			f := newDebateFixtureWith(t, 2, 3, "", func(o *Options) { committee, o.Committee = o.Committee, nil })
+			stopped := false
+			defer func() {
+				if !stopped {
+					f.stop(t)
+				}
+			}()
 			f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 			for i := 1; i <= 2; i++ {
 				member := committeeAgent(i)
@@ -76,6 +85,8 @@ func TestAmendmentShedPresentation(t *testing.T) {
 			stream := f.handIn(t, "amend-debate-"+tc.name, handedDesign)
 			f.await(t, stream, sketched)
 			f.stop(t)
+			stopped = true
+			f.s.options.Committee = committee
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 			must(t, err)
 			defer repo.Close()
