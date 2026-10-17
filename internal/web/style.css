@@ -1201,3 +1201,9 @@ button:disabled {
 .workgroup-graph figcaption { font-weight: 600; }
 .workgroup-graph p { overflow-wrap: anywhere; }
 #project-home { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+
+.managed-repo { border-top: 1px solid var(--line); padding: 0.75rem 0; min-width: 0; }
+.managed-repo dl { margin: 0.5rem 0; }
+.managed-repo dt { font-weight: 600; }
+.managed-repo dd { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+#charter-changed { color: var(--accent); }

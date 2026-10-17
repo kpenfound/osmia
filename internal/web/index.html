@@ -72,7 +72,7 @@
 
 <div id="settings-menu" class="popover menu" popover data-anchor="settings-button">
   <button type="button" data-open="project-add">Create project</button>
-  <button type="button" data-open="projects">Projects and charters</button>
+  <button type="button" data-open="projects">Project management</button>
   <button type="button" data-open="priority">Priority</button>
   <button type="button" data-open="profiles">Profiles and usage</button>
   <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>
@@ -324,19 +324,29 @@
     </section>
 
     <section class="view" data-view="projects" aria-labelledby="projects-title" hidden>
-      <div class="view-head"><h2 id="projects-title">Projects and charters</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="view-head"><h2 id="projects-title">Project management</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="project-edit" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
+        <p id="charter-state" class="meta" role="status"></p>
+        <h3>Project charter</h3>
         <div class="actions"><button type="button" data-action="read-charter">Read charter</button></div>
+        <p id="charter-revision" class="meta"></p>
+        <p id="charter-changed" role="status" hidden>Charter changed elsewhere. Your draft and its revision are kept. Read charter to load the latest revision.</p>
         <label>Numbered contributor rules <textarea name="content" rows="10"></textarea></label>
         <div class="actions">
           <button type="submit" disabled>Save charter</button>
-          <button type="button" data-action="extract">Extract knowledge</button>
-          <button type="button" data-action="rebase">Rebase workstreams</button>
-          <button type="button" data-action="remove">Remove project from active work</button>
         </div>
         <p class="result" role="status"></p>
       </form>
+      <div class="control">
+        <div class="actions">
+          <button type="button" id="project-add-repo">Add repo</button>
+          <button type="button" id="project-remove">Remove project from active work</button>
+        </div>
+        <p id="project-result" class="result" role="status"></p>
+        <h3>Repos</h3>
+        <div id="project-repos"></div>
+      </div>
     </section>
 
     <section class="view" data-view="priority" aria-labelledby="priority-title" hidden>

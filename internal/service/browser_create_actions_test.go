@@ -77,7 +77,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	p.awaitText("#project-add-title", "Create project")
 	p.click("#project-home")
 	p.click(`[data-project="` + string(project) + `"] [data-project-action="projects"]`)
-	p.await("the card's charter entry still opens its charter view", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
+	p.await("the card's management entry opens project management", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
 	// Global create actions also ignore the workstream currently being viewed.
 	p.selectWorkstream(f.streams[project])
 	p.click("#new-workstream")

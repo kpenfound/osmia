@@ -124,7 +124,7 @@ func (s *subscriber) take() []Event {
 
 // traceEvents returns the observer of a project's trace, which announces the
 // views each commit changes. The librarian's workstream has no status,
-// conversation or inbox entry, so only its spend is announced.
+// conversation or inbox entry; its changes refresh extraction in configuration.
 func (h *hub) traceEvents(project config.ProjectID) func(trace.Commit) {
 	librarian := librarianWorkstream(project)
 	return func(c trace.Commit) {
@@ -136,6 +136,9 @@ func (h *hub) traceEvents(project config.ProjectID) func(trace.Commit) {
 		}
 		for _, name := range c.Paths {
 			parts := strings.Split(name, "/")
+			if name == "charter.md" || name == "documents.jsonl" {
+				add(EventConfig, "")
+			}
 			if len(parts) == 1 && name == "ledger.jsonl" {
 				add(EventSpend, "")
 			}
@@ -147,6 +150,7 @@ func (h *hub) traceEvents(project config.ProjectID) func(trace.Commit) {
 				add(EventSpend, "")
 			}
 			if stream == librarian {
+				add(EventConfig, "")
 				continue
 			}
 			add(EventWorkstream, stream)

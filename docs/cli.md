@@ -97,7 +97,7 @@ working for conversation, packet and ratification commands. One ratification
 approves the shared project spec and every member; interrupted sealing remains
 pending for the whole group until all members finish. Delivery approvals stay
 per workstream.
-The web page's **New design session** and **Start workgroup from brief** offer
+The web page's **Open a design session** and **Start workgroup from brief** offer
 the same flow, using `POST /v1/design` and `POST /v1/design/{workstream}/start`.
 All design commands support `--json`.
 
