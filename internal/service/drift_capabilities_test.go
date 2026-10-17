@@ -56,6 +56,13 @@ func claimOldestTurn(t *testing.T, f *shedFixture, repository *trace.Repository,
 // Deliverer: the production question path a running service's chief uses.
 func chiefAnswers(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
+	chiefRecordsAnswer(t, f, repository, stream, id, text, cite)
+	must(t, f.s.answers(f.s.cfg, repository).Pass(context.Background()))
+}
+
+// chiefRecordsAnswer records the production answer without running delivery.
+func chiefRecordsAnswer(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
+	t.Helper()
 	ctx := context.Background()
 	must(t, func() error {
 		_, err := repository.EnsureChiefOfStaff(ctx, stream, f.clock.Now(), ownerActor)
@@ -85,7 +92,6 @@ func chiefAnswers(t *testing.T, f *shedFixture, repository *trace.Repository, st
 		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
 	}
 	completeClaimedTurn(t, f, repository, stream, trace.ChiefOfStaff, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
-	must(t, f.s.answers(f.s.cfg, repository).Pass(ctx))
 }
 
 // askTool returns the named tool of list, failing the test if it is absent.

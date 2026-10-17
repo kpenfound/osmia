@@ -130,17 +130,14 @@ func (m *masons) Pass(ctx context.Context) error {
 				continue
 			}
 			if state.Value == UnitWaiting {
-				transitions, err := trace.Read[trace.Transition](m.repository, stream)
+				latest, err := latestUnitTransition(m.repository, stream, u.ID)
 				if err != nil {
 					return err
 				}
-				masonWaiting, amendmentWaiting := false, false
-				for i := len(transitions) - 1; i >= 0; i-- {
-					if transitions[i].Subject == trace.UnitSubject(u.ID) && transitions[i].To == UnitWaiting {
-						amendmentWaiting = strings.HasPrefix(transitions[i].Cause, "amendment_")
-						masonWaiting = transitions[i].Actor == masonActor
-						break
-					}
+				amendmentWaiting := strings.HasPrefix(latest.Cause, "amendment_")
+				masonWaiting, err := questionWaitOwner(m.repository, stream, u.ID, masonAgent(u.ID), masonActor)
+				if err != nil {
+					return err
 				}
 				if amendmentWaiting {
 					b.inFlight = append(b.inFlight, u.ID)
@@ -162,6 +159,11 @@ func (m *masons) Pass(ctx context.Context) error {
 				b.inFlight = append(b.inFlight, u.ID)
 				continue
 			}
+			state, err = m.repository.Workflow(stream, trace.UnitSubject(u.ID))
+			if err != nil {
+				return err
+			}
+			b.states[trace.UnitSubject(u.ID)] = state
 			if queued, err := m.resumeMasonRuling(ctx, stream, u.ID); err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			} else if queued {
@@ -534,14 +536,8 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 	return err == nil, err
 }
 
-// follow moves a unit between implementing and waiting as its mason's thread
-// says, and returns the unit's state. An implementing unit whose mason's
-// latest turn asked a question it has not waited on moves to waiting; a
-// question an earlier turn asked was answered, or overtaken by the turn that
-// followed it, as one a move to implementing queues. A waiting
-// unit whose mason's latest turn delivers the answer to one of its questions
-// moves back to implementing. The workspace is left as it is either way. A
-// unit whose state moved since it was read is left to the next pass.
+// follow parks a mason's latest question and resumes the question named by
+// the wait once its answer is delivered. The workspace is kept either way.
 func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -571,14 +567,25 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 		to, cause = UnitWaiting, trace.QuestionSubject(q)+"_"+trace.QuestionOpen
 		reason = fmt.Sprintf("unit %s is waiting: its mason asked question %s; the unit's workspace is kept and it takes no mason slot until the answer arrives", unit, q)
 	case UnitWaiting:
-		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
-			return q.Asked.Thread == th.Identity.ThreadID && questions.TurnID(q.Asked.ID) == last.Request.TurnID
-		})
-		if i < 0 {
+		waited, delivered, problem, err := waitedQuestion(m.repository, stream, unit, th, asked)
+		if err != nil {
+			return "", err
+		}
+		if problem != "" {
+			return UnitContested, m.contestQuestionWait(ctx, stream, unit, state, masonActor, problem)
+		}
+		if !delivered {
 			return state.Value, nil
 		}
-		q := asked[i].Asked.ID
+		q := waited.Asked.ID
 		to, id, cause = UnitImplementing, fmt.Sprintf("%s-%s-%s", subject, UnitImplementing, q), trace.QuestionSubject(q)+"_"+trace.QuestionAnswered
+		transitions, err := trace.Read[trace.Transition](m.repository, stream)
+		if err != nil {
+			return "", err
+		}
+		if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+			id += fmt.Sprintf("-%d", state.Version)
+		}
 		reason = fmt.Sprintf("unit %s resumes implementing: the answer to question %s is its mason's next turn", unit, q)
 	default:
 		return state.Value, nil

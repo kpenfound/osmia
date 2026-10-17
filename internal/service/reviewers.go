@@ -176,16 +176,9 @@ func (r *reviewers) Pass(ctx context.Context) error {
 				continue
 			}
 			if st.Value == UnitWaiting {
-				transitions, err := trace.Read[trace.Transition](r.repository, stream)
+				reviewerWaiting, err := questionWaitOwner(r.repository, stream, unit, reviewerAgent(unit), reviewerActor)
 				if err != nil {
 					return err
-				}
-				reviewerWaiting := false
-				for i := len(transitions) - 1; i >= 0; i-- {
-					if transitions[i].Subject == trace.UnitSubject(unit) && transitions[i].To == UnitWaiting {
-						reviewerWaiting = transitions[i].Actor == reviewerActor
-						break
-					}
 				}
 				if !reviewerWaiting {
 					continue
@@ -201,6 +194,12 @@ func (r *reviewers) Pass(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
+				// The answer turn may itself have asked another question.
+				if value, err := r.followQuestion(ctx, stream, unit, st); err != nil {
+					return err
+				} else if value != UnitReviewing {
+					continue
+				}
 			} else if value, err := r.followQuestion(ctx, stream, unit, st); err != nil {
 				return err
 			} else if value != UnitReviewing {
@@ -214,12 +213,8 @@ func (r *reviewers) Pass(ctx context.Context) error {
 	return nil
 }
 
-// followQuestion moves a unit between reviewing and waiting as its reviewer's
-// thread says, and returns the unit's state. A reviewing unit whose
-// reviewer's latest turn asked a question it has not waited on moves to
-// waiting; a question an earlier turn asked was answered, or overtaken by the
-// turn that followed it. A waiting unit whose reviewer's latest turn delivers
-// the answer to one of its questions moves back to reviewing.
+// followQuestion parks a reviewer's latest question and resumes the question
+// named by the wait once its answer is delivered, even if later turns ran.
 func (r *reviewers) followQuestion(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
 	th, err := r.repository.Thread(stream, reviewerAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -247,20 +242,32 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 		to, cause = UnitWaiting, trace.QuestionSubject(q)+"_"+trace.QuestionOpen
 		reason = fmt.Sprintf("unit %s is waiting: its reviewer asked question %s; the exact candidate is kept until the answer arrives", unit, q)
 	} else if state.Value == UnitWaiting {
-		last := th.Turns[len(th.Turns)-1]
-		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
-			return q.Asked.Thread == th.Identity.ThreadID && strings.HasPrefix(last.Request.TurnID, "answer_") && q.Asked.ID == answerQuestionID(last.Request.TurnID)
-		})
-		if i < 0 {
+		waited, delivered, problem, err := waitedQuestion(r.repository, stream, unit, th, asked)
+		if err != nil {
+			return "", err
+		}
+		if problem != "" {
+			return UnitContested, r.contestQuestionWait(ctx, stream, unit, state, reviewerActor, problem)
+		}
+		if !delivered {
 			return state.Value, nil
 		}
-		q = asked[i].Asked.ID
+		q = waited.Asked.ID
 		to, cause = UnitReviewing, trace.QuestionSubject(q)+"_"+trace.QuestionAnswered
 		reason = fmt.Sprintf("unit %s resumes reviewing: the answer to question %s is the reviewer's next turn over the same candidate", unit, q)
 	} else {
 		return state.Value, nil
 	}
 	id := fmt.Sprintf("%s-reviewer-%s-%s", trace.UnitSubject(unit), to, q)
+	if to == UnitReviewing {
+		transitions, err := trace.Read[trace.Transition](r.repository, stream)
+		if err != nil {
+			return "", err
+		}
+		if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+			id += fmt.Sprintf("-%d", state.Version)
+		}
+	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: cause}
 	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: to, Reason: reason}})
 	if errors.Is(err, trace.ErrConflict) {
@@ -317,6 +324,10 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				}
 			}
 			currentAnswer := latest.From == UnitWaiting && latest.To == UnitReviewing && latest.Cause == trace.QuestionSubject(answerQuestionID(last.Request.TurnID))+"_"+trace.QuestionAnswered
+			if !currentAnswer {
+				origin, originErr := r.answerOrigin(stream, unit, last)
+				currentAnswer = originErr == nil && (origin.Request.TurnID == turnID || strings.HasPrefix(origin.Request.TurnID, turnID+"-recover-"))
+			}
 			if currentAnswer && last.Status() == "idle" && last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == verdictOutcome {
 				return r.finishReview(ctx, stream, unit, state, last)
 			}
@@ -354,6 +365,9 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			}
 			return r.finishReview(ctx, stream, unit, state, last)
 		}
+	}
+	if slices.ContainsFunc(th.Turns, func(t trace.QueuedTurn) bool { return t.Request.TurnID == turnID && !t.CompletedAt.IsZero() }) {
+		return r.refreshReview(ctx, stream, unit, state, "the completed review turn was followed by a question answer without an applicable verdict; review the candidate again")
 	}
 	if paused {
 		return nil
@@ -531,7 +545,10 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 			}
 		}
 		if latest.From != UnitWaiting || latest.To != UnitReviewing || latest.Cause != trace.QuestionSubject(answerQuestionID(result.Turn))+"_"+trace.QuestionAnswered {
-			return UnitReviewResult{}, false, nil
+			origin, err := r.answerOrigin(stream, unit, trace.QueuedTurn{Request: trace.TurnRequest{TurnID: result.Turn}})
+			if err != nil || (origin.Request.TurnID != reviewTurnID(unit, state.Version) && !strings.HasPrefix(origin.Request.TurnID, reviewTurnID(unit, state.Version)+"-recover-")) {
+				return UnitReviewResult{}, false, nil
+			}
 		}
 	}
 	return result, true, nil
@@ -540,16 +557,24 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 // turnIdentity follows answer turns back to the exact evidence that prompted
 // the question. Current workspace contents cannot replace that identity.
 func (r *reviewers) turnIdentity(stream config.WorkstreamID, unit string, turn trace.QueuedTurn) (UnitReviewIdentity, error) {
+	origin, err := r.answerOrigin(stream, unit, turn)
+	if err != nil {
+		return UnitReviewIdentity{}, err
+	}
+	return reviewIdentityInPrompt(origin.Request.Prompt)
+}
+
+func (r *reviewers) answerOrigin(stream config.WorkstreamID, unit string, turn trace.QueuedTurn) (trace.QueuedTurn, error) {
 	if !strings.HasPrefix(turn.Request.TurnID, "answer_") {
-		return reviewIdentityInPrompt(turn.Request.Prompt)
+		return turn, nil
 	}
 	thread, err := r.repository.Thread(stream, reviewerAgent(unit))
 	if err != nil {
-		return UnitReviewIdentity{}, err
+		return trace.QueuedTurn{}, err
 	}
 	asked, err := r.repository.Questions(stream)
 	if err != nil {
-		return UnitReviewIdentity{}, err
+		return trace.QueuedTurn{}, err
 	}
 	for range thread.Turns {
 		question := answerQuestionID(turn.Request.TurnID)
@@ -565,10 +590,10 @@ func (r *reviewers) turnIdentity(stream config.WorkstreamID, unit string, turn t
 		}
 		turn = thread.Turns[j]
 		if !strings.HasPrefix(turn.Request.TurnID, "answer_") {
-			return reviewIdentityInPrompt(turn.Request.Prompt)
+			return turn, nil
 		}
 	}
-	return UnitReviewIdentity{}, errors.New("review answer has no original candidate identity")
+	return trace.QueuedTurn{}, errors.New("review answer has no original candidate identity")
 }
 
 func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, turn trace.QueuedTurn) error {
@@ -578,7 +603,7 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	}
 	identity, err := r.turnIdentity(stream, unit, turn)
 	if err != nil {
-		return err
+		return r.refreshReview(ctx, stream, unit, state, "the verdict has no pinned candidate identity: "+err.Error())
 	}
 	_, current, evidenceErr := r.unitReviewEvidence(ctx, stream, unit)
 	reviewed := identity
