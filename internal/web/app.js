@@ -1512,6 +1512,7 @@
       byId('session-title').textContent = 'Session';
       byId('session-meta').replaceChildren();
       byId('session-feed').replaceChildren(el('p', { class: 'meta' }, 'No session selected.'));
+      sessionFeedShown = null;
       byId('session-diff').textContent = '';
       byId('session-commits').replaceChildren();
       return;
@@ -1673,6 +1674,7 @@
       byId('design-title').textContent = 'Design session';
       byId('design-meta').replaceChildren();
       byId('design-feed').replaceChildren(el('p', { class: 'meta' }, 'No design session selected.'));
+      designFeedShown = null;
       return;
     }
     byId('design-title').textContent = w.workstream;
