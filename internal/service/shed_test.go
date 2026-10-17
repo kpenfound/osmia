@@ -67,7 +67,7 @@ func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepa
 	added, err := f.c.AddProject(context.Background(), request(clone))
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte(shedCharter), 0600))
+	writeCharter(t, f.c, added.Project.ID, shedCharter)
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 	for round := 1; round <= rounds; round++ {
 		f.script(replyTurnID(round, 1), nil, nil)
@@ -360,14 +360,6 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		moves[2].Reason != "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 3" {
 		t.Fatalf("feature transitions: %+v", moves)
 	}
-	streamTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
-	must(t, err)
-	streamDir := "workstreams/" + string(stream) + "/"
-	events, err := os.ReadFile(filepath.Join(streamTrace, streamDir, "events.jsonl"))
-	must(t, err)
-	if !strings.Contains(string(events), `"from":"sketched","to":"in-shed"`) {
-		t.Fatalf("events.jsonl:\n%s", events)
-	}
 	if status, err := f.c.Status(ctx, stream); err != nil || status.State == nil || *status.State != InShedState {
 		t.Fatalf("status: %+v %v", status, err)
 	}
@@ -414,11 +406,10 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		if len(docs) != 1 || docs[0].Path != "shed/round-1/"+member+".json" || docs[0].Actor != (trace.Actor{Kind: "agent", ID: member}) || docs[0].Cause != ops[0].Operation.ID {
 			t.Fatalf("document of %s: %+v", member, docs)
 		}
-		data, err := os.ReadFile(filepath.Join(streamTrace, streamDir, docs[0].Path))
-		if err != nil || string(data) != docs[0].Content || !strings.Contains(string(data), `"revision": {`) {
-			t.Fatalf("%s on disk: %q %v", docs[0].Path, data, err)
+		if !strings.Contains(docs[0].Content, `"revision": {`) {
+			t.Fatalf("%s: %q", docs[0].Path, docs[0].Content)
 		}
-		landed := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+docs[0].Path)
+		landed := documentCommit(t, f.s.cfg.Root, f.project, stream, docs[0].Path)
 		if commit != "" && landed != commit {
 			t.Fatalf("records landed in separate commits: %s %s", commit, landed)
 		}
@@ -473,8 +464,8 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 			t.Fatalf("staged workspace of %s retained", turn)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(f.trace, "notes", "committee.md")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("committee notes: %v", err)
+	if notes, ok := traceFile(t, f.trace, "notes/committee.md"); ok {
+		t.Fatalf("committee notes: %q", notes)
 	}
 	for path, content := range snapshot(t, filepath.Join(root, "projects")) {
 		if strings.Contains(content, demoSecret) {

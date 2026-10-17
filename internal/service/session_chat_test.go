@@ -85,7 +85,7 @@ func newSessionChatFixture(t *testing.T) (*Service, *Client, config.ProjectID, c
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	must(t, err)
 	return s, c, added.Project.ID, resp.Session.Workstream, engine, clone
@@ -595,7 +595,6 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 	repo := s.sole().repository
 	traceDir, err := s.cfg.Root.WorkstreamTrace(project, stream)
 	must(t, err)
-	home := t.TempDir()
 	ctx := context.Background()
 
 	// A turn is in progress, so the relay's transition to idle is a real
@@ -607,22 +606,19 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 		Attempts: []trace.TurnAttempt{{Path: "replay", SourceSession: coreadapter.BackendSession{ID: "model-session-x", Backend: "claude"}}},
 	}
 
-	before := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
+	before := traceCommits(t, traceDir)
 	must(t, sessionRelay(ctx, repo, time.Now, trace.Thread{}, turn))
-	after := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
+	after := traceCommits(t, traceDir)
 
-	commits := strings.Fields(demoGit(t, home, "-C", traceDir, "log", "--format=%H", "--reverse", before+".."+after))
+	commits := committedPaths(t, traceDir, before)
 	if len(commits) != 2 {
-		t.Fatalf("sessionRelay recorded %d commits, want exactly 2 (the entry and the idle transition): %v", len(commits), commits)
+		t.Fatalf("sessionRelay recorded %d commits, want exactly 2 (the entry and the idle transition): %q", len(commits), commits)
 	}
-	changed := func(commit string) string {
-		return demoGit(t, home, "-C", traceDir, "diff-tree", "--no-commit-id", "--name-only", "-r", commit)
+	if !strings.Contains(commits[0], "session-entries/") {
+		t.Fatalf("the first commit sessionRelay made was not the context-rebuilt entry: %q", commits[0])
 	}
-	if !strings.Contains(changed(commits[0]), "session-entries/") {
-		t.Fatalf("the first commit sessionRelay made was not the context-rebuilt entry: %q", changed(commits[0]))
-	}
-	if !strings.Contains(changed(commits[1]), "workflow.json") {
-		t.Fatalf("the second commit sessionRelay made was not the idle transition: %q", changed(commits[1]))
+	if !strings.Contains(commits[1], "events.jsonl") {
+		t.Fatalf("the second commit sessionRelay made was not the idle transition: %q", commits[1])
 	}
 
 	entries, err := sessionEntriesSince(repo, stream, time.Time{})
@@ -638,9 +634,8 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 
 	// Retrying the relay for the same turn records nothing more.
 	must(t, sessionRelay(ctx, repo, time.Now, trace.Thread{}, turn))
-	retried := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
-	if retried != after {
-		t.Fatalf("retrying the relay recorded more trace commits: %s -> %s", after, retried)
+	if retried := traceCommits(t, traceDir); retried != after {
+		t.Fatalf("retrying the relay recorded more trace commits: %d -> %d", after, retried)
 	}
 	entries, err = sessionEntriesSince(repo, stream, time.Time{})
 	must(t, err)
@@ -795,7 +790,7 @@ func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, engine
 }
 

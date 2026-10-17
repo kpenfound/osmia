@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -65,7 +63,7 @@ func TestHandInCharterGate(t *testing.T) {
 	}
 	added, err := c.AddProject(ctx, request(clone))
 	must(t, err)
-	id, path := added.Project.ID, added.Project.Charter
+	id := added.Project.ID
 
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
@@ -77,7 +75,7 @@ func TestHandInCharterGate(t *testing.T) {
 	}
 
 	api := handInError(t, c, HandInRequest{Project: id, Key: "k", Path: "/tmp/design.md"})
-	if api.Code != CharterEmpty || !strings.Contains(api.Message, string(id)) || !strings.Contains(api.Message, "charter has no rules") || !strings.Contains(api.Message, path) {
+	if api.Code != CharterEmpty || !strings.Contains(api.Message, string(id)) || !strings.Contains(api.Message, "charter has no rules") || !strings.Contains(api.Message, "osmia edit charter "+string(id)) {
 		t.Fatalf("empty charter: %+v", api)
 	}
 	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != http.StatusConflict {
@@ -96,7 +94,7 @@ func TestHandInCharterGate(t *testing.T) {
 		t.Fatalf("reads without an edit recorded %d revisions", n)
 	}
 
-	must(t, os.WriteFile(path, []byte(trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n"), 0600))
+	writeCharter(t, c, id, trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n")
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
 	state := cfg.Project.CharterState
@@ -120,22 +118,22 @@ func TestHandInCharterGate(t *testing.T) {
 	}
 
 	// Emptying the charter closes the gate again.
-	must(t, os.WriteFile(path, []byte("# Charter\n"), 0600))
+	writeCharter(t, c, id, "# Charter\n")
 	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != CharterEmpty {
 		t.Fatalf("emptied charter: %+v", api)
 	}
 	if n := charterRevisionCount(t, s); n != 3 {
-		t.Fatalf("hand-in did not record the edit: %d", n)
+		t.Fatalf("the edit recorded %d revisions in total", n)
 	}
 
 	// A trace failure is a diagnostic, not a status failure.
-	must(t, os.Remove(path))
+	traceExec(t, added.Project.Trace, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, 'documents.jsonl', 'osmia.trace.document', 'charter', 99, '{not json}')")
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
 	if cfg.Project == nil || cfg.Project.CharterState != nil || !hasDiagnostic(cfg.Diagnostics, Internal) {
 		t.Fatalf("unreadable charter: %+v %+v", cfg.Project, cfg.Diagnostics)
 	}
-	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != Internal || !strings.Contains(api.Message, path) {
+	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != Internal || !strings.Contains(api.Message, "cannot read the charter of project "+string(id)) {
 		t.Fatalf("unreadable charter hand-in: %+v", api)
 	}
 
@@ -161,9 +159,11 @@ func TestContextProviderReadsActiveProject(t *testing.T) {
 	}
 	added, err := c.AddProject(ctx, request(clone))
 	must(t, err)
-	id, path := added.Project.ID, added.Project.Charter
-	must(t, os.WriteFile(path, []byte("1. Keep changes small.\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(added.Project.Trace, "kb", "service.md"), []byte("Service notes\n"), 0600))
+	id := added.Project.ID
+	writeCharter(t, c, id, "1. Keep changes small.\n")
+	repo, err := s.repository(id)
+	must(t, err)
+	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
 	b, err := provider.Assemble(ctx, id, bundle.Scope{})
 	must(t, err)
 	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 1 || len(b.Knowledge) != 1 || b.Knowledge[0].Content != "Service notes\n" || b.Entities.Revision != 1 {

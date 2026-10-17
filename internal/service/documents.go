@@ -36,7 +36,7 @@ func documentFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, trace.ErrConflict):
 		failWith(w, &APIError{Conflict, "the document changed or is no longer editable; read it again before saving"})
-	case errors.Is(err, trace.ErrOwnerEdit):
+	case errors.Is(err, trace.ErrInvalidEdit):
 		failWith(w, &APIError{Validation, err.Error()})
 	default:
 		failWith(w, &APIError{Internal, "cannot read or save the documents; check the project trace"})
@@ -116,7 +116,7 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 		var doc trace.Document
 		switch r.Method {
 		case http.MethodGet:
-			doc, err = repo.Charter(r.Context(), s.now())
+			doc, err = repo.Charter(r.Context())
 		case http.MethodPut:
 			var edit CharterEdit
 			if !decode(w, r, &edit) {

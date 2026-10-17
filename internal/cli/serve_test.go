@@ -202,7 +202,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 				t.Fatalf("refused librarian: %+v", extraction)
 			}
 
-			must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+			setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 			design := filepath.Join(filepath.Dir(clone), "design.md")
 			must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
 			var handed service.HandInResponse
@@ -267,19 +267,8 @@ func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, proj
 	logView("feed", feed, err)
 	state, err := c.Status(ctx, stream)
 	logView("status", state, err)
-	r, err := config.ResolveRoot(root, "")
-	if err != nil {
-		t.Logf("diagnostic root: %v", err)
-		return
-	}
-	dir, err := r.WorkstreamTrace(project, stream)
-	if err != nil {
-		t.Logf("diagnostic trace path: %v", err)
-		return
-	}
-	for _, name := range []string{"workflow.json", "agents/" + trace.ChiefOfStaff + "/log.jsonl"} {
-		data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(stream), name))
-		t.Logf("durable %s: %s; error: %v", name, data, err)
+	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.ChiefOfStaff+"/log.jsonl") {
+		t.Logf("durable chief log record: %s", body)
 	}
 }
 

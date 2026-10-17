@@ -261,7 +261,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	if !reflect.DeepEqual(api.Units, status.Units) {
 		t.Fatalf("unit cards through API: %+v", api.Units)
 	}
-	if data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "units/resume/report.json")); err != nil || string(data) != doc.Content {
+	if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "units/resume/report.json"); err != nil || string(data) != doc.Content {
 		t.Fatalf("report file %q %v", data, err)
 	}
 

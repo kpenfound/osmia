@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -64,7 +63,7 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 		t.Fatalf("no notice for the abandonment: %+v", outbox)
 	}
 	// Nothing is deleted.
-	if data, err := os.ReadFile(out.Handed); err != nil || string(data) != "# Design\n" {
+	if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "handed/stdin"); err != nil || string(data) != "# Design\n" {
 		t.Fatalf("handed copy: %q %v", data, err)
 	}
 	if docs, err := trace.Read[trace.Document](r, stream); err != nil || len(docs) != 1 {
@@ -106,10 +105,6 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 		t.Fatalf("abandoned again: %d %s", code, body)
 	}
 	if !f.unchanged(t, head) {
-		commits, err := exec.Command("git", "-C", f.trace, "log", "--format=%H %s", "--name-only", head+"..HEAD").CombinedOutput()
-		t.Logf("commits since refusal baseline (error=%v):\n%s", err, commits)
-		documents, err := exec.Command("git", "-C", f.trace, "log", "-p", head+"..HEAD", "--", "documents.jsonl").CombinedOutput()
-		t.Logf("project documents since refusal baseline (error=%v):\n%s", err, documents)
 		t.Fatal("a refused abandonment wrote to the trace")
 	}
 }
@@ -145,10 +140,6 @@ func TestAbandonRefusals(t *testing.T) {
 		}
 	}
 	if !f.unchanged(t, head) {
-		commits, err := exec.Command("git", "-C", f.trace, "log", "--format=%H %s", "--name-only", head+"..HEAD").CombinedOutput()
-		t.Logf("commits since refusal baseline (error=%v):\n%s", err, commits)
-		documents, err := exec.Command("git", "-C", f.trace, "log", "-p", head+"..HEAD", "--", "documents.jsonl").CombinedOutput()
-		t.Logf("project documents since refusal baseline (error=%v):\n%s", err, documents)
 		t.Fatal("a refused abandonment wrote to the trace")
 	}
 	if state, err := f.repository().Workflow(handed, trace.FeatureSubject); err != nil || state.Value != HandedState {

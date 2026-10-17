@@ -157,11 +157,11 @@ func (r *Repository) RecordMemoryWatch(ctx context.Context, key, expected, curso
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	files, removed, err := r.documentFiles(ctx, docs)
+	files, err := r.documentFiles(ctx, docs)
 	if err != nil {
 		return err
 	}
-	if err := r.publishTree(ctx, files, removed); err != nil {
+	if err := r.publish(ctx, files); err != nil {
 		return err
 	}
 	_ = r.wake.Notify(context.Background())

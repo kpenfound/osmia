@@ -75,7 +75,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		must(t, err)
 	}
 	sessionPath := filepath.Join(f.opts.Config.Root, "workstreams", string(f.project), string(session))
-	sessionBefore := snapshot(t, sessionPath)
+	sessionBefore := traceCommits(t, sessionPath)
 	repo.Close()
 	path := filepath.Join(f.opts.Config.Root, "runtime.json")
 	data, err := os.ReadFile(path)
@@ -179,8 +179,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 				t.Fatalf("legacy chief changed for %s", stream)
 			}
 		}
-		currentSession := snapshot(t, sessionPath)
-		if !reflect.DeepEqual(sessionBefore, currentSession) {
+		if traceCommits(t, sessionPath) != sessionBefore {
 			t.Fatal("startup changed the exploratory session")
 		}
 		if _, err := r.ChiefOfStaffThread(cleaned); !errors.Is(err, os.ErrNotExist) {

@@ -3,9 +3,10 @@ package trace
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
 func TestNotifyIsDurableIdempotentAndBoundToActiveChief(t *testing.T) {

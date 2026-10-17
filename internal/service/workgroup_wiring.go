@@ -144,7 +144,7 @@ func (s *Service) workgroupChiefDispatchPass(ctx context.Context, repository *tr
 		// repo too. Only the real leader consumes the group's dispatch slot.
 		seen[id] = true
 		if err := s.dispatchWorkgroupChiefTurn(ctx, g); err != nil {
-			if errors.Is(err, trace.ErrLocked) {
+			if errors.Is(err, trace.ErrLocked) || errors.Is(err, trace.ErrMembershipChanged) {
 				continue
 			}
 			return fmt.Errorf("workgroup %s chief turn: %w", id, err)

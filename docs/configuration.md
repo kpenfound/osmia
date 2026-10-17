@@ -21,8 +21,10 @@ repositories. File-based context supports the complete flow without Hearsay.
 The default repo's `p_…` ID is also the project ID. Additional repos have their
 own `p_…` IDs and set `group_id` to that default ID in their configuration.
 `active_projects` lists repo registrations, including the default. The shared
-charter lives at `projects/<default-repo-id>/charter.md`; each repo keeps its
-KB and entities in its own trace. API project views expose the repo list;
+charter is a document in the default repo's trace,
+`projects/<default-repo-id>/trace.db`, which the owner edits with
+`osmia edit charter <project-id>` or in the web UI; each repo keeps its KB and
+entities in its own trace. API project views expose the repo list;
 compatibility fields such as `upstream` at the top level describe the default
 repo. Use `osmia project repos <project-id>` to see the members.
 
@@ -96,10 +98,9 @@ only the canonical format, so traversal, absolute names and case aliases cannot
 become identities. `CheckProjectIDs`/`CheckWorkstreamIDs` reject duplicates with
 `ErrCollision`; constructors also accept existing IDs to check. Generation does
 not reserve a key: persistence callers must reserve it atomically and retry
-generation on collision. The trace repositories reserve project and
-workstream identities when creating their directories: a project's own trace
-repository for its ID, and a workstream's own dedicated trace repository for
-its ID. Workstream keys are not a
+generation on collision. The traces reserve project and workstream
+identities when creating their directories: a project's own trace directory
+for its ID, and a workstream's own trace directory for its ID. Workstream keys are not a
 configuration list; they belong to persisted workstream manifests.
 
 ```text
@@ -110,10 +111,11 @@ configuration list; they belong to persisted workstream manifests.
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
 <root>/projects/<repo-id>/config.toml
-<root>/projects/<repo-id>/                     dedicated repo knowledge trace; default repo holds project charter
-<root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own dedicated trace repository, separate from projects/<repo-id>/
-<root>/workgroups/<workgroup-id>/              cross-repo record, project spec, shared chief and group decisions
-<root>/workstreams-staging/                    a new or migrating workstream's trace is built here before an atomic rename publishes it
+<root>/projects/<repo-id>/trace.db             dedicated repo knowledge trace; default repo holds project charter
+<root>/projects/<repo-id>/osmia.lock           the trace's process lock
+<root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own trace.db and osmia.lock, separate from projects/<repo-id>/
+<root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, project spec, shared chief and group decisions
+<root>/workstreams-staging/                    a new workstream's trace is built here before an atomic rename publishes it
 <root>/workstreams-deleting/<repo-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
 <root>/branches/<repo-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
 ```
@@ -123,10 +125,11 @@ service-wide assistant, may still carry a `<root>/beekeeper/` directory,
 alongside the layout above. The service no longer reads or writes it; it can
 be deleted.
 
-A project whose trace still uses the older layout, with every workstream's
-records inside the project's own repository under `workstreams/<workstream-id>/`,
-is migrated automatically into the layout above the next time the service
-opens it; see [trace migration](#trace-migration).
+Each trace is one SQLite database, `trace.db`, beside its write-ahead log
+(`trace.db-wal`) and shared-memory index (`trace.db-shm`). No other trace file
+exists on disk. A trace still kept as a Git repository is migrated to its
+database the next time the service opens its project; see
+[trace migration](#trace-migration).
 
 `Root` provides checked helpers for these paths. Managed state paths reject
 symlink aliases, including aliases within the root that could collapse two
@@ -149,29 +152,46 @@ remain excluded from factory passes. They are never converted to features.
 Traces, rulings, decisions and archive records are preserved without owner
 action. Migration is resumable and idempotent: an interrupted start finishes
 on the next start, and repeated starts create no duplicates. This is separate
-from the trace-layout migration below; neither requires moving existing member
+from the trace migration below; neither requires moving existing member
 traces to a workgroup trace.
 
 ### Trace migration
 
-The service detects the older shared layout by the presence of a
-`workstreams/` directory inside the project's own trace repository, and
-migrates it before the project opens or is scheduled; other projects keep
-running meanwhile. For each workstream still in that directory it builds the
-workstream's own dedicated trace repository, verifies that it holds exactly
-the same records and history as the shared copy, and only once every
-workstream is verified rewrites the project's own history to drop the
-`workstreams/` paths and prunes the objects that history alone held, keeping
-the charter, knowledge base, notes and decision history intact. An archived
-workstream not yet cleaned up is migrated the same way as any other, so
-archive cleanup still has a real trace to apply its checks to; its archive
-record in `runtime.json` is kept either way. Migration is resumable: a crash
-at any step, and a restart mid-copy, both resume or complete on the next
-start without losing or duplicating a record, and a workstream is never
-authoritative in two places at once. `osmia serve` and `osmia doctor` both run
-it before opening a project's trace; progress, completion and any failure are
-logged, naming the project and workstream and never transcript content or
-credentials.
+A trace with a `.git` directory and no `trace.db` is a Git trace, and is
+migrated to its database before its project opens or is scheduled; other
+projects keep running meanwhile. `osmia serve` and `osmia doctor` both run the
+migration. It covers the project's trace and every workstream trace of the
+project, and each cross-repo workgroup's trace with its host workstream. For
+each trace it:
+
+1. takes the Git trace's lock, `.git/osmia.lock`;
+2. finishes an interrupted publication left in `.git/osmia-publication.json`;
+3. records pending hand edits as owner revisions: a project's `charter.md`, and
+   a workstream's `spec.md` and `plan.json` once the draft passes the same
+   validation an edit through the API does. An invalid draft stops that
+   workstream's migration, and the project does not open, with an error naming
+   the files and the problems; fix or revert the file and restart, and nothing
+   is lost;
+4. imports HEAD into `trace.db.import` in the same directory: every JSONL line
+   as a record, in the order the trace read its files, the workflow, and
+   `project.json`, `workstream.json`, role notes and inbox numbering as files.
+   Every other file HEAD holds must be the latest revision of a document, or
+   the migration stops naming it. Bytes in the work tree that were never
+   committed are dropped, and each dropped path is logged;
+5. verifies the import record by record against HEAD, with the decoded
+   workflow, the files and the database's integrity;
+6. checkpoints, closes, flushes and renames the import to `trace.db`. From then
+   on `trace.db` is the only authority, and a `.git` beside it is ignored;
+7. removes `.git` and every other file of the directory except `trace.db`,
+   `osmia.lock` and, in a project's trace, `config.toml`.
+
+A crash before the rename discards `trace.db.import` and starts again; a crash
+after it resumes the cleanup. A trace still on the shared layout, with a
+`workstreams/` directory inside the project's trace, or with
+`.git/osmia-migration-reclaim.json`, is refused with an error naming it.
+Workstreams already in `workstreams-deleting/` are deleted as they are.
+Progress, completion and any failure are logged, naming the project and
+workstream and never trace content or credentials.
 
 ## Top-level config.toml
 
@@ -690,12 +710,12 @@ writing anything, then:
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
 3. seeds the local entity map from the clone's
    tracked CODEOWNERS and directory structure, and creates the project's
-   dedicated trace repository with
-   a [charter](charter.md) template in `charter.md` and the seed as the first
+   trace database, `projects/<id>/trace.db`, with
+   a [charter](charter.md) template and the seed as the first
    revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
-5. creates the librarian's workstream, its own dedicated trace repository and
+5. creates the librarian's workstream, its own trace database and
    its thread, and requests
    the first knowledge-base extraction as a
    durable operation;
@@ -713,10 +733,11 @@ its workspace, and forgets that workspace alone when its directory is gone.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`
-run again finishes it. A retry never creates a second trace repository and an
+run again finishes it. A retry never creates a second trace and an
 interrupted registration never blocks a retry: the same request returns the
-finished project; a different request waits until the pending registration finishes. A trace initialization that never committed is
-discarded and redone; one with history is kept. The extraction is requested
+finished project; a different request waits until the pending registration finishes. A trace whose database never committed its
+manifest is discarded and redone, keeping only `config.toml`; one with a
+manifest is kept. The extraction is requested
 once; a retry finds it in the trace and does not request another.
 
 Registration can add distinct projects while other projects run. Each active
@@ -754,12 +775,12 @@ Each KB prose file has an 8 KiB ceiling, and all prose together has a 64 KiB
 ceiling; the entity map is excluded. The librarian is instructed to aim well
 below these limits and can call `kb_check` on its isolated output to find and
 repair problems before finishing. The service also validates at publication;
-invalid output leaves the recorded KB unchanged. Existing KB files are not
+invalid output leaves the recorded KB unchanged. Existing KB documents are not
 silently truncated: a successful librarian pass must consolidate them.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active repo ID from `active_projects` as a text edit, stops admitting new work,
-and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's trace repositories, and the owner's clone, are not deleted. Remove additional repos before removing the default repo; a default with other
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's traces, and the owner's clone, are not deleted. Remove additional repos before removing the default repo; a default with other
 active repos cannot be removed. Adding the
 same upstream again afterwards generates a new project ID and new trace
 repositories; the old ones stay untouched under `projects/<old-id>/` and
@@ -1092,10 +1113,9 @@ An older `resolved` flag without evidence is re-derived from retained history
 where possible; otherwise the hold remains visible. Archive and cleanup alone
 never supply resolution evidence.
 
-The service then deletes the workstream's own independent storage, its dedicated
-trace repository and its temporary workspaces, including all check
-stdout/stderr, documents, decisions and agent turns, from disk, as files; it
-does not rewrite or prune any Git history. An archive
+The service then deletes the workstream's own independent storage, its trace
+directory and its temporary workspaces, including all check
+stdout/stderr, documents, decisions and agent turns, from disk. An archive
 cannot be restored or unarchived. Resolution removes active documents and temporary workspaces while retaining
 the trace and target-repository branches. Publication may require further
 dependent repair or approved rework; it never authorizes trace deletion.
@@ -1108,9 +1128,10 @@ also waits while another retained workstream depends on it as a base
 (archived bases may leave together with their archived dependents), and until
 the librarian refresh covering its landed units has incorporated the
 workstream's learnings into project knowledge. Once every wait clears, the
-service records durable cleanup intent before moving the trace repository
-aside by one atomic rename. Directory listings no longer show it as live, and
-its removal then runs without holding any repository lock, so deleting even a
+service records durable cleanup intent, closes the workstream's database and
+moves its trace directory aside by one atomic rename. Directory listings no
+longer show it as live, and its removal then runs without holding any trace
+lock, so deleting even a
 large trace never delays a read, a write or reconciliation of any other
 workstream. The archive record is marked clean, `trace_deleted` in the API,
 only once the storage is confirmed gone; a later pass reconciles whether an

@@ -71,7 +71,7 @@ func newCrossRepoRatifyFixture(t *testing.T, configure ...func(*Options)) *cross
 	demoGit(t, home, "-C", clone2, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	added, err := f.c.AddProject(context.Background(), ProjectAddRequest{Name: "other", Upstream: "owner/other", Fork: "owner/other-fork", Clone: clone2})
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n")
 	cf := &crossRepoRatifyFixture{architectFixture: f, project2: added.Project.ID}
 	cf.stream1 = cf.handInSkipping(t, cf.project, "upload-server")
 	cf.stream2 = cf.handInSkipping(t, cf.project2, "upload-client")

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -95,9 +94,7 @@ func (r *Repository) AdoptDesignConversation(ctx context.Context, source *Reposi
 	if err != nil {
 		return err
 	}
-	target.mu.Lock()
-	_, err = target.readFile("workstreams/" + string(stream) + "/" + conversationOriginPath)
-	target.mu.Unlock()
+	_, err = target.file("workstreams/" + string(stream) + "/" + conversationOriginPath)
 	if err == nil {
 		return nil
 	}
@@ -143,7 +140,7 @@ func (r *Repository) AdoptDesignConversation(ctx context.Context, source *Reposi
 	}
 	target.mu.Lock()
 	defer target.mu.Unlock()
-	if _, err := target.readFile("workstreams/" + string(stream) + "/" + conversationOriginPath); err == nil {
+	if _, err := target.file("workstreams/" + string(stream) + "/" + conversationOriginPath); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -165,27 +162,15 @@ func (r *Repository) AdoptDesignConversation(ctx context.Context, source *Reposi
 	if err != nil {
 		return err
 	}
-	prefix := "workstreams/" + string(stream) + "/"
-	files := map[string][]byte{}
-	for _, rec := range imports {
-		data, err := json.Marshal(rec)
-		if err != nil {
-			return err
-		}
-		name := recordPath(rec)
-		files[name] = append(files[name], append(data, '\n')...)
-	}
-	files[prefix+conversationOriginPath] = content
 	origin := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: "conversation-origin", Revision: 1, Project: r.Project(), Workstream: stream, At: chief.Identity.At, Actor: chief.Identity.Actor, Cause: "design-start"}, Path: conversationOriginPath, Content: string(content)}
-	if err := target.appendRecords(files, []Record{origin}); err != nil {
+	if err := target.checkRevisions(ctx, []Record{origin}); err != nil {
 		return err
 	}
-	data, err := encodeWorkflow(targetLog)
-	if err != nil {
-		return err
-	}
-	files[prefix+"workflow.json"] = data
-	return target.publish(ctx, files)
+	// The imported identity and log replace the host's own, which hold no
+	// turns, and the origin precedes the records it admits.
+	prefix := "workstreams/" + string(stream) + "/agents/" + ChiefOfStaff + "/"
+	c := change{replace: []string{prefix + "identity.jsonl", prefix + "log.jsonl"}, records: append([]Record{origin}, imports...), stream: stream, workflow: &targetLog, message: "Adopt design conversation"}
+	return target.publish(ctx, c)
 }
 
 func conversationRecordHash(rec Record) string {
@@ -195,17 +180,20 @@ func conversationRecordHash(rec Record) string {
 
 // importedConversationRecord accepts a foreign scope only at its pinned
 // original workstream and only with the immutable fingerprint written at adoption.
-func (r *Repository) importedConversationRecord(rec Record, checked *treeFiles) bool {
+// It requires r.cache.mu, and remembers each workstream's import.
+func (r *Repository) importedConversationRecord(ctx context.Context, rec Record) bool {
 	h := rec.header()
-	var data []byte
-	name := "workstreams/" + string(h.Workstream) + "/" + conversationOriginPath
-	if checked != nil {
-		data, _ = checked.read(name)
-	} else {
-		data, _ = r.readFile(name)
+	imported, ok := r.cache.origins[h.Workstream]
+	if !ok {
+		if d, err := r.latestDocument(ctx, r.reads, h.Workstream, conversationOriginPath); err == nil {
+			var i conversationImport
+			if json.Unmarshal([]byte(d.Content), &i) == nil {
+				imported = &i
+			}
+		}
+		r.cache.origins[h.Workstream] = imported
 	}
-	var imported conversationImport
-	if json.Unmarshal(data, &imported) != nil || imported.Origin.Project != h.Project || imported.Origin.Workstream != h.Workstream {
+	if imported == nil || imported.Origin.Project != h.Project || imported.Origin.Workstream != h.Workstream {
 		return false
 	}
 	return imported.Records[recordKey(rec)] == conversationRecordHash(rec)
@@ -243,9 +231,7 @@ func (r *Repository) DesignConversationImported(stream config.WorkstreamID) (boo
 	if err != nil {
 		return false, err
 	}
-	source.mu.Lock()
-	defer source.mu.Unlock()
-	_, err = source.readFile(filepath.ToSlash("workstreams/" + string(stream) + "/" + conversationOriginPath))
+	_, err = source.file("workstreams/" + string(stream) + "/" + conversationOriginPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}

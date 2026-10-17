@@ -49,7 +49,7 @@ func TestSetFeatureStateFailureLeavesNoEvent(t *testing.T) {
 	s := mustScoped(t, r, streamID)
 	injected := errors.New("injected publication failure")
 	s.failPublication = func(step string) error {
-		if step == "before-ref" {
+		if step == boundaryBeforeCommit {
 			return injected
 		}
 		return nil

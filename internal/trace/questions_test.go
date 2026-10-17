@@ -3,7 +3,6 @@ package trace
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -72,13 +71,8 @@ func committed(t *testing.T, r *Repository, name string) {
 	t.Helper()
 	s := mustScoped(t, r, streamID)
 	name = "workstreams/" + string(streamID) + "/questions/" + name
-	disk, err := os.ReadFile(s.directory + "/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	head, err := s.gitBytes(context.Background(), nil, "", "cat-file", "blob", "HEAD:"+name)
-	if err != nil || string(head) != string(disk) || len(disk) == 0 {
-		t.Fatalf("%s is not committed as written: %v", name, err)
+	if len(storedBodies(t, s, name)) == 0 {
+		t.Fatalf("%s holds no committed record", name)
 	}
 }
 
@@ -100,7 +94,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	// A publication that fails before the ref moves leaves neither the
 	// question nor its event.
 	s.failPublication = func(step string) error {
-		if step == "before-ref" {
+		if step == boundaryBeforeCommit {
 			return errors.New("injected")
 		}
 		return nil

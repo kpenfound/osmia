@@ -51,7 +51,7 @@ func ReadGroupApproval(r *Repository, host config.WorkstreamID) (GroupApproval, 
 }
 
 // RecordGroupApproval permits a single immutable decision followed by its
-// completion. Both validation and journal publication accept its tools path.
+// completion, recorded at its tools path.
 func RecordGroupApproval(ctx context.Context, r *Repository, host config.WorkstreamID, decision GroupApproval, at time.Time, actor Actor) error {
 	old, doc, found, err := ReadGroupApproval(r, host)
 	if err != nil {

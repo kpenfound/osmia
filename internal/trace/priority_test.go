@@ -3,7 +3,6 @@ package trace
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -57,12 +56,8 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 		t.Fatalf("second change %+v %v", second, err)
 	}
 	s := mustScoped(t, r, streamID)
-	data, err := os.ReadFile(s.directory + "/workstreams/" + string(streamID) + "/priority.jsonl")
-	if err != nil || strings.Count(string(data), "\n") != 2 {
-		t.Fatalf("priority log: %q %v", data, err)
-	}
-	if out, err := s.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
-		t.Fatalf("priority not committed: %q %v", out, err)
+	if bodies := storedBodies(t, s, "workstreams/"+string(streamID)+"/priority.jsonl"); len(bodies) != 2 {
+		t.Fatalf("priority log: %q", bodies)
 	}
 
 	// An apply error records nothing and is returned as it is.

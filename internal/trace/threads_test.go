@@ -216,14 +216,7 @@ func TestThreadConcurrentQueueAndClaims(t *testing.T) {
 
 func TestThreadPublicationFailures(t *testing.T) {
 	for _, action := range []string{"create", "enqueue", "claim", "capture", "complete"} {
-		steps := []string{"objects-written", "journal-written", "before-ref", "ref-published", "materialized:workflow.json", "before-journal-removal"}
-		if action == "create" {
-			steps = append(steps, "materialized:identity.jsonl")
-		}
-		if action == "enqueue" || action == "capture" {
-			steps = append(steps, "materialized:log.jsonl")
-		}
-		for _, step := range steps {
+		for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 			t.Run(action+"/"+step, func(t *testing.T) {
 				ctx := context.Background()
 				r, root, p := create(t)
@@ -318,7 +311,7 @@ func TestThreadPublicationFailures(t *testing.T) {
 }
 
 func TestThreadReopenAtPublicationBoundary(t *testing.T) {
-	for _, step := range []string{"before-ref", "ref-published", "materialized:log.jsonl"} {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
 			s := mustScoped(t, r, streamID)
@@ -343,7 +336,7 @@ func TestThreadReopenAtPublicationBoundary(t *testing.T) {
 			}
 			defer r.Close()
 			want := 1
-			if step == "before-ref" {
+			if step == boundaryBeforeCommit {
 				want = 0
 			}
 			if th := mustThread(t, r); len(th.Turns) != want {
@@ -425,9 +418,9 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				step := "before-ref"
+				step := boundaryBeforeCommit
 				if committed {
-					step = "ref-published"
+					step = boundaryCommitted
 				}
 				s.failPublication = func(step2 string) error {
 					if step2 == step {
@@ -515,7 +508,7 @@ func embeddedWorkflow(t *testing.T, log workflowLog) []byte {
 }
 
 func TestThreadOwnedRecordValidation(t *testing.T) {
-	for _, mode := range []string{"missing-log", "changed-embedded-queue", "unknown-request"} {
+	for _, mode := range []string{"missing-log", "unknown-request"} {
 		t.Run(mode, func(t *testing.T) {
 			r, root, p := create(t)
 			s := mustScoped(t, r, streamID)
@@ -524,32 +517,15 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			enqueue(t, r, "one")
-			files := map[string][]byte{}
-			name := "workstreams/" + string(streamID) + "/workflow.json"
-			log, _, err := s.loadWorkflow(streamID)
-			if err != nil {
-				t.Fatal(err)
-			}
 			switch mode {
 			case "missing-log":
-				files["workstreams/"+string(streamID)+"/agents/mason/log.jsonl"] = nil
-			case "changed-embedded-queue":
-				th := log.Threads["mason"]
-				th.Turns[0].Request.Prompt = "tampered"
-				log.Threads["mason"] = th
-				files[name] = embeddedWorkflow(t, log)
+				storeExec(t, s, "DELETE FROM records WHERE path = ?", "workstreams/"+string(streamID)+"/agents/mason/log.jsonl")
 			case "unknown-request":
-				th := log.Threads["mason"]
-				th.Turns[0].Request.ID = "request_unknown"
-				log.Threads["mason"] = th
-				data, err := encodeWorkflow(log)
-				if err != nil {
+				var body string
+				if err := s.db.QueryRow("SELECT body FROM workflow_threads WHERE agent_id = 'mason'").Scan(&body); err != nil {
 					t.Fatal(err)
 				}
-				files[name] = data
-			}
-			if err := s.publish(ctx, files); err != nil {
-				t.Fatal(err)
+				storeExec(t, s, "UPDATE workflow_threads SET body = ? WHERE agent_id = 'mason'", strings.Replace(body, `"request_one"`, `"request_unknown"`, 1))
 			}
 			r.Close()
 			reopened, err := Open(root, p)
@@ -561,6 +537,20 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// storedWorkflowThread returns the stored form of agent's thread.
+func storedWorkflowThread(t *testing.T, s *Repository, agent string) (storedThread, string) {
+	t.Helper()
+	var body string
+	if err := s.db.QueryRow("SELECT body FROM workflow_threads WHERE agent_id = ?", agent).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var stored storedThread
+	if err := decode([]byte(body), &stored); err != nil {
+		t.Fatal(err)
+	}
+	return stored, body
 }
 
 func TestWorkflowStoresTurnReferences(t *testing.T) {
@@ -580,17 +570,10 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 	}
 	enqueue(t, r, "two")
 	before := mustThread(t, r)
-	data, err := s.readFile("workstreams/" + string(streamID) + "/workflow.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f workflowFile
-	if err := decode(data, &f); err != nil {
-		t.Fatal(err)
-	}
-	turns := f.Threads["mason"].Turns
-	if f.Version != workflowVersion || len(turns) != 2 {
-		t.Fatalf("stored workflow: version %d, %d turns", f.Version, len(turns))
+	stored, body := storedWorkflowThread(t, s, "mason")
+	turns := stored.Turns
+	if len(turns) != 2 {
+		t.Fatalf("stored workflow: %d turns", len(turns))
 	}
 	if turns[0].RequestID != "request_one" || turns[0].ResponseID != "response_one" || turns[1].RequestID != "request_two" || turns[1].ResponseID != "" {
 		t.Fatalf("stored turn references: %+v", turns)
@@ -601,8 +584,8 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 		}
 	}
 	for _, content := range []string{"Message one", "Captured final"} {
-		if strings.Contains(string(data), content) {
-			t.Fatalf("workflow.json repeats turn content %q", content)
+		if strings.Contains(body, content) {
+			t.Fatalf("the stored thread repeats turn content %q", content)
 		}
 	}
 	r.Close()
@@ -617,7 +600,7 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 }
 
 func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
-	r, root, p := create(t)
+	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	if err := r.CreateThread(ctx, threadAgent()); err != nil {
@@ -633,36 +616,36 @@ func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := "workstreams/" + string(streamID) + "/workflow.json"
-	if err := s.publish(ctx, map[string][]byte{name: embeddedWorkflow(t, log)}); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-	reopened, err := Open(root, p)
+	records, _, err := s.scan()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
-	if after := mustThread(t, reopened); !equalJSON(after.Turns, before.Turns) || after.Status != before.Status {
+	var embedded workflowFile
+	if err := decode(embeddedWorkflow(t, log), &embedded); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := s.checkWorkflow(streamID, embedded, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := loaded.Threads["mason"]; !equalJSON(after.Turns, before.Turns) || after.Status != before.Status {
 		t.Fatalf("embedded thread differs:\n%+v\n%+v", after, before)
 	}
-	if err := reopened.CompleteTurn(ctx, streamID, "mason", "one", "token", at.Add(2*time.Second)); err != nil {
+	stored := storeThreads(loaded.Threads)["mason"]
+	if stored.Turns[0].Request != nil || stored.Turns[0].RequestID != before.Turns[0].Request.ID {
+		t.Fatalf("an embedded turn is stored by reference: %+v", stored.Turns[0])
+	}
+
+	// A version 1 workflow whose embedded turn differs from its records is
+	// refused.
+	th := log.Threads["mason"]
+	th.Turns[0].Request.Prompt = "tampered"
+	log.Threads["mason"] = th
+	if err := decode(embeddedWorkflow(t, log), &embedded); err != nil {
 		t.Fatal(err)
 	}
-	reopenedStream := mustScoped(t, reopened, streamID)
-	data, err := reopenedStream.readFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f workflowFile
-	if err := decode(data, &f); err != nil {
-		t.Fatal(err)
-	}
-	if f.Version != workflowVersion || strings.Contains(string(data), "Message one") || f.Threads["mason"].Turns[0].ResponseID != "response_one" {
-		t.Fatalf("saved workflow keeps embedded turns:\n%s", data)
-	}
-	if th := mustThread(t, reopened); th.Status != "waiting" || th.Turns[0].Request.Prompt != "Message one" || th.Turns[0].Response.Result.FinalResponse != "Captured final" {
-		t.Fatalf("completed thread: %+v", th)
+	if _, _, err := s.checkWorkflow(streamID, embedded, records); err == nil {
+		t.Fatal("a changed embedded queue was accepted")
 	}
 }
 

@@ -3,11 +3,9 @@ package trace
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"reflect"
-	"strconv"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,50 +30,28 @@ func projectDocuments(t *testing.T, r *Repository, id string) []Document {
 	}
 	return out
 }
-func kbFiles(t *testing.T, root string) map[string]string {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, "kb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := map[string]string{}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(root, "kb", e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[e.Name()] = string(data)
-	}
-	return out
-}
 
 func TestRecordDocumentsIsOneCommit(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	first := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1), projectDocument("subsystem-service", "kb/service.md", "# service\n", 1), projectDocument(EntitiesDocument, EntitiesPath, "{\"version\":1,\"entities\":[]}\n", 1)}
-	created, err := strconv.Atoi(gitOutput(t, r, "rev-list", "--count", "HEAD"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	created := commits(t, r)
 	if err := r.RecordDocuments(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	before := gitOutput(t, r, "rev-list", "--count", "HEAD")
-	if before != strconv.Itoa(created+1) {
-		t.Fatalf("commits after one record: %s, %d before it", before, created)
+	before := commits(t, r)
+	if before != created+1 {
+		t.Fatalf("commits after one record: %d, %d before it", before, created)
 	}
-	if got := kbFiles(t, dir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "service.md": "# service\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
-		t.Fatalf("files: %v", got)
+	if got := kbFiles(t, r); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "service.md": "# service\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
+		t.Fatalf("knowledge base: %v", got)
 	}
 	// Every revision in the batch is checked before anything is written.
 	invalid := [][]Document{
 		{projectDocument("subsystem-trace", "kb/trace.md", "x\n", 2), projectDocument("subsystem-service", "kb/service.md", "x\n", 3)},
 		{projectDocument("subsystem-trace", "kb/trace.md", "x\n", 2), projectDocument("subsystem-other", "kb/trace.md", "x\n", 1)},
 		{projectDocument("subsystem-trace", "kb/trace.md", "x\n", 2), projectDocument("subsystem-trace", "kb/trace.md", "y\n", 3)},
+		{projectDocument("subsystem-other", "kb/trace.md", "x\n", 1)},
 		{projectDocument("charter", "charter.md", "1. Rule\n", 2)},
 		{projectDocument("spec", "spec.md", "x\n", 1)},
 		{},
@@ -84,32 +60,30 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 		if err := r.RecordDocuments(ctx, docs); err == nil {
 			t.Fatalf("batch %d accepted", i)
 		}
-		if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != before {
-			t.Fatalf("batch %d committed: %s", i, got)
+		if got := commits(t, r); got != before {
+			t.Fatalf("batch %d committed: %d", i, got)
 		}
 		if got := projectDocuments(t, r, "subsystem-trace"); len(got) != 1 {
 			t.Fatalf("batch %d wrote revisions: %+v", i, got)
 		}
 	}
-	if got := kbFiles(t, dir); len(got) != 3 || got["trace.md"] != "# trace\n" {
-		t.Fatalf("files after refused batches: %v", got)
+	if got := kbFiles(t, r); len(got) != 3 || got["trace.md"] != "# trace\n" {
+		t.Fatalf("knowledge base after refused batches: %v", got)
 	}
-	// A removal revision deletes the file and the tree entry; history keeps it.
+	// An empty revision removes the subsystem; its history stays readable.
 	second := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace 2\n", 2), projectDocument("subsystem-service", "kb/service.md", "", 2), projectDocument(EntitiesDocument, EntitiesPath, "{\"version\":1,\"entities\":[]}\n", 2)}
 	if err := r.RecordDocuments(ctx, second); err != nil {
 		t.Fatal(err)
 	}
-	if got := kbFiles(t, dir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace 2\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
-		t.Fatalf("files after removal: %v", got)
+	if got := kbFiles(t, r); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace 2\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
+		t.Fatalf("knowledge base after removal: %v", got)
 	}
-	if tree := gitOutput(t, r, "ls-tree", "--name-only", "HEAD", "kb/"); strings.Contains(tree, "service.md") {
-		t.Fatalf("removed file still tracked:\n%s", tree)
+	if _, err := r.Prose("service"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("removed prose read: %v", err)
 	}
-	if got := projectDocuments(t, r, "subsystem-service"); len(got) != 2 || got[1].Content != "" {
+	got := projectDocuments(t, r, "subsystem-service")
+	if len(got) != 2 || got[0].Content != "# service\n" || got[1].Content != "" {
 		t.Fatalf("removal revision: %+v", got)
-	}
-	if committed := gitOutput(t, r, "show", "HEAD~1:kb/service.md"); committed != "# service" {
-		t.Fatalf("history lost the removed file: %q", committed)
 	}
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
@@ -124,26 +98,11 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 	}
 }
 
-func gitOutput(t *testing.T, r *Repository, args ...string) string {
-	t.Helper()
-	out, err := r.git(context.Background(), nil, args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
 func TestRecordDocumentsPublicationFailures(t *testing.T) {
-	pre := []string{"objects-written", "journal-written", "before-ref"}
-	post := []string{"ref-published", "materialized:documents.jsonl", "materialized:trace.md", "removed:service.md", "before-journal-removal"}
-	for _, step := range append(pre, post...) {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
 			ctx := context.Background()
-			dir, err := root.ProjectTrace(p.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
 			first := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1), projectDocument("subsystem-service", "kb/service.md", "# service\n", 1)}
 			if err := r.RecordDocuments(ctx, first); err != nil {
 				t.Fatal(err)
@@ -165,28 +124,22 @@ func TestRecordDocumentsPublicationFailures(t *testing.T) {
 			if err := r.Close(); err != nil {
 				t.Fatal(err)
 			}
-			r, err = Open(root, p)
+			r, err := Open(root, p)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer r.Close()
-			committed := false
-			for _, s := range post {
-				committed = committed || step == s
-			}
-			want := map[string]string{"trace.md": "# trace\n", "service.md": "# service\n", "entities.json": "{}\n"}
+			committed := step == boundaryCommitted
+			want := map[string]string{"trace.md": "# trace\n", "service.md": "# service\n"}
 			revisions := 1
 			if committed {
-				want, revisions = map[string]string{"trace.md": "# trace 2\n", "entities.json": "{}\n"}, 2
+				want, revisions = map[string]string{"trace.md": "# trace 2\n"}, 2
 			}
-			if got := kbFiles(t, dir); !reflect.DeepEqual(got, want) {
-				t.Fatalf("files: %v", got)
+			if got := kbFiles(t, r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("knowledge base: %v", got)
 			}
 			if got := projectDocuments(t, r, "subsystem-service"); len(got) != revisions {
 				t.Fatalf("revisions: %+v", got)
-			}
-			if _, err := r.dir.Stat(publicationFile); !os.IsNotExist(err) {
-				t.Fatalf("journal retained: %v", err)
 			}
 			// The same batch is recorded once whether or not it committed.
 			if err := r.RecordDocuments(ctx, second); committed != (err != nil) {
@@ -194,6 +147,67 @@ func TestRecordDocumentsPublicationFailures(t *testing.T) {
 			}
 			if got := projectDocuments(t, r, "subsystem-service"); len(got) != 2 || got[1].Content != "" {
 				t.Fatalf("after retry: %+v", got)
+			}
+		})
+	}
+}
+
+// A crash before or after the database commit leaves a document and the
+// transition and outbox entries recorded with it all visible, or none.
+func TestRecordDocumentsWithPublicationFailures(t *testing.T) {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
+		t.Run(step, func(t *testing.T) {
+			r, root, p := create(t)
+			ctx := context.Background()
+			s := mustScoped(t, r, streamID)
+			report := unitReport("{\"turn\":1}\n", 1)
+			tx := transaction("reviewing", 0, "", "reviewing", 2)
+			injected := errors.New("injected publication failure")
+			hit := false
+			s.failPublication = func(got string) error {
+				if got == step {
+					hit = true
+					return injected
+				}
+				return nil
+			}
+			if _, err := r.RecordDocumentsWith(ctx, []Document{report}, tx); !errors.Is(err, injected) || !hit {
+				t.Fatalf("injection not reached: %v", err)
+			}
+			s.failPublication = nil
+			if err := r.Close(); err != nil {
+				t.Fatal(err)
+			}
+			r, err := Open(root, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			committed := step == boundaryCommitted
+			_, docErr := Get[Document](r, streamID, "unit-parser-report", 1)
+			state, err := r.Workflow(streamID, "feature")
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := ready(t, r, at)
+			transitions, err := Read[Transition](r, streamID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if committed {
+				if docErr != nil || state.Value != "reviewing" || len(events) != 2 || len(transitions) != 1 {
+					t.Fatalf("partly committed: %v %+v %d events %d transitions", docErr, state, len(events), len(transitions))
+				}
+				return
+			}
+			if docErr == nil || state.Version != 0 || len(events) != 0 || len(transitions) != 0 {
+				t.Fatalf("partly committed: %v %+v %d events %d transitions", docErr, state, len(events), len(transitions))
+			}
+			if _, err := r.RecordDocumentsWith(ctx, []Document{report}, tx); err != nil {
+				t.Fatal(err)
+			}
+			if got := ready(t, r, at); len(got) != 2 {
+				t.Fatalf("retry: %d events", len(got))
 			}
 		})
 	}
@@ -293,33 +307,26 @@ func TestAbandonTurnRefusesCapturedTurn(t *testing.T) {
 func TestRecordDocumentsRefusesUnpublishablePaths(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := r.RecordDocuments(ctx, []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1)}); err != nil {
 		t.Fatal(err)
 	}
-	commits := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	before := commits(t, r)
 	for _, path := range []string{"kb/foo.bar.md", "kb/nested/foo.md", "kb/foo.txt", "docs/foo.md", "charter.md"} {
 		batch := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace 2\n", 2), projectDocument("subsystem-foo", path, "# foo\n", 1)}
 		if err := r.RecordDocuments(ctx, batch); err == nil {
 			t.Fatalf("%s recorded", path)
 		}
-		if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != commits {
-			t.Fatalf("%s: commits %s, want %s", path, got, commits)
-		}
-		if _, err := r.dir.Stat(publicationFile); !os.IsNotExist(err) {
-			t.Fatalf("%s: journal left behind: %v", path, err)
+		if got := commits(t, r); got != before {
+			t.Fatalf("%s: commits %d, want %d", path, got, before)
 		}
 		if got := projectDocuments(t, r, "subsystem-trace"); len(got) != 1 {
 			t.Fatalf("%s: revisions recorded: %+v", path, got)
 		}
-		if got := kbFiles(t, dir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "entities.json": "{}\n"}) {
-			t.Fatalf("%s: files: %v", path, got)
+		if got := kbFiles(t, r); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n"}) {
+			t.Fatalf("%s: knowledge base: %v", path, got)
 		}
 	}
-	// The trace reopens cleanly: nothing partial was published.
+	// The trace reopens cleanly: nothing partial was committed.
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -336,40 +343,29 @@ func streamDocument(id, path, content string, revision int) Document {
 	return d
 }
 
+// streamFile is the logical path of a workstream document of streamID.
+func streamFile(path string) string { return "workstreams/" + string(streamID) + "/" + path }
+
 func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	r, root, p := create(t)
 	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	handed := streamDocument("handed", "handed/design.md", "# Design\n", 1)
 	handed.Source = "stdin"
 	if err := r.Append(ctx, handed); err != nil {
 		t.Fatal(err)
 	}
-	before := gitOutput(t, s, "rev-list", "--count", "HEAD")
-	commits := func() int {
-		n, err := strconv.Atoi(gitOutput(t, s, "rev-list", "--count", "HEAD"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-	created := commits()
+	created := commits(t, s)
 	first := []Document{streamDocument("spec", "spec.md", "# Spec\n", 1), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 1), streamDocument("seal", "seal.json", "{\"seal\":1}\n", 1)}
 	if err := r.RecordDocuments(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	if got := commits(); got != created+1 {
+	if got := commits(t, s); got != created+1 {
 		t.Fatalf("commits after one record: %d, %d before it", got, created)
 	}
-	streamDir := filepath.Join(dir, "workstreams", string(streamID))
 	for name, want := range map[string]string{"spec.md": "# Spec\n", "plan.json": "{\"version\":1,\"units\":[]}\n", "seal.json": "{\"seal\":1}\n"} {
-		data, err := os.ReadFile(filepath.Join(streamDir, name))
-		if err != nil || string(data) != want {
-			t.Fatalf("%s on disk: %q %v", name, data, err)
+		if got := fileOf(t, s, streamFile(name)); got != want {
+			t.Fatalf("%s: %q", name, got)
 		}
 	}
 	docs, err := Read[Document](r, streamID)
@@ -394,27 +390,24 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 		{streamDocument("spec", "spec.md", "x\n", 1)},
 		{streamDocument("spec", "spec.md", "x\n", 2), streamDocument("spec", "spec.md", "y\n", 3)},
 	}
-	after := gitOutput(t, s, "rev-list", "--count", "HEAD")
+	after := commits(t, s)
 	for i, docs := range invalid {
 		if err := r.RecordDocuments(ctx, docs); err == nil {
 			t.Fatalf("batch %d accepted", i)
 		}
-		if got := gitOutput(t, s, "rev-list", "--count", "HEAD"); got != after {
-			t.Fatalf("batch %d committed: %s (was %s before the first record)", i, got, before)
-		}
-		if _, err := s.dir.Stat(publicationFile); !os.IsNotExist(err) {
-			t.Fatalf("batch %d: journal left behind: %v", i, err)
+		if got := commits(t, s); got != after {
+			t.Fatalf("batch %d committed: %d", i, got)
 		}
 	}
 	second := []Document{streamDocument("spec", "spec.md", "# Spec 2\n", 2), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 2)}
 	if err := r.RecordDocuments(ctx, second); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(streamDir, "spec.md")); err != nil || string(data) != "# Spec 2\n" {
-		t.Fatalf("spec.md after revision 2: %q %v", data, err)
+	if got := fileOf(t, s, streamFile("spec.md")); got != "# Spec 2\n" {
+		t.Fatalf("spec.md after revision 2: %q", got)
 	}
-	if committed := gitOutput(t, s, "show", "HEAD~1:workstreams/"+string(streamID)+"/spec.md"); committed != "# Spec" {
-		t.Fatalf("history lost revision 1: %q", committed)
+	if first, err := Get[Document](r, streamID, "spec", 1); err != nil || first.Content != "# Spec\n" {
+		t.Fatalf("history lost revision 1: %+v %v", first, err)
 	}
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
@@ -429,94 +422,52 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	}
 }
 
-// own-pull-request-outcome.json is a workstream document path the publication
-// journal accepts, next to base.json and base-observation.json; an unlisted
-// name alongside it is still refused.
-func TestOwnPullRequestOutcomeDocumentPathIsAccepted(t *testing.T) {
-	r, root, p := create(t)
+// acceptedPath records content at path of streamID as a workstream document
+// and refuses an unlisted name beside it.
+func acceptedPath(t *testing.T, id, path, content, unlisted string) {
+	t.Helper()
+	r, _, _ := create(t)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
+	if err := r.RecordDocuments(ctx, []Document{streamDocument(id, path, content, 1)}); err != nil {
 		t.Fatal(err)
 	}
-	outcome := streamDocument("workstream-own-pull-request-outcome", "own-pull-request-outcome.json", "{\"number\":1,\"outcome\":\"merged\"}\n", 1)
-	if err := r.RecordDocuments(ctx, []Document{outcome}); err != nil {
-		t.Fatal(err)
+	if got := fileOf(t, mustScoped(t, r, streamID), streamFile(path)); got != content {
+		t.Fatalf("%s: %q", path, got)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "own-pull-request-outcome.json"))
-	if err != nil || string(data) != "{\"number\":1,\"outcome\":\"merged\"}\n" {
-		t.Fatalf("own-pull-request-outcome.json on disk: %q %v", data, err)
-	}
-	unlisted := streamDocument("workstream-own-pull-request-outcome-extra", "own-pull-request-outcome-extra.json", "x\n", 1)
-	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
-		t.Fatal("unlisted path accepted")
+	if err := r.RecordDocuments(ctx, []Document{streamDocument(id+"-extra", unlisted, "x\n", 1)}); err == nil {
+		t.Fatalf("unlisted path %s accepted", unlisted)
 	}
 }
 
-// assumptions.json is a workstream document path the publication journal
-// accepts, next to base.json and own-pull-request-outcome.json; an unlisted
-// name alongside it is still refused.
+func TestOwnPullRequestOutcomeDocumentPathIsAccepted(t *testing.T) {
+	acceptedPath(t, "workstream-own-pull-request-outcome", "own-pull-request-outcome.json", "{\"number\":1,\"outcome\":\"merged\"}\n", "own-pull-request-outcome-extra.json")
+}
+
 func TestAssumptionsDocumentPathIsAccepted(t *testing.T) {
-	r, root, p := create(t)
-	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assumptions := streamDocument("workstream-assumptions", AssumptionsPath, "{\"version\":1,\"assumptions\":[]}\n", 1)
-	if err := r.RecordDocuments(ctx, []Document{assumptions}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), AssumptionsPath))
-	if err != nil || string(data) != "{\"version\":1,\"assumptions\":[]}\n" {
-		t.Fatalf("assumptions.json on disk: %q %v", data, err)
-	}
-	unlisted := streamDocument("workstream-assumptions-extra", "assumptions-extra.json", "x\n", 1)
-	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
-		t.Fatal("unlisted path accepted")
-	}
+	acceptedPath(t, "workstream-assumptions", AssumptionsPath, "{\"version\":1,\"assumptions\":[]}\n", "assumptions-extra.json")
 }
 
 func TestEdgeObservationDocumentPathIsAccepted(t *testing.T) {
-	r, root, project := create(t)
-	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(project.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := "{\"edges\":[]}\n"
-	document := streamDocument("workstream-edge-observation", "edge-observation.json", content, 1)
-	if err := r.RecordDocuments(ctx, []Document{document}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "edge-observation.json"))
-	if err != nil || string(data) != content {
-		t.Fatalf("edge observation on disk: %q %v", data, err)
-	}
-	unlisted := streamDocument("workstream-edge-observation-extra", "edge-observation-extra.json", "x\n", 1)
-	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
-		t.Fatal("unlisted path accepted")
-	}
+	acceptedPath(t, "workstream-edge-observation", "edge-observation.json", "{\"edges\":[]}\n", "edge-observation-extra.json")
 }
 
 // A session's check run and its captured output are recorded under
 // session-checks/, mirroring a workstream's own final check runs under
 // final/; an unlisted name in the same directory is refused.
 func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
-	r, root, p := create(t)
+	r, _, _ := create(t)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	run := streamDocument("session-check-1", "session-checks/checks-1.json", "{\"run\":1}\n", 1)
 	output := streamDocument("session-check-1-output", "session-checks/checks-1-output.txt", "CHECKS\n", 1)
 	if err := r.RecordDocuments(ctx, []Document{run, output}); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "session-checks", "checks-1.json"))
-	if err != nil || string(data) != "{\"run\":1}\n" {
-		t.Fatalf("session-checks/checks-1.json on disk: %q %v", data, err)
+	s := mustScoped(t, r, streamID)
+	if got := fileOf(t, s, streamFile("session-checks/checks-1.json")); got != "{\"run\":1}\n" {
+		t.Fatalf("session-checks/checks-1.json: %q", got)
+	}
+	if got := fileOf(t, s, streamFile("session-checks/checks-1-output.txt")); got != "CHECKS\n" {
+		t.Fatalf("session-checks/checks-1-output.txt: %q", got)
 	}
 	unlisted := streamDocument("session-check-other", "session-checks/other.json", "x\n", 1)
 	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
@@ -528,19 +479,14 @@ func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
 // recorded together with the transitions it makes; other names under moves/
 // are refused.
 func TestWorkstreamMoveDocumentPathIsAccepted(t *testing.T) {
-	r, root, p := create(t)
+	r, _, _ := create(t)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	move := streamDocument("workstream-move-1", "moves/move-1.json", "{\"move\":1}\n", 1)
 	if _, err := r.RecordDocumentsWith(ctx, []Document{move}, transaction("assembled", 0, "", "assembled", 1)); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "moves", "move-1.json"))
-	if err != nil || string(data) != "{\"move\":1}\n" {
-		t.Fatalf("moves/move-1.json on disk: %q %v", data, err)
+	if got := fileOf(t, mustScoped(t, r, streamID), streamFile("moves/move-1.json")); got != "{\"move\":1}\n" {
+		t.Fatalf("moves/move-1.json: %q", got)
 	}
 	for _, path := range []string{"moves/move-0.json", "moves/other.json", "moves/move-1.txt"} {
 		if err := r.RecordDocuments(ctx, []Document{streamDocument("workstream-move-other", path, "x\n", 1)}); err == nil {
@@ -551,26 +497,18 @@ func TestWorkstreamMoveDocumentPathIsAccepted(t *testing.T) {
 
 // A shed record is a workstream document under shed/round-<n>/: a batch is one
 // commit through RecordDocuments, Append records one too, a project-scoped
-// shed path is refused, and the trace reopens with the files on disk.
+// shed path is refused, and the trace reopens with every record readable.
 func TestShedRecordsAreWorkstreamDocuments(t *testing.T) {
 	r, root, p := create(t)
 	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := gitOutput(t, s, "rev-list", "--count", "HEAD")
+	before := commits(t, s)
 	batch := []Document{streamDocument("shed-round-1-agent_committee_1", "shed/round-1/agent_committee_1.json", "{\"round\":1}\n", 1), streamDocument("shed-round-1-agent_committee_2", "shed/round-1/agent_committee_2.json", "{\"round\":1}\n", 1)}
 	if err := r.RecordDocuments(ctx, batch); err != nil {
 		t.Fatal(err)
 	}
-	n, err := strconv.Atoi(before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := gitOutput(t, s, "rev-list", "--count", "HEAD"); got != strconv.Itoa(n+1) {
-		t.Fatalf("commits %s after one batch, %s before it", got, before)
+	if got := commits(t, s); got != before+1 {
+		t.Fatalf("commits %d after one batch, %d before it", got, before)
 	}
 	if err := r.Append(ctx, streamDocument("shed-round-12-agent_committee_1", "shed/round-12/agent_committee_1.json", "{\"round\":12}\n", 1)); err != nil {
 		t.Fatal(err)
@@ -596,12 +534,8 @@ func TestShedRecordsAreWorkstreamDocuments(t *testing.T) {
 	}
 	reopenedStream := mustScoped(t, reopened, streamID)
 	for _, d := range docs {
-		data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), filepath.FromSlash(d.Path)))
-		if err != nil || string(data) != d.Content {
-			t.Fatalf("%s on disk: %q %v", d.Path, data, err)
-		}
-		if got := gitOutput(t, reopenedStream, "cat-file", "blob", "HEAD:workstreams/"+string(streamID)+"/"+d.Path); got != strings.TrimSpace(d.Content) {
-			t.Fatalf("%s committed as %q", d.Path, got)
+		if got := fileOf(t, reopenedStream, streamFile(d.Path)); got != d.Content {
+			t.Fatalf("%s reads %q", d.Path, got)
 		}
 	}
 }
@@ -615,14 +549,12 @@ func unitReport(content string, revision int) Document {
 // A unit report and the transitions recorded with it are one commit, and a
 // refused transition records neither.
 func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
-	r, root, p := create(t)
+	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
-	dir, err := root.WorkstreamTrace(p.ID, streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := gitOutput(t, s, "rev-list", "--count", "HEAD")
+	var observed []Commit
+	r.Observe(func(c Commit) { observed = append(observed, c) })
+	before := commits(t, s)
 	refused := [][]Transaction{
 		{transaction("stale", 3, "", "reviewing", 0)},
 		{func() Transaction {
@@ -635,12 +567,15 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 		if _, err := r.RecordDocumentsWith(ctx, []Document{unitReport("{}\n", 1)}, txs...); err == nil {
 			t.Fatalf("batch %d accepted", i)
 		}
-		if got := gitOutput(t, s, "rev-list", "--count", "HEAD"); got != before {
-			t.Fatalf("batch %d committed: %s", i, got)
+		if got := commits(t, s); got != before {
+			t.Fatalf("batch %d committed: %d", i, got)
 		}
 	}
 	if _, err := r.RecordDocumentsWith(ctx, []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1)}); err == nil {
 		t.Fatal("project documents recorded with a workflow")
+	}
+	if len(observed) != 0 {
+		t.Fatalf("refused batches announced commits: %+v", observed)
 	}
 	states, err := r.RecordDocumentsWith(ctx, []Document{unitReport("{\"turn\":1}\n", 1)}, transaction("reviewing", 0, "", "reviewing", 1))
 	if err != nil {
@@ -649,17 +584,19 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if want := []WorkflowState{{Version: 1, Value: "reviewing"}}; !reflect.DeepEqual(states, want) {
 		t.Fatalf("states %+v", states)
 	}
-	if got := gitOutput(t, s, "rev-list", "--count", "HEAD"); got != fmt.Sprint(mustAtoi(t, before)+1) {
-		t.Fatalf("commits %s, %s before", got, before)
+	if got := commits(t, s); got != before+1 {
+		t.Fatalf("commits %d, %d before", got, before)
 	}
-	files := gitOutput(t, s, "show", "--name-only", "--format=", "HEAD")
-	for _, want := range []string{"workstreams/" + string(streamID) + "/units/parser/report.json", "workstreams/" + string(streamID) + "/events.jsonl", "workstreams/" + string(streamID) + "/documents.jsonl"} {
-		if !strings.Contains(files, want) {
-			t.Fatalf("the commit lacks %s:\n%s", want, files)
+	if len(observed) != 1 || observed[0].Workflow == nil {
+		t.Fatalf("announced commits: %+v", observed)
+	}
+	for _, want := range []string{streamFile("units/parser/report.json"), streamFile("events.jsonl"), streamFile("documents.jsonl"), streamFile("workflow.json")} {
+		if !slices.Contains(observed[0].Paths, want) {
+			t.Fatalf("the commit lacks %s: %v", want, observed[0].Paths)
 		}
 	}
-	if data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "units", "parser", "report.json")); err != nil || string(data) != "{\"turn\":1}\n" {
-		t.Fatalf("report file %q %v", data, err)
+	if got := fileOf(t, s, streamFile("units/parser/report.json")); got != "{\"turn\":1}\n" {
+		t.Fatalf("report %q", got)
 	}
 	if got, err := r.Workflow(streamID, "feature"); err != nil || got.Value != "reviewing" {
 		t.Fatalf("workflow %+v %v", got, err)
@@ -739,11 +676,89 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	}
 }
 
-func mustAtoi(t *testing.T, s string) int {
+// draft records the workstream's spec and plan and moves it to state.
+func draft(t *testing.T, r *Repository, state string) {
 	t.Helper()
-	n, err := strconv.Atoi(s)
+	ctx := context.Background()
+	if err := r.RecordDocuments(ctx, []Document{streamDocument("spec", "spec.md", "# Spec\n", 1), streamDocument("plan", "plan.json", "{}\n", 1)}); err != nil {
+		t.Fatal(err)
+	}
+	transact(t, r, transaction(state, 0, "", state, 0))
+}
+
+func TestEditDraftComparesRevisionsAndChecksContent(t *testing.T) {
+	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
+	ctx := context.Background()
+	draft(t, r, "sketched")
+	accept := func(map[string]string) error { return nil }
+	later := at.Add(time.Hour)
+	before := commits(t, s)
+	for _, revisions := range [][2]int{{2, 1}, {1, 2}, {0, 1}} {
+		if _, err := r.EditDraft(ctx, streamID, revisions[0], revisions[1], "# Spec 2\n", "{}\n", later, accept); !errors.Is(err, ErrConflict) {
+			t.Fatalf("revisions %v: %v", revisions, err)
+		}
+	}
+	refused := errors.New("cyclic plan")
+	var checked map[string]string
+	if _, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 2\n", "{\"cycle\":true}\n", later, func(content map[string]string) error {
+		checked = content
+		return refused
+	}); !errors.Is(err, ErrInvalidEdit) || !errors.Is(err, refused) {
+		t.Fatalf("invalid draft: %v", err)
+	}
+	if checked["spec"] != "# Spec 2\n" || checked["plan"] != "{\"cycle\":true}\n" {
+		t.Fatalf("checked content: %v", checked)
+	}
+	// Unchanged content records nothing.
+	if got, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec\n", "{}\n", later, accept); err != nil || got["spec"].Revision != 1 || got["plan"].Revision != 1 {
+		t.Fatalf("unchanged draft: %+v %v", got, err)
+	}
+	if got := commits(t, s); got != before {
+		t.Fatalf("refused or unchanged edits committed: %d, %d before", got, before)
+	}
+	// Only the changed document gets a new revision, as the owner's.
+	got, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 2\n", "{}\n", later, accept)
+	if err != nil || got["spec"].Revision != 2 || got["spec"].Content != "# Spec 2\n" || got["spec"].Actor != owner || got["spec"].Cause != "owner-edit" || got["plan"].Revision != 1 {
+		t.Fatalf("edit: %+v %v", got, err)
+	}
+	if got := commits(t, s); got != before+1 {
+		t.Fatalf("commits %d, %d before", got, before)
+	}
+	if _, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 3\n", "{}\n", later, accept); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale edit: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return n
+	defer reopened.Close()
+	if got := fileOf(t, mustScoped(t, reopened, streamID), streamFile("spec.md")); got != "# Spec 2\n" {
+		t.Fatalf("spec after reopen: %q", got)
+	}
+}
+
+func TestEditDraftOnlyBeforeRatification(t *testing.T) {
+	accept := func(map[string]string) error { return nil }
+	ctx := context.Background()
+	t.Run("state", func(t *testing.T) {
+		r, _, _ := create(t)
+		draft(t, r, "building")
+		if _, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 2\n", "{}\n", at, accept); !errors.Is(err, ErrConflict) {
+			t.Fatalf("edit while building: %v", err)
+		}
+	})
+	t.Run("ratified", func(t *testing.T) {
+		r, _, _ := create(t)
+		draft(t, r, "in-shed")
+		if err := r.Append(ctx, streamDocument("shed-round-1-ratification", "shed/round-1/ratification.json", "{}\n", 1)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 2\n", "{}\n", at, accept); !errors.Is(err, ErrConflict) {
+			t.Fatalf("edit after ratification: %v", err)
+		}
+	})
 }

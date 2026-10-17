@@ -45,11 +45,6 @@ func TestOwnerDocumentAPIPinsRevisionsAndEnforcesRatification(t *testing.T) {
 	var docs map[string]trace.Document
 	must(t, c.Do(ctx, http.MethodGet, draftPath, nil, &docs))
 	draft := DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec + "\nAn owner note.\n", Plan: validPlan}
-	// Unrecorded local edits cannot be overwritten by the browser.
-	specPath := workstreamTraceFile(t, s.cfg.Root, added.Project.ID, handed.Workstream, "spec.md")
-	must(t, os.WriteFile(specPath, []byte("local edit"), 0600))
-	assertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), Conflict)
-	must(t, os.WriteFile(specPath, []byte(validSpec), 0600))
 	must(t, c.Do(ctx, http.MethodPut, draftPath, draft, &docs))
 	if docs["spec"].Revision != 2 || docs["plan"].Revision != 1 {
 		t.Fatalf("saved draft: %+v", docs)

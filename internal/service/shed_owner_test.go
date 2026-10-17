@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,7 +13,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -332,8 +329,8 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 
 // Skipping debate runs no round, in this service and in the next, and leaves
 // the workstream in the shed for ratification. The skip is the recorded
-// transition, not the owner subject's latest value: a ruling and a reported
-// invalid edit both move the subject on, and neither resumes the debate.
+// transition, not the owner subject's latest value: a ruling moves the
+// subject on and does not resume the debate.
 func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
@@ -375,9 +372,6 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	if _, err := f.c.ShedRule(ctx, stream, objection, "dismiss", "Small enough."); err != nil {
 		t.Fatal(err)
 	}
-	// An invalid owner edit is reported, which moves the subject again.
-	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath), []byte(cyclicPlan), 0600))
-	f.awaitOwnerState(t, stream, "invalid-edit")
 	f.stop(t)
 
 	// A service that can run the committee starts no round either: the skip
@@ -397,7 +391,7 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	if slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
 		t.Fatalf("a committee was created for a skipped debate: %+v", threads)
 	}
-	if moves, want := f.ownerMoves(t, stream), []string{skippedValue, "ruled-1", "invalid-edit"}; !slices.Equal(moves, want) {
+	if moves, want := f.ownerMoves(t, stream), []string{skippedValue, "ruled-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("owner subject went %v, want %v", moves, want)
 	}
 	f.stillInShed(t, stream)
@@ -457,63 +451,6 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 			t.Fatalf("%s on an abandoned workstream: %v", name, err)
 		}
 	}
-}
-
-// A redraft is given up rather than written over an owner edit no revision
-// records, and the architect's reply is recorded all the same.
-func TestARedraftIsGivenUpOverAnUnrecordedOwnerEdit(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 1, 2)
-	defer f.stop(t)
-	p := &faults{}
-	objection := shed.ObjectionID(1, committeeAgent(1), 1)
-	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
-	replying, release := make(chan struct{}), make(chan struct{})
-	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: splitPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		close(replying)
-		select {
-		case <-release:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		if recorded, reason, err := shedTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": objection, "answer": "Split in two."}); err != nil || !recorded {
-			p.report("answer: %q %v", reason, err)
-		}
-		return nil
-	})
-	stream := f.handIn(t, "design", handedDesign)
-	select {
-	case <-replying:
-	case <-time.After(demoTimeout):
-		t.Fatal("the reply did not start")
-	}
-	// The owner edits plan.json while the architect replies. The edit is not
-	// recorded yet, so the redraft must not be written over it.
-	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath), []byte(cyclicPlan), 0600))
-	close(release)
-
-	f.awaitReplied(t, stream, 1)
-	f.settledReplies(t, stream)
-	reply := f.reply(t, stream, 1)
-	if reply.Redraft != nil || len(reply.Answers) != 1 {
-		t.Fatalf("reply %+v", reply)
-	}
-	if len(reply.Problems) != 1 || !strings.Contains(reply.Problems[0], plan.PlanPath) || !strings.Contains(reply.Problems[0], "the owner has edited") {
-		t.Fatalf("problems %+v", reply.Problems)
-	}
-	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 {
-		t.Fatalf("the redraft was recorded over the edit: %+v", docs)
-	}
-	if told := f.transition(t, stream, "shed-reply-1-replied"); !strings.Contains(told.Reason, "its redraft was given up") {
-		t.Fatalf("reply transition %q", told.Reason)
-	}
-	// The owner's file is untouched, so nothing of the edit is lost.
-	data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath))
-	must(t, err)
-	if string(data) != cyclicPlan {
-		t.Fatalf("plan.json %q", data)
-	}
-	p.check(t)
 }
 
 // A request for further rounds survives a restart and resumes the debate from
@@ -592,92 +529,6 @@ func TestOwnerAsksForMoreRoundsAcrossARestart(t *testing.T) {
 	p.check(t)
 }
 
-// The owner's edits to spec.md and plan.json are recorded as the owner's
-// before any turn reads them; an invalid plan edit is reported and not
-// recorded.
-func TestOwnerEditsAreRecordedBeforeTheNextRound(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
-	defer f.stop(t)
-	f.opts.Committee = nil
-	f.stop(t)
-	f.start(t)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, sketched)
-	directory := workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "")
-
-	// An edited spec is the owner's next revision.
-	// The edit sharpens a criterion; the recorded plan still addresses both.
-	edited := strings.Replace(validSpec, "2. Acknowledged chunks are never sent again.", "2. Acknowledged chunks are never sent again, whatever the client retries.", 1)
-	must(t, os.WriteFile(filepath.Join(directory, plan.SpecPath), []byte(edited), 0600))
-	f.awaitDocument(t, stream, plan.SpecDocument, 2)
-	docs := f.documents(t, stream, plan.SpecDocument)
-	if latest := docs[len(docs)-1]; latest.Content != edited || latest.Actor != ownerActor || latest.Cause != "owner-edit" {
-		t.Fatalf("recorded edit %+v", docs)
-	}
-
-	// An invalid plan edit is not recorded, and is reported once.
-	must(t, os.WriteFile(filepath.Join(directory, plan.PlanPath), []byte(cyclicPlan), 0600))
-	f.awaitOwnerState(t, stream, "invalid-edit")
-	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 {
-		t.Fatalf("the invalid edit was recorded: %+v", docs)
-	}
-	var reported []trace.Transition
-	for _, tr := range f.transitions(t, stream) {
-		if tr.Subject == ownerSubject && tr.To == "invalid-edit" {
-			reported = append(reported, tr)
-		}
-	}
-	if len(reported) != 1 || !strings.Contains(reported[0].Reason, cycleProblem) || reported[0].Actor != ownerActor {
-		t.Fatalf("reports of the invalid edit %+v", reported)
-	}
-	outbox, err := f.repository().Outbox(stream)
-	must(t, err)
-	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
-		return e.TransitionID == reported[0].ID && e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, cycleProblem)
-	}) {
-		t.Fatalf("the chief of staff was not told: %+v", outbox)
-	}
-
-	// Correcting the file records it, and the round the committee runs is
-	// pinned to both owner revisions.
-	must(t, os.WriteFile(filepath.Join(directory, plan.PlanPath), []byte(splitPlan), 0600))
-	f.awaitDocument(t, stream, plan.PlanDocument, 2)
-	f.stop(t)
-	f.opts.Committee = &Committee{Engine: f.engine, Hosts: f.opts.Architect.Hosts}
-	f.member(1, 1, 1, silent)
-	f.start(t)
-	f.awaitShed(t, stream, "heard-1")
-	round := f.transition(t, stream, "shed-round-1")
-	if !strings.Contains(round.Reason, "spec.md revision 2 and plan.json revision 2") {
-		t.Fatalf("round 1 pin %q", round.Reason)
-	}
-}
-
-// awaitReplied waits until the architect's reply to round n is recorded. An
-// attempt of the reply operation that failed says at once that it never will,
-// with what the trace recorded as the reason.
-func (f *shedFixture) awaitReplied(t *testing.T, stream config.WorkstreamID, n int) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if slices.Contains(f.shedMoves(t, stream), fmt.Sprintf("replied-%d", n)) {
-			return
-		}
-		for _, op := range f.replyOperations(t, stream) {
-			for _, a := range op.History {
-				if a.Failure != "" {
-					t.Fatalf("an attempt of the reply to round %d failed: %s", n, a.Failure)
-				}
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("workstream %s shed went %v, want replied-%d", stream, f.shedMoves(t, stream), n)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
 // awaitDocument waits until the workstream records that revision of a
 // document.
 func (f *shedFixture) awaitDocument(t *testing.T, stream config.WorkstreamID, id string, revision int) {
@@ -690,21 +541,6 @@ func (f *shedFixture) awaitDocument(t *testing.T, stream config.WorkstreamID, id
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("workstream %s records %d revisions of %s, want %d", stream, len(docs), id, revision)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-// awaitOwnerState waits until the workstream's owner subject reaches a state.
-func (f *shedFixture) awaitOwnerState(t *testing.T, stream config.WorkstreamID, want string) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if slices.Contains(f.ownerMoves(t, stream), want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("workstream %s owner subject went %v, want %q", stream, f.ownerMoves(t, stream), want)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 type Client struct {
@@ -404,6 +405,36 @@ func (c *Client) CharterProposal(ctx context.Context, id config.WorkstreamID, qu
 func (c *Client) DecideCharter(ctx context.Context, id config.WorkstreamID, question string, req CharterDecisionRequest) (CharterProposalView, error) {
 	var v CharterProposalView
 	err := c.Do(ctx, "POST", Prefix+"/charter/"+url.PathEscape(string(id))+"/"+url.PathEscape(question), req, &v)
+	return v, err
+}
+
+// Charter reads the latest revision of a project's charter.
+func (c *Client) Charter(ctx context.Context, project config.ProjectID) (trace.Document, error) {
+	var v trace.Document
+	err := c.Do(ctx, "GET", Prefix+"/projects/charter/"+url.PathEscape(string(project)), nil, &v)
+	return v, err
+}
+
+// EditCharter records the owner's charter edit of the revision they read.
+func (c *Client) EditCharter(ctx context.Context, project config.ProjectID, edit CharterEdit) (trace.Document, error) {
+	var v trace.Document
+	err := c.Do(ctx, "PUT", Prefix+"/projects/charter/"+url.PathEscape(string(project)), edit, &v)
+	return v, err
+}
+
+// Documents reads the latest revisions of a workstream's handed document,
+// spec and plan, by record ID.
+func (c *Client) Documents(ctx context.Context, id config.WorkstreamID) (map[string]trace.Document, error) {
+	var v map[string]trace.Document
+	err := c.Do(ctx, "GET", Prefix+"/documents/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// EditDraft records the owner's edit of a workstream's spec and plan, of
+// the revisions they read, and returns the latest revisions by record ID.
+func (c *Client) EditDraft(ctx context.Context, id config.WorkstreamID, edit DraftEdit) (map[string]trace.Document, error) {
+	var v map[string]trace.Document
+	err := c.Do(ctx, "PUT", Prefix+"/documents/"+url.PathEscape(string(id)), edit, &v)
 	return v, err
 }
 

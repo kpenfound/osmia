@@ -236,8 +236,8 @@ func TestFactoryContextReadsPriorRevisionsAndEnforcesTurnScope(t *testing.T) {
 	source.Revision = 1
 	source.Content = `{"content":"` + strings.Repeat("é", 40000) + `"}`
 	must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{source}))
-	must(t, questions.Resolve(context.Background(), c.repo, c.stream, "source#source-fixture", c.f.clock.Now()))
-	if err := questions.Resolve(context.Background(), c.repo, c.stream, "source#missing", c.f.clock.Now()); err == nil {
+	must(t, questions.Resolve(context.Background(), c.repo, c.stream, "source#source-fixture"))
+	if err := questions.Resolve(context.Background(), c.repo, c.stream, "source#missing"); err == nil {
 		t.Fatal("invented source resolved")
 	}
 	var recovered strings.Builder

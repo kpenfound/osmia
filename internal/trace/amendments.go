@@ -80,7 +80,7 @@ func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.Work
 	}
 	transitionID := "amendment_" + id + "_filed"
 	tx := Transaction{ExpectedVersion: 0, Transition: Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: h.Cause, Depth: 2}, Subject: "amendment_" + id, To: "filed", Reason: "per-unit budget exceeded"}, Events: []Event{Notice(transitionID, "amendment", fmt.Sprintf("Budget amendment %s filed for workstream %s: %s", id, stream, req.Reason))}}
-	files, _, err := r.stage(stream, log, v, []Record{a}, tx)
+	files, _, err := r.stage(ctx, stream, log, v, []Record{a}, tx)
 	if err != nil {
 		return Amendment{}, err
 	}
@@ -325,7 +325,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			txs = append(txs, Transaction{ExpectedVersion: v.states[subject].Version, Transition: wait})
 		}
 		if len(txs) > 0 {
-			files, _, err := target.stage(member, log, v, nil, txs...)
+			files, _, err := target.stage(ctx, member, log, v, nil, txs...)
 			if err != nil {
 				return AmendmentOutcome{}, err
 			}
@@ -371,7 +371,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		wait := Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: subject + "_waiting_amendment_" + id, Revision: 1, Project: target.project, Workstream: member, Unit: unit, At: at, Actor: Actor{Kind: "service", ID: parkRole}, Cause: transitionID, Depth: h.Depth + 1}, Subject: subject, From: from, To: "waiting", Reason: fmt.Sprintf("unit %s waits for amendment %s; its %s stage and candidate are preserved", unit, id, stage)}
 		txs = append(txs, Transaction{ExpectedVersion: v.states[subject].Version, Transition: wait})
 	}
-	files, _, err := target.stage(member, log, v, []Record{a}, txs...)
+	files, _, err := target.stage(ctx, member, log, v, []Record{a}, txs...)
 	if err != nil {
 		return AmendmentOutcome{}, err
 	}

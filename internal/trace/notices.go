@@ -75,11 +75,11 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		h.Actor = Actor{Kind: "agent", ID: ChiefOfStaff}
 		h.Depth++
 		d := Document{Header: h, Path: "notices/" + id + ".json", Content: string(data)}
-		files, removed, err := r.documentFiles(ctx, []Document{d})
+		files, err := r.documentFiles(ctx, []Document{d})
 		if err != nil {
 			return nil, err
 		}
-		if err := r.publishTree(ctx, files, removed); err != nil {
+		if err := r.publish(ctx, files); err != nil {
 			return nil, err
 		}
 		return json.Marshal(d)

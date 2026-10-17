@@ -105,7 +105,7 @@ func (d *exitDemo) design(req agent.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "workstreams", stream, "handed", "stdin"))
+	data, err := latestDocumentIn(dir, "workstreams/"+stream+"/documents.jsonl", "handed/stdin")
 	if err != nil {
 		return "", fmt.Errorf("turn %s of workstream %s: %w", req.Name, stream, err)
 	}
@@ -438,7 +438,7 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	if _, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "refused", Stdin: ptr(exitDebated)}); !failed(err, CharterEmpty) {
 		t.Fatalf("a hand-in before the charter: %v", err)
 	}
-	must(t, os.WriteFile(added.Project.Charter, []byte(exitCharter), 0600))
+	writeCharter(t, f.c, added.Project.ID, exitCharter)
 	onboarded, err := f.c.Configuration(ctx)
 	must(t, err)
 	if cs := onboarded.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 {
@@ -736,10 +736,9 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	if threads, err := f.repository().Threads(gone); err != nil || slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
 		t.Fatalf("the abandoned workstream has a committee: %+v %v", threads, err)
 	}
-	goneTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, gone)
-	must(t, err)
 	for _, path := range []string{"handed/stdin", plan.SpecPath, plan.PlanPath} {
-		demoGit(t, home, "-C", goneTrace, "cat-file", "blob", "HEAD:workstreams/"+string(gone)+"/"+path)
+		_, err := workstreamDocument(t, f.s.cfg.Root, f.project, gone, path)
+		must(t, err)
 	}
 	if refs := demoGit(t, home, "-C", clone, "for-each-ref", "--format=%(refname)", "refs/heads/osmia/"+string(gone)); strings.TrimSpace(refs) != "" {
 		t.Fatalf("the abandoned workstream has a branch: %s", refs)

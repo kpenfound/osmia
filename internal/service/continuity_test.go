@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -469,8 +468,8 @@ func demonstrate(t *testing.T, mode string) {
 			t.Fatalf("second operation was applied before the restart: %+v", op)
 		}
 	}
-	if notes, err := os.ReadFile(filepath.Join(traceDir, "notes", demoRole+".md")); err != nil || string(notes) != "first turn: owner prefers small commits" {
-		t.Fatalf("notes before restart: %q %v", notes, err)
+	if notes, _ := traceFile(t, traceDir, "notes/"+demoRole+".md"); string(notes) != "first turn: owner prefers small commits" {
+		t.Fatalf("notes before restart: %q", notes)
 	}
 	must(t, repo.Close())
 
@@ -640,26 +639,17 @@ func demonstrate(t *testing.T, mode string) {
 		}
 	}
 
-	// Ordinary files hold the same history, and nothing leaked or escaped.
-	streamTrace, err := cfg.Root.WorkstreamTrace(project, stream)
-	must(t, err)
-	for _, name := range []string{"workflow.json", "events.jsonl", "ledger.jsonl", "agents/" + demoAgent + "/log.jsonl", "agents/" + demoAgent + "/identity.jsonl"} {
-		path := "workstreams/" + string(stream) + "/" + name
-		data, err := os.ReadFile(filepath.Join(streamTrace, path))
-		if err != nil || len(data) == 0 {
-			t.Fatalf("trace file %s: %v", name, err)
-		}
-		if committed := demoGit(t, home, "-C", streamTrace, "show", "HEAD:"+path); committed != string(data) {
-			t.Fatalf("trace file %s differs from its committed version", name)
+	// The trace holds the whole history, and nothing leaked or escaped.
+	for _, name := range []string{"events.jsonl", "ledger.jsonl", "agents/" + demoAgent + "/log.jsonl", "agents/" + demoAgent + "/identity.jsonl"} {
+		if len(workstreamRecords(t, cfg.Root, project, stream, name)) == 0 {
+			t.Fatalf("trace records %s: none", name)
 		}
 	}
-	log, err := os.ReadFile(filepath.Join(streamTrace, "workstreams", string(stream), "agents", demoAgent, "log.jsonl"))
-	must(t, err)
-	if lines := bytes.Split(bytes.TrimSpace(log), []byte("\n")); len(lines) != 4 {
-		t.Fatalf("owned log has %d records", len(lines))
+	if log := workstreamRecords(t, cfg.Root, project, stream, "agents/"+demoAgent+"/log.jsonl"); len(log) != 4 {
+		t.Fatalf("owned log has %d records", len(log))
 	}
-	if notes, err := os.ReadFile(filepath.Join(traceDir, "notes", demoRole+".md")); err != nil || string(notes) != "second turn: confirmed" {
-		t.Fatalf("final notes: %q %v", notes, err)
+	if notes, _ := traceFile(t, traceDir, "notes/"+demoRole+".md"); string(notes) != "second turn: confirmed" {
+		t.Fatalf("final notes: %q", notes)
 	}
 	if after := snapshot(t, clone); !reflect.DeepEqual(after, cloneBefore) {
 		t.Fatal("runtime changed the target repository or its VCS metadata")

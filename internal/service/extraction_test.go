@@ -300,15 +300,23 @@ func operationsOf(t *testing.T, s *Service, id config.ProjectID) []trace.Operati
 	return out
 }
 
-func proseOnDisk(t *testing.T, traceDir string) map[string]string {
+// knowledgeBase returns the latest revision of each of the project's
+// knowledge-base documents by file name, leaving out removed prose.
+func knowledgeBase(t *testing.T, traceDir string) map[string]string {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(traceDir, "kb"))
-	must(t, err)
+	latest := map[string]string{}
+	for _, body := range traceQuery(t, traceDir, "SELECT body FROM records WHERE path = 'documents.jsonl' ORDER BY seq") {
+		var d trace.Document
+		must(t, json.Unmarshal(body, &d))
+		if name, ok := strings.CutPrefix(d.Path, "kb/"); ok {
+			latest[name] = d.Content
+		}
+	}
 	out := map[string]string{}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(traceDir, "kb", e.Name()))
-		must(t, err)
-		out[e.Name()] = string(data)
+	for name, content := range latest {
+		if content != "" {
+			out[name] = content
+		}
 	}
 	return out
 }
@@ -383,15 +391,22 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	if docs := documentRevisions(t, s, trace.EntitiesDocument); len(docs) != 2 {
 		t.Fatalf("retry duplicated revisions: %d", len(docs))
 	}
-	commit := demoGit(t, filepath.Dir(f.clone), "-C", traceDir, "log", "-1", "--format=%H", "--", "kb/trace.md")
-	if other := demoGit(t, filepath.Dir(f.clone), "-C", traceDir, "log", "-1", "--format=%H", "--", "kb/entities.json"); other != commit {
+	commitOf := func(path string) string {
+		rows := traceQuery(t, traceDir, "SELECT CAST(commit_seq AS TEXT) FROM records WHERE path = 'documents.jsonl' AND json_extract(body, '$.path') = ? ORDER BY seq DESC LIMIT 1", path)
+		if len(rows) != 1 {
+			t.Fatalf("no revision of %s", path)
+		}
+		return string(rows[0])
+	}
+	commit := commitOf("kb/trace.md")
+	if other := commitOf("kb/entities.json"); other != commit {
 		t.Fatalf("revisions landed in separate commits: %s %s", commit, other)
 	}
-	if got := proseOnDisk(t, traceDir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n\nRun go test ./internal/trace.\n", "service.md": "# service\n\nOne process.\n", "entities.json": refined}) {
-		t.Fatalf("kb on disk: %v", got)
+	if got := knowledgeBase(t, traceDir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n\nRun go test ./internal/trace.\n", "service.md": "# service\n\nOne process.\n", "entities.json": refined}) {
+		t.Fatalf("kb: %v", got)
 	}
-	if notes, err := os.ReadFile(filepath.Join(traceDir, "notes", "librarian.md")); err != nil || string(notes) != "librarian: trace tests are slow" {
-		t.Fatalf("librarian notes: %q %v", notes, err)
+	if notes, _ := traceFile(t, traceDir, "notes/librarian.md"); string(notes) != "librarian: trace tests are slow" {
+		t.Fatalf("librarian notes: %q", notes)
 	}
 	// The librarian's workstream carries no feature: workstream status does
 	// not list it.
@@ -449,11 +464,8 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	if docs := documentRevisions(t, s, trace.EntitiesDocument); len(docs) != 3 {
 		t.Fatalf("entity revisions: %d", len(docs))
 	}
-	if got := proseOnDisk(t, traceDir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n\nRevised.\n", "entities.json": refined}) {
-		t.Fatalf("kb on disk after re-run: %v", got)
-	}
-	if out := demoGit(t, filepath.Dir(f.clone), "-C", traceDir, "ls-tree", "--name-only", "HEAD", "kb/"); strings.Contains(out, "service.md") {
-		t.Fatalf("removed prose still tracked:\n%s", out)
+	if got := knowledgeBase(t, traceDir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n\nRevised.\n", "entities.json": refined}) {
+		t.Fatalf("kb after re-run: %v", got)
 	}
 	ops = operationsOf(t, s, id)
 	var result struct{ Subsystems, Removed []string }
@@ -574,7 +586,7 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 	must(t, err)
 	id := added.Project.ID
 	seededDocs := documentRevisions(t, s, trace.EntitiesDocument)
-	kbBefore := proseOnDisk(t, added.Project.Trace)
+	kbBefore := knowledgeBase(t, added.Project.Trace)
 	for i, tc := range cases {
 		n := i + 1
 		if n > 1 {
@@ -595,7 +607,7 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 		if docs := documentRevisions(t, s, trace.EntitiesDocument); !reflect.DeepEqual(docs, seededDocs) {
 			t.Fatalf("%s: entity map changed: %+v", tc.name, docs)
 		}
-		if got := proseOnDisk(t, added.Project.Trace); !reflect.DeepEqual(got, kbBefore) {
+		if got := knowledgeBase(t, added.Project.Trace); !reflect.DeepEqual(got, kbBefore) {
 			t.Fatalf("%s: kb changed: %v", tc.name, got)
 		}
 	}

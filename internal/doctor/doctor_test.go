@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/trace/legacytrace"
 )
 
 const projectID = "p_0123456789abcdef0123456789abcdef"
@@ -175,30 +176,72 @@ func TestHealthyRoot(t *testing.T) {
 	must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
-// TestTraceMigrationIncompleteIsReported breaks a project's shared-layout
-// trace so Migrate can never complete, and confirms doctor reports it as a
-// failed check naming the migration, rather than trying to open or repair
-// the trace itself.
+// TestGitTraceIsMigrated gives the project a Git trace, which doctor moves
+// to its database as serve would before opening it.
+func TestGitTraceIsMigrated(t *testing.T) {
+	o, dir := fixture(t)
+	directory := filepath.Join(dir, "projects", projectID)
+	must(t, legacytrace.Build(directory, map[string][]byte{"project.json": legacytrace.ProjectManifest(projectID, time.Unix(0, 0).UTC()), "documents.jsonl": nil}))
+
+	checks := Run(context.Background(), o)
+	expect(t, find(t, checks, "widgets trace"), Pass, "0 workstreams")
+	if _, err := os.Lstat(filepath.Join(directory, "trace.db")); err != nil {
+		t.Fatalf("the trace was not migrated: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(directory, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("the Git trace was kept: %v", err)
+	}
+}
+
+// TestTraceMigrationIncompleteIsReported gives the project a Git trace whose
+// HEAD holds a file migration does not know, so Migrate cannot complete, and
+// confirms doctor reports it as a failed check naming the migration, leaving
+// the Git trace as it was.
 func TestTraceMigrationIncompleteIsReported(t *testing.T) {
+	o, dir := fixture(t)
+	directory := filepath.Join(dir, "projects", projectID)
+	must(t, legacytrace.Build(directory, map[string][]byte{"project.json": legacytrace.ProjectManifest(projectID, time.Unix(0, 0).UTC()), "documents.jsonl": nil, "stray.txt": []byte("unknown\n")}))
+	head, err := legacytrace.Head(directory)
+	must(t, err)
+
+	checks := Run(context.Background(), o)
+	expect(t, find(t, checks, "widgets trace"), Fail, "trace migration is incomplete")
+	if !Failed(checks) {
+		t.Fatal("an incomplete trace migration passed")
+	}
+	if after, err := legacytrace.Head(directory); err != nil || after != head {
+		t.Fatalf("doctor altered the unmigrated trace: %s %v", after, err)
+	}
+	if _, err := os.Lstat(filepath.Join(directory, "trace.db")); !os.IsNotExist(err) {
+		t.Fatalf("a failed migration left a trace database: %v", err)
+	}
+}
+
+// TestDamagedTraceDatabaseIsReported damages a project's closed trace
+// database past its first page, so its integrity check fails, and confirms
+// doctor reports the database by path.
+func TestDamagedTraceDatabaseIsReported(t *testing.T) {
 	o, dir := fixture(t)
 	root, err := config.ResolveRoot(dir, "")
 	must(t, err)
 	r, err := trace.Create(context.Background(), root, config.Project{ID: projectID, Name: "widgets", Clone: filepath.Join(filepath.Dir(dir), "clone")}, time.Unix(0, 0).UTC(), trace.Actor{Kind: "owner", ID: "local"})
 	must(t, err)
 	must(t, r.Close())
-	directory, err := root.ProjectTrace(projectID)
+	database := filepath.Join(dir, "projects", projectID, "trace.db")
+	data, err := os.ReadFile(database)
 	must(t, err)
-	must(t, os.MkdirAll(filepath.Join(directory, "workstreams", "w_deadbeefdeadbeefdeadbeefdeadbeef"), 0o700))
+	if len(data) <= 4096 {
+		t.Fatalf("trace database of %d bytes has one page", len(data))
+	}
+	for i := 4096; i < len(data); i++ {
+		data[i] = 0xa5
+	}
+	must(t, os.WriteFile(database, data, 0o600))
 
 	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "widgets trace"), Fail, "trace migration from the shared layout is incomplete")
+	expect(t, find(t, checks, "widgets trace"), Fail, database)
 	if !Failed(checks) {
-		t.Fatal("an incomplete trace migration passed")
-	}
-	// Doctor never touched the broken shared trace beyond the failed attempt
-	// Migrate itself makes.
-	if _, err := os.Lstat(filepath.Join(directory, "workstreams")); err != nil {
-		t.Fatalf("doctor altered the unmigrated trace: %v", err)
+		t.Fatal("a damaged trace database passed")
 	}
 }
 
@@ -347,13 +390,15 @@ func TestGitHubToken(t *testing.T) {
 
 func TestUnopenableState(t *testing.T) {
 	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "project.json"), []byte("{}"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "trace.db"), []byte("{}"), 0o600))
 	must(t, os.WriteFile(filepath.Join(dir, "runtime.json"), []byte("not json"), 0o600))
 	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "widgets trace"), Fail, "")
+	expect(t, find(t, checks, "widgets trace"), Fail, "trace.db")
 	expect(t, find(t, checks, "runtime.json"), Fail, "runtime.json")
 
-	must(t, os.Remove(filepath.Join(dir, "projects", projectID, "project.json")))
+	// A project directory holding only its configuration has no trace.
+	must(t, os.Remove(filepath.Join(dir, "projects", projectID, "trace.db")))
+	must(t, os.RemoveAll(filepath.Join(dir, "projects", projectID, "osmia.lock")))
 	expect(t, find(t, Run(context.Background(), o), "widgets trace"), Warn, "no trace")
 }
 

@@ -128,13 +128,13 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	must(t, os.WriteFile(design, []byte(handedDesign), 0600))
 	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "refused", Path: design})
 	var api *APIError
-	if !errors.As(err, &api) || api.Code != CharterEmpty || api.Message != fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") in %s", f.project, added.Project.Charter) {
+	if !errors.As(err, &api) || api.Code != CharterEmpty || api.Message != fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: osmia edit charter %s", f.project, f.project) {
 		t.Fatalf("empty charter: %v", err)
 	}
 	if list, err := f.c.Statuses(ctx); err != nil || len(list.Workstreams) != 0 {
 		t.Fatalf("the refused hand-in created a workstream: %+v %v", list, err)
 	}
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n2. Every change has a test.\n"), 0600))
+	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 
 	// Each hand-in copies its input unchanged under handed/.
 	stdin := "# Resumable uploads\n\n\tFrom stdin, with a tab and é.\n"
@@ -152,12 +152,11 @@ func TestHandInToSketchedPlan(t *testing.T) {
 		in.req.Project = f.project
 		out, err := f.c.HandIn(ctx, in.req)
 		must(t, err)
-		path := workstreamTraceFile(t, f.s.cfg.Root, f.project, out.Workstream, "handed/"+in.handed)
-		if out.Project != f.project || out.State != HandedState || out.Source != in.source || out.Handed != path {
+		if out.Project != f.project || out.State != HandedState || out.Source != in.source {
 			t.Fatalf("hand-in %s: %+v", in.req.Key, out)
 		}
-		if data, err := os.ReadFile(path); err != nil || string(data) != in.content {
-			t.Fatalf("handed copy %s: %q %v", path, data, err)
+		if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, out.Workstream, "handed/"+in.handed); err != nil || string(data) != in.content {
+			t.Fatalf("handed copy %s: %q %v", in.handed, data, err)
 		}
 		docs := f.documents(t, out.Workstream, handedDocument)
 		if len(docs) != 1 || docs[0].Content != in.content || docs[0].Source != in.source || docs[0].Path != "handed/"+in.handed || docs[0].Actor != ownerActor {
@@ -205,10 +204,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			t.Fatalf("sketched transition of %s: %+v", stream, sketch)
 		}
 		sketches[stream] = sketch.Reason
-		events, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "events.jsonl"))
-		must(t, err)
-		if !strings.Contains(string(events), `"from":"handed","to":"sketched"`) {
-			t.Fatalf("events.jsonl of %s:\n%s", stream, events)
+		if events := allTransitions(t, f.s.cfg.Root, f.project, stream); !slices.ContainsFunc(events, func(tr trace.Transition) bool { return tr.From == "handed" && tr.To == "sketched" }) {
+			t.Fatalf("transitions of %s: %+v", stream, events)
 		}
 	}
 

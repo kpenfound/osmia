@@ -9,15 +9,15 @@ import (
 )
 
 // MarkWorkstreamTraceForDeletion durably marks stream's own dedicated trace
-// repository for permanent deletion: any cached open instance is closed and
-// evicted so its flock is released, then the repository is moved, by one
+// for permanent deletion: any cached open instance's database is closed and
+// the instance evicted so its flock is released, then the trace directory is
+// moved, by one
 // atomic rename, out of WorkstreamTraces and into WorkstreamDeleting. The
 // rename alone makes deletion restart-safe: once it lands, the workstream is
 // gone from WorkstreamTraces and so never again discoverable as live, and a
 // crash before the actual removal finishes is resumed by
 // FinishWorkstreamTraceDeletion, called later with the same arguments. It
-// does not touch Git history: no ref moves, nothing is rewritten or pruned.
-// It reports moved=false, with no error, when the trace is already gone
+// reports moved=false, with no error, when the trace is already gone
 // from WorkstreamTraces, whether because an earlier call already moved or
 // removed it, or because it never existed. Must be called on the project's
 // own instance, never a workstream's.
@@ -62,10 +62,10 @@ func (r *Repository) MarkWorkstreamTraceForDeletion(stream config.WorkstreamID) 
 	return true, nil
 }
 
-// FinishWorkstreamTraceDeletion removes stream's trace repository from
+// FinishWorkstreamTraceDeletion removes stream's trace directory from
 // WorkstreamDeleting, where MarkWorkstreamTraceForDeletion, or an earlier
 // call to this function interrupted before it finished, left it. It touches
-// no repository lock and no Git ref, so it may take as long as removing the
+// no trace lock or database, so it may take as long as removing the
 // files does without delaying a read, a write or reconciliation of any
 // workstream. It is a no-op when nothing is there.
 func FinishWorkstreamTraceDeletion(root config.Root, project config.ProjectID, stream config.WorkstreamID) error {
@@ -92,7 +92,7 @@ func WorkstreamTraceDeletionPending(root config.Root, project config.ProjectID, 
 	return err == nil, err
 }
 
-// WorkstreamTraceGone reports whether stream's trace repository is fully
+// WorkstreamTraceGone reports whether stream's trace directory is fully
 // gone: absent from WorkstreamTraces, where it would be live, and absent
 // from WorkstreamDeleting, where a deletion in progress or interrupted
 // would leave it. Only then may a caller treat the trace as permanently

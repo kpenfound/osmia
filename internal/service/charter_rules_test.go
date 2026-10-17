@@ -57,7 +57,10 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	demoGit(t, home, "init", "-q", f.cfg.Project.Clone)
 	repo, err := trace.Create(ctx, f.cfg.Root, f.cfg.Project, f.clock.Now(), ownerActor)
 	must(t, err)
-	must(t, os.WriteFile(f.charterFile(t), []byte(charterBefore), 0600))
+	current, err := repo.Charter(ctx)
+	must(t, err)
+	_, err = repo.EditCharter(ctx, current.Revision, charterBefore, f.clock.Now())
+	must(t, err)
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		must(t, repo.CreateWorkstream(ctx, ws, f.clock.Now(), ownerActor))
 	}
@@ -110,11 +113,12 @@ func (f *charterFixture) claim(t *testing.T, repo *trace.Repository, agent, thre
 	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: thread, Turn: turn, Role: role}
 }
 
-func (f *charterFixture) charterFile(t *testing.T) string {
+// charter returns the content of the latest charter revision.
+func (f *charterFixture) charter(t *testing.T) string {
 	t.Helper()
-	dir, err := f.cfg.Root.ProjectTrace(project)
+	content, err := projectDocument(t, f.cfg.Root, project, "charter.md")
 	must(t, err)
-	return filepath.Join(dir, "charter.md")
+	return string(content)
 }
 
 // start runs the service and lets it finish its passes.
@@ -182,7 +186,7 @@ func appended(t *testing.T, repo *trace.Repository) []trace.Document {
 // assemble returns the bundle a turn of the workstream receives.
 func assemble(t *testing.T, repo *trace.Repository, ws config.WorkstreamID) bundle.Bundle {
 	t.Helper()
-	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }, Now: func() time.Time { return demoStart }}
+	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }}
 	b, err := files.Assemble(context.Background(), project, bundle.Scope{Workstream: ws})
 	must(t, err)
 	return b
@@ -281,10 +285,8 @@ func TestRatifiedCharterRuleReachesEveryWorkstreamOnce(t *testing.T) {
 	if chartered.State != trace.CharterChartered || chartered.Number != 2 || chartered.Charter == 0 {
 		t.Fatalf("chartered %+v", chartered)
 	}
-	content, err := os.ReadFile(f.charterFile(t))
-	must(t, err)
-	if string(content) != withRule(charterBefore, 2) {
-		t.Fatalf("charter.md:\n%s", content)
+	if content := f.charter(t); content != withRule(charterBefore, 2) {
+		t.Fatalf("charter:\n%s", content)
 	}
 	checkChartered(t, f.s.sole().repository, withRule(charterBefore, 2), 2)
 	if st, err := f.c.Status(ctx, stream); err != nil || len(st.Gates) != 0 {
@@ -356,10 +358,8 @@ func TestDeclinedCharterProposalChangesNothing(t *testing.T) {
 	if got := charterRevisions(t, repo); !reflect.DeepEqual(got, before) {
 		t.Fatalf("charter revisions %+v, were %+v", got, before)
 	}
-	content, err := os.ReadFile(f.charterFile(t))
-	must(t, err)
-	if string(content) != charterBefore {
-		t.Fatalf("charter.md:\n%s", content)
+	if content := f.charter(t); content != charterBefore {
+		t.Fatalf("charter:\n%s", content)
 	}
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		if b := assemble(t, repo, ws); len(b.CharterNotices) != 0 || len(b.CharterEdits) != 1 || len(b.Notices) != 0 {
@@ -371,9 +371,8 @@ func TestDeclinedCharterProposalChangesNothing(t *testing.T) {
 	}
 }
 
-// An owner edit of the charter made while the ratified rule is written is
-// recorded as the owner's revision, not overwritten: the rule is appended
-// after it with the next number.
+// An owner edit of the charter saved while the ratified rule is written
+// stands: the rule is appended after it with the next number.
 func TestCharterWriteKeepsAConcurrentOwnerEdit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -390,7 +389,12 @@ func TestCharterWriteKeepsAConcurrentOwnerEdit(t *testing.T) {
 	f.s.boundary = func(name string) error {
 		if name == "charter-write" && edits == 0 {
 			edits++
-			return os.WriteFile(f.charterFile(t), []byte(edited), 0600)
+			current, err := repo.Charter(ctx)
+			if err != nil {
+				return err
+			}
+			_, err = repo.EditCharter(ctx, current.Revision, edited, f.clock.Now())
+			return err
 		}
 		return nil
 	}
@@ -403,10 +407,8 @@ func TestCharterWriteKeepsAConcurrentOwnerEdit(t *testing.T) {
 	if owner.Content != edited || owner.Actor != ownerActor || owner.Cause != "owner-edit" {
 		t.Fatalf("the owner's edit is not recorded before the rule: %+v", owner)
 	}
-	content, err := os.ReadFile(f.charterFile(t))
-	must(t, err)
-	if string(content) != withRule(edited, 3) {
-		t.Fatalf("charter.md:\n%s", content)
+	if latest := revisions[len(revisions)-1]; latest.Content != withRule(edited, 3) {
+		t.Fatalf("charter:\n%s", latest.Content)
 	}
 	checkChartered(t, repo, withRule(edited, 3), 3)
 }

@@ -198,7 +198,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	if body := noticeOf(t, repository, stream, AssembledState); body != "Workstream state changed from building to assembled: "+wantAssembled {
 		t.Fatalf("the notice %q", body)
 	}
-	charter, err := repository.Charter(ctx, time.Now())
+	charter, err := repository.Charter(ctx)
 	must(t, err)
 	in, err := decodeFinalReview(op)
 	must(t, err)
@@ -386,7 +386,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	}
 
 	// So does a changed charter or spec.
-	must(t, os.WriteFile(filepath.Join(f.trace, "charter.md"), []byte(shedCharter+"3. Document every change.\n"), 0600))
+	recordCharter(t, repository, shedCharter+"3. Document every change.\n")
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != fmt.Sprintf("final review 1 is stale: it read charter revision %d, and %d is current; a new final review is required", charter.Revision, charter.Revision+1) {
 		t.Fatalf("a changed charter: %q %v", reason, err)
 	}

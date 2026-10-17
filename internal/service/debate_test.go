@@ -361,11 +361,8 @@ func TestRedraftThenConcessionEndsTheDebate(t *testing.T) {
 	if len(plans) != 2 || plans[1].Content != splitPlan || plans[1].Actor != architectActor || plans[1].Cause != ops[0].Operation.ID || len(f.documents(t, stream, plan.SpecDocument)) != 1 {
 		t.Fatalf("plan revisions: %+v", plans)
 	}
-	streamTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
-	must(t, err)
-	streamDir := "workstreams/" + string(stream) + "/"
 	landed := func(path string) string {
-		return demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+path)
+		return documentCommit(t, f.s.cfg.Root, f.project, stream, path)
 	}
 	if landed(plan.PlanPath) != landed(shed.ReplyPath(1)) {
 		t.Fatal("the redraft and the reply landed in separate commits")

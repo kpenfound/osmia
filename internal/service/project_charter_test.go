@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,19 +41,19 @@ func TestProjectCharterSharedByRepoAPIContextAndRestart(t *testing.T) {
 			member = r
 		}
 	}
-	if member.ID == "" || result.Project.Charter != added.Project.Charter {
+	if member.ID == "" || result.Project.ID != added.Project.ID {
 		t.Fatalf("shared project: %+v", result)
 	}
-	if _, err := os.Stat(filepath.Join(member.Trace, "charter.md")); !os.IsNotExist(err) {
+	if _, err := projectDocument(t, s.cfg.Root, member.ID, "charter.md"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("member has independent charter: %v", err)
 	}
 	blockedBrief := "Build a client feature"
 	_, err = c.HandIn(ctx, HandInRequest{Project: member.ID, Key: "empty-project-policy", Stdin: &blockedBrief})
 	assertCode(t, err, CharterEmpty)
-	if !strings.Contains(err.Error(), added.Project.Charter) {
+	if !strings.Contains(err.Error(), "osmia edit charter "+string(primary)) {
 		t.Fatalf("empty charter named a member path: %v", err)
 	}
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Project policy for every repo.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Project policy for every repo.\n")
 	primaryRepo, err := s.repository(primary)
 	must(t, err)
 	memberRepo, err := s.repository(member.ID)
@@ -70,9 +71,9 @@ func TestProjectCharterSharedByRepoAPIContextAndRestart(t *testing.T) {
 	var saved trace.Document
 	must(t, c.Do(ctx, http.MethodPut, endpoint(member.ID), CharterEdit{Revision: policy.Revision, Content: "1. Shared policy edited through a member.\n"}, &saved))
 	assertCode(t, c.Do(ctx, http.MethodPut, endpoint(primary), CharterEdit{Revision: policy.Revision, Content: "stale"}, nil), Conflict)
-	// A direct owner edit is recorded once by a member read before use.
+	// The owner's next edit is the charter every repo reads.
 	text := "1. Owner policy applies to every repo.\n"
-	must(t, os.WriteFile(added.Project.Charter, []byte(text), 0600))
+	writeCharter(t, c, added.Project.ID, text)
 	assertCode(t, c.Do(ctx, http.MethodPut, endpoint(member.ID), CharterEdit{Revision: saved.Revision, Content: "overwrite"}, nil), Conflict)
 	doc, _, err := s.loadCharter(ctx, member.ID)
 	must(t, err)
@@ -206,7 +207,7 @@ func TestMemberCharterProposalWritesProjectAuthorityOnceAfterInterruption(t *tes
 		t.Fatalf("recovered proposal: %+v", proposals)
 	}
 	for _, r := range []*trace.Repository{authority, repo} {
-		doc, err := r.Charter(ctx, f.clock.Now())
+		doc, err := r.Charter(ctx)
 		must(t, err)
 		if doc.Content != withRule(policy, 4) || doc.Project != primary.ID {
 			t.Fatalf("shared standing rule: %+v", doc)
@@ -249,7 +250,7 @@ func TestDesignProductionWorkerBundlesShareProjectCharter(t *testing.T) {
 		t.Helper()
 		primary, err := f.s.repository(f.project)
 		must(t, err)
-		doc, err := primary.Charter(ctx, f.clock.Now())
+		doc, err := primary.Charter(ctx)
 		must(t, err)
 		for i, stream := range []config.WorkstreamID{f.stream1, f.stream2} {
 			id := f.project
@@ -258,7 +259,7 @@ func TestDesignProductionWorkerBundlesShareProjectCharter(t *testing.T) {
 			}
 			repo, err := f.s.repository(id)
 			must(t, err)
-			files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }, Now: f.clock.Now}
+			files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }}
 			unit := "accept"
 			if i == 1 {
 				unit = "resume"
@@ -328,7 +329,7 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 				case <-release:
 				case <-ctx.Done():
 				}
-				doc, err := f.repository(otherProject).Charter(context.WithoutCancel(ctx), f.clock.Now())
+				doc, err := f.repository(otherProject).Charter(context.WithoutCancel(ctx))
 				if err == nil && doc.Project != project {
 					err = errors.New("draining turn read member policy")
 				}

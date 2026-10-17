@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -145,7 +146,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if x := awaitExtraction(t, c); x.State != "succeeded" {
 		t.Fatalf("extraction: %+v", x)
 	}
-	must(t, os.WriteFile(added.Project.Charter, []byte(chiefDemoCharter), 0600))
+	writeCharter(t, c, added.Project.ID, chiefDemoCharter)
 	onboarded, err := c.Configuration(ctx)
 	must(t, err)
 	if cs := onboarded.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 1 {
@@ -733,15 +734,13 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if r := ruled.Ruling; r == nil || r.Decision != trace.DecisionRuling || r.OwnerResponse != chiefDemoRuling || r.ReturnedAnswer != chiefDemoRelayed || r.Scope != "notify" || r.Revision != 2 {
 		t.Fatalf("ruling: %+v", r)
 	}
-	streamTrace, err := cfg.Root.WorkstreamTrace(id, stream)
-	must(t, err)
 	for path, wants := range map[string][]string{
-		"workstreams/" + string(stream) + "/questions/2/question.jsonl": {chiefDemoQuestion, `"batch":"escalation_2"`},
-		"workstreams/" + string(stream) + "/questions/2/rulings.jsonl":  {`"owner_response":"` + chiefDemoRuling, `"returned_answer":"` + chiefDemoRelayed},
-		"workstreams/" + string(stream) + "/questions/1/question.jsonl": {"Where does state live?"},
-		"workstreams/" + string(stream) + "/questions/1/rulings.jsonl":  {`"returned_answer":"` + chiefDemoAnswer, `"citations":["charter#1"]`},
+		"questions/2/question.jsonl": {chiefDemoQuestion, `"batch":"escalation_2"`},
+		"questions/2/rulings.jsonl":  {`"owner_response":"` + chiefDemoRuling, `"returned_answer":"` + chiefDemoRelayed},
+		"questions/1/question.jsonl": {"Where does state live?"},
+		"questions/1/rulings.jsonl":  {`"returned_answer":"` + chiefDemoAnswer, `"citations":["charter#1"]`},
 	} {
-		committed := demoGit(t, "", "-C", streamTrace, "cat-file", "blob", "HEAD:"+path)
+		committed := string(bytes.Join(workstreamRecords(t, cfg.Root, id, stream, path), []byte("\n")))
 		for _, w := range wants {
 			if !strings.Contains(committed, w) {
 				t.Fatalf("committed %s lacks %q:\n%s", path, w, committed)

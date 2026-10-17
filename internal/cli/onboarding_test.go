@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -198,24 +196,6 @@ func treeHash(t *testing.T, dir string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// traceDocuments reads the project-level document revisions from the trace
-// directory.
-func traceDocuments(t *testing.T, traceDir string) map[string][]trace.Document {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(traceDir, "documents.jsonl"))
-	must(t, err)
-	out := map[string][]trace.Document{}
-	lines := bufio.NewScanner(bytes.NewReader(data))
-	lines.Buffer(nil, 1<<20)
-	for lines.Scan() {
-		var d trace.Document
-		must(t, json.Unmarshal(lines.Bytes(), &d))
-		out[d.ID] = append(out[d.ID], d)
-	}
-	must(t, lines.Err())
-	return out
-}
-
 func onboardingStatus(t *testing.T, root string) service.ConfigResponse {
 	t.Helper()
 	var st struct {
@@ -275,9 +255,10 @@ func TestProjectOnboarding(t *testing.T) {
 	traceDir := added.Project.Trace
 	resolvedRoot, err := config.ResolveRoot(root, "")
 	must(t, err)
-	if traceDir != filepath.Join(resolvedRoot.String(), "projects", string(id)) || strings.HasPrefix(traceDir, added.Project.Clone) || added.Project.Charter != filepath.Join(traceDir, "charter.md") {
-		t.Fatalf("trace %s, charter %s, clone %s", traceDir, added.Project.Charter, added.Project.Clone)
+	if traceDir != filepath.Join(resolvedRoot.String(), "projects", string(id)) || strings.HasPrefix(traceDir, added.Project.Clone) {
+		t.Fatalf("trace %s, clone %s", traceDir, added.Project.Clone)
 	}
+	db := trace.TraceDatabase(traceDir)
 
 	// 6. The service stops while the librarian's first turn runs, and the
 	// extraction finishes after a restart.
@@ -302,18 +283,18 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("librarian turns %v", runs)
 	}
 	for path, want := range onboardingProse {
-		if got, err := os.ReadFile(filepath.Join(traceDir, path)); err != nil || string(got) != want {
-			t.Fatalf("%s: %q %v", path, got, err)
+		if got := latestDocument(t, db, "documents.jsonl", path).Content; got != want {
+			t.Fatalf("%s: %q", path, got)
 		}
 	}
 	want, err := kb.Parse([]byte(onboardingEntities))
 	must(t, err)
-	if got, err := kb.LoadFile(filepath.Join(traceDir, "kb", "entities.json")); err != nil || !reflect.DeepEqual(got, want) {
+	if got, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content)); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("entities: %+v %v", got, err)
 	}
 	// One revision per produced file, plus the seed: nothing was recorded
 	// twice across the restart.
-	docs := traceDocuments(t, traceDir)
+	docs := traceDocuments(t, db, "documents.jsonl")
 	counts := map[string]int{}
 	for doc, revisions := range docs {
 		counts[doc] = len(revisions)
@@ -340,7 +321,7 @@ func TestProjectOnboarding(t *testing.T) {
 	design := filepath.Join(home, "design.md")
 	must(t, os.WriteFile(design, []byte("# Upload API\n"), 0600))
 	code, out, diag := invoke(t, root, "handin", string(id), design)
-	if code != 4 || out != "" || !strings.Contains(diag, "charter_empty") || !strings.Contains(diag, added.Project.Charter) {
+	if code != 4 || out != "" || !strings.Contains(diag, "charter_empty") || !strings.Contains(diag, "osmia edit charter "+string(id)) {
 		t.Fatalf("hand-in with an empty charter: %d %q %q", code, out, diag)
 	}
 	var all struct {
@@ -351,12 +332,12 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("a refused hand-in created workstreams: %+v", all.Status.Workstreams)
 	}
 
-	// 4. The owner writes rules; status records the edit and shows the
-	// charter ready and the context file-based.
-	must(t, os.WriteFile(added.Project.Charter, []byte(onboardingCharter), 0600))
+	// 4. The owner writes rules with osmia edit; status shows the charter
+	// ready and the context file-based.
+	setCharter(t, root, id, onboardingCharter)
 	status := successful(t, root, "status")
 	for _, want := range []string{
-		"Charter: ready (2 rules, revision 2) " + added.Project.Charter,
+		"Charter: ready (2 rules, revision 2)\n",
 		"Context: " + string(id) + " context_mode=file",
 		"Knowledge base: extraction 1 succeeded",
 	} {
@@ -364,16 +345,16 @@ func TestProjectOnboarding(t *testing.T) {
 			t.Fatalf("status lacks %q:\n%s", want, status)
 		}
 	}
-	charters := traceDocuments(t, traceDir)["charter"]
+	charters := traceDocuments(t, db, "documents.jsonl")["charter"]
 	if edit := charters[len(charters)-1]; len(charters) != 2 || edit.Revision != 2 || edit.Actor != (trace.Actor{Kind: "owner", ID: "local"}) || edit.Cause != "owner-edit" || edit.Content != onboardingCharter {
 		t.Fatalf("charter revisions: %+v", charters)
 	}
-	if log := onboardingGit(t, home, "-C", traceDir, "log", "--format=%s", "--", "documents.jsonl"); strings.Count(log, "\n")+1 < 3 {
-		t.Fatalf("trace history:\n%s", log)
+	if commits := commitCount(t, db); commits < 3 {
+		t.Fatalf("trace history: %d commits", commits)
 	}
 
 	// 5. Resolution reads the local entity map alone.
-	local, err := kb.LoadFile(filepath.Join(traceDir, "kb", "entities.json"))
+	local, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content))
 	must(t, err)
 	fp := local.ResolveEntities([]string{"history", "internal"})
 	if !slices.Equal(fp.Entities, []string{"internal", "service", "trace"}) || !slices.Equal(fp.Paths, []string{"internal", "internal/service", "internal/trace"}) || len(fp.Unresolved) != 0 {
@@ -410,7 +391,7 @@ func TestProjectOnboarding(t *testing.T) {
 	}
 
 	// 7. Removing the project keeps the trace and the clone.
-	traceBefore := onboardingGit(t, home, "-C", traceDir, "rev-parse", "HEAD")
+	traceBefore := commitCount(t, db)
 	removed := successful(t, root, "project", "remove", string(id))
 	if !strings.Contains(removed, string(id)) {
 		t.Fatalf("remove output:\n%s", removed)
@@ -418,11 +399,11 @@ func TestProjectOnboarding(t *testing.T) {
 	if cfg := onboardingStatus(t, root); cfg.Project != nil {
 		t.Fatalf("project still active: %+v", cfg.Project)
 	}
-	if head := onboardingGit(t, home, "-C", traceDir, "rev-parse", "HEAD"); head != traceBefore {
-		t.Fatalf("trace moved on removal: %s != %s", head, traceBefore)
+	if commits := commitCount(t, db); commits != traceBefore {
+		t.Fatalf("trace moved on removal: %d commits, %d before", commits, traceBefore)
 	}
-	if got, err := os.ReadFile(added.Project.Charter); err != nil || string(got) != onboardingCharter {
-		t.Fatalf("charter after removal: %q %v", got, err)
+	if got := latestDocument(t, db, "documents.jsonl", "charter.md").Content; got != onboardingCharter {
+		t.Fatalf("charter after removal: %q", got)
 	}
 	if treeHash(t, clone) != cloneBefore {
 		t.Fatal("removal changed the clone")

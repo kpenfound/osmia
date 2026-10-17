@@ -295,13 +295,13 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
-	must(t, os.WriteFile(workstreamTraceFile(t, cfg.Root, project, stream, "status.jsonl"), []byte("{not json}\n"), 0600))
+	traceExec(t, workstreamTraceDirectory(t, cfg.Root, project, stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.status', 'status', 1, '{not json}')", "workstreams/"+string(stream)+"/status.jsonl")
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
 	list := s.statusList()
-	streaks := "cannot read the turn attempts of the active project; check the trace repository"
 	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", project)
-	// The capacity reads no trace, so a damaged one does not hide it.
-	if want := []Diagnostic{{"failure_streaks", Internal, streaks}, {"provider_usage", Internal, usage}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
+	// The capacity reads no trace, and failure streaks read only the thread
+	// records, so a damaged status record hides neither.
+	if want := []Diagnostic{{"provider_usage", Internal, usage}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
 	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, message}) {

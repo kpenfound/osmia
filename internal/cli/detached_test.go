@@ -362,7 +362,7 @@ func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
 
 	var added service.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 
 	text := successful(t, root, "handin", string(added.Project.ID), "https://github.com/owner/repo/issues/3")
 	if !strings.Contains(text, "handed in to project") {

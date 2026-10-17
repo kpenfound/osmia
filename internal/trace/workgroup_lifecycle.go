@@ -91,6 +91,24 @@ func (r *Repository) SetQuestionReadBoundary(boundary func(config.WorkstreamID) 
 	return nil
 }
 
+// questionRead is lockQuestionRead for a read of committed records alone,
+// which takes no lock: it never waits on a write in progress.
+func (r *Repository) questionRead(stream config.WorkstreamID) (*Repository, error) {
+	target, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
+	if boundary := r.questionReadBoundary.Load(); boundary != nil && *boundary != nil {
+		if err := (*boundary)(stream); err != nil {
+			return nil, err
+		}
+	}
+	if err := r.memberReadError(stream); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
 func (r *Repository) lockQuestionRead(stream config.WorkstreamID) (*Repository, error) {
 	target, err := r.scoped(stream)
 	if err != nil {
@@ -167,6 +185,11 @@ func (r *Repository) bindMembers(members map[config.WorkstreamID]CrossRepoMember
 	return nil
 }
 
+// ErrMembershipChanged reports member bindings that differ from the
+// workgroup's recorded membership: a member joined, or left, after the
+// caller read it. Reading the membership again and binding it resolves it.
+var ErrMembershipChanged = errors.New("workgroup membership differs from its bindings")
+
 func (r *Repository) validateMemberBindings(id config.WorkgroupID, members map[config.WorkstreamID]CrossRepoMember) error {
 	groups, _, err := Workgroups(r)
 	if err != nil {
@@ -177,11 +200,11 @@ func (r *Repository) validateMemberBindings(id config.WorkgroupID, members map[c
 			continue
 		}
 		if len(group.Members) != len(members)+1 {
-			return fmt.Errorf("%w: workgroup %s requires its fixed membership", ErrConflict, id)
+			return fmt.Errorf("%w: %w: workgroup %s requires its fixed membership", ErrConflict, ErrMembershipChanged, id)
 		}
 		for _, stream := range group.Members[1:] {
 			if _, ok := members[stream]; !ok {
-				return fmt.Errorf("%w: missing member binding %s", ErrConflict, stream)
+				return fmt.Errorf("%w: %w: missing member binding %s", ErrConflict, ErrMembershipChanged, stream)
 			}
 		}
 		approval, _, found, err := ReadGroupApproval(r, group.Members[0])

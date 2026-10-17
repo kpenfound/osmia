@@ -166,7 +166,8 @@ func (r Root) PendingProject() (string, error) { return r.managed("project-add.j
 // PendingSessionOpen is the journal of one interrupted session open.
 func (r Root) PendingSessionOpen() (string, error) { return r.managed("session-open.json") }
 
-// ProjectTrace is the project directory and dedicated trace repository.
+// ProjectTrace is the project directory: its configuration and its trace
+// database.
 func (r Root) ProjectTrace(id ProjectID) (string, error) {
 	if err := CheckProjectIDs(id); err != nil {
 		return "", err
@@ -190,9 +191,9 @@ func (r Root) Workstream(project ProjectID, stream WorkstreamID) (string, error)
 }
 
 // WorkstreamTraces is the directory under which every workstream of project
-// has its own dedicated trace repository, a sibling of the project's own
-// trace directory and of every other project's. It never shares a parent
-// with any registered project's "projects" tree.
+// has its own trace directory, a sibling of the project's own trace
+// directory and of every other project's. It never shares a parent with any
+// registered project's "projects" tree.
 func (r Root) WorkstreamTraces(project ProjectID) (string, error) {
 	if err := CheckProjectIDs(project); err != nil {
 		return "", err
@@ -200,8 +201,8 @@ func (r Root) WorkstreamTraces(project ProjectID) (string, error) {
 	return r.managed("workstreams", string(project))
 }
 
-// WorkstreamTrace is the workstream's own dedicated trace repository, outside
-// the project trace repository and every target repository.
+// WorkstreamTrace is the directory of the workstream's own trace database,
+// outside the project's trace directory and every target repository.
 func (r Root) WorkstreamTrace(project ProjectID, stream WorkstreamID) (string, error) {
 	if err := CheckProjectIDs(project); err != nil {
 		return "", err
@@ -212,25 +213,25 @@ func (r Root) WorkstreamTrace(project ProjectID, stream WorkstreamID) (string, e
 	return r.managed("workstreams", string(project), string(stream))
 }
 
-// WorkstreamStaging is where a new workstream's dedicated trace repository is
-// built before it is published into WorkstreamTraces by an atomic rename, so
-// a directory listing of WorkstreamTraces never observes a workstream before
-// its trace is complete and committed. It is a sibling of "workstreams" and
-// "projects", never nested under either, so it is never itself read as a
-// project's or workstream's trace.
+// WorkstreamStaging is where a new workstream's trace directory is built,
+// its database created and closed, before it is published into
+// WorkstreamTraces by an atomic rename, so a directory listing of
+// WorkstreamTraces never observes a workstream before its trace is complete.
+// It is a sibling of "workstreams" and "projects", never nested under either,
+// so it is never itself read as a project's or workstream's trace.
 func (r Root) WorkstreamStaging() (string, error) {
 	return r.managed("workstreams-staging")
 }
 
-// WorkgroupTrace is a cross-repo workgroup's own dedicated trace
-// repository: its membership record, its shared chief-of-staff thread, its
+// WorkgroupTrace is the directory of a cross-repo workgroup's own trace
+// database: its membership record, its shared chief-of-staff thread, its
 // inbox numbering and its project spec, kept outside every one of its
 // members' own traces and outside every target repository. It is a sibling
 // of "projects" and "workstreams", never nested under either, so nothing
 // that lists registered projects or a project's own workstreams ever
 // observes it. It is used only for a workgroup whose members span more
-// than one repo; a workgroup confined to one repo keeps using that repo's
-// own trace exactly as before.
+// than one repo; a workgroup confined to one repo uses that repo's own
+// trace.
 func (r Root) WorkgroupTrace(id WorkgroupID) (string, error) {
 	if err := CheckWorkgroupIDs(id); err != nil {
 		return "", err
@@ -238,10 +239,10 @@ func (r Root) WorkgroupTrace(id WorkgroupID) (string, error) {
 	return r.managed("workgroups", string(id))
 }
 
-// WorkstreamDeleting is where a workstream's own dedicated trace repository
-// is moved, by one atomic rename out of WorkstreamTraces, before archive
-// cleanup removes it. Its presence there is the durable, restart-safe
-// record that deletion is under way: a directory listing of
+// WorkstreamDeleting is where a workstream's own trace directory is moved,
+// once its database is closed, by one atomic rename out of WorkstreamTraces,
+// before archive cleanup removes it. Its presence there is the durable,
+// restart-safe record that deletion is under way: a directory listing of
 // WorkstreamTraces never again observes the workstream once the rename
 // lands, and anything still here after a crash is finished, not mistaken
 // for a live trace. It is a sibling of "workstreams" and

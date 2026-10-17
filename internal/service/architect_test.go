@@ -108,7 +108,7 @@ func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFi
 	added, err := f.c.AddProject(context.Background(), request(clone))
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n2. Every change has a test.\n"), 0600))
+	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 	return f
 }
 
@@ -408,14 +408,14 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 			}
 			return err
 		})
-	head := demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "rev-parse", "HEAD")
+	head := traceCommits(t, f.trace)
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
 	// The draft is recorded as architect-authored revisions caused by the
-	// draft operation, in one commit, and the files are on disk.
+	// draft operation, in one commit.
 	ops := f.acknowledgedDraftOperations(t, stream)
 	if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" || !strings.Contains(ops[0].Result.Evidence, "draft 1 passed validation") {
 		t.Fatalf("operations: %+v", ops)
@@ -426,16 +426,13 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 		if len(docs) != 1 || docs[0].Revision != 1 || docs[0].Path != want.path || docs[0].Content != want.content || docs[0].Actor != architectActor || docs[0].Cause != operation || docs[0].Source != "" {
 			t.Fatalf("%s revisions: %+v", id, docs)
 		}
-		data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, want.path))
+		data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, want.path)
 		if err != nil || string(data) != want.content {
-			t.Fatalf("%s on disk: %q %v", want.path, data, err)
+			t.Fatalf("%s: %q %v", want.path, data, err)
 		}
 	}
-	streamTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
-	must(t, err)
-	streamDir := "workstreams/" + string(stream) + "/"
-	spec := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+"spec.md")
-	if other := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+"plan.json"); other != spec {
+	spec := documentCommit(t, f.s.cfg.Root, f.project, stream, "spec.md")
+	if other := documentCommit(t, f.s.cfg.Root, f.project, stream, "plan.json"); other != spec {
 		t.Fatalf("revisions landed in separate commits: %s %s", spec, other)
 	}
 	// One transition moves the feature, with its actor and reason, and its
@@ -449,11 +446,6 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	if len(moves) != 2 || moves[1].ID != "sketched" || moves[1].From != HandedState || moves[1].To != SketchedState || moves[1].Actor != draftingActor || moves[1].Cause != operation ||
 		moves[1].Reason != "the architect's draft 1 passed validation: spec.md revision 1 with 2 acceptance criteria and plan.json revision 1 with 2 units" {
 		t.Fatalf("feature transitions: %+v", moves)
-	}
-	events, err := os.ReadFile(filepath.Join(streamTrace, streamDir, "events.jsonl"))
-	must(t, err)
-	if !strings.Contains(string(events), `"from":"handed","to":"sketched"`) {
-		t.Fatalf("events.jsonl:\n%s", events)
 	}
 	outbox, err := f.repository().Outbox(stream)
 	must(t, err)
@@ -479,8 +471,8 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != "draft-1-1" || th.Turns[0].Status() != "idle" || th.Identity.Role != architectRole || th.Active != "" {
 		t.Fatalf("architect thread: %+v", th)
 	}
-	if _, err := os.Stat(filepath.Join(f.trace, "notes", "architect.md")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("architect notes: %v", err)
+	if notes, ok := traceFile(t, f.trace, "notes/architect.md"); ok {
+		t.Fatalf("architect notes: %q", notes)
 	}
 	// Another pass, and applying the operation again as a retry after a stop
 	// would, record nothing more; a workstream in another feature state is
@@ -536,7 +528,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 			t.Fatalf("secret copied into %s", path)
 		}
 	}
-	if strings.TrimSpace(head) == strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "rev-parse", "HEAD")) {
+	if traceCommits(t, f.trace) == head {
 		t.Fatal("the trace did not move")
 	}
 }
@@ -765,7 +757,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	added, err := f2.c.AddProject(ctx, request(clone))
 	must(t, err)
 	f2.project, f2.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, f2.c, added.Project.ID, "1. Keep changes small.\n")
 	stream = f2.handIn(t, "design", handedDesign)
 	must(t, (&drafter{s: f2.s, repository: f2.repository()}).Pass(ctx))
 	if state, err := f2.repository().Workflow(stream, draftSubject); err != nil || state.Value != "" {
@@ -1010,7 +1002,7 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 	added, err := f.c.AddProject(context.Background(), request(clone))
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n")
 	repository.Store(f.repository())
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 	stream := f.handIn(t, "design", handedDesign)
@@ -1341,7 +1333,7 @@ func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
 	added, err := f2.c.AddProject(ctx, request(clone))
 	must(t, err)
 	f2.project, f2.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, f2.c, added.Project.ID, "1. Keep changes small.\n")
 	f2.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 	stream := f2.handIn(t, "design", handedDesign)
 	f2.await(t, stream, sketched)

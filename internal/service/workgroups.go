@@ -250,9 +250,10 @@ func (w *workgroupResolver) resolveCrossRepoWorkgroups(ctx context.Context) erro
 		}
 		seen[id] = true
 		if err := w.resolveCrossRepoWorkgroup(ctx, id); err != nil {
-			if errors.Is(err, trace.ErrLocked) {
+			if errors.Is(err, trace.ErrLocked) || errors.Is(err, trace.ErrMembershipChanged) {
 				// The workgroup trace is busy with another member's own
-				// pass right now; try again next pass.
+				// pass, or a member joined since the membership was read;
+				// try again next pass.
 				continue
 			}
 			return fmt.Errorf("workgroup %s: %w", id, err)

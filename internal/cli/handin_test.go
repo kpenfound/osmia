@@ -48,20 +48,19 @@ func handInFixture(t *testing.T) (string, config.ProjectID, string) {
 	root := resolved.String()
 	var added service.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 	return root, added.Project.ID, filepath.Dir(clone)
 }
 
 func handedWorkstream(t *testing.T, root string, project config.ProjectID, stream config.WorkstreamID) (trace.Document, string) {
 	t.Helper()
-	path := filepath.Join(root, "workstreams", string(project), string(stream), "workstreams", string(stream), "documents.jsonl")
-	data, err := os.ReadFile(path)
-	must(t, err)
+	bodies := traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/documents.jsonl")
+	if len(bodies) == 0 {
+		t.Fatalf("workstream %s records no handed document", stream)
+	}
 	var doc trace.Document
-	must(t, json.Unmarshal(bytes.TrimSpace(data), &doc))
-	handed, err := os.ReadFile(filepath.Join(filepath.Dir(path), doc.Path))
-	must(t, err)
-	return doc, string(handed)
+	must(t, json.Unmarshal([]byte(bodies[0]), &doc))
+	return doc, doc.Content
 }
 
 // handedCount counts the project's workstreams other than the librarian's.
@@ -95,7 +94,7 @@ func TestHandInCommand(t *testing.T) {
 	if result.Project != project || result.State != "handed" || result.Source != "file:"+design || config.CheckWorkstreamIDs(result.Workstream) != nil {
 		t.Fatalf("file hand-in %+v", result)
 	}
-	if doc, handed := handedWorkstream(t, root, project, result.Workstream); doc.Source != "file:"+design || handed != "# Design\n" || filepath.Base(result.Handed) != "design.md" {
+	if doc, handed := handedWorkstream(t, root, project, result.Workstream); doc.Source != "file:"+design || handed != "# Design\n" || doc.Path != "handed/design.md" {
 		t.Fatalf("file copy %+v %q", doc, handed)
 	}
 
@@ -103,15 +102,11 @@ func TestHandInCommand(t *testing.T) {
 	lines := strings.Split(text, "\n")
 	stream, ok := strings.CutPrefix(lines[0], "Workstream ")
 	stream, ok2 := strings.CutSuffix(stream, " handed in to project "+string(project))
-	if !ok || !ok2 || len(lines) != 5 || lines[1] != "State: handed" || lines[3] != "Source: https://github.com/owner/repo/issues/3" || lines[4] != "" {
+	if !ok || !ok2 || len(lines) != 4 || lines[1] != "State: handed" || lines[2] != "Source: https://github.com/owner/repo/issues/3" || lines[3] != "" {
 		t.Fatalf("URL hand-in output:\n%s", text)
 	}
 	id := config.WorkstreamID(stream)
-	want := "Handed: " + filepath.Join(root, "workstreams", string(project), stream, "workstreams", stream, "handed", "issue-3.md")
-	if lines[2] != want {
-		t.Fatalf("URL hand-in output:\n%s\nwant %s", text, want)
-	}
-	if doc, handed := handedWorkstream(t, root, project, id); doc.Source != "https://github.com/owner/repo/issues/3" || handed != "# Title\n\nBody\n" {
+	if doc, handed := handedWorkstream(t, root, project, id); doc.Source != "https://github.com/owner/repo/issues/3" || handed != "# Title\n\nBody\n" || doc.Path != "handed/issue-3.md" {
 		t.Fatalf("issue copy %+v %q", doc, handed)
 	}
 
@@ -182,16 +177,14 @@ func TestHandInSkipDebate(t *testing.T) {
 	lines := strings.Split(text, "\n")
 	stream, ok := strings.CutPrefix(lines[0], "Workstream ")
 	stream, ok2 := strings.CutSuffix(stream, " handed in to project "+string(project))
-	if !ok || !ok2 || len(lines) != 6 || lines[1] != "State: handed" || lines[3] != "Source: file:"+design ||
-		lines[4] != "Debate: skipped; ratify the spec and the plan once they are drafted" || lines[5] != "" {
+	if !ok || !ok2 || len(lines) != 5 || lines[1] != "State: handed" || lines[2] != "Source: file:"+design ||
+		lines[3] != "Debate: skipped; ratify the spec and the plan once they are drafted" || lines[4] != "" {
 		t.Fatalf("hand-in output:\n%s", text)
 	}
 	skips := func(stream string) []trace.Transition {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(root, "workstreams", string(project), stream, "workstreams", stream, "events.jsonl"))
-		must(t, err)
 		var out []trace.Transition
-		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		for _, line := range traceBodies(t, workstreamDatabase(t, root, project, stream), "workstreams/"+stream+"/events.jsonl") {
 			var tr trace.Transition
 			must(t, json.Unmarshal([]byte(line), &tr))
 			if tr.ID == "shed-owner-skip" {

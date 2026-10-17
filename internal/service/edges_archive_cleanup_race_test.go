@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -148,9 +146,7 @@ func TestUpstreamReadErrorsWithoutCleanupEvidence(t *testing.T) {
 					t.Fatal(api)
 				}
 			}
-			dir, err := cfg.Root.WorkstreamTrace(cfg.Project.ID, stream)
-			must(t, err)
-			must(t, os.WriteFile(filepath.Join(dir, ".git", "refs", "heads", "main"), []byte("corrupt history"), 0600))
+			traceExec(t, workstreamTraceDirectory(t, cfg.Root, cfg.Project.ID, stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'corrupt', 1, 'corrupt history')", "workstreams/"+string(stream)+"/documents.jsonl")
 			status, err := s.upstreamMergeStatus(context.Background(), repo, trace.Edge{From: stream, To: quiet, Type: trace.EdgeHardBlock})
 			if err == nil || status.Merged {
 				t.Fatalf("unexplained corrupt upstream lost its error: %+v %v", status, err)

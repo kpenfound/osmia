@@ -89,11 +89,11 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		return nil, err
 	}
 	doc := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: scope.Unit, At: now(), Actor: Actor{Kind: "agent", ID: actor}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}, Path: "tools/" + id + ".json", Content: string(data)}
-	files, removed, err := r.documentFiles(ctx, []Document{doc})
+	files, err := r.documentFiles(ctx, []Document{doc})
 	if err != nil {
 		return nil, err
 	}
-	if err := r.publishTree(ctx, files, removed); err != nil {
+	if err := r.publish(ctx, files); err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context, output json.RawMessage, callErr error) error {

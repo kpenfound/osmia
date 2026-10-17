@@ -41,7 +41,6 @@ var entities = kb.Map{Version: kb.Version, Entities: []kb.Entity{
 
 type fixture struct {
 	repo     *trace.Repository
-	dir      string
 	root     config.Root
 	provider bundle.Provider
 }
@@ -66,11 +65,7 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	dir, err := root.ProjectTrace(project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := fixture{repo: repo, dir: dir, root: root}
+	f := fixture{repo: repo, root: root}
 	f.provider = bundle.Files{
 		Repository: func(id config.ProjectID) (*trace.Repository, error) {
 			if id != project {
@@ -78,31 +73,48 @@ func setup(t *testing.T) fixture {
 			}
 			return repo, nil
 		},
-		Now: func() time.Time { return timestamp.Add(time.Hour) },
 	}
-	f.write(t, "charter.md", "# Charter\n\n## Testing\n\n1. Every change has a test.\n2. Run dagger check.\n")
-	f.write(t, "kb/internal.md", "# Internal\nHow the internal packages fit.\n")
-	f.write(t, "kb/internal.kb.seed.md", "# Seeding\n")
-	f.write(t, "kb/zeta.md", "# Zeta\nNo entity names this subsystem.\n")
+	f.charter(t, "# Charter\n\n## Testing\n\n1. Every change has a test.\n2. Run dagger check.\n")
+	f.prose(t, "internal", "# Internal\nHow the internal packages fit.\n")
+	f.prose(t, "internal.kb.seed", "# Seeding\n")
+	f.prose(t, "zeta", "# Zeta\nNo entity names this subsystem.\n")
 	return f
 }
 
-func (f fixture) write(t *testing.T, name, content string) {
+// charter records content as the owner's next charter revision.
+func (f fixture) charter(t *testing.T, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(f.dir, name), []byte(content), 0600); err != nil {
+	ctx := context.Background()
+	latest, err := f.repo.Charter(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.EditCharter(ctx, latest.Revision, content, timestamp.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// streamFile is the on-disk path of name within stream's own dedicated trace
-// repository.
-func (f fixture) streamFile(t *testing.T, stream config.WorkstreamID, name string) string {
+// prose records content as the next revision of subsystem's knowledge-base
+// prose. Empty content removes the subsystem.
+func (f fixture) prose(t *testing.T, subsystem, content string) {
 	t.Helper()
-	dir, err := f.root.WorkstreamTrace(project, stream)
+	revision := 1
+	documents, err := f.repo.ProjectDocuments()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(dir, "workstreams", string(stream), name)
+	for _, d := range documents {
+		if d.Path == trace.ProsePath(subsystem) {
+			revision = d.Revision + 1
+		}
+	}
+	// An entity's prose is named by its entity ID, whose dots a record ID
+	// cannot hold.
+	id := kb.ProseDocument(strings.ReplaceAll(subsystem, ".", "-"))
+	d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: project, At: timestamp, Actor: owner, Cause: "test"}, Path: trace.ProsePath(subsystem), Content: content}
+	if err := f.repo.Append(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f fixture) assemble(t *testing.T, scope bundle.Scope) bundle.Bundle {
@@ -201,10 +213,8 @@ func TestScopedBundleExpandsPartOfAndNotesMissingProse(t *testing.T) {
 		t.Fatalf("scoped bundle holds unrelated prose:\n%s", text)
 	}
 
-	// A missing ancestor file is looked for along the whole lineage.
-	if err := os.Remove(filepath.Join(f.dir, "kb/internal.md")); err != nil {
-		t.Fatal(err)
-	}
+	// A missing ancestor's prose is looked for along the whole lineage.
+	f.prose(t, "internal", "")
 	b = f.assemble(t, bundle.Scope{Entities: []string{"knowledge"}})
 	if want := []bundle.MissingProse{{Entity: "internal.kb", Looked: []string{"kb/internal.kb.md", "kb/internal.md"}}}; !reflect.DeepEqual(b.Missing, want) {
 		t.Fatalf("missing %#v", b.Missing)
@@ -214,40 +224,22 @@ func TestScopedBundleExpandsPartOfAndNotesMissingProse(t *testing.T) {
 	}
 }
 
-func TestBundleRecordsCharterEditBeforeIncluding(t *testing.T) {
-	f := setup(t)
-	b := f.assemble(t, bundle.Scope{})
-	if b.Charter.Revision != 2 {
-		t.Fatalf("charter revision %d", b.Charter.Revision)
-	}
-	f.write(t, "charter.md", "1. Only this rule.\n")
-	b = f.assemble(t, bundle.Scope{})
-	if b.Charter.Revision != 3 || len(b.Charter.Rules) != 1 || b.Charter.Rules[0].Text != "Only this rule." {
-		t.Fatalf("charter %#v", b.Charter)
-	}
-	doc, err := trace.Get[trace.Document](f.repo, "", "charter", 3)
-	if err != nil || doc.Content != "1. Only this rule.\n" || doc.Actor != owner || doc.Cause != "owner-edit" || !doc.At.Equal(timestamp.Add(time.Hour)) {
-		t.Fatalf("recorded edit %#v %v", doc, err)
-	}
-	// An unchanged charter records nothing more.
-	f.assemble(t, bundle.Scope{})
-	if _, err := trace.Get[trace.Document](f.repo, "", "charter", 4); err == nil {
-		t.Fatal("unchanged charter recorded a revision")
-	}
-}
-
-func TestBundleReadsFilesAtEachCall(t *testing.T) {
+func TestBundleReadsTheLatestRevisionsAtEachCall(t *testing.T) {
 	f := setup(t)
 	scope := bundle.Scope{Entities: []string{"internal"}}
 	f.assemble(t, scope)
-	f.write(t, "kb/internal.md", "edited\n")
-	f.write(t, "kb/internal.kb.md", "new file\n")
+	f.prose(t, "internal", "edited\n")
+	f.prose(t, "internal.kb", "new prose\n")
+	f.charter(t, "1. Only this rule.\n")
 	b := f.assemble(t, scope)
 	if got := sources(b); !reflect.DeepEqual(got, []string{"kb/internal.md", "kb/internal.kb.md", "kb/internal.kb.seed.md"}) {
 		t.Fatalf("knowledge %v", got)
 	}
 	if b.Knowledge[0].Content != "edited\n" {
 		t.Fatalf("stale prose %q", b.Knowledge[0].Content)
+	}
+	if b.Charter.Revision != 3 || len(b.Charter.Rules) != 1 || b.Charter.Rules[0].Text != "Only this rule." {
+		t.Fatalf("stale charter %#v", b.Charter)
 	}
 }
 
@@ -492,23 +484,6 @@ func TestBundleFailures(t *testing.T) {
 	if _, err := f.provider.Assemble(context.Background(), project, bundle.Scope{Workstream: first}); err == nil {
 		t.Fatal("unknown workstream assembled a bundle")
 	}
-	if err := os.Symlink("internal.md", filepath.Join(f.dir, "kb/cmd.md")); err != nil {
-		t.Fatal(err)
-	}
-	for _, scope := range []bundle.Scope{{Entities: []string{"cmd"}}, {}} {
-		if _, err := f.provider.Assemble(context.Background(), project, scope); err == nil || !strings.Contains(err.Error(), "kb/cmd.md") {
-			t.Fatalf("symlinked prose with scope %v: %v", scope, err)
-		}
-	}
-	if err := os.Remove(filepath.Join(f.dir, "kb/cmd.md")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(f.dir, "kb/cmd.md"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.provider.Assemble(context.Background(), project, bundle.Scope{}); err == nil {
-		t.Fatal("directory named like prose was skipped")
-	}
 }
 
 type fakeTurns func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
@@ -616,14 +591,14 @@ func TestBundleCharterNotices(t *testing.T) {
 	}
 }
 
-func TestDirectCharterEditsAndChiefNoticesReachOtherWorkstreams(t *testing.T) {
+func TestCharterEditsAndChiefNoticesReachOtherWorkstreams(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	if err := f.repo.CreateWorkstream(ctx, second, timestamp, owner); err != nil {
 		t.Fatal(err)
 	}
 	before := f.assemble(t, bundle.Scope{})
-	f.write(t, "charter.md", "1. Keep records durable.\n")
+	f.charter(t, "1. Keep records durable.\n")
 	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: project, Workstream: first, At: timestamp, Actor: owner, Cause: "test"}
 	if err := f.repo.CreateWorkstream(ctx, first, timestamp, owner); err != nil {
 		t.Fatal(err)

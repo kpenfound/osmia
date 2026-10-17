@@ -46,19 +46,6 @@ func traceFixture(t *testing.T, seed []byte) (*trace.Repository, config.Root, co
 	return r, root, p
 }
 
-func entitiesFile(t *testing.T, root config.Root, p config.Project) string {
-	t.Helper()
-	dir, err := root.ProjectTrace(p.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, trace.EntitiesPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
 // entityRevisions returns the entity map's revisions, leaving out other
 // project documents such as the charter.
 func entityRevisions(r *trace.Repository) ([]trace.Document, error) {
@@ -73,13 +60,10 @@ func entityRevisions(r *trace.Repository) ([]trace.Document, error) {
 }
 
 func TestStoreRecordsRevisions(t *testing.T) {
-	r, root, p := traceFixture(t, nil)
+	r, _, _ := traceFixture(t, nil)
 	m, err := Load(r)
 	if err != nil || !reflect.DeepEqual(m, Map{Version: Version, Entities: []Entity{}}) {
 		t.Fatalf("fresh trace: %#v, %v", m, err)
-	}
-	if got := entitiesFile(t, root, p); got != "{}\n" {
-		t.Fatalf("fresh file: %q", got)
 	}
 	invalid := Map{Version: Version, Entities: []Entity{entity("a", []string{"../x"})}}
 	if err := Store(context.Background(), r, invalid, at, owner, "test"); err == nil {
@@ -87,9 +71,6 @@ func TestStoreRecordsRevisions(t *testing.T) {
 	}
 	if docs, err := entityRevisions(r); err != nil || len(docs) != 0 {
 		t.Fatalf("invalid map wrote documents: %v, %v", docs, err)
-	}
-	if got := entitiesFile(t, root, p); got != "{}\n" {
-		t.Fatalf("invalid map wrote the file: %q", got)
 	}
 	first := Map{Version: Version, Entities: []Entity{{ID: "a", Name: "A", Aliases: []string{}, Paths: []string{"a"}, Owners: []string{}, PartOf: []string{}}}}
 	second := Map{Version: Version, Entities: append(append([]Entity{}, first.Entities...), Entity{ID: "b", Name: "B", Aliases: []string{}, Paths: []string{"b"}, Owners: []string{}, PartOf: []string{"a"}})}
@@ -110,14 +91,15 @@ func TestStoreRecordsRevisions(t *testing.T) {
 			t.Fatalf("revision %d: %#v", i+1, d)
 		}
 	}
-	if got := entitiesFile(t, root, p); got != string(secondData) {
-		t.Fatalf("file: %q", got)
-	}
 	loaded, err := Load(r)
 	if err != nil || !reflect.DeepEqual(loaded, second) {
 		t.Fatalf("load: %#v, %v", loaded, err)
 	}
-	fromFile, err := LoadFile(filepath.Join(root.String(), "projects", string(p.ID), trace.EntitiesPath))
+	file := filepath.Join(t.TempDir(), "entities.json")
+	if err := os.WriteFile(file, secondData, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fromFile, err := LoadFile(file)
 	if err != nil || !reflect.DeepEqual(fromFile, second) {
 		t.Fatalf("load file: %#v, %v", fromFile, err)
 	}
@@ -131,9 +113,6 @@ func TestCreateSeededIsFirstRevision(t *testing.T) {
 	docs, err := entityRevisions(r)
 	if err != nil || len(docs) != 1 || docs[0].Revision != 1 || docs[0].Content != string(seed) || docs[0].Cause != "project-create" {
 		t.Fatalf("documents: %#v, %v", docs, err)
-	}
-	if got := entitiesFile(t, root, p); got != string(seed) {
-		t.Fatalf("file: %q", got)
 	}
 	m, err := Load(r)
 	if err != nil {

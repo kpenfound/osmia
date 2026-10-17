@@ -201,7 +201,7 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	current, err := project.Charter(ctx, at)
+	current, err := project.Charter(ctx)
 	if err != nil {
 		return CharterProposal{}, err
 	}
@@ -224,16 +224,16 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 		At: at, Actor: actor, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
 	tx := Transaction{ExpectedVersion: v.states[subject].Version, Transition: Transition{Header: h, Subject: subject, From: "", To: CharterProposed,
 		Reason: fmt.Sprintf("The chief of staff proposed the owner's ruling on question %s as charter rule %d", id, number)}}
-	files, removed, err := r.documentFiles(ctx, []Document{doc})
+	files, err := r.documentFiles(ctx, []Document{doc})
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	staged, _, err := r.stage(stream, log, v, nil, tx)
+	staged, _, err := r.stage(ctx, stream, log, v, nil, tx)
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	maps.Copy(files, staged)
-	if err := r.publishTree(ctx, files, removed); err != nil {
+	files.add(staged)
+	if err := r.publish(ctx, files); err != nil {
 		return CharterProposal{}, err
 	}
 	_ = r.wake.Notify(context.Background())

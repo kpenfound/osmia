@@ -164,7 +164,7 @@ type ReloadError struct {
 	At      time.Time `json:"at"`
 }
 
-// ProjectView names a registered project, its trace and its charter file.
+// ProjectView names a registered project and its trace.
 // Upstream, Fork, Clone, BaseBranch, Trace and Extraction describe the
 // project's default repo, the one its own ID names; Repos lists every repo
 // of the project, the default repo included, each with its own settings.
@@ -176,7 +176,6 @@ type ProjectView struct {
 	Clone      string           `json:"clone"`
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
-	Charter    string           `json:"charter"`
 	Repos      []RepoView       `json:"repos"`
 	// CharterState and Extraction are reported by status only.
 	CharterState *CharterState    `json:"charter_state,omitempty"`
@@ -279,14 +278,13 @@ type HandInRequest struct {
 	SkipDebate bool                `json:"skip_debate,omitempty"`
 }
 
-// HandInResponse names the workstream a hand-in created. Handed is the path
-// of the copied input; Source is where it came from, as recorded.
-// SkipDebate reports that the hand-in skipped the workstream's debate.
+// HandInResponse names the workstream a hand-in created. Source is where its
+// input came from, as recorded. SkipDebate reports that the hand-in skipped
+// the workstream's debate.
 type HandInResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	State      string              `json:"state"`
-	Handed     string              `json:"handed"`
 	Source     string              `json:"source"`
 	SkipDebate bool                `json:"skip_debate,omitempty"`
 }

@@ -256,7 +256,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 
 	traceDir, err := f.cfg.Root.ProjectTrace(project)
 	must(t, err)
-	head := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD")
+	head := traceCommits(t, traceDir)
 	_, err = c.Answer(ctx, 9, "Both are part of the contract.", "")
 	apiError(t, err, Validation, "there is no inbox entry 9; list the entries with osmia inbox")
 	_, err = c.Answer(ctx, batch.Number, " \n", "")
@@ -264,8 +264,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	for _, number := range []string{"0", "-1", "01", "x", "1.5"} {
 		apiError(t, c.Do(ctx, "POST", Prefix+"/inbox/"+number, AnswerRequest{Text: "x"}, new(AnswerResponse)), Validation, "inbox entry must be a number from osmia inbox")
 	}
-	if got := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("a refused answer committed: %s, was %s", got, head)
+	if got := traceCommits(t, traceDir); got != head {
+		t.Fatalf("a refused answer committed: %d commits, was %d", got, head)
 	}
 	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.", "")
 	must(t, err)

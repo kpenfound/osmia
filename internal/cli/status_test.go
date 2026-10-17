@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -121,14 +120,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	dir, err := cfg.Root.ProjectTrace(cfg.Project.ID)
-	must(t, err)
-	data, err := os.ReadFile(filepath.Join(dir, trace.WorkgroupsPath))
-	must(t, err)
 	var recorded struct {
 		Workgroups []trace.Workgroup `json:"workgroups"`
 	}
-	must(t, json.Unmarshal(data, &recorded))
+	must(t, json.Unmarshal([]byte(latestDocument(t, projectDatabase(t, root, cfg.Project.ID), "documents.jsonl", trace.WorkgroupsPath).Content), &recorded))
 	workgroup := func(w config.WorkstreamID) *service.WorkgroupView {
 		group, ok := trace.WorkgroupOf(recorded.Workgroups, w)
 		if !ok {

@@ -5,8 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -49,8 +50,8 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		}
 		project.mu.Lock()
 		defer project.mu.Unlock()
-		content, err := project.readFile("notes/" + scope.Role + ".md")
-		if err != nil && !os.IsNotExist(err) {
+		content, err := project.file("notes/" + scope.Role + ".md")
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
 		digest := missingNotesSHA256
@@ -88,11 +89,8 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		project.mu.Lock()
 		defer project.mu.Unlock()
 		name := "notes/" + scope.Role + ".md"
-		if err := project.checked(name); err != nil {
-			return nil, err
-		}
-		current, err := project.readFile(name)
-		if err != nil && !os.IsNotExist(err) {
+		current, err := project.file(name)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
 		currentSHA256 := missingNotesSHA256
@@ -107,7 +105,9 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 				SHA256  string `json:"sha256"`
 			}{false, "notes changed since they were read; re-read, merge, and retry", currentSHA256})
 		}
-		if err := project.publish(ctx, map[string][]byte{name: []byte(*args.Text)}); err != nil {
+		notes := change{message: "Record " + scope.Role + " notes"}
+		notes.setFile(name, []byte(*args.Text))
+		if err := project.publish(ctx, notes); err != nil {
 			return nil, err
 		}
 		return json.RawMessage(`{"written":true}`), nil

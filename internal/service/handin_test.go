@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -63,7 +63,6 @@ type handInFixture struct {
 	issues  *fakeIssues
 	project config.ProjectID
 	trace   string
-	charter string
 	home    string
 }
 
@@ -77,8 +76,8 @@ func newHandInFixture(t *testing.T) *handInFixture {
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
-	return &handInFixture{s: s, c: c, issues: fake, project: added.Project.ID, trace: added.Project.Trace, charter: added.Project.Charter, home: filepath.Dir(clone)}
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	return &handInFixture{s: s, c: c, issues: fake, project: added.Project.ID, trace: added.Project.Trace, home: filepath.Dir(clone)}
 }
 
 func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
@@ -91,25 +90,26 @@ func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
 
 func (f *handInFixture) repository() *trace.Repository { return f.s.sole().repository }
 
-func (f *handInFixture) head(t *testing.T) string {
+// head returns how many commits the project's trace and each of its
+// workstreams' traces hold, apart from the librarian's workstream, which the
+// project's extraction writes to.
+func (f *handInFixture) head(t *testing.T) map[string]int {
 	t.Helper()
-	out, err := exec.Command("git", "-C", f.trace, "rev-parse", "HEAD").Output()
-	must(t, err)
-	return strings.TrimSpace(string(out))
+	commits := map[string]int{"project": traceCommits(t, f.trace)}
+	for _, stream := range f.streams(t) {
+		commits[string(stream)] = traceCommits(t, workstreamTraceDirectory(t, f.s.cfg.Root, f.project, stream))
+	}
+	return commits
 }
 
-// unchanged reports whether no commit since head touched the trace outside
-// the librarian's workstream, which the project's extraction writes to.
-func (f *handInFixture) unchanged(t *testing.T, head string) bool {
+// unchanged reports whether nothing was committed since head outside the
+// librarian's workstream, and no workstream was created.
+func (f *handInFixture) unchanged(t *testing.T, head map[string]int) bool {
 	t.Helper()
-	out, err := exec.Command("git", "-C", f.trace, "diff", "--name-only", head, "HEAD").Output()
-	must(t, err)
-	librarian := "workstreams/" + string(librarianWorkstream(f.project)) + "/"
-	for _, name := range strings.Fields(string(out)) {
-		if !strings.HasPrefix(name, librarian) {
-			t.Logf("changed: %s", name)
-			return false
-		}
+	now := f.head(t)
+	if !maps.Equal(now, head) {
+		t.Logf("commits went from %v to %v", head, now)
+		return false
 	}
 	return true
 }
@@ -117,11 +117,16 @@ func (f *handInFixture) unchanged(t *testing.T, head string) bool {
 // streams lists the project's workstreams other than the librarian's.
 func (f *handInFixture) streams(t *testing.T) []config.WorkstreamID {
 	t.Helper()
-	streams, err := f.repository().Workstreams()
+	base, err := f.s.cfg.Root.WorkstreamTraces(f.project)
+	must(t, err)
+	entries, err := os.ReadDir(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	must(t, err)
 	var out []config.WorkstreamID
-	for _, id := range streams {
-		if id != librarianWorkstream(f.project) {
+	for _, entry := range entries {
+		if id := config.WorkstreamID(entry.Name()); id != librarianWorkstream(f.project) {
 			out = append(out, id)
 		}
 	}
@@ -133,11 +138,10 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	t.Helper()
 	ctx := context.Background()
 	stream := HandInWorkstream(f.project, key)
-	if out.Project != f.project || out.Workstream != stream || out.State != HandedState || out.Source != source ||
-		out.Handed != workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "handed/"+name) {
+	if out.Project != f.project || out.Workstream != stream || out.State != HandedState || out.Source != source {
 		t.Fatalf("response %+v", out)
 	}
-	data, err := os.ReadFile(out.Handed)
+	data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "handed/"+name)
 	must(t, err)
 	if string(data) != content {
 		t.Fatalf("handed bytes %q, want %q", data, content)
@@ -159,10 +163,8 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	if tr.Subject != trace.FeatureSubject || tr.From != "" || tr.To != "handed" || tr.Actor != owner || !strings.Contains(tr.Reason, "owner handed in handed/"+name+" from "+source) {
 		t.Fatalf("transition %+v", tr)
 	}
-	events, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "events.jsonl"))
-	must(t, err)
-	if !strings.Contains(string(events), `"to":"handed"`) {
-		t.Fatalf("events.jsonl:\n%s", events)
+	if events := allTransitions(t, f.s.cfg.Root, f.project, stream); !slices.ContainsFunc(events, func(tr trace.Transition) bool { return tr.To == "handed" }) {
+		t.Fatalf("transitions: %+v", events)
 	}
 	state, err := r.Workflow(stream, trace.FeatureSubject)
 	must(t, err)
@@ -201,7 +203,7 @@ func TestHandInFileURLAndStdin(t *testing.T) {
 	f.checkHanded(t, out, "file", "design.md", "file:"+design, content)
 	// The copy is independent of the original file.
 	must(t, os.WriteFile(design, []byte("changed"), 0600))
-	if data, _ := os.ReadFile(out.Handed); string(data) != content {
+	if data, _ := workstreamDocument(t, f.s.cfg.Root, f.project, out.Workstream, "handed/design.md"); string(data) != content {
 		t.Fatalf("handed copy follows the original: %q", data)
 	}
 
@@ -442,12 +444,12 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 
 	// The charter gate comes before the input is read or fetched.
 	fetches := f.issues.fetches
-	must(t, os.WriteFile(f.charter, []byte("# Charter\n"), 0600))
+	writeCharter(t, f.c, f.project, "# Charter\n")
 	_, _, err := f.s.loadCharter(context.Background(), f.project)
 	must(t, err)
 	head = f.head(t)
 	api := handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/12"})
-	if api.Code != CharterEmpty || !strings.Contains(api.Message, f.charter) || f.issues.fetches != fetches {
+	if api.Code != CharterEmpty || !strings.Contains(api.Message, "osmia edit charter "+string(f.project)) || f.issues.fetches != fetches {
 		t.Fatalf("empty charter: %+v, %d fetches", api, f.issues.fetches-fetches)
 	}
 	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {

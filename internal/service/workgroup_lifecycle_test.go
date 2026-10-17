@@ -675,11 +675,13 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 		reject(t)
 	})
 	t.Run("corrupt-live", func(t *testing.T) {
-		file := filepath.Join(path, "workstreams", string(f.stream1), "workstream.json")
-		original, err := os.ReadFile(file)
-		must(t, err)
-		must(t, os.WriteFile(file, []byte("corrupt live manifest\n"), 0600))
-		defer func() { must(t, os.WriteFile(file, original, 0600)) }()
+		manifest := "workstreams/" + string(f.stream1) + "/workstream.json"
+		original, ok := traceFile(t, path, manifest)
+		if !ok {
+			t.Fatal("the live member has no manifest")
+		}
+		traceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", []byte("corrupt live manifest\n"), manifest)
+		defer traceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", original, manifest)
 		reject(t)
 	})
 	t.Run("inactive-repo", func(t *testing.T) {

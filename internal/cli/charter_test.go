@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +24,8 @@ func withCharterProposal(t *testing.T) service.Options {
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, written, owner)
 	must(t, err)
-	must(t, os.WriteFile(filepath.Join(opts.Config.Root, "projects", string(project), "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
+	_, err = repo.EditCharter(ctx, 1, "# Charter\n\n1. Keep state in files.\n", written)
+	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, written, owner))
 	content, err := json.Marshal(trace.CharterProposal{Question: "1", Ruling: "workstreams/" + stream + "/questions/1/rulings.jsonl", RulingRevision: 2, OwnerResponse: "Uploads always resume.\nNo exceptions.", Rule: "Uploads resume.", Number: 2})
 	must(t, err)

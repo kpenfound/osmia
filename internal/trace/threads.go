@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -881,11 +882,40 @@ func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamI
 	return ErrClaim
 }
 
+// saveThread requires r.mu. It commits log, whose threads changed, with
+// additions, the threads' new records. Each changed thread is checked
+// against its records first.
 func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID, log workflowLog, additions ...Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	records, _, err := r.scan()
+	old := r.workflows[stream]
+	if old == nil {
+		return fmt.Errorf("workstream %s: workflow written before it was loaded", stream)
+	}
+	changed := map[string]Thread{}
+	for id, t := range storeThreads(log.Threads) {
+		body, err := json.Marshal(t)
+		if err != nil {
+			return err
+		}
+		if old.threads[id] != string(body) {
+			changed[id] = log.Threads[id]
+		}
+	}
+	records, err := r.records(func(v Record) bool {
+		var agentID string
+		switch rec := v.(type) {
+		case Agent:
+			agentID = rec.ID
+		case TurnRequest:
+			agentID = rec.AgentID
+		case TurnResponse:
+			agentID = rec.AgentID
+		}
+		_, ok := changed[agentID]
+		return ok
+	})
 	if err != nil {
 		return err
 	}
@@ -894,18 +924,10 @@ func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID,
 	for _, rec := range additions {
 		added[recordKey(rec)] = true
 	}
-	if err := validateThreads(log.Threads, records, r.project, stream, added); err != nil {
+	if err := validateThreads(changed, records, r.project, stream, added); err != nil {
 		return err
 	}
-	data, err := encodeWorkflow(log)
-	if err != nil {
-		return err
-	}
-	files := map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": data}
-	if err := r.appendRecords(files, additions); err != nil {
-		return err
-	}
-	if err := r.publish(ctx, files); err != nil {
+	if err := r.publish(ctx, change{records: additions, stream: stream, workflow: &log, message: "Record workflow transaction"}); err != nil {
 		return err
 	}
 	_ = r.wake.Notify(context.Background())

@@ -35,7 +35,10 @@ osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
 osmia rebase w_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
+osmia edit charter p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
+osmia edit spec w_0123456789abcdef0123456789abcdef
+osmia edit plan w_0123456789abcdef0123456789abcdef --from plan.json
 osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
 osmia handin p_0123456789abcdef0123456789abcdef dependent.md --base w_0123456789abcdef0123456789abcdef
 osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
@@ -251,8 +254,8 @@ a crash and repeated starts neither lose nor duplicate records. See
   chief of staff's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. Archived workstreams are named on one line,
   `Archived: <workstream-id>...`, instead. Open owner gates appear under the
-  workstream even before a status is written. Reading the charter records any edit you made to
-  it; see [charter](charter.md).
+  workstream even before a status is written. Write the charter with
+  `osmia edit charter`; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, its latest drift rebase with its reason and one
   `Moved:` line for each of its upstream moved events, then `Units:` with one line per unit of the sealed plan or follow-up and its state
@@ -604,14 +607,28 @@ a crash and repeated starts neither lose nor duplicate records. See
   conflicts with, or whose publication the service could still carry out
   fails with `conflict` (exit 5) and stays assembled. The web page offers the
   same as Record my merge upstream in an assembled workstream's menu.
-- Editing the documents needs no command. You edit `spec.md` and `plan.json` in
-  the workstream's directory under the trace yourself. The service records what
-  you changed as a new revision of yours before any turn reads it, and the next
-  round debates it. The two are one draft: if what you leave does not validate,
-  neither file is recorded and neither is debated, your chief of staff reports
-  the problems, and the recorded revisions stay. Until you correct them, a
-  redraft by the architect of a file you edited is given up rather than written
-  over your edit.
+- `edit charter <project-id> [--from FILE]`, `edit spec <workstream-id>
+  [--from FILE]` and `edit plan <workstream-id> [--from FILE]` edit the
+  project's charter, or a workstream's spec or plan before ratification. The
+  command reads the latest revision and opens it as `charter.md`, `spec.md` or
+  `plan.json` in a new temporary directory with `$VISUAL`, or else `$EDITOR`,
+  attached to the terminal. With `--from` it reads the edited content from
+  that file instead and opens no editor. Without `--from` and with neither
+  variable set it fails with exit 4 and asks you to set `EDITOR` or use
+  `--from`; an unreadable `--from` file is exit 2, and an editor that exits
+  with an error is exit 1 and keeps the file. Unchanged content prints `No
+  changes.` and sends nothing. Otherwise the command saves the content as your
+  next revision of the one it read and prints the new revision number
+  (`Recorded spec.md revision 3.`); the next round debates an edited spec or
+  plan. The spec and the plan are one draft: editing one sends the other
+  unchanged at its current revision, and a draft that does not validate is
+  refused with `validation` (exit 4), naming the problems, and records
+  nothing. A revision recorded since the command read it fails with
+  `conflict` (exit 5), as does a spec or plan that is already ratified. On
+  either failure the edited file is kept and its path printed: run the
+  command again with `--from <that path>` to retry against the latest
+  revision. A successful save removes the temporary directory. The web page
+  edits the same documents through the same API.
 - `project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
@@ -621,8 +638,8 @@ a crash and repeated starts neither lose nor duplicate records. See
   and activates the project without a restart. The clone path is made
   absolute by the client and must be an existing local Git repository outside
   the Osmia root; nothing is written to it. The output names the project ID,
-  the trace path and the next step: writing the charter in
-  `<trace>/charter.md`. The extraction runs in the service after the command
+  the trace path and the next step: writing the charter with
+  `osmia edit charter <project-id>`. The extraction runs in the service after the command
   returns; `status` shows its state, and the project is usable whether it
   succeeds or fails; after a failure `osmia project extract` starts a new
   attempt. Adding a
@@ -667,13 +684,13 @@ a crash and repeated starts neither lose nor duplicate records. See
   (`https://github.com/OWNER/REPO/issues/NUMBER`, fetched by the service), or
   `-` for stdin (read by the client, at most 512 KiB of UTF-8 text; the client
   refuses larger or non-UTF-8 stdin itself with exit 4, before sending a
-  request, and that message has no `validation:` prefix). The output names the
-  workstream ID, its state, the path of the copy under its own trace
-  repository's `handed/` directory and the recorded source. The client sends a new
+  request, and that message has no `validation:` prefix). The service records
+  the input in the workstream's trace as its handed document. The output names
+  the workstream ID, its state and the recorded source. The client sends a new
   idempotency key with each command, so a request the API retries creates one
   workstream, and running the command again creates another. A project whose
   charter has no rules fails with `charter_empty` (exit 4), naming the project
-  and the path to its `charter.md`. A project ID that is not the active project
+  and the `osmia edit charter` command that writes it. A project ID that is not the active project
   fails with `not_found` (exit 4). An unreadable, empty, non-UTF-8 or oversized
   input, or a URL of another shape, fails with `validation` (exit 4); an issue
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
@@ -820,11 +837,10 @@ API's conversation response.
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
-branch, trace and charter paths) and `next_step`; `project extract` returns
+branch and trace path) and `next_step`; `project extract` returns
 the project view and the pending extraction. `handin` returns the API's
-hand-in response: `project`, `workstream`, `state`, `handed` (the absolute
-path of the copy), `source`, and `skip_debate` when the hand-in skipped
-debate. Output is one JSON value plus
+hand-in response: `project`, `workstream`, `state`, `source`, and
+`skip_debate` when the hand-in skipped debate. `edit` has no JSON output. Output is one JSON value plus
 newline, without progress text. Profile map keys are sorted in human output and
 JSON. The responses are separate API requests, not an atomic snapshot.
 
@@ -833,18 +849,18 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project, hand-in, abandon, single-workstream status, send, conversation, inbox, answer and reload failures print the service's
+Project, hand-in, edit, abandon, single-workstream status, send, conversation, inbox, answer and reload failures print the service's
 message, which names the field, project or workstream ID or path at fault and
 never raw file contents.
 
 | Exit | Meaning |
 | --- | --- |
 | 0 | Success, help, or clean foreground cancellation |
-| 1 | Invalid API response, local output or unexpected client failure, or a failed `doctor` check |
-| 2 | Invalid command, flags, arguments or root |
+| 1 | Invalid API response, local output or unexpected client failure, an `edit` editor that exited with an error, or a failed `doctor` check |
+| 2 | Invalid command, flags, arguments or root, or an unreadable `edit --from` file |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit or not UTF-8 |
-| 5 | API conflict (including an extraction already running or abandoning a delivered or abandoned workstream), project already active, unsupported operation, restart required or internal failure |
+| 4 | API malformed-input or validation rejection (including an `edit` draft that does not validate), no project is configured, unknown project or workstream, empty charter on hand-in, stdin over the hand-in limit or not UTF-8, or `edit` without `--from` while neither `VISUAL` nor `EDITOR` is set |
+| 5 | API conflict (including an extraction already running, abandoning a delivered or abandoned workstream, or an `edit` of a revision that has since changed or a ratified draft), project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup failure, including ownership conflict, or a failure that stopped a running service |
 
 For exit 3, start the service and verify matching root/socket and permissions.

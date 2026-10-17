@@ -40,7 +40,7 @@ func newSessionFixture(t *testing.T) (*Service, *Client, config.ProjectID, strin
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, clone
 }
 
@@ -146,7 +146,7 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 				s, c := start(t, opts)
 				added, err := c.AddProject(context.Background(), request(clone))
 				must(t, err)
-				must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+				writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 				project := added.Project.ID
 				req := SessionOpenRequest{Project: project, Profile: "default"}
 				crash := errors.New("crash")
@@ -228,7 +228,7 @@ func TestSessionOpenRetryComparesTheRequestsProject(t *testing.T) {
 	demoGit(t, home, "-C", cloneB, "remote", "add", "upstream", bareB)
 	addedB, err := c.AddProject(context.Background(), ProjectAddRequest{Name: "second", Upstream: "second/second", Fork: "owner/second", Clone: cloneB})
 	must(t, err)
-	must(t, os.WriteFile(addedB.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, addedB.Project.ID, "1. Keep changes small.\n")
 	projectB := addedB.Project.ID
 
 	crash := errors.New("crash")

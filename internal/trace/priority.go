@@ -92,7 +92,7 @@ func (r *Repository) SetProjectPriority(ctx context.Context, agent string, scope
 		return PriorityChange{}, err
 	}
 	v.Order = append(v.Order, order...)
-	if err := r.append(ctx, v, true); err != nil {
+	if err := r.append(ctx, v); err != nil {
 		return PriorityChange{}, err
 	}
 	return v, nil

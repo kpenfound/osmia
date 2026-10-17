@@ -79,10 +79,8 @@ func conversationFixture(t *testing.T, prefix string) (Options, *config.Config) 
 	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, demoStart, owner))
 	must(t, repo.CreateWorkstream(ctx, quiet, demoStart, owner))
+	recordCharter(t, repo, trace.CharterTemplate+"\n## Rules\n\n1. Keep the upload API stable.\n")
 	must(t, repo.Close())
-	dir, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(dir, "charter.md"), []byte(trace.CharterTemplate+"\n## Rules\n\n1. Keep the upload API stable.\n"), 0600))
 	opts.Reconciliation.Now = (&demoClock{now: demoStart}).Now
 	return opts, cfg
 }

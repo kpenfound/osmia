@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -62,7 +60,7 @@ func create(t *testing.T) (*Repository, config.Root, config.Project) {
 
 // mustScoped returns the workstream's own trace instance, the way every
 // workstream-scoped write and read resolves it: its own directory, lock and
-// Git history, independent of the project's.
+// database, independent of the project's.
 func mustScoped(t *testing.T, r *Repository, stream config.WorkstreamID) *Repository {
 	t.Helper()
 	s, err := r.scoped(stream)
@@ -108,15 +106,22 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 }
 func TestCreateRoundTripReopen(t *testing.T) {
 	r, root, p := create(t)
-	for _, name := range []string{".git", "charter.md", "kb/entities.json", "notes"} {
-		if _, err := os.Stat(filepath.Join(r.directory, name)); err != nil {
+	s := mustScoped(t, r, streamID)
+	// Each trace directory holds its database and lock, and nothing else.
+	for _, dir := range []string{r.directory, s.directory} {
+		for _, name := range []string{databaseFile, lockFile} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	s := mustScoped(t, r, streamID)
-	for _, name := range []string{".git", "workstreams/" + string(streamID) + "/handed", "workstreams/" + string(streamID) + "/shed", "workstreams/" + string(streamID) + "/amendments", "workstreams/" + string(streamID) + "/questions", "workstreams/" + string(streamID) + "/units", "workstreams/" + string(streamID) + "/agents"} {
-		if _, err := os.Stat(filepath.Join(s.directory, name)); err != nil {
-			t.Fatal(err)
+		for _, e := range entries {
+			if !slices.Contains(storeFiles, e.Name()) {
+				t.Fatalf("%s holds %s", dir, e.Name())
+			}
 		}
 	}
 	for _, v := range specimens() {
@@ -157,12 +162,6 @@ func TestCreateRoundTripReopen(t *testing.T) {
 	checkTyped[TurnRequest](t, reopened, all[5])
 	checkTyped[TurnResponse](t, reopened, all[6])
 	checkTyped[Cost](t, reopened, all[7])
-	if out, err := reopened.git(context.Background(), nil, "fsck", "--full"); err != nil {
-		t.Fatalf("git fsck: %v, %s", err, out)
-	}
-	if out, err := reopenedStream.git(context.Background(), nil, "fsck", "--full"); err != nil {
-		t.Fatalf("workstream git fsck: %v, %s", err, out)
-	}
 }
 func TestRevisionsAndTerminalHistory(t *testing.T) {
 	r, _, _ := create(t)
@@ -175,10 +174,6 @@ func TestRevisionsAndTerminalHistory(t *testing.T) {
 	if err := r.Append(context.Background(), terminal); err != nil {
 		t.Fatal(err)
 	}
-	oldHead, err := s.git(context.Background(), nil, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
 	doc.Revision = 2
 	doc.Content = "# Revised feature\n"
 	doc.Cause = "owner-message-2"
@@ -189,13 +184,8 @@ func TestRevisionsAndTerminalHistory(t *testing.T) {
 	if err != nil || len(docs) != 2 || docs[0].Content != "# Feature\n" || docs[1].Content != doc.Content {
 		t.Fatalf("history: %#v %v", docs, err)
 	}
-	oldContent, err := s.git(context.Background(), nil, "show", oldHead+":workstreams/"+string(streamID)+"/spec.md")
-	if err != nil || oldContent != "# Feature" {
-		t.Fatalf("Git history: %q %v", oldContent, err)
-	}
-	current, err := s.readFile("workstreams/" + string(streamID) + "/spec.md")
-	if err != nil || string(current) != doc.Content {
-		t.Fatalf("latest document: %s %v", current, err)
+	if current := fileOf(t, s, "workstreams/"+string(streamID)+"/spec.md"); current != doc.Content {
+		t.Fatalf("latest document: %s", current)
 	}
 	checkTyped[Transition](t, r, terminal)
 	doc.Revision = 4
@@ -257,10 +247,8 @@ func TestProjectDocumentsAndImmutableInput(t *testing.T) {
 }
 func TestInvalidRecordsDoNotWrite(t *testing.T) {
 	r, _, _ := create(t)
-	baseline, err := r.git(context.Background(), nil, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := mustScoped(t, r, streamID)
+	baseline, streamBaseline := commits(t, r), commits(t, s)
 	for _, mutate := range []func(*Document){
 		func(d *Document) { d.Version = 2 }, func(d *Document) { d.Schema = "unknown" }, func(d *Document) { d.ID = "../bad" }, func(d *Document) { d.Project = "invalid" }, func(d *Document) { d.Workstream = "/tmp/escape" }, func(d *Document) { d.At = time.Time{} }, func(d *Document) { d.Actor = Actor{} }, func(d *Document) { d.Cause = "" }, func(d *Document) { d.Depth = -1 },
 	} {
@@ -303,13 +291,12 @@ func TestInvalidRecordsDoNotWrite(t *testing.T) {
 			t.Fatalf("invalid %T accepted", v)
 		}
 	}
-	after, err := r.git(context.Background(), nil, "rev-parse", "HEAD")
-	if err != nil || baseline != after {
-		t.Fatalf("rejected record changed Git: %s %s %v", baseline, after, err)
+	if after, streamAfter := commits(t, r), commits(t, s); after != baseline || streamAfter != streamBaseline {
+		t.Fatalf("rejected record committed: %d/%d, %d/%d", after, baseline, streamAfter, streamBaseline)
 	}
 	docs, err := Read[Document](r, streamID)
 	if err != nil || len(docs) != 0 {
-		t.Fatalf("rejected record wrote files: %v %v", docs, err)
+		t.Fatalf("rejected record wrote records: %v %v", docs, err)
 	}
 }
 func TestSeparationAndBoundaryRejection(t *testing.T) {
@@ -362,274 +349,13 @@ func TestSeparationAndBoundaryRejection(t *testing.T) {
 		})
 	}
 }
-func TestSymlinksAndGitRedirection(t *testing.T) {
-	for _, mode := range []string{"document", "agent-directory", "inside-alias", "git-directory", "git-config", "git-objects", "hardlink"} {
-		t.Run(mode, func(t *testing.T) {
-			r, _, p := create(t)
-			s := mustScoped(t, r, streamID)
-			sentinel := filepath.Join(p.Clone, "sentinel")
-			if err := os.WriteFile(sentinel, []byte("untouched"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			name := "workstreams/" + string(streamID) + "/spec.md"
-			target := sentinel
-			switch mode {
-			case "agent-directory":
-				name = "workstreams/" + string(streamID) + "/agents"
-				target = p.Clone
-			case "inside-alias":
-				// Two distinct paths inside the same workstream trace
-				// repository must not alias one file.
-				target = filepath.Join(s.directory, "workstreams/"+string(streamID)+"/workstream.json")
-			case "git-directory":
-				name = ".git"
-				target = filepath.Join(p.Clone, ".git")
-			case "git-config":
-				name = ".git/config"
-			case "git-objects":
-				name = ".git/objects"
-				target = p.Clone
-			}
-			full := filepath.Join(s.directory, name)
-			if err := os.RemoveAll(full); err != nil {
-				t.Fatal(err)
-			}
-			var err error
-			if mode == "hardlink" {
-				err = os.Link(sentinel, full)
-			} else {
-				err = os.Symlink(target, full)
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := r.Append(context.Background(), specimens()[0]); err == nil {
-				t.Fatal("alias accepted")
-			}
-			data, err := os.ReadFile(sentinel)
-			if err != nil || string(data) != "untouched" {
-				t.Fatalf("external file changed: %s %v", data, err)
-			}
-			if _, err := os.Stat(filepath.Join(p.Clone, "index")); !os.IsNotExist(err) {
-				t.Fatalf("Git wrote outside trace: %v", err)
-			}
-		})
-	}
-}
-func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
-	for _, mode := range []string{"config", "alternates", "hardlink"} {
-		// Records and workflow publications run Git even when the handle has
-		// listed HEAD's tree; a read runs Git when the handle has not listed
-		// the tree of HEAD, and to finish a publication that stopped after its
-		// ref moved.
-		for _, op := range []string{"record", "publish", "read", "recover"} {
-			t.Run(mode+"/"+op, func(t *testing.T) {
-				r, _, p := create(t)
-				s := mustScoped(t, r, streamID)
-				ctx := context.Background()
-				var err error
-				switch op {
-				case "read":
-					err = r.Append(ctx, specimens()[0])
-					// A handle that made HEAD knows its tree; one that opened
-					// on it lists the tree with Git.
-					s.tree, s.treeHead = nil, ""
-				case "recover":
-					injected := errors.New("injected publication failure")
-					s.failPublication = func(step string) error {
-						if step == "ref-published" {
-							return injected
-						}
-						return nil
-					}
-					if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); !errors.Is(err, injected) {
-						t.Fatalf("injection not reached: %v", err)
-					}
-					s.failPublication = nil
-				default:
-					_, err = r.Workflow(streamID, FeatureSubject)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				git := filepath.Join(s.directory, ".git")
-				if err := os.MkdirAll(filepath.Join(git, "objects", "info"), 0700); err != nil {
-					t.Fatal(err)
-				}
-				want := ""
-				switch mode {
-				case "config":
-					err = os.WriteFile(filepath.Join(git, "config"), []byte(gitConfig+"[core]\n\tbare = true\n"), 0600)
-					want = "differs from the isolated local configuration"
-				case "alternates":
-					err = os.WriteFile(filepath.Join(git, "objects", "info", "alternates"), []byte(filepath.Join(p.Clone, ".git", "objects")+"\n"), 0600)
-					want = "external Git storage is forbidden"
-				case "hardlink":
-					sentinel := filepath.Join(p.Clone, "sentinel")
-					if err := os.WriteFile(sentinel, []byte("untouched"), 0600); err != nil {
-						t.Fatal(err)
-					}
-					err = os.Link(sentinel, filepath.Join(git, "objects", "info", "linked"))
-					want = "hardlink aliases are forbidden"
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				ref := filepath.Join(git, "refs", "heads", "main")
-				before, err := os.ReadFile(ref)
-				if err != nil {
-					t.Fatal(err)
-				}
-				switch op {
-				case "record":
-					err = r.Append(ctx, specimens()[0])
-				case "publish":
-					_, err = r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design")
-				default:
-					_, err = r.Workflow(streamID, FeatureSubject)
-				}
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("%s with a tampered store: %v", op, err)
-				}
-				if after, err := os.ReadFile(ref); err != nil || string(after) != string(before) {
-					t.Fatalf("Git committed with a tampered store: %s %v", after, err)
-				}
-				if _, err := os.Stat(filepath.Join(s.directory, publicationFile)); op == "recover" && err != nil {
-					t.Fatalf("recovery finished with a tampered store: %v", err)
-				}
-			})
-		}
-	}
-}
-func TestCheckedEntryAcceptsAVanishedFile(t *testing.T) {
-	r, _, _ := create(t)
-	name := ".git/tmp_obj_vanished"
-	if err := os.WriteFile(filepath.Join(r.directory, name), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := fs.ReadDir(r.dir.FS(), ".git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var entry fs.DirEntry
-	for _, e := range entries {
-		if e.Name() == path.Base(name) {
-			entry = e
-		}
-	}
-	if entry == nil {
-		t.Fatal("entry not listed")
-	}
-	// The file is removed between the directory listing and the check.
-	if err := os.Remove(filepath.Join(r.directory, name)); err != nil {
-		t.Fatal(err)
-	}
-	parent, err := r.dir.OpenRoot(".git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer parent.Close()
-	if err := checkedEntry(parent, name, entry); err != nil {
-		t.Fatalf("vanished entry: %v", err)
-	}
-}
-
-// A handle keeps the listing of each commit it makes, which must match the
-// listing Git gives for that commit.
-func TestHandleListsTheTreesItCommits(t *testing.T) {
-	r, _, _ := create(t)
-	s := mustScoped(t, r, streamID)
-	ctx := context.Background()
-	if _, err := r.Workflow(streamID, FeatureSubject); err != nil {
-		t.Fatal(err)
-	}
-	publish := func(files map[string][]byte, removed []string) {
-		t.Helper()
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if err := r.publishTree(ctx, files, removed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	check := func(i int, repo *Repository) {
-		t.Helper()
-		ref, err := os.ReadFile(filepath.Join(repo.directory, ".git", "refs", "heads", "main"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		derived, head := repo.tree, repo.treeHead
-		if head != strings.TrimSpace(string(ref)) {
-			t.Fatalf("step %d: the handle lists %q, HEAD is %q", i, head, ref)
-		}
-		repo.tree, repo.treeHead = nil, ""
-		_, listed, err := repo.headTree(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(derived, listed) {
-			t.Fatalf("step %d: the handle lists\n%v\nGit lists\n%v", i, derived, listed)
-		}
-	}
-	steps := []struct {
-		run  func()
-		repo *Repository
-	}{
-		// This document is workstream-scoped, so it lands in the workstream's
-		// own dedicated trace repository, not the project's.
-		{func() {
-			if err := r.Append(ctx, specimens()[0]); err != nil {
-				t.Fatal(err)
-			}
-		}, s},
-		{func() { publish(map[string][]byte{"notes/a.md": []byte("a\n")}, nil) }, r},
-		{func() { publish(map[string][]byte{"notes/b.md": []byte("b\n")}, []string{"notes/a.md"}) }, r},
-		{func() {
-			if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err != nil {
-				t.Fatal(err)
-			}
-		}, s},
-	}
-	for i, step := range steps {
-		step.run()
-		check(i, step.repo)
-	}
-	if _, ok := r.tree["notes/a.md"]; ok {
-		t.Fatal("a removed path is still listed")
-	}
-	if _, ok := r.tree["notes/b.md"]; !ok {
-		t.Fatal("a published path is not listed")
-	}
-}
-func TestHeadTreeRefusesAnInvalidRef(t *testing.T) {
-	for _, ref := range []string{"main~1", "-p", "HEAD", strings.Repeat("a", 39)} {
-		t.Run(ref, func(t *testing.T) {
-			r, _, _ := create(t)
-			s := mustScoped(t, r, streamID)
-			if err := os.WriteFile(filepath.Join(s.directory, ".git", "refs", "heads", "main"), []byte(ref+"\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := r.Workflow(streamID, FeatureSubject); err == nil || !strings.Contains(err.Error(), "invalid trace HEAD") {
-				t.Fatalf("ref %q: %v", ref, err)
-			}
-		})
-	}
-}
-func TestGitEnvironmentAndExistingRepositories(t *testing.T) {
+func TestExistingTraceAndSecondWriter(t *testing.T) {
 	root, p := fixture(t)
-	t.Setenv("GIT_DIR", filepath.Join(p.Clone, ".git"))
-	t.Setenv("GIT_WORK_TREE", p.Clone)
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(p.Clone, "unexpected-index"))
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "core.bare")
-	t.Setenv("GIT_CONFIG_VALUE_0", "true")
 	r, err := Create(context.Background(), root, p, at, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := os.Stat(filepath.Join(p.Clone, "unexpected-index")); !os.IsNotExist(err) {
-		t.Fatalf("inherited Git index: %v", err)
-	}
 	if second, err := Create(context.Background(), root, p, at, owner); err == nil {
 		second.Close()
 		t.Fatal("existing trace initialized again")
@@ -642,17 +368,12 @@ func TestGitEnvironmentAndExistingRepositories(t *testing.T) {
 	}
 }
 func TestCorruptionPreservesValidHistory(t *testing.T) {
-	for _, damage := range []string{"malformed", "version", "identity", "schema", "duplicate-key", "unknown-field", "partial-line", "revision-gap", "missing-file"} {
+	for _, damage := range []string{"malformed", "version", "identity", "schema", "duplicate-key", "unknown-field", "partial-body", "revision-gap", "path"} {
 		t.Run(damage, func(t *testing.T) {
 			r, root, p := create(t)
 			s := mustScoped(t, r, streamID)
 			d := specimens()[0].(Document)
 			if err := r.Append(context.Background(), d); err != nil {
-				t.Fatal(err)
-			}
-			name := filepath.Join(s.directory, recordPath(d))
-			data, err := os.ReadFile(name)
-			if err != nil {
 				t.Fatal(err)
 			}
 			next := d
@@ -667,58 +388,51 @@ func TestCorruptionPreservesValidHistory(t *testing.T) {
 			case "revision-gap":
 				next.Revision = 4
 			}
-			line, _ := json.Marshal(next)
+			body, _ := json.Marshal(next)
 			switch damage {
 			case "malformed":
-				line = []byte("{broken")
+				body = []byte("{broken")
 			case "duplicate-key":
-				line = append([]byte(`{"id":"other",`), line[1:]...)
+				body = append([]byte(`{"id":"other",`), body[1:]...)
 			case "unknown-field":
-				line = append([]byte(`{"surprise":true,`), line[1:]...)
+				body = append([]byte(`{"surprise":true,`), body[1:]...)
+			case "partial-body":
+				body = body[:len(body)-1]
 			}
-			data = append(data, line...)
-			if damage != "partial-line" {
-				data = append(data, '\n')
+			name := recordPath(d)
+			if damage == "path" {
+				// A valid record stored under another record's path.
+				name = "workstreams/" + string(streamID) + "/events.jsonl"
 			}
+			storeExec(t, s, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES ((SELECT max(seq) FROM commits), ?, ?, ?, ?, ?)", name, next.Schema, next.ID, next.Revision, string(body))
 			if err := r.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if damage == "missing-file" {
-				err = os.Remove(name)
-			} else {
-				err = os.WriteFile(name, data, 0600)
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
 			reopened, err := Open(root, p)
-			if err == nil || !strings.Contains(err.Error(), "documents.jsonl") {
-				t.Fatalf("missing affected-file diagnostic: %v", err)
+			if err == nil || !strings.Contains(err.Error(), name+"#") {
+				t.Fatalf("missing damaged-row diagnostic: %v", err)
 			}
 			if reopened == nil {
 				t.Fatal("corruption discarded readable handle")
 			}
 			defer reopened.Close()
 			docs, err := Read[Document](reopened, streamID)
-			expected := 1
-			if damage == "missing-file" {
-				expected = 0
-			}
-			if err == nil || len(docs) != expected {
+			if err == nil || len(docs) != 1 || !reflect.DeepEqual(docs[0], d) {
 				t.Fatalf("valid history not retained alongside error: %#v %v", docs, err)
 			}
-			if err := reopened.Append(context.Background(), next); err == nil {
-				t.Fatal("append accepted corrupt history")
-			}
-			if damage != "missing-file" {
-				after, _ := os.ReadFile(name)
-				if string(after) != string(data) {
-					t.Fatal("corrupt log silently repaired")
+			if damage != "path" {
+				if err := reopened.Append(context.Background(), next); err == nil {
+					t.Fatal("append accepted over corrupt history")
 				}
+			}
+			stored := storedBodies(t, mustScoped(t, reopened, streamID), name)
+			if stored[len(stored)-1] != string(body) {
+				t.Fatal("corrupt row silently repaired")
 			}
 		})
 	}
 }
+
 func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	r, root, p := create(t)
 	s := mustScoped(t, r, streamID)
@@ -740,70 +454,64 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	if successes != 1 {
 		t.Fatalf("duplicate append successes: %d", successes)
 	}
-	// A failed Git write is retained as explicit, uncommitted history.
+	// A commit that fails before the database commits records nothing.
 	d := specimens()[0].(Document)
 	d.Revision = 2
 	d.Content = "pending"
-	// This index lock permits read-only history checks, then refuses the commit.
-	lock := filepath.Join(s.directory, ".git/index.lock")
-	if err := os.WriteFile(lock, nil, 0600); err != nil {
-		t.Fatal(err)
+	injected := errors.New("injected commit failure")
+	before := commits(t, s)
+	s.failPublication = func(step string) error {
+		if step == boundaryBeforeCommit {
+			return injected
+		}
+		return nil
 	}
-	if err := r.Append(context.Background(), d); err == nil {
-		t.Fatal("Git failure reported success")
+	if err := r.Append(context.Background(), d); !errors.Is(err, injected) {
+		t.Fatalf("failed commit: %v", err)
 	}
-	if err := os.Remove(lock); err != nil {
-		t.Fatal(err)
+	s.failPublication = nil
+	if after := commits(t, s); after != before {
+		t.Fatalf("a failed commit landed: %d commits, %d before", after, before)
 	}
 	r.Close()
 	reopened, err := Open(root, p)
-	if err == nil || !strings.Contains(err.Error(), "reconciliation required") {
-		t.Fatalf("interrupted commit lost: %v", err)
-	}
-	if reopened == nil {
-		t.Fatal("pending records unreadable")
+	if err != nil {
+		t.Fatal(err)
 	}
 	defer reopened.Close()
 	docs, err := Read[Document](reopened, streamID)
-	if err != nil || len(docs) != 2 || docs[1].Content != "pending" {
-		t.Fatalf("pending history: %#v %v", docs, err)
+	if err != nil || len(docs) != 1 || docs[0].Content != "# Feature\n" {
+		t.Fatalf("history after a failed commit: %#v %v", docs, err)
+	}
+	if err := reopened.Append(context.Background(), d); err != nil {
+		t.Fatalf("retry of the failed commit: %v", err)
 	}
 }
 
-// TestAppendCommitOutlivesTheCallersCancellation shows that once append has
-// already written an ordinary file ahead of committed history, a caller's
-// context cancelling during the commit that reconciles it does not fail that
-// commit and leave the mismatch for checkHistory to catch: Close cancels a
-// project's context before closing its trace, and a write already past this
-// point must not be turned into exactly the "ahead of history" state
-// TestConcurrentAppendAndFailedCommit shows a genuine Git failure leaves.
-func TestAppendCommitOutlivesTheCallersCancellation(t *testing.T) {
+// A cancelled caller commits nothing.
+func TestAppendWithACancelledContextCommitsNothing(t *testing.T) {
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	before := commits(t, s)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	paths := []string{"workstreams/" + string(streamID) + "/documents.jsonl"}
-	content := map[string][]byte{paths[0]: []byte("")}
-	if err := s.commitContent(ctx, paths, content, "cancelled"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("a cancelled context should fail an ordinary commit: %v", err)
+	if err := r.Append(ctx, specimens()[0]); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled append: %v", err)
 	}
-	if err := s.commitContent(context.WithoutCancel(ctx), paths, content, "outlives cancellation"); err != nil {
-		t.Fatalf("a commit past the point of no return must not fail on the caller's cancellation: %v", err)
+	if after := commits(t, s); after != before {
+		t.Fatalf("a cancelled append committed: %d commits, %d before", after, before)
 	}
-	if _, err := s.checkHistory(context.Background()); err != nil {
-		t.Fatalf("the commit should leave history consistent: %v", err)
+	if docs, err := Read[Document](r, streamID); err != nil || len(docs) != 0 {
+		t.Fatalf("a cancelled append recorded: %#v %v", docs, err)
 	}
 }
 
 // TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject is the
-// isolation the split exists for: each workstream's own trace is its own
-// Git repository with its own lock, so a write that happens to hold one
+// isolation separate traces give: each workstream's own trace is its own
+// database with its own lock, so a write that happens to hold one
 // workstream's own lock for a long time never serializes a write to another
 // workstream or a read of the project's own trace, since neither shares a
-// lock or a Git repository with it. Before the split, every workstream and
-// the project shared the one repository's lock, so this would have waited.
+// lock or a database with it.
 func TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject(t *testing.T) {
 	r, _, _ := create(t)
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -829,7 +537,7 @@ func TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject(t *testing.
 			done <- err
 			return
 		}
-		if _, err := r.Charter(context.Background(), at); err != nil {
+		if _, err := r.Charter(context.Background()); err != nil {
 			done <- err
 			return
 		}
@@ -916,34 +624,6 @@ func TestReopenAfterProcessExit(t *testing.T) {
 	checkTyped[Transition](t, r, specimens()[1])
 }
 
-func TestUncommittedNewLog(t *testing.T) {
-	r, root, p := create(t)
-	s := mustScoped(t, r, streamID)
-	lock := filepath.Join(s.directory, ".git/index.lock")
-	if err := os.WriteFile(lock, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Append(context.Background(), specimens()[4]); err == nil {
-		t.Fatal("Git failure reported success")
-	}
-	if err := os.Remove(lock); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-	reopened, err := Open(root, p)
-	if err == nil || !strings.Contains(err.Error(), "identity.jsonl: trace file is not committed") {
-		t.Fatalf("uncommitted new file went unnoticed: %v", err)
-	}
-	if reopened == nil {
-		t.Fatal("uncommitted history lost")
-	}
-	defer reopened.Close()
-	checkTyped[Agent](t, reopened, specimens()[4])
-	if err := reopened.Append(context.Background(), specimens()[0]); err == nil {
-		t.Fatal("append allowed before reconciliation")
-	}
-}
-
 func TestExistingConfigurationIsNotCommitted(t *testing.T) {
 	root, p := fixture(t)
 	name, err := root.ProjectConfig(p.ID)
@@ -966,12 +646,9 @@ func TestExistingConfigurationIsNotCommitted(t *testing.T) {
 	if err != nil || string(got) != string(data) {
 		t.Fatalf("configuration changed: %s %v", got, err)
 	}
-	files, err := r.git(context.Background(), nil, "ls-tree", "-r", "--name-only", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(files, "config.toml") {
-		t.Fatal("configuration included in trace commit")
+	var stored int
+	if err := r.db.QueryRow("SELECT count(*) FROM files WHERE path LIKE '%config.toml%'").Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("configuration included in the trace: %d %v", stored, err)
 	}
 }
 
@@ -994,12 +671,8 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 	if err != nil || len(docs) != 2 || docs[0].ID != "charter" || !reflect.DeepEqual(docs[1], want) {
 		t.Fatalf("documents: %#v, %v", docs, err)
 	}
-	data, err := os.ReadFile(filepath.Join(r.directory, EntitiesPath))
-	if err != nil || string(data) != seed {
-		t.Fatalf("file: %q, %v", data, err)
-	}
-	if _, err := r.checkHistory(context.Background()); err != nil {
-		t.Fatal(err)
+	if got := fileOf(t, r, EntitiesPath); got != seed {
+		t.Fatalf("latest entity map: %q", got)
 	}
 }
 
@@ -1020,21 +693,6 @@ func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
 		t.Fatalf("reopen after close: %v", err)
 	}
 	if err := again.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The trace's Git writes each new object by renaming it into place, so a
-// check of the object store never meets an object Git has linked twice while
-// it writes it. The setting rides on every command, and the isolated
-// .git/config stays as it is.
-func TestTraceGitWritesObjectsByRename(t *testing.T) {
-	r, _, _ := create(t)
-	got, err := r.git(context.Background(), nil, "config", "--get", "core.createObject")
-	if err != nil || got != "rename" {
-		t.Fatalf("core.createObject is %q: %v", got, err)
-	}
-	if err := r.checkGit(); err != nil {
 		t.Fatal(err)
 	}
 }

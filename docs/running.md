@@ -170,7 +170,8 @@ The member view is laid out like a chat client:
   folded below them; a
   delivery shows the final report's findings and the units serving each
   criterion.
-  The Documents tab reads and edits the draft spec and plan, the dependency,
+  The Documents tab reads and edits the draft spec and plan before
+  ratification, each save a new revision as with `osmia edit`, the dependency,
   and the debate actions; the Trace tab walks the workstream's record. The
   `…` menu pauses the workstream or jumps to its dependency, debate actions
   or abandonment. It also archives a delivered or abandoned workstream,
@@ -201,7 +202,8 @@ From the page you can:
   keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.
 - Set or clear a project's priority order and each role's profile.
-- Create a project, add a repo, read and edit its shared charter, remove repo
+- Create a project, add a repo, read and edit its shared charter (each save a
+  new revision, as with `osmia edit charter`), remove repo
   registrations from active work and hand in new work.
 - Open a project design chat, review readiness questions and collapsed
   assumptions, then start a workgroup from its brief.

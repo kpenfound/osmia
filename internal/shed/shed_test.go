@@ -169,7 +169,6 @@ func TestRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 
 type fixture struct {
 	repo *trace.Repository
-	dir  string
 }
 
 // setup creates a trace with a ruled charter, one knowledge-base file, an
@@ -191,17 +190,13 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	dir, err := root.ProjectTrace(project)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := repo.CreateWorkstream(ctx, stream, start, owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "charter.md"), []byte("# Charter\n\n1. Every change has a test.\n2. Keep state in files.\n3. First of two.\n3. Second of two.\n"), 0600); err != nil {
+	if _, err := repo.EditCharter(ctx, 1, "# Charter\n\n1. Every change has a test.\n2. Keep state in files.\n3. First of two.\n3. Second of two.\n", start); err != nil {
 		t.Fatal(err)
 	}
-	f := fixture{repo: repo, dir: dir}
+	f := fixture{repo: repo}
 	f.documents(t, "", document("", "subsystem-store", "kb/store.md", "# Store\nState lives in files under the root.\n", 1))
 	if err := kb.Store(ctx, repo, kb.Map{Version: 1, Entities: []kb.Entity{{ID: "internal.store", Name: "Store", Aliases: []string{"the store"}, Paths: []string{"internal/store/**"}}}}, start, owner, "seed"); err != nil {
 		t.Fatal(err)

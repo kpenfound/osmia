@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -11,19 +10,14 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ownerEdits records the owner's edits to spec.md and plan.json as new owner
-// revisions before any turn reads them, and returns the latest recorded
-// revisions of both. The two are one draft: an edit that leaves them invalid
-// is not recorded, neither file included, the latest recorded revisions stay
-// the ones under debate, and the problems are reported once to the
-// workstream's chief of staff.
-func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (shed.Pin, error) {
+// draftPin returns the revisions of spec.md and plan.json the debate reads:
+// those a group decision pinned for the workstream, or else the latest
+// recorded ones.
+func (d *debate) draftPin(stream config.WorkstreamID) (shed.Pin, error) {
 	decision, found, err := d.repository.GroupApprovalOf(stream)
 	if err != nil {
 		return shed.Pin{}, err
@@ -35,56 +29,7 @@ func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (sh
 			}
 		}
 	}
-
-	// The check runs while the trace is held, so the entity map it validates
-	// against is loaded before the read.
-	entities, err := kb.Load(d.repository)
-	if err != nil {
-		return shed.Pin{}, err
-	}
-	docs, err := d.repository.OwnerDocuments(ctx, stream, d.s.now(), func(content map[string]string) error {
-		if problems := validateDraft(content[plan.SpecDocument], content[plan.PlanDocument], entities); len(problems) > 0 {
-			return errors.New(strings.Join(problems, "; "))
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, trace.ErrOwnerEdit) {
-		return shed.Pin{}, err
-	}
-	if err != nil {
-		if err := d.reportInvalidEdit(ctx, stream, err.Error()); err != nil {
-			return shed.Pin{}, err
-		}
-	}
-	return shed.Pin{Spec: docs[plan.SpecDocument].Revision, Plan: docs[plan.PlanDocument].Revision}, nil
-}
-
-// reportInvalidEdit tells the chief of staff why an owner edit is not
-// debated. The transition is identified by the problems it reports, so each
-// distinct problem is reported once however many passes read the same edit.
-func (d *debate) reportInvalidEdit(ctx context.Context, stream config.WorkstreamID, problems string) error {
-	id := fmt.Sprintf("shed-owner-invalid-%x", sha256.Sum256([]byte(problems)))[:32]
-	transitions, err := trace.Read[trace.Transition](d.repository, stream)
-	if err != nil {
-		return err
-	}
-	if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
-		return nil
-	}
-	state, err := d.repository.Workflow(stream, ownerSubject)
-	if err != nil {
-		return err
-	}
-	reason := "an owner edit is not recorded and not debated: " + problems
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: ownerHeader(id, d.repository.Project(), stream, "owner-edit", d.s.now()), Subject: ownerSubject, From: state.Value, To: invalidEditValue, Reason: reason},
-		Events: []trace.Event{trace.Notice(id, invalidEditValue, "Your edit of the spec or the plan is not recorded, and the committee keeps debating the revisions that are: "+problems+
-			"\nCorrect the file to have it debated. Until then the architect gives up a redraft of what you edited rather than write over it.")}}
-	// Another writer of the subject moved it; the next pass reports the edit.
-	if _, err := d.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
-		return err
-	}
-	return nil
+	return latestPin(d.repository, stream)
 }
 
 func ownerHeader(id string, project config.ProjectID, stream config.WorkstreamID, cause string, at time.Time) trace.Header {

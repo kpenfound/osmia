@@ -9,25 +9,29 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/trace/legacytrace"
 )
 
-// TestTraceMigrationFailureDoesNotBlockOtherProjects breaks one project's
-// trace so that migrating it from the shared layout can never complete,
-// before the service starts, and confirms the service still starts, the
-// broken project is simply not scheduled, and the other project's
-// workstream keeps running normally. It also shows that the migration
-// failure itself, which the standard log package once reported, now lands
-// as a structured record through the service's own logger.
+// TestTraceMigrationFailureDoesNotBlockOtherProjects gives one project a Git
+// workstream trace whose migration can never complete, before the service
+// starts, and confirms the service still starts, the broken project is
+// simply not scheduled, and the other project's workstream keeps running
+// normally. The migration failure is logged as a structured record through
+// the service's own logger.
 func TestTraceMigrationFailureDoesNotBlockOtherProjects(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 
-	// Give the first project a shared-layout workstream directory with no
-	// manifest, so its migration fails every time it is attempted.
-	directory, err := f.cfg.Root.ProjectTrace(project)
+	// Give the first project a Git workstream trace whose HEAD holds a file
+	// no trace keeps, so its migration fails every time it is attempted.
+	const broken = "w_deadbeefdeadbeefdeadbeefdeadbeef"
+	directory, err := f.cfg.Root.WorkstreamTrace(project, broken)
 	must(t, err)
-	must(t, os.MkdirAll(filepath.Join(directory, "workstreams", "w_deadbeefdeadbeefdeadbeefdeadbeef"), 0700))
+	must(t, os.MkdirAll(directory, 0700))
+	files := legacytrace.Workstream(string(project), broken, demoStart)
+	files["workstreams/"+broken+"/unknown.txt"] = []byte("not a trace file\n")
+	must(t, legacytrace.Build(directory, files))
 
 	var logged syncBuffer
 	f.opts.Logger = slog.New(slog.NewJSONHandler(&logged, nil))
@@ -64,9 +68,11 @@ func TestTraceMigrationFailureDoesNotBlockOtherProjects(t *testing.T) {
 		return ops
 	})
 
-	// The shared-layout fixture is left exactly as it was: nothing scheduled
-	// it, so nothing reclaimed it either.
-	if _, err := os.Lstat(filepath.Join(directory, "workstreams")); err != nil {
-		t.Fatalf("the unmigrated project's shared trace was altered: %v", err)
+	// The Git trace stays authoritative: no database replaced it.
+	if _, err := os.Lstat(filepath.Join(directory, ".git")); err != nil {
+		t.Fatalf("the unmigrated Git trace was removed: %v", err)
+	}
+	if ok, err := trace.HasTraceDatabase(directory); err != nil || ok {
+		t.Fatalf("the unmigrated trace has a database: %v %v", ok, err)
 	}
 }

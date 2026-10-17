@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -315,17 +314,20 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 	if _, err := tools[1].Handle(ctx, writeInput); err != nil {
 		t.Fatal(err)
 	}
-	directory, _ := root.ProjectTrace(project)
-	if err := os.Rename(directory+"/notes/mason.md", directory+"/notes/reviewer.md"); err != nil {
+	data, err = tools[0].Handle(ctx, json.RawMessage(`{}`))
+	if err != nil || !strings.Contains(string(data), "later notes") {
+		t.Fatalf("notes after the write: %s %v", data, err)
+	}
+	// A write against notes that changed since they were read records
+	// nothing.
+	stale, err := json.Marshal(map[string]string{"text": "lost", "expected_sha256": currentNotes.SHA256})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("reviewer.md", directory+"/notes/mason.md"); err != nil {
-		t.Fatal(err)
+	if out, err := tools[1].Handle(ctx, stale); err != nil || !strings.Contains(string(out), `"written":false`) {
+		t.Fatalf("stale write: %s %v", out, err)
 	}
-	if _, err := tools[0].Handle(ctx, json.RawMessage(`{}`)); err == nil {
-		t.Fatal("symlink read accepted")
-	}
-	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"escape","expected_sha256":"stale"}`)); err == nil {
-		t.Fatal("symlink write accepted")
+	if data, err = tools[0].Handle(ctx, json.RawMessage(`{}`)); err != nil || !strings.Contains(string(data), "later notes") {
+		t.Fatalf("notes after a stale write: %s %v", data, err)
 	}
 }

@@ -4,14 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func traceService(t *testing.T, f *walkFixture) *Service {
@@ -95,19 +92,11 @@ func TestTraceAPIErrors(t *testing.T) {
 	if api == nil || api.Code != Validation {
 		t.Fatalf("workstream error %+v", api)
 	}
-	// A repository read failure is returned without record content. The
-	// handle finds its trace removed when it next writes. stream has its own
-	// dedicated trace repository, so removing the project's trace directory
-	// does not touch it; removing its manifest, while leaving its directory
-	// itself so it still lists as a known workstream, is what simulates its
-	// trace being destroyed out from under the open handle.
+	// A trace read failure is returned without record content: a damaged
+	// record stored beside the open handle's.
 	streamDir, err := f.root.WorkstreamTrace(project, stream)
 	must(t, err)
-	must(t, os.Remove(filepath.Join(streamDir, "workstreams", string(stream), "workstream.json")))
-	removed := trace.Document{Header: f.header("document", "postremoval", "postremoval", 1, ownerActor), Path: "units/postremoval/report.json", Content: "{}"}
-	if err := f.repo.Append(context.Background(), removed); err == nil {
-		t.Fatal("a removed trace accepted a write")
-	}
+	traceExec(t, streamDir, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'damaged', 1, 'secret damaged content')", "workstreams/"+string(stream)+"/documents.jsonl")
 	_, api = s.traceView(context.Background(), string(stream), "", "")
 	if api == nil || api.Code != Internal || !strings.Contains(api.Message, "trace repository") {
 		t.Fatalf("unavailable trace %+v", api)

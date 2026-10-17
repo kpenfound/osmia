@@ -68,7 +68,7 @@ func TestOperationIdentityAndDeliveryFencing(t *testing.T) {
 
 func TestOperationPublicationRecovery(t *testing.T) {
 	for _, kind := range []string{"claim", "observe", "effect", "result", "acknowledge", "retry"} {
-		for _, boundary := range []string{"before-ref", "ref-published"} {
+		for _, boundary := range []string{boundaryBeforeCommit, boundaryCommitted} {
 			t.Run(kind+"/"+boundary, func(t *testing.T) {
 				r, root, project := create(t)
 				s := mustScoped(t, r, streamID)
@@ -133,7 +133,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 					}
 				}
 				want := 0
-				if boundary == "ref-published" {
+				if boundary == boundaryCommitted {
 					want = 1
 				}
 				if found != want {

@@ -1,19 +1,17 @@
 package trace
 
 import (
+	"context"
 	"errors"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestProseValidatesSubsystemNames(t *testing.T) {
-	r, root, p := create(t)
-	kb := filepath.Join(root.String(), "projects", string(p.ID), "kb")
-	if err := os.WriteFile(filepath.Join(kb, "api.md"), []byte("API\n"), 0600); err != nil {
+	r, _, _ := create(t)
+	if err := r.RecordDocuments(context.Background(), []Document{projectDocument("subsystem-api", "kb/api.md", "API\n", 1)}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := r.Prose("api"); err != nil || got != "API\n" {
@@ -30,35 +28,27 @@ func TestProseValidatesSubsystemNames(t *testing.T) {
 }
 
 func TestSubsystemsListsProseNames(t *testing.T) {
-	r, root, p := create(t)
-	kb := filepath.Join(root.String(), "projects", string(p.ID), "kb")
+	r, _, _ := create(t)
+	ctx := context.Background()
 	if got, err := r.Subsystems(); err != nil || !reflect.DeepEqual(got, []string{}) {
 		t.Fatalf("empty kb: %v %v", got, err)
 	}
-	for _, name := range []string{"zeta.md", "api.md", ".hidden.md", "notes.txt", ".md", "a:b.md"} {
-		if err := os.WriteFile(filepath.Join(kb, name), nil, 0600); err != nil {
-			t.Fatal(err)
-		}
+	var docs []Document
+	for _, name := range []string{"zeta", "api", "gone"} {
+		docs = append(docs, projectDocument("subsystem-"+name, "kb/"+name+".md", "# "+name+"\n", 1))
 	}
-	if err := os.Mkdir(filepath.Join(kb, "dir.md"), 0700); err != nil {
+	if err := r.RecordDocuments(ctx, docs); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("api.md", filepath.Join(kb, "link.md")); err != nil {
+	// An empty revision removes a subsystem.
+	if err := r.RecordDocuments(ctx, []Document{projectDocument("subsystem-gone", "kb/gone.md", "", 2)}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.Subsystems()
-	if want := []string{"api", "dir", "link", "zeta"}; err != nil || !reflect.DeepEqual(got, want) {
+	if want := []string{"api", "zeta"}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("subsystems %v %v", got, err)
 	}
-	for _, name := range []string{"dir", "link"} {
-		if _, err := r.Prose(name); err == nil {
-			t.Errorf("irregular prose %s was read", name)
-		}
-	}
-	if err := os.RemoveAll(kb); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := r.Subsystems(); err != nil || !reflect.DeepEqual(got, []string{}) {
-		t.Fatalf("missing kb: %v %v", got, err)
+	if _, err := r.Prose("gone"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("removed prose: %v", err)
 	}
 }

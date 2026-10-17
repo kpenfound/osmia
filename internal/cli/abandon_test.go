@@ -2,8 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +12,7 @@ import (
 func TestAbandonCommand(t *testing.T) {
 	root, project, _ := handInFixture(t)
 	id := handInStdin(t, root, project, "# Design\n")
-	handed := filepath.Join(root, "workstreams", string(project), id, "workstreams", id, "handed", "stdin")
+	db := workstreamDatabase(t, root, project, id)
 
 	text := successful(t, root, "abandon", id, "Superseded by the upload design.")
 	if want := "Workstream " + id + " abandoned\nReason: Superseded by the upload design.\n"; text != want {
@@ -23,11 +21,11 @@ func TestAbandonCommand(t *testing.T) {
 	if status := successful(t, root, "status", id); !strings.Contains(status, "abandoned") {
 		t.Fatalf("status:\n%s", status)
 	}
-	if data, err := os.ReadFile(handed); err != nil || string(data) != "# Design\n" {
-		t.Fatalf("handed copy %q %v", data, err)
+	if handed := latestDocument(t, db, "workstreams/"+id+"/documents.jsonl", "handed/stdin"); handed.Content != "# Design\n" {
+		t.Fatalf("handed copy %+v", handed)
 	}
-	if _, err := os.Stat(filepath.Join(root, "workstreams", string(project), id, "workstreams", id, "events.jsonl")); err != nil {
-		t.Fatal(err)
+	if len(traceBodies(t, db, "workstreams/"+id+"/events.jsonl")) == 0 {
+		t.Fatal("the abandoned workstream records no transitions")
 	}
 
 	code, out, diag := invoke(t, root, "abandon", id, "again")

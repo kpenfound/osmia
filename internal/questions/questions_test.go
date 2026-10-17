@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,7 +31,6 @@ var (
 
 type fixture struct {
 	repo    *trace.Repository
-	dir     string
 	root    config.Root
 	project config.Project
 }
@@ -54,22 +52,17 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	dir, err := root.ProjectTrace(project)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, s := range []config.WorkstreamID{stream, other} {
 		if err := repo.CreateWorkstream(ctx, s, start, owner); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for name, content := range map[string]string{
-		"charter.md":  "# Charter\n\n1. Every change has a test.\n2. Keep state in files.\n3. First of two.\n3. Second of two.\n",
-		"kb/store.md": "# Store\nState lives in files under the root.\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := repo.EditCharter(ctx, 1, "# Charter\n\n1. Every change has a test.\n2. Keep state in files.\n3. First of two.\n3. Second of two.\n", start); err != nil {
+		t.Fatal(err)
+	}
+	store := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-store", Revision: 1, Project: project, At: start, Actor: owner, Cause: "test"}, Path: "kb/store.md", Content: "# Store\nState lives in files under the root.\n"}
+	if err := repo.RecordDocuments(ctx, []trace.Document{store}); err != nil {
+		t.Fatal(err)
 	}
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "draft"}, Path: path, Content: content}
@@ -80,7 +73,7 @@ func setup(t *testing.T) fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return fixture{repo: repo, dir: dir, root: root, project: p}
+	return fixture{repo: repo, root: root, project: p}
 }
 
 func TestRoutedAmendmentParksAndSurvivesRestart(t *testing.T) {
@@ -250,15 +243,19 @@ func (f fixture) turn(t *testing.T, agent, role, turn string) coreadapter.Scope 
 	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: "resume", Thread: agent + "_thread", Turn: turn, Role: role}
 }
 
+// head identifies the commits of the project's trace and of both
+// workstreams' traces: it changes whenever any of them commits.
 func (f fixture) head(t *testing.T) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", f.dir, "rev-parse", "HEAD")
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
+	var counts []int
+	for _, s := range []config.WorkstreamID{"", stream, other} {
+		n, err := f.repo.CommitCount(string(s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts = append(counts, n)
 	}
-	return strings.TrimSpace(string(out))
+	return fmt.Sprint(counts)
 }
 
 func tools(t *testing.T, f fixture, agent string, scope coreadapter.Scope, now time.Time) map[string]coreadapter.Tool {
@@ -311,7 +308,7 @@ func TestResolveCitations(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []string{"charter#1", "charter#2", "kb/store.md", "ruling#1", "spec#1", "spec#2", "plan#resume"} {
-		if err := questions.Resolve(ctx, f.repo, stream, c, start); err != nil {
+		if err := questions.Resolve(ctx, f.repo, stream, c); err != nil {
 			t.Errorf("%s: %v", c, err)
 		}
 	}
@@ -328,7 +325,7 @@ func TestResolveCitations(t *testing.T) {
 		"":                 "it is not one of " + questions.CitationForms,
 	} {
 		var unresolved *questions.Unresolved
-		if err := questions.Resolve(ctx, f.repo, stream, c, start); !errors.As(err, &unresolved) || unresolved.Reason != reason || unresolved.Citation != c {
+		if err := questions.Resolve(ctx, f.repo, stream, c); !errors.As(err, &unresolved) || unresolved.Reason != reason || unresolved.Citation != c {
 			t.Errorf("%q: %v, want reason %q", c, err, reason)
 		}
 	}
@@ -339,7 +336,7 @@ func TestResolveCitations(t *testing.T) {
 		"plan#resume": "this workstream has no recorded plan",
 	} {
 		var unresolved *questions.Unresolved
-		if err := questions.Resolve(ctx, f.repo, other, c, start); !errors.As(err, &unresolved) || unresolved.Reason != reason {
+		if err := questions.Resolve(ctx, f.repo, other, c); !errors.As(err, &unresolved) || unresolved.Reason != reason {
 			t.Errorf("%q in another workstream: %v, want reason %q", c, err, reason)
 		}
 	}
@@ -412,19 +409,12 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	if got := f.head(t); got != before {
 		t.Fatalf("a refused call committed: %s, was %s", got, before)
 	}
-	// Checking a charter citation first records the owner's pending edit of
-	// the charter, and nothing else, even when the answer is then refused.
 	if got := call(t, chief["answer"], `{"question":"1","text":"In files.","citations":["charter#2","charter#9"]}`); got != `{"recorded":false,"reason":"citation \"charter#9\" does not resolve: the charter has no rule numbered 9 exactly once"}` {
 		t.Fatalf("answer citing a missing rule: %s", got)
 	}
-	documents, err := trace.Read[trace.Document](f.repo, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	edit := documents[len(documents)-1]
 	recorded := f.head(t)
-	if recorded == before || edit.Path != "charter.md" || edit.Revision != 2 || edit.Actor != owner || !strings.Contains(edit.Content, "2. Keep state in files.") {
-		t.Fatalf("pending charter edit: head %s, was %s, latest document %+v", recorded, before, edit.Header)
+	if recorded != before {
+		t.Fatalf("an answer citing a missing rule committed: %s, was %s", recorded, before)
 	}
 	for input, want := range map[string]string{
 		`{"question":"1","text":"In files.","citations":["charter#3"]}`: `{"recorded":false,"reason":"citation \"charter#3\" does not resolve: the charter has no rule numbered 3 exactly once"}`,
@@ -758,8 +748,7 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 	if got := f.head(t); got != before {
 		t.Fatalf("a refused proposal committed: %s, was %s", got, before)
 	}
-	// Rules 1 to 3 are in the owner's unrecorded edit of the charter, 3
-	// twice.
+	// Rules 1 to 3 are in the owner's charter, 3 twice.
 	if got := call(t, chief["propose_charter"], `{"question":"1","rule":" Uploads resume. "}`); got != `{"recorded":true,"question":"1","number":4,"next":"The owner ratifies or declines the proposal; make it the attention of your status until they do."}` {
 		t.Fatalf("propose_charter: %s", got)
 	}

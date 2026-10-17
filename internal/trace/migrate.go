@@ -3,62 +3,54 @@ package trace
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// ErrMigrationIncomplete reports that a project's trace could not finish
-// moving from the shared layout, every workstream's records inside the
-// project's own trace repository, to the per-workstream layout. The caller
-// must not open or schedule the project; the shared trace is left exactly as
-// it was and stays authoritative, and a later call to Migrate resumes or
-// retries from where this one left off.
-var ErrMigrationIncomplete = errors.New("project trace migration is incomplete")
+// ErrMigrationIncomplete reports that a trace could not finish moving from
+// its Git repository to its database. The caller must not open or schedule
+// the project; the Git trace stays authoritative and unchanged apart from a
+// finished publication, and a later call to Migrate resumes.
+var ErrMigrationIncomplete = errors.New("trace migration is incomplete")
 
-// migrationInterrupt lets tests simulate a crash at a named boundary step of
-// Migrate, the way failPublication does for an ordinary publication. It is
-// nil in production.
+// migrationInterrupt lets tests simulate a crash at a named step of a
+// trace's migration. It is nil in production.
 var migrationInterrupt func(string) error
 
-// Migrate moves project's trace from the shared layout to the per-workstream
-// layout, if it has not finished already: every workstream still recorded
-// inside the project's own trace repository gets its own dedicated trace
-// repository, under the Osmia root and outside the project's own and outside
-// any target repository, and the project's own trace repository keeps only
-// durable project knowledge once every workstream is moved. Callers open the
-// project's trace with Open only after Migrate returns nil; while it returns
-// ErrMigrationIncomplete the project must not be scheduled, though other
-// projects are unaffected.
+// importSuffix names the database a migration builds beside the trace
+// before it switches to it.
+const importSuffix = ".import"
+
+// Migrate moves every Git trace of project to its own database: the
+// project's trace and each workstream trace of the project. A trace that
+// already has a database is only cleaned of its Git files. A workstream
+// already being deleted is left as it is.
 //
-// The move is resumable. A crash before, during or after any step, and a
-// second call once nothing is left to do, both leave every retained
-// workstream's trace readable from exactly one place, with no record lost or
-// duplicated. For each workstream still in the shared layout, Migrate builds
-// the workstream's own trace repository and verifies that it holds the same
-// records, latest content and revision history as the shared trace before
-// relying on it; an archived workstream that has not been cleaned up is
-// moved the same way as any other, so archive cleanup's knowledge-
-// incorporation and dependency checks keep reading a real trace for it.
-// Only once every workstream's copy is verified does Migrate reclaim the
-// obsolete shared storage: it rewrites the project's own history to drop the
-// workstream paths and prunes the objects that history alone kept, while
-// keeping the charter, knowledge base, notes and decision history intact. A
-// verification failure leaves the shared trace exactly as it was; nothing is
-// reclaimed until every workstream's copy is proven.
+// For each trace it takes the Git trace's lock, finishes an interrupted
+// publication, records the owner's pending hand edits of the charter or of a
+// workstream's spec and plan, imports HEAD, verifies the import, and only
+// then switches to the database and removes the Git files. check validates
+// a workstream's spec and plan, by record ID, before a hand edit of them is
+// recorded; an invalid draft stops that workstream's migration with an
+// error naming the files and the problems, and the project must not open.
+// Bytes in the work tree that HEAD does not hold are dropped, and each
+// dropped path is logged. A crash at any step resumes on the next call.
 //
-// logf receives migration start, each workstream's copy, verification and
-// switch, reclamation, completion and failure, naming only the project and
-// workstream; it never receives transcript content or credentials. A nil
-// logf discards them.
-func Migrate(ctx context.Context, root config.Root, project config.ProjectID, logf func(format string, args ...any)) error {
+// logf receives each step for each trace, naming only the project and
+// workstream; it never receives trace content. A nil logf discards them.
+func Migrate(ctx context.Context, root config.Root, project config.ProjectID, check func(map[string]string) error, logf func(format string, args ...any)) error {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -69,513 +61,583 @@ func Migrate(ctx context.Context, root config.Root, project config.ProjectID, lo
 	if err != nil {
 		return err
 	}
-	shared, err := hasSharedLayout(directory)
-	if err != nil || !shared {
+	if err := migrateTrace(ctx, migration{project: project, directory: directory, check: check, logf: logf}); err != nil {
 		return err
 	}
-	pr, err := openStoreDirectory(root, project, "", directory)
-	if err != nil {
-		return err
-	}
-	pr.failPublication = migrationInterrupt
-	ok := false
-	defer func() {
-		if !ok {
-			pr.Close()
-		}
-	}()
-	if err := pr.checkGit(); err != nil {
-		return err
-	}
-	if err := pr.acquire(); err != nil {
-		return err
-	}
-	if err := pr.recoverPublication(ctx); err != nil {
-		return err
-	}
-	logf("migration: project %s: starting migration from the shared trace layout", project)
-	streams, err := legacyWorkstreamIDs(pr)
-	if err != nil {
-		return fmt.Errorf("%w: %s: list legacy workstreams: %v", ErrMigrationIncomplete, project, err)
-	}
-	for _, stream := range streams {
-		if err := migrateOneWorkstream(ctx, root, project, stream, pr, logf); err != nil {
-			return err
-		}
-	}
-	if err := reclaimSharedWorkstreams(ctx, pr, logf); err != nil {
-		logf("migration: project %s: reclaiming the shared trace storage failed: %v", project, err)
-		return fmt.Errorf("%w: %s: reclaim the shared trace storage: %v", ErrMigrationIncomplete, project, err)
-	}
-	logf("migration: project %s: migration complete", project)
-	ok = true
-	return pr.Close()
+	return migrateWorkstreams(ctx, root, project, check, logf)
 }
 
-// hasSharedLayout reports whether a project's own trace directory still
-// holds the shared layout's "workstreams" directory. It does not require the
-// directory to exist at all: a project with no trace yet, or one whose
-// migration already reclaimed the shared storage, both report false.
-func hasSharedLayout(directory string) (bool, error) {
-	info, err := os.Lstat(filepath.Join(directory, "workstreams"))
-	if os.IsNotExist(err) {
-		return false, nil
+// MigrateWorkgroups moves every cross-repo workgroup's Git trace, and the
+// Git trace of its host workstream, to their databases, as Migrate does for
+// a project.
+func MigrateWorkgroups(ctx context.Context, root config.Root, logf func(format string, args ...any)) error {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	entries, err := os.ReadDir(filepath.Join(root.String(), "workgroups"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
 	}
 	if err != nil {
-		return false, err
+		return err
 	}
-	if !info.IsDir() {
-		return false, fmt.Errorf("%s/workstreams: expected a directory", directory)
+	var errs []error
+	for _, entry := range entries {
+		id := config.WorkgroupID(entry.Name())
+		if config.CheckWorkgroupIDs(id) != nil || !entry.IsDir() {
+			continue
+		}
+		directory, err := root.WorkgroupTrace(id)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		project := crossRepoProject(id)
+		if err := migrateTrace(ctx, migration{project: project, directory: directory, logf: logf}); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, migrateWorkstreams(ctx, root, project, nil, logf))
 	}
-	return true, nil
+	return errors.Join(errs...)
 }
 
-// legacyWorkstreamIDs lists the workstreams the shared layout holds inside
-// pr's own trace directory, under "workstreams", in a stable order.
-func legacyWorkstreamIDs(pr *Repository) ([]config.WorkstreamID, error) {
-	entries, err := fs.ReadDir(pr.dir.FS(), "workstreams")
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]config.WorkstreamID, 0, len(entries))
-	for _, e := range entries {
-		id, err := config.ParseWorkstreamID(e.Name())
-		if err != nil || !e.IsDir() {
-			return nil, fmt.Errorf("%s: not a legacy workstream trace directory", e.Name())
-		}
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids, nil
-}
-
-// migrateOneWorkstream copies stream's records into its own dedicated trace
-// repository if that has not happened yet, verifies the copy against the
-// shared trace, and switches authority to it. Once this returns nil, stream
-// is read only from its own repository; the shared copy is reclaimed later,
-// together with every other workstream's.
-func migrateOneWorkstream(ctx context.Context, root config.Root, project config.ProjectID, stream config.WorkstreamID, pr *Repository, logf func(string, ...any)) error {
-	newDirectory, err := root.WorkstreamTrace(project, stream)
-	if err != nil {
-		return err
-	}
-	switch _, err := os.Lstat(newDirectory); {
-	case os.IsNotExist(err):
-		logf("migration: project %s: workstream %s: copying its trace into its own repository", project, stream)
-		if err := copyWorkstreamTrace(ctx, root, project, stream, pr); err != nil {
-			logf("migration: project %s: workstream %s: copy failed: %v", project, stream, err)
-			return fmt.Errorf("%w: %s: workstream %s: copy its trace: %v", ErrMigrationIncomplete, project, stream, err)
-		}
-		if err := pr.boundary("migration-workstream-copied:" + string(stream)); err != nil {
-			return err
-		}
-		logf("migration: project %s: workstream %s: copied", project, stream)
-	case err != nil:
-		return err
-	}
-	if err := verifyMigratedWorkstream(ctx, root, project, stream, pr); err != nil {
-		logf("migration: project %s: workstream %s: verification failed: %v", project, stream, err)
-		return fmt.Errorf("%w: %s: workstream %s: verify its trace: %v", ErrMigrationIncomplete, project, stream, err)
-	}
-	if err := pr.boundary("migration-workstream-verified:" + string(stream)); err != nil {
-		return err
-	}
-	logf("migration: project %s: workstream %s: verified", project, stream)
-	// Nothing further makes the copy authoritative: every reader of the
-	// per-workstream layout already discovers workstreams from their own
-	// dedicated directories alone, so a verified copy is switched to the
-	// instant it exists. This step is named so a crash can be interrupted
-	// and resumed right after a workstream is switched, as after any other.
-	if err := pr.boundary("migration-workstream-switched:" + string(stream)); err != nil {
-		return err
-	}
-	logf("migration: project %s: workstream %s: switched to its own trace repository", project, stream)
-	return nil
-}
-
-// copyWorkstreamTrace builds stream's own dedicated trace repository from
-// its subtree of the shared trace, staged outside WorkstreamTraces and moved
-// into place by one atomic rename, exactly as creating a new workstream
-// does, so a directory listing never observes it before it is complete.
-func copyWorkstreamTrace(ctx context.Context, root config.Root, project config.ProjectID, stream config.WorkstreamID, pr *Repository) error {
-	prefix := "workstreams/" + string(stream)
-	newDirectory, err := root.WorkstreamTrace(project, stream)
-	if err != nil {
-		return err
-	}
+func migrateWorkstreams(ctx context.Context, root config.Root, project config.ProjectID, check func(map[string]string) error, logf func(string, ...any)) error {
 	base, err := root.WorkstreamTraces(project)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(base, 0700); err != nil {
-		return err
+	entries, err := os.ReadDir(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
 	}
-	staging, err := root.WorkstreamStaging()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(staging, 0700); err != nil {
-		return err
+	for _, entry := range entries {
+		stream, err := config.ParseWorkstreamID(entry.Name())
+		if err != nil || !entry.IsDir() {
+			return fmt.Errorf("%s: not a workstream trace directory", entry.Name())
+		}
+		directory, err := root.WorkstreamTrace(project, stream)
+		if err != nil {
+			return err
+		}
+		if err := migrateTrace(ctx, migration{project: project, stream: stream, directory: directory, check: check, logf: logf}); err != nil {
+			return err
+		}
 	}
-	build, err := os.MkdirTemp(staging, "ws-"+string(stream)+"-")
+	return nil
+}
+
+// migration is the migration of one trace directory.
+type migration struct {
+	project   config.ProjectID
+	stream    config.WorkstreamID
+	directory string
+	check     func(map[string]string) error
+	logf      func(string, ...any)
+}
+
+func (m migration) name() string {
+	if m.stream == "" {
+		return "project " + string(m.project)
+	}
+	return "project " + string(m.project) + ": workstream " + string(m.stream)
+}
+
+func (m migration) log(format string, args ...any) {
+	m.logf("migration: "+m.name()+": "+format, args...)
+}
+
+func (m migration) boundary(step string) error {
+	if migrationInterrupt != nil {
+		return migrationInterrupt(step + ":" + m.name())
+	}
+	return nil
+}
+
+// failed reports a failed step of m.
+func (m migration) failed(step string, err error) error {
+	m.log("%s failed: %v", step, err)
+	return fmt.Errorf("%w: %s: %s: %w", ErrMigrationIncomplete, m.name(), step, err)
+}
+
+func migrateTrace(ctx context.Context, m migration) error {
+	switched, err := HasTraceDatabase(m.directory)
 	if err != nil {
 		return err
+	}
+	legacy, err := hasLegacyTrace(m.directory)
+	if err != nil {
+		return err
+	}
+	if switched {
+		if !legacy {
+			return nil
+		}
+		return m.cleanup()
+	}
+	if !legacy {
+		return nil
+	}
+	if m.stream == "" {
+		if _, err := os.Lstat(filepath.Join(m.directory, "workstreams")); err == nil {
+			return fmt.Errorf("%w: %s: %s keeps every workstream inside the project trace; that layout is no longer supported", ErrMigrationIncomplete, m.name(), m.directory)
+		}
+		if _, err := os.Lstat(filepath.Join(m.directory, legacyReclaimFile)); err == nil {
+			return fmt.Errorf("%w: %s: %s holds an unfinished shared-layout migration; that layout is no longer supported", ErrMigrationIncomplete, m.name(), m.directory)
+		}
+	}
+	l, err := openLegacyTrace(m.directory)
+	if err != nil {
+		return m.failed("lock", err)
+	}
+	defer l.Close()
+	// Another migration may have switched while this one waited.
+	if switched, err := HasTraceDatabase(m.directory); err != nil || switched {
+		if err != nil {
+			return err
+		}
+		return m.cleanup()
+	}
+	m.log("starting migration from Git to the trace database")
+	importPath := filepath.Join(m.directory, databaseFile+importSuffix)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := os.Remove(importPath + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return m.failed("discard an interrupted import", err)
+		}
+	}
+	if err := l.finishPublication(ctx); err != nil {
+		return m.failed("finish the publication journal", err)
+	}
+	if err := m.boundary("migration-journal-finished"); err != nil {
+		return err
+	}
+	head, err := l.head()
+	if err != nil {
+		return m.failed("read HEAD", err)
+	}
+	tree, err := l.tree(ctx, head)
+	if err != nil {
+		return m.failed("read HEAD", err)
+	}
+	files, err := l.blobs(ctx, tree)
+	if err != nil {
+		return m.failed("read HEAD", err)
+	}
+	plan, err := m.plan(files)
+	if err != nil {
+		return m.failed("plan the import", err)
+	}
+	work, err := l.workTree()
+	if err != nil {
+		return m.failed("read the work tree", err)
+	}
+	edits, edited, err := m.handEdits(plan, work)
+	if err != nil {
+		return m.failed("record owner edits", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(work)) {
+		if m.stream == "" && name == "config.toml" {
+			continue
+		}
+		if data, ok := files[name]; (!ok || !bytes.Equal(data, work[name])) && !edited[name] {
+			m.log("dropping %s, which HEAD does not hold", name)
+		}
+	}
+	m.log("importing HEAD")
+	imported, err := m.importHead(ctx, importPath, plan)
+	if err != nil {
+		return m.failed("import", err)
 	}
 	ok := false
 	defer func() {
 		if !ok {
-			os.RemoveAll(build)
+			imported.closeDatabases()
 		}
 	}()
-	s, err := openStoreDirectory(root, project, stream, build)
-	if err != nil {
+	if err := m.boundary("migration-imported"); err != nil {
 		return err
 	}
-	if err := func() error {
-		defer s.Close()
-		if err := s.dir.Mkdir(".git", 0700); err != nil {
-			return err
-		}
-		for _, name := range []string{".git/objects", ".git/refs/heads"} {
-			if err := s.mkdir(name); err != nil {
-				return err
-			}
-		}
-		for _, f := range []struct{ name, data string }{{".git/config", gitConfig}, {".git/HEAD", "ref: refs/heads/main\n"}, {".git/osmia.lock", ""}} {
-			if err := s.writeFile(f.name, []byte(f.data)); err != nil {
-				return err
-			}
-		}
-		if err := s.acquire(); err != nil {
-			return err
-		}
-		var paths []string
-		found := map[string]bool{}
-		if err := pr.walkDir(prefix, func(parent *os.Root, name string, entry fs.DirEntry) error {
-			if err := checkedEntry(parent, name, entry); err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			data, err := readEntry(parent, name, entry)
-			if err != nil {
-				return err
-			}
-			if err := s.writeFile(name, data); err != nil {
-				return err
-			}
-			paths = append(paths, name)
-			found[name] = true
-			return nil
-		}); err != nil {
-			return err
-		}
-		if !found[prefix+"/workstream.json"] {
-			return fmt.Errorf("%s: the shared trace holds no workstream manifest", prefix)
-		}
-		for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-			name = prefix + "/" + name
-			if found[name] {
-				continue
-			}
-			if err := s.writeFile(name, nil); err != nil {
-				return err
-			}
-			paths = append(paths, name)
-		}
-		slices.Sort(paths)
-		return s.commit(ctx, paths, "Migrate workstream trace from the shared layout")
-	}(); err != nil {
+	m.log("verifying the import")
+	if err := m.verify(ctx, imported, plan, importPath); err != nil {
+		return m.failed("verify", err)
+	}
+	if err := m.boundary("migration-verified"); err != nil {
 		return err
 	}
-	if err := os.Rename(build, newDirectory); err != nil {
-		if _, statErr := os.Lstat(newDirectory); statErr == nil {
-			return fmt.Errorf("%w: workstream %s already has its own trace repository", ErrConflict, stream)
+	if len(edits) > 0 {
+		m.log("recording %d owner edits", len(edits))
+		imported.mu.Lock()
+		for _, d := range edits {
+			if err = imported.append(ctx, d); err != nil {
+				break
+			}
 		}
-		return err
+		imported.mu.Unlock()
+		if err != nil {
+			return m.failed("record owner edits", err)
+		}
 	}
+	m.log("switching to the trace database")
 	ok = true
+	if err := m.switchTo(ctx, imported, importPath); err != nil {
+		return m.failed("switch", err)
+	}
+	if err := m.boundary("migration-switched"); err != nil {
+		return err
+	}
+	if err := m.cleanup(); err != nil {
+		return err
+	}
+	m.log("migration complete")
 	return nil
 }
 
-// verifyMigratedWorkstream reads stream's subtree of the shared trace and
-// its own dedicated trace repository independently, so a resumed migration
-// re-checks a copy made in an earlier process the same way it checks one
-// just made, and reports whether they hold exactly the same files with the
-// same bytes, and whether the copy reads as a valid trace in its own right.
-func verifyMigratedWorkstream(ctx context.Context, root config.Root, project config.ProjectID, stream config.WorkstreamID, pr *Repository) error {
-	prefix := "workstreams/" + string(stream)
-	shared := map[string][]byte{}
-	if err := pr.walkDir(prefix, func(parent *os.Root, name string, entry fs.DirEntry) error {
-		if err := checkedEntry(parent, name, entry); err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		data, err := readEntry(parent, name, entry)
-		if err != nil {
-			return err
-		}
-		shared[name] = data
-		return nil
-	}); err != nil {
-		return fmt.Errorf("read the shared trace: %w", err)
-	}
-	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-		name = prefix + "/" + name
-		if _, ok := shared[name]; !ok {
-			shared[name] = nil
-		}
-	}
-	s, err := openWorkstreamDirectory(root, project, stream)
-	if err != nil {
-		return fmt.Errorf("open the migrated trace: %w", err)
-	}
-	defer s.Close()
-	if err := s.checkGit(); err != nil {
-		return fmt.Errorf("the migrated trace: %w", err)
-	}
-	if err := s.acquire(); err != nil {
-		return fmt.Errorf("the migrated trace: %w", err)
-	}
-	if err := s.recoverPublication(ctx); err != nil {
-		return fmt.Errorf("the migrated trace: %w", err)
-	}
-	copied := map[string][]byte{}
-	if err := s.walk(func(parent *os.Root, name string, entry fs.DirEntry) error {
-		if entry.IsDir() {
-			return nil
-		}
-		data, err := readEntry(parent, name, entry)
-		if err != nil {
-			return err
-		}
-		copied[name] = data
-		return nil
-	}); err != nil {
-		return fmt.Errorf("read the migrated trace: %w", err)
-	}
-	if len(shared) != len(copied) {
-		return fmt.Errorf("the migrated trace holds %d files, the shared trace holds %d", len(copied), len(shared))
-	}
-	for name, data := range shared {
-		other, ok := copied[name]
-		if !ok || !bytes.Equal(data, other) {
-			return fmt.Errorf("%s: the migrated trace does not match the shared trace", name)
-		}
-	}
-	if _, _, err := s.scan(); err != nil {
-		return fmt.Errorf("the migrated trace does not read as a valid trace: %w", err)
-	}
-	if _, err := s.checkHistory(ctx); err != nil {
-		return fmt.Errorf("the migrated trace's history does not check out: %w", err)
-	}
-	return nil
+// importPlan is a legacy trace's HEAD sorted into what the database holds.
+type importPlan struct {
+	// order lists the record logs in the order they are imported, and
+	// lines holds each one's lines.
+	order []string
+	lines map[string][][]byte
+	// records holds every record that decodes and validates, in import order.
+	records []Record
+	files   map[string][]byte
+	// workflow is the workstream's workflow.json, when HEAD holds one.
+	workflow []byte
 }
 
-// migrationReclaimFile journals the one-time history rewrite that drops the
-// shared layout's workstream paths from the project's own trace.
-const migrationReclaimFile = ".git/osmia-migration-reclaim.json"
-
-type migrationReclaimJournal struct {
-	Parent string `json:"parent"`
-	Commit string `json:"commit"`
+// plan sorts HEAD's files. Every file must be a record log, a kept file,
+// the workflow, or the materialized file of a document's latest revision.
+func (m migration) plan(head map[string][]byte) (importPlan, error) {
+	p := importPlan{lines: map[string][][]byte{}, files: map[string][]byte{}}
+	names := slices.Collect(maps.Keys(head))
+	walkOrder(names)
+	var derived []string
+	for _, name := range names {
+		if m.stream != "" && !strings.HasPrefix(name, workstreamPrefix(string(m.stream))) {
+			return p, fmt.Errorf("%s: HEAD holds a file of another trace", name)
+		}
+		switch {
+		case legacyRecordFile(name):
+			p.order = append(p.order, name)
+			p.lines[name] = legacyLines(head[name])
+			for _, line := range p.lines[name] {
+				if v, err := decodeRecord(line); err == nil && validate(v) == nil {
+					p.records = append(p.records, v)
+				}
+			}
+		case legacyFile(name):
+			p.files[name] = head[name]
+		case m.stream != "" && name == workstreamPrefix(string(m.stream))+"workflow.json":
+			p.workflow = head[name]
+		default:
+			derived = append(derived, name)
+		}
+	}
+	latest := map[string]Document{}
+	for _, v := range p.records {
+		if d, ok := v.(Document); ok {
+			latest[scopePath(d.Header)+d.Path] = d
+		}
+	}
+	for _, name := range derived {
+		d, ok := latest[name]
+		switch {
+		case ok && d.Content == string(head[name]):
+		case !ok && m.stream == "" && name == EntitiesPath && string(head[name]) == "{}\n":
+		default:
+			return p, fmt.Errorf("%s: HEAD holds a file that is neither a record log, a trace file nor a document's latest revision", name)
+		}
+	}
+	return p, nil
 }
 
-// reclaimSharedWorkstreams rewrites pr's history to drop every "workstreams"
-// entry, keeping the charter, knowledge base, notes and decision history,
-// and prunes the objects that history alone held. It resumes an interrupted
-// rewrite before checking whether one is still needed, so calling it when
-// the shared storage is already reclaimed, or when an earlier rewrite was
-// interrupted, both leave pr with no "workstreams" directory and no
-// unreachable objects from it.
-func reclaimSharedWorkstreams(ctx context.Context, pr *Repository, logf func(string, ...any)) error {
-	if err := recoverMigrationReclaim(ctx, pr); err != nil {
-		return err
-	}
-	switch _, err := pr.dir.Stat("workstreams"); {
-	case os.IsNotExist(err):
-		return nil
-	case err != nil:
-		return err
-	}
-	logf("migration: project %s: reclaiming the obsolete shared trace storage", pr.project)
-	pr.forget()
-	if _, err := pr.checkHistory(ctx); err != nil {
-		return err
-	}
-	if err := pr.checkGit(); err != nil {
-		return err
-	}
-	refs, err := pr.git(ctx, nil, "for-each-ref", "--format=%(refname)")
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(refs) != "refs/heads/main" {
-		return fmt.Errorf("trace reclamation requires only the service-owned main reference")
-	}
-	parent, err := pr.git(ctx, nil, "rev-parse", "refs/heads/main")
-	if err != nil {
-		return err
-	}
-	commits, err := pr.git(ctx, nil, "rev-list", "--reverse", "--topo-order", parent)
-	if err != nil {
-		return err
-	}
-	mapped, trees := map[string]string{}, map[string]string{}
-	for _, oid := range strings.Fields(commits) {
-		raw, err := pr.gitBytes(ctx, nil, "", "cat-file", "commit", oid)
-		if err != nil {
-			return err
+// handEdits returns the owner's hand edits of the charter or of the
+// workstream's spec and plan as their next revisions, and the paths they
+// record. An invalid spec or plan is refused with the problems.
+func (m migration) handEdits(p importPlan, work map[string][]byte) ([]Document, map[string]bool, error) {
+	latest := map[string]Document{}
+	for _, v := range p.records {
+		if d, ok := v.(Document); ok && d.Workstream == m.stream {
+			latest[d.Path] = d
 		}
-		header, message, ok := bytes.Cut(raw, []byte("\n\n"))
-		if !ok {
-			return fmt.Errorf("invalid trace commit")
+	}
+	at := time.Now().UTC()
+	edited := map[string]bool{}
+	if m.stream == "" {
+		data, ok := work["charter.md"]
+		if !ok || data == nil {
+			return nil, edited, nil
 		}
-		lines := strings.Split(string(header), "\n")
-		for i, line := range lines {
-			key, value, _ := strings.Cut(line, " ")
-			switch key {
-			case "tree":
-				tree, err := stripWorkstreamsTree(ctx, pr, value, trees)
-				if err != nil {
-					return err
-				}
-				lines[i] = "tree " + tree
-			case "parent":
-				replacement, ok := mapped[value]
-				if !ok {
-					return fmt.Errorf("trace parent missing during reclamation")
-				}
-				lines[i] = "parent " + replacement
+		next := charterRevision(m.project, at, ownerActor, "owner-edit", 1, string(data))
+		if d, ok := latest["charter.md"]; ok {
+			if d.Content == string(data) {
+				return nil, edited, nil
+			}
+			next.Revision = d.Revision + 1
+		}
+		edited["charter.md"] = true
+		m.log("recording the owner's edit of charter.md")
+		return []Document{next}, edited, nil
+	}
+	prefix := workstreamPrefix(string(m.stream))
+	content := map[string]string{}
+	var changed []string
+	for _, id := range slices.Sorted(maps.Keys(ownerEditable)) {
+		d, ok := latest[ownerEditable[id]]
+		if !ok || d.ID != id {
+			continue
+		}
+		content[id] = d.Content
+		data, ok := work[prefix+d.Path]
+		if ok && data != nil && string(data) != d.Content {
+			content[id] = string(data)
+			changed = append(changed, id)
+		}
+	}
+	if len(changed) == 0 {
+		return nil, edited, nil
+	}
+	var paths []string
+	for _, id := range changed {
+		paths = append(paths, prefix+ownerEditable[id])
+	}
+	if len(content) == len(ownerEditable) && m.check != nil {
+		if err := m.check(content); err != nil {
+			return nil, nil, fmt.Errorf("the owner's edit of %s is invalid; fix or revert it and restart: %w", strings.Join(paths, " and "), err)
+		}
+	}
+	var docs []Document
+	for _, id := range changed {
+		d := latest[ownerEditable[id]]
+		d.Revision++
+		d.Content, d.At, d.Actor, d.Cause, d.Depth = content[id], at, ownerActor, "owner-edit", 0
+		docs = append(docs, d)
+		edited[prefix+d.Path] = true
+	}
+	m.log("recording the owner's edit of %s", strings.Join(paths, " and "))
+	return docs, edited, nil
+}
+
+// importHead writes p to a new database at path, in one transaction.
+func (m migration) importHead(ctx context.Context, path string, p importPlan) (*Repository, error) {
+	write, read, err := openDatabases(path)
+	if err != nil {
+		return nil, err
+	}
+	r := &Repository{project: m.project, stream: m.stream, directory: m.directory, db: write, reads: read, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}
+	if err := initialize(ctx, write); err != nil {
+		r.closeDatabases()
+		return nil, err
+	}
+	if err := m.write(ctx, r, p); err != nil {
+		r.closeDatabases()
+		return nil, err
+	}
+	return r, nil
+}
+
+func (m migration) write(ctx context.Context, r *Repository, p importPlan) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "INSERT INTO commits (at, message) VALUES (?, ?)", time.Now().UTC().Format(time.RFC3339Nano), "Migrate trace from Git")
+	if err != nil {
+		return err
+	}
+	commit, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	for _, name := range p.order {
+		for i, line := range p.lines[name] {
+			id, err := identityOf(line)
+			if err != nil {
+				return fmt.Errorf("%s:%d: not a record: %w", name, i+1, err)
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (?, ?, ?, ?, ?, ?)", commit, name, id.Schema, id.ID, id.Revision, string(line)); err != nil {
+				return fmt.Errorf("%s:%d: %w", name, i+1, err)
 			}
 		}
-		rewritten := append([]byte(strings.Join(lines, "\n")+"\n\n"), message...)
-		mapped[oid], err = pr.git(ctx, rewritten, "hash-object", "-t", "commit", "-w", "--stdin")
-		if err != nil {
+	}
+	for _, name := range slices.Sorted(maps.Keys(p.files)) {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO files (path, content) VALUES (?, ?)", name, p.files[name]); err != nil {
 			return err
 		}
 	}
-	if err := pr.syncObjects(); err != nil {
-		return err
-	}
-	j := migrationReclaimJournal{Parent: parent, Commit: mapped[parent]}
-	data, err := json.Marshal(j)
-	if err != nil {
-		return err
-	}
-	if err := pr.writeFile(migrationReclaimFile, data); err != nil {
-		return err
-	}
-	if err := pr.boundary("migration-reclaim-journal-written"); err != nil {
-		return err
-	}
-	return recoverMigrationReclaim(ctx, pr)
-}
-
-// stripWorkstreamsTree returns tree with its top-level "workstreams" entry
-// removed, or tree itself when it has none.
-func stripWorkstreamsTree(ctx context.Context, r *Repository, tree string, cache map[string]string) (string, error) {
-	if rewritten, ok := cache[tree]; ok {
-		return rewritten, nil
-	}
-	raw, err := r.gitBytes(ctx, nil, "", "ls-tree", "-z", tree)
-	if err != nil {
-		return "", err
-	}
-	var kept []byte
-	changed := false
-	for _, entry := range bytes.Split(raw, []byte{0}) {
-		if len(entry) == 0 {
-			continue
-		}
-		_, name, ok := bytes.Cut(entry, []byte{'\t'})
-		if !ok {
-			return "", fmt.Errorf("invalid trace tree")
-		}
-		if string(name) == "workstreams" {
-			changed = true
-			continue
-		}
-		kept = append(kept, entry...)
-		kept = append(kept, 0)
-	}
-	result := tree
-	if changed {
-		result, err = r.git(ctx, kept, "mktree", "-z")
+	if p.workflow != nil {
+		log, err := m.legacyWorkflow(r, p)
 		if err != nil {
-			return "", err
+			return err
 		}
+		r.workflows = map[config.WorkstreamID]*cachedWorkflow{m.stream: {log: workflowLog{}, threads: map[string]string{}}}
+		if _, _, err := r.writeWorkflow(ctx, tx, m.stream, log, nil); err != nil {
+			return err
+		}
+		r.workflows = nil
 	}
-	cache[tree] = result
-	return result, nil
+	return tx.Commit()
 }
 
-// recoverMigrationReclaim resumes an interrupted reclamation before any
-// trace read or write.
-func recoverMigrationReclaim(ctx context.Context, r *Repository) error {
-	data, err := r.readFile(migrationReclaimFile)
-	if os.IsNotExist(err) {
-		return nil
+// legacyWorkflow decodes and checks the workflow.json of p against its
+// records.
+func (m migration) legacyWorkflow(r *Repository, p importPlan) (workflowLog, error) {
+	var file workflowFile
+	if err := decode(p.workflow, &file); err != nil {
+		return workflowLog{}, fmt.Errorf("workflow.json: %w", err)
 	}
+	log, _, err := r.checkWorkflow(m.stream, file, p.records)
+	if err != nil {
+		return workflowLog{}, fmt.Errorf("workflow.json: %w", err)
+	}
+	return log, nil
+}
+
+// verify checks the import against HEAD: every record line, in order, the
+// files, the decoded workflow, and the database's integrity.
+func (m migration) verify(ctx context.Context, r *Repository, p importPlan, path string) error {
+	total := 0
+	for _, name := range p.order {
+		bodies, err := storedRows(ctx, r, name)
+		if err != nil {
+			return err
+		}
+		if len(bodies) != len(p.lines[name]) {
+			return fmt.Errorf("%s: %d records imported, HEAD holds %d", name, len(bodies), len(p.lines[name]))
+		}
+		for i, body := range bodies {
+			if body != string(p.lines[name][i]) {
+				return fmt.Errorf("%s:%d: the imported record differs", name, i+1)
+			}
+		}
+		total += len(bodies)
+	}
+	var count int
+	if err := r.db.QueryRowContext(ctx, "SELECT count(*) FROM records").Scan(&count); err != nil {
+		return err
+	}
+	if count != total {
+		return fmt.Errorf("%d records imported, HEAD holds %d", count, total)
+	}
+	for name, data := range p.files {
+		got, err := r.file(name)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(got, data) {
+			return fmt.Errorf("%s: the imported file differs", name)
+		}
+	}
+	if p.workflow != nil {
+		want, err := m.legacyWorkflow(r, p)
+		if err != nil {
+			return err
+		}
+		got, _, err := r.loadWorkflow(m.stream)
+		if err != nil {
+			return err
+		}
+		if !equalJSON(comparable(got), comparable(want)) {
+			return fmt.Errorf("the imported workflow differs from workflow.json")
+		}
+	}
+	return quickCheck(ctx, r.db, path)
+}
+
+// comparable returns log with each empty list absent, as the database
+// stores it.
+func comparable(log workflowLog) workflowLog {
+	if len(log.Transactions) == 0 {
+		log.Transactions = nil
+	}
+	if len(log.Deliveries) == 0 {
+		log.Deliveries = nil
+	}
+	if len(log.Operations) == 0 {
+		log.Operations = nil
+	}
+	if len(log.Threads) == 0 {
+		log.Threads = nil
+	}
+	return log
+}
+
+// storedRows returns the bodies of the records stored at path, in seq order.
+func storedRows(ctx context.Context, r *Repository, path string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT body FROM records WHERE path = ? ORDER BY seq", path)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var bodies []string
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, body)
+	}
+	return bodies, rows.Err()
+}
+
+// switchTo makes the imported database at path the trace's database: it is
+// checkpointed, closed, flushed and renamed into place.
+func (m migration) switchTo(ctx context.Context, r *Repository, path string) error {
+	_, err := r.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	if err = errors.Join(err, r.closeDatabases()); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
-	var j migrationReclaimJournal
-	if err := decode(data, &j); err != nil {
+	if err := errors.Join(f.Sync(), f.Close()); err != nil {
 		return err
 	}
-	if !objectID.MatchString(j.Parent) || !objectID.MatchString(j.Commit) {
-		return fmt.Errorf("invalid trace migration reclaim journal")
-	}
-	if err := r.checkGit(); err != nil {
-		return err
-	}
-	head, err := r.git(ctx, nil, "rev-parse", "refs/heads/main")
-	if err != nil {
-		return err
-	}
-	if head != j.Parent && head != j.Commit {
-		return fmt.Errorf("trace changed during reclamation")
-	}
-	if err := r.writeFile(".git/refs/heads/main", []byte(j.Commit+"\n")); err != nil {
-		return err
-	}
-	if err := r.boundary("migration-reclaim-ref-published"); err != nil {
-		return err
-	}
-	if err := r.dir.RemoveAll("workstreams"); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := syncDir(r.dir, "."); err != nil {
-		return err
-	}
-	r.changed()
-	r.forget()
-	r.recordFiles, r.verified, r.workflows = nil, nil, nil
-	r.gitMu.Lock()
-	r.tree, r.treeHead, r.synced = nil, "", nil
-	r.gitMu.Unlock()
-	if err := r.boundary("migration-reclaim-files-removed"); err != nil {
-		return err
-	}
-	// Neither the index, reflogs nor packed unreachable objects may retain
-	// the workstream paths this history rewrite dropped.
-	for _, args := range [][]string{{"read-tree", j.Commit}, {"reflog", "expire", "--expire=now", "--all"}, {"-c", "gc.packRefs=false", "gc", "--prune=now"}} {
-		if _, err := r.git(ctx, nil, args...); err != nil {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
-	if err := r.syncObjects(); err != nil {
+	if err := os.Rename(path, filepath.Join(m.directory, databaseFile)); err != nil {
 		return err
 	}
-	if err := r.boundary("migration-reclaim-objects-pruned"); err != nil {
-		return err
+	return syncDirectory(m.directory)
+}
+
+// cleanup removes every file of a switched trace directory but its
+// database, lock and, in a project's trace, its configuration, removing
+// .git last.
+func (m migration) cleanup() error {
+	m.log("removing the Git trace files")
+	keep := map[string]bool{lockFile: true, ".git": true}
+	for _, name := range storeFiles {
+		keep[name] = true
 	}
-	if err := r.dir.Remove(migrationReclaimFile); err != nil {
-		return err
+	if m.stream == "" {
+		keep["config.toml"] = true
 	}
-	return syncDir(r.dir, ".git")
+	entries, err := os.ReadDir(m.directory)
+	if err != nil {
+		return m.failed("clean up", err)
+	}
+	for _, entry := range entries {
+		if keep[entry.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(m.directory, entry.Name())); err != nil {
+			return m.failed("clean up", err)
+		}
+		if err := m.boundary("migration-cleaned:" + entry.Name()); err != nil {
+			return err
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(m.directory, ".git")); err != nil {
+		return m.failed("clean up", err)
+	}
+	return syncDirectory(m.directory)
 }

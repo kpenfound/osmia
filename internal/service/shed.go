@@ -47,10 +47,9 @@ const (
 	shedSubject = "shed"
 	// ownerSubject is the workflow subject that tracks the owner's own part
 	// in the shed, one value per action: objected-<n>, ruled-<n>,
-	// overruled-<n>, more-<n>, redraft-<n>, ratified-<n>, skipped and
-	// invalid-edit. The debate controller reads it and writes it only to
-	// report an invalid owner edit, so an owner action never races a round for
-	// the shed subject.
+	// overruled-<n>, more-<n>, redraft-<n>, ratified-<n> and skipped. The
+	// debate controller only reads it, so an owner action never races a round
+	// for the shed subject.
 	ownerSubject = "shed-owner"
 	// skippedValue is the owner-subject value of the action that skips
 	// debate, and skipTransition the transition that records it. A later
@@ -58,9 +57,6 @@ const (
 	// stands as long as the workstream is in the shed.
 	skippedValue   = "skipped"
 	skipTransition = "shed-owner-skip"
-	// invalidEditValue is the owner-subject value of an owner edit that was
-	// read, found invalid and not recorded.
-	invalidEditValue = "invalid-edit"
 	// maxRoundAttempts bounds the turns one member may start in one round
 	// after service stops interrupt earlier ones: the librarian's bound.
 	maxRoundAttempts = maxExtractionAttempts
@@ -218,7 +214,7 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	if err != nil {
 		return err
 	}
-	pin, err := d.ownerEdits(ctx, stream)
+	pin, err := d.draftPin(stream)
 	if err != nil {
 		return err
 	}
@@ -1370,7 +1366,7 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 	if err != nil {
 		return nil, err
 	}
-	charter, err := d.repository.Charter(ctx, d.s.now())
+	charter, err := d.repository.Charter(ctx)
 	if err != nil {
 		return nil, err
 	}

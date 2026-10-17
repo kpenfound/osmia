@@ -238,7 +238,7 @@ func (t Turn) Resolve(ctx context.Context, citation string) error {
 		}
 		return nil
 	case questions.IsCharter(citation) || questions.IsProse(citation):
-		err := questions.Resolve(ctx, t.Repository, t.Stream, citation, t.Now())
+		err := questions.Resolve(ctx, t.Repository, t.Stream, citation)
 		var unresolved *questions.Unresolved
 		if errors.As(err, &unresolved) {
 			return invalid("%s", unresolved.Error())

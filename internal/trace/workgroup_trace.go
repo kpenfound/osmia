@@ -272,7 +272,7 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 	// holds shared's own lock, so a shared-aware Close trying to take it
 	// again here would deadlock), and nothing has claimed the registry
 	// entry yet for a second opener to reuse.
-	if err := r.checkGit(); err != nil {
+	if err := checkStoreFiles(r.directory); err != nil {
 		r.Close()
 		return nil, err
 	}
@@ -280,18 +280,14 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 		r.Close()
 		return nil, err
 	}
-	// Registered for another caller to reuse only once every recovery and
-	// scan below has actually succeeded: a failure here is returned with r
-	// left unshared, exactly as an ordinary, single-use open always has,
-	// rather than handing a second caller a reference whose health this
-	// call never confirmed.
-	if err := r.recoverPublication(context.Background()); err != nil {
+	// Registered for another caller to reuse only once the database opened
+	// and scanned: a failure here is returned with r left unshared, exactly
+	// as an ordinary, single-use open always has, rather than handing a
+	// second caller a reference whose health this call never confirmed.
+	if err := r.openLocked(false); err != nil {
 		return r, err
 	}
 	if _, _, err := r.scan(); err != nil {
-		return r, err
-	}
-	if _, err := r.checkHistory(context.Background()); err != nil {
 		return r, err
 	}
 	r.shared = shared
@@ -363,8 +359,8 @@ func acquireWorkgroupTrace(r *Repository) error {
 }
 
 // createWorkgroupTraceDirectory builds and commits a new, empty workgroup
-// trace at root.WorkgroupTrace(id): a bare Git store and an empty
-// documents.jsonl, under the project identity crossRepoProject(id) derives,
+// trace at root.WorkgroupTrace(id), under the project identity
+// crossRepoProject(id) derives,
 // exactly as a project's own trace does, but with none of a project's
 // charter, knowledge base or entity map, which a workgroup's own trace
 // never needs.
@@ -417,39 +413,16 @@ func createWorkgroupTraceDirectory(ctx context.Context, root config.Root, id con
 			r.Close()
 		}
 	}()
-	if err := r.dir.Mkdir(".git", 0700); err != nil {
-		return nil, err
-	}
-	for _, name := range []string{".git/objects", ".git/refs/heads"} {
-		if err := r.mkdir(name); err != nil {
-			return nil, err
-		}
-	}
-	for _, f := range []struct{ name, data string }{{".git/config", gitConfig}, {".git/HEAD", "ref: refs/heads/main\n"}, {".git/osmia.lock", ""}} {
-		if err := r.writeFile(f.name, []byte(f.data)); err != nil {
-			return nil, err
-		}
-	}
 	if err := acquireWorkgroupTrace(r); err != nil {
 		return nil, err
 	}
-	// The workgroup trace's own root instance is project-shaped, so it is
-	// checked by scanTrace the same way a project's own instance is: a
-	// "project.json" manifest naming its own synthetic identity.
-	manifest := Header{Schema: "osmia.trace.project", Version: Version, ID: string(project), Revision: 1, Project: project, At: at, Actor: actor, Cause: cause}
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
+	if err := r.openLocked(true); err != nil {
 		return nil, err
 	}
-	for _, f := range []struct {
-		name string
-		data []byte
-	}{{"project.json", append(data, '\n')}, {"documents.jsonl", nil}} {
-		if err := r.writeFile(f.name, f.data); err != nil {
-			return nil, err
-		}
-	}
-	if err := r.commit(ctx, []string{"project.json", "documents.jsonl"}, "Create workgroup trace"); err != nil {
+	// The workgroup trace's own root instance is project-shaped: a
+	// "project.json" manifest naming its own synthetic identity.
+	manifest := Header{Schema: "osmia.trace.project", Version: Version, ID: string(project), Revision: 1, Project: project, At: at, Actor: actor, Cause: cause}
+	if err := r.createManifest(ctx, "project.json", manifest, nil, "Create workgroup trace"); err != nil {
 		return nil, err
 	}
 	r.shared = shared

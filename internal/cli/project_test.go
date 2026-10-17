@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // emptyFixture writes a root without a project and a local Git clone.
@@ -78,7 +79,7 @@ func TestProjectCommands(t *testing.T) {
 	var added service.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", relative, "--base-branch", "develop", "--json")), &added))
 	id := added.Project.ID
-	if err := config.CheckProjectIDs(id); err != nil || added.Project.BaseBranch != "develop" || !strings.HasSuffix(added.Project.Clone, "clone") || !strings.Contains(added.NextStep, "charter.md") {
+	if err := config.CheckProjectIDs(id); err != nil || added.Project.BaseBranch != "develop" || !strings.HasSuffix(added.Project.Clone, "clone") || !strings.Contains(added.NextStep, "osmia edit charter "+string(id)) {
 		t.Fatalf("%+v %v", added, err)
 	}
 	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
@@ -90,7 +91,7 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(status, "Project: "+string(id)+" (dagger)") || !strings.Contains(status, "Trace: "+added.Project.Trace) || strings.Contains(status, "Diagnostic") {
 		t.Fatalf("status with a project:\n%s", status)
 	}
-	if !strings.Contains(status, "Charter: empty; write numbered rules before handing in work (0 rules, revision 1) "+added.Project.Charter) {
+	if !strings.Contains(status, "Charter: empty; write numbered rules with osmia edit charter "+string(id)+" before handing in work (0 rules, revision 1)\n") {
 		t.Fatalf("status without charter rules:\n%s", status)
 	}
 	// Registration started the librarian's extraction; this service has no
@@ -121,16 +122,16 @@ func TestProjectCommands(t *testing.T) {
 		t.Fatalf("extract unknown project: %d %s %s", code, out, diag)
 	}
 	code, out, diag = invoke(t, root, "handin", string(id), "design.md")
-	if code != 4 || out != "" || diag != "charter_empty: project "+string(id)+" cannot take work: its charter has no rules; write numbered rules (\"1. ...\") in "+added.Project.Charter+"\n" {
+	if code != 4 || out != "" || !strings.HasPrefix(diag, "charter_empty: project "+string(id)+" cannot take work: its charter has no rules") || !strings.Contains(diag, "osmia edit charter "+string(id)) {
 		t.Fatalf("empty charter hand-in: %d %s %s", code, out, diag)
 	}
 	code, out, diag = invoke(t, root, "handin", project, "design.md")
 	if code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+project+" is not an active project") {
 		t.Fatalf("unknown project hand-in: %d %s %s", code, out, diag)
 	}
-	must(t, os.WriteFile(added.Project.Charter, []byte("# Charter\n1. Keep changes small.\n1. Test every fix.\n"), 0600))
+	setCharter(t, root, id, "# Charter\n1. Keep changes small.\n1. Test every fix.\n")
 	status = successful(t, root, "status")
-	if !strings.Contains(status, "Charter: ready (2 rules, revision 2) "+added.Project.Charter+"\n  charter.md:3: rule 1 is numbered 2 times") {
+	if !strings.Contains(status, "Charter: ready (2 rules, revision 2)\n  charter.md:3: rule 1 is numbered 2 times") {
 		t.Fatalf("status with charter rules:\n%s", status)
 	}
 	var st2 struct {
@@ -155,7 +156,7 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(removed, "Project "+string(id)+" (dagger) removed") || !strings.Contains(removed, "Trace: "+added.Project.Trace) || !strings.Contains(removed, "retained") {
 		t.Fatalf("remove output:\n%s", removed)
 	}
-	if _, err := os.Stat(added.Project.Charter); err != nil {
+	if _, err := os.Stat(trace.TraceDatabase(added.Project.Trace)); err != nil {
 		t.Fatal("trace deleted", err)
 	}
 	if !strings.Contains(successful(t, root, "status"), "Project: none configured") {

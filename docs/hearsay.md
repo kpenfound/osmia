@@ -91,4 +91,4 @@ Watches commit each cursor together with deduplicated event handles and chief
 notices. They cannot change feature state or restart delivered work. An outage
 retains the cursor and uses local context. A changed endpoint, principal, agent
 configuration or project scope starts a separate cursor. Tests use HTTP fixtures
-and local trace repositories; deployment with real sources is an operator step.
+and local trace databases; deployment with real sources is an operator step.

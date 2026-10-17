@@ -110,7 +110,7 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	_, err = repo.Charter(ctx, demoStart)
+	_, err = repo.Charter(ctx)
 	must(t, err)
 	input := runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, quiet}}}
 	store, _, err := runtime.Open(input)
@@ -138,7 +138,7 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	temp := filepath.Join(cfg.Root.String(), "threads", string(project), string(stream))
 	must(t, os.MkdirAll(temp, 0700))
 	must(t, os.WriteFile(filepath.Join(temp, "output.log"), []byte("session output"), 0600))
-	before := strings.TrimSpace(demoGit(t, cfg.Root.String(), "-C", mustProjectTrace(t, cfg), "rev-parse", "HEAD"))
+	before := traceCommits(t, mustProjectTrace(t, cfg))
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
 	// Terminal state alone keeps the durable trace, even after workspace cleanup.
 	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
@@ -191,9 +191,8 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(deletingDir(t, cfg), string(stream))); !os.IsNotExist(err) {
 		t.Fatalf("deleted trace left behind in the deletion staging area: %v", err)
 	}
-	after := strings.TrimSpace(demoGit(t, cfg.Root.String(), "-C", mustProjectTrace(t, cfg), "rev-parse", "HEAD"))
-	if after != before {
-		t.Fatalf("archive cleanup changed the project repository's main reference: %s, was %s", after, before)
+	if after := traceCommits(t, mustProjectTrace(t, cfg)); after != before {
+		t.Fatalf("archive cleanup committed to the project trace: %d commits, was %d", after, before)
 	}
 	// A repeated pass stays stable: it neither regresses what already
 	// cleared nor errs now that the workstream's own trace is gone.

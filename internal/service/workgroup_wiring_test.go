@@ -88,11 +88,8 @@ clone = "`+home2+`"
 		must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agentID, Project: p.ID, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: threadID}))
 		// The chief's answer to member1's question cites charter#1, which
 		// must resolve against member1's own project (through ProjectFor),
-		// exactly as newQuestionFixture's own raw charter.md write lets its
-		// citation resolve.
-		traceDir, err := cfg.Root.ProjectTrace(p.ID)
-		must(t, err)
-		must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files under the root.\n"), 0600))
+		// as in newQuestionFixture.
+		recordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
 		must(t, repo.Close())
 	}
 

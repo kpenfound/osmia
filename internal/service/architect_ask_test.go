@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -365,7 +364,7 @@ func TestArchitectQuestionParksTheRedraftUntilTheAnswerArrives(t *testing.T) {
 	}
 	// The owner edits the spec while the redraft is parked.
 	edited := strings.Replace(validSpec, "never sent again", "never sent twice", 1)
-	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(edited), 0600))
+	editDraft(t, f.c, stream, edited, "")
 
 	f.rule(t, "1")
 	f.awaitShed(t, stream, "redrafted-1", "failed-1")

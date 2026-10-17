@@ -4,8 +4,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"slices"
 	"strings"
 	"time"
@@ -62,12 +63,8 @@ func (r *Repository) reserveInboxNumber(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	r.forget()
-	if _, err := r.checkHistory(ctx); err != nil {
-		return 0, err
-	}
-	data, err := r.readFile(inboxCounterFile)
-	if err != nil && !os.IsNotExist(err) {
+	data, err := r.file(inboxCounterFile)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return 0, err
 	}
 	var c inboxCounter
@@ -81,13 +78,9 @@ func (r *Repository) reserveInboxNumber(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := r.writeFile(inboxCounterFile, append(out, '\n')); err != nil {
-		return 0, err
-	}
-	// Past this write the file is already ahead of committed history; see
-	// append's commitContent call for why the commit that reconciles it runs
-	// without the caller's cancellation.
-	if err := r.commit(context.WithoutCancel(ctx), []string{inboxCounterFile}, "Reserve inbox number"); err != nil {
+	reserve := change{message: "Reserve inbox number"}
+	reserve.setFile(inboxCounterFile, append(out, '\n'))
+	if err := r.publish(ctx, reserve); err != nil {
 		return 0, err
 	}
 	return next, nil
@@ -287,7 +280,7 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 		return entry, fmt.Errorf("%s", entry.Hold)
 	}
 	// A consolidated escalation's questions may belong to several of the
-	// workgroup's own workstreams; each is its own trace repository, so the
+	// workgroup's own workstreams; each is its own trace, so the
 	// ruling is recorded as one commit per distinct workstream the batch
 	// touches. Every one of them is checked, in the same order the single-
 	// workstream check always ran in (feature state before "already
@@ -422,7 +415,7 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 			if ws == lastPending {
 				txs[0].Events = []Event{Notice(txs[0].Transition.ID, "ruling", fmt.Sprintf("The owner ruled on inbox entry %d, %s (questions %s): %s", number, entry.Batch, strings.Join(ids, ", "), strings.TrimSpace(text)))}
 			}
-			files, _, err := sr.stage(ws, log, v, rulings, txs...)
+			files, _, err := sr.stage(ctx, ws, log, v, rulings, txs...)
 			if err != nil {
 				return err
 			}
@@ -509,7 +502,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 		byStream[ws] = append(byStream[ws], qid)
 	}
 	// The batch's questions may belong to several of the workgroup's own
-	// workstreams, each its own trace repository. A first pass across every
+	// workstreams, each its own trace. A first pass across every
 	// member the batch touches, none of its own locks held while another
 	// member's is, finds which of them are still ruled (pending this call's
 	// own relay) and which are already answered from an earlier, interrupted
@@ -619,7 +612,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 				relayed = append(relayed, next)
 				txs = append(txs, questionTransition(v, next.Header, qid, QuestionRuled, QuestionAnswered, fmt.Sprintf("The chief of staff relayed the owner's ruling on question %s with scope %s", qid, reach)))
 			}
-			files, _, err := tr.stage(ws, log, v, relayed, txs...)
+			files, _, err := tr.stage(ctx, ws, log, v, relayed, txs...)
 			if err != nil {
 				return err
 			}

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,7 +42,7 @@ func (f *architectFixture) buildOperations(t *testing.T, stream config.Workstrea
 	return out
 }
 
-// buildTransitions returns, in the order events.jsonl holds them, the
+// buildTransitions returns, in the order they were recorded, the
 // transitions of the build subject, of the unit subjects and the move to
 // building.
 func buildTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
@@ -57,19 +56,14 @@ func buildTransitions(t *testing.T, root config.Root, project config.ProjectID, 
 	return out
 }
 
-// allTransitions returns every transition of the workstream's events.jsonl,
-// in the order it holds them.
+// allTransitions returns every transition of the workstream, in the order
+// they were recorded.
 func allTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
-	data, err := os.ReadFile(workstreamTraceFile(t, root, project, stream, "events.jsonl"))
-	must(t, err)
 	var out []trace.Transition
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		if len(line) == 0 {
-			continue
-		}
+	for _, body := range workstreamRecords(t, root, project, stream, "events.jsonl") {
 		var tr trace.Transition
-		must(t, json.Unmarshal(line, &tr))
+		must(t, json.Unmarshal(body, &tr))
 		if tr.Schema == "osmia.trace.transition" {
 			out = append(out, tr)
 		}

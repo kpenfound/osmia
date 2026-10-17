@@ -277,7 +277,7 @@ func (s *Service) designSystemPrompt(ctx context.Context, cfg *config.Config, re
 	var b strings.Builder
 	b.WriteString(designRolePrompt)
 	fmt.Fprintf(&b, "\n\n## Project\nRepos in this project: %s\n", designRepoList(members))
-	charterDoc, err := repository.Charter(ctx, now)
+	charterDoc, err := repository.Charter(ctx)
 	if err != nil {
 		return "", fmt.Errorf("charter: %w", err)
 	}

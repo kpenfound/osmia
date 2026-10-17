@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -32,23 +33,36 @@ func (s *Service) chiefRepository(ctx context.Context, repository *trace.Reposit
 		host, err = repository.ChiefOfStaffHost(stream)
 		return repository, host, host, noop, err
 	}
-	_, g, _, err := repository.CrossRepoProjectSpec(id)
-	if err != nil {
-		return nil, "", "", noop, err
-	}
-	if len(g.Members) == 0 {
-		return nil, "", "", noop, fmt.Errorf("workstream %s points to cross-repo workgroup %s, which has no recorded trace", stream, id)
-	}
-	members, err := s.crossRepoMemberRepos(ctx, g)
-	if err != nil {
-		return nil, "", "", noop, err
-	}
-	wt, err := trace.OpenWorkgroupTrace(s.current().Root, id, members)
-	if wt != nil && err != nil {
-		wt.Close()
-	}
-	if err != nil {
-		return nil, "", "", noop, err
+	var g trace.Workgroup
+	var wt *trace.Repository
+	// A member can join between reading the membership and binding it;
+	// the membership is then read again.
+	for attempt := 0; ; attempt++ {
+		_, g, _, err = repository.CrossRepoProjectSpec(id)
+		if err != nil {
+			return nil, "", "", noop, err
+		}
+		if len(g.Members) == 0 {
+			return nil, "", "", noop, fmt.Errorf("workstream %s points to cross-repo workgroup %s, which has no recorded trace", stream, id)
+		}
+		members, err := s.crossRepoMemberRepos(ctx, g)
+		if err != nil {
+			return nil, "", "", noop, err
+		}
+		wt, err = trace.OpenWorkgroupTrace(s.current().Root, id, members)
+		if wt != nil && err != nil {
+			wt.Close()
+		}
+		if errors.Is(err, trace.ErrMembershipChanged) {
+			if attempt < 2 {
+				continue
+			}
+			return nil, "", "", noop, fmt.Errorf("%w: %w", errWorkgroupJoining, err)
+		}
+		if err != nil {
+			return nil, "", "", noop, err
+		}
+		break
 	}
 	host, err = wt.ChiefOfStaffHost(stream)
 	if err != nil {

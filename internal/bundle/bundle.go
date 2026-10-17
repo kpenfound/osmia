@@ -57,7 +57,7 @@ type Bundle struct {
 	// CharterNotices are the charter rules the owner ratified from rulings,
 	// in the order they were recorded in the charter.
 	CharterNotices []CharterNotice `json:"charter_notices"`
-	// CharterEdits identify direct owner edits so in-flight roles notice revised policy.
+	// CharterEdits identify the owner's edits so in-flight roles notice revised policy.
 	CharterEdits   []trace.Document `json:"charter_edits"`
 	ProjectNotices []ProjectNotice  `json:"project_notices"`
 	// ProjectSpec is the scope's workstream's workgroup's project spec,
@@ -188,26 +188,23 @@ type CharterNotice struct {
 	OwnerResponse  string              `json:"owner_response"`
 }
 
-// Files is the provider that reads only the project's local files and trace.
-// It keeps nothing between calls, so edits to the charter or the knowledge
-// base apply to the next assembly.
+// Files is the provider that reads only the project's trace. It keeps
+// nothing between calls, so edits to the charter or the knowledge base apply
+// to the next assembly.
 type Files struct {
 	Provider Provider
 	Role     string
 	// Repository returns the open trace of an active project. Files never
 	// closes it.
 	Repository func(config.ProjectID) (*trace.Repository, error)
-	// Now timestamps a charter revision recorded for an owner edit.
-	Now func() time.Time
 }
 
 var _ Provider = Files{}
 
 func (Files) Mode(config.ProjectID) Mode { return ModeFile }
 
-// Assemble reads the charter through the trace, which first records any
-// unrecorded owner edit, then the knowledge base, the entity map and the
-// rulings, in that order. The notices are the project's rulings with scope
+// Assemble reads the latest charter, then the knowledge base, the entity map
+// and the rulings, in that order. The notices are the project's rulings with scope
 // notify, ordered as the decisions are, and the charter rules ratified from
 // rulings, ordered by when the charter recorded them.
 func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Scope) (Bundle, error) {
@@ -219,7 +216,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		return Bundle{}, err
 	}
 	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}, CharterNotices: []CharterNotice{}}
-	doc, err := repo.Charter(ctx, f.now().UTC())
+	doc, err := repo.Charter(ctx)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("charter: %w", err)
 	}

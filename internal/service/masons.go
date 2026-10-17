@@ -712,7 +712,7 @@ func dependencyOrder(p plan.Plan) []plan.Unit {
 // bundle assembles the mason bundle of one unit, from the service's files
 // and this trace.
 func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
-	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
+	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }}
 	return files.Mason(ctx, m.repository.Project(), stream, unit)
 }
 

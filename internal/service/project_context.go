@@ -11,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
-	"time"
 )
 
 const projectContextTool = "project_context"
@@ -38,9 +37,6 @@ func projectContext(repo *trace.Repository, scope coreadapter.Scope) coreadapter
 			}
 			project, err := repo.ProjectFor(config.WorkstreamID(scope.Workstream))
 			if err != nil {
-				return nil, err
-			}
-			if _, err := project.Charter(ctx, time.Now().UTC()); err != nil {
 				return nil, err
 			}
 			docs, err := project.ProjectDocuments()

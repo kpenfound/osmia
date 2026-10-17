@@ -58,7 +58,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 	// Record the charter now, so /config's later read of it is the fast,
 	// read-only path (trace.Repository.Charter) rather than one that writes
 	// the first recorded revision.
-	_, err = repo.Charter(ctx, demoStart)
+	_, err = repo.Charter(ctx)
 	must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "done")

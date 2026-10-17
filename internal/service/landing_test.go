@@ -452,7 +452,7 @@ func TestStaleApprovalCannotLand(t *testing.T) {
 	if got, err := lands.current(ctx, stream, stale, result); err != nil || got != fmt.Sprintf("units/resume/review.json revision %d replaced the approval", review.Revision) {
 		t.Fatalf("an earlier review revision: %q %v", got, err)
 	}
-	f.editSpec(t, stream, staleSpec)
+	recordSpec(t, repository, stream, staleSpec)
 	got, err := lands.current(ctx, stream, in, result)
 	must(t, err)
 	if !strings.HasPrefix(got, "stale approval: stale review inputs: ") || !strings.Contains(got, "spec does not match its seal") {

@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,10 +25,11 @@ var ErrConflict = errors.New("trace revision or identity conflict")
 var ErrLocked = errors.New("trace repository already open")
 
 // Repository is a service-owned trace handle, never a target workspace handle.
-// One process holds its exclusive lock until Close; calls on that handle serialize.
-// External writers must not modify or move the repository while it is open.
+// One process holds its exclusive lock until Close. Writes on that handle
+// serialize; reads of committed records never wait on a write in progress.
+// External writers must not modify or move the trace while it is open.
 //
-// A Repository value is one Git-backed trace store directory: either the
+// A Repository value is one trace directory and its database: either the
 // project's own trace, holding only durable project knowledge (the charter,
 // the knowledge base, notes and lasting project decisions), or one
 // workstream's dedicated trace, holding that workstream's complete trace.
@@ -82,12 +84,19 @@ type Repository struct {
 	project         config.ProjectID
 	stream          config.WorkstreamID
 	directory       string
-	dir             *os.Root
 	lock            *os.File
 	session         string
 	wake            *coreadapter.WakeAdapter
 	failPublication func(string) error
 	observer        atomic.Pointer[func(Commit)]
+	// db is the write connection and reads the read-only pool of the
+	// trace's database.
+	db    *sql.DB
+	reads *sql.DB
+	// cache holds the trace's decoded records under its own lock.
+	cache recordCache
+	// decoded counts the stored records this handle decoded.
+	decoded atomic.Uint64
 	// parent is the project instance that opened this workstream instance
 	// through scoped, nil on the project's own instance. observed delegates
 	// to it so that Observe, called once on the project instance, also
@@ -102,55 +111,11 @@ type Repository struct {
 	// closed is set under workstreamsMu once Close has begun, so a scoped
 	// call racing it never opens a child Close could miss.
 	closed bool
-	// gitMu guards what the handle remembers about the Git store: the tree
-	// listing of the commit treeHead and the object files already flushed.
-	gitMu    sync.Mutex
-	tree     map[string]string
-	treeHead string
-	synced   map[string]bool
-	// recordFiles holds, under mu, the bytes of each valid JSONL file with its
-	// decoded records.
-	recordFiles map[string]recordFile
-	// generation counts the handle's changes to the files of the trace.
-	// scanned and history, under mu, are the latest scan and history check,
-	// reused while generation is unchanged and, for history, HEAD has not
-	// moved: the lock keeps other writers out, so the files change only
-	// when the handle writes them.
+	// generation counts the commits that landed in this trace.
 	generation atomic.Uint64
-	scanned    *scannedTrace
-	history    *checkedHistory
-	// verified holds, under mu, each trace file checkHistory read and checked
-	// with a trusted status, by path, so a later check reads only the files
-	// whose status changed.
-	verified map[string]verifiedFile
-	// workflows holds each workstream's latest loaded workflow, under mu.
+	// workflows holds each workstream's committed workflow, under mu.
 	workflows map[config.WorkstreamID]*cachedWorkflow
 }
-
-// scannedTrace is a scan the handle made at generation.
-type scannedTrace struct {
-	generation uint64
-	records    []Record
-	streams    []config.WorkstreamID
-	err        error
-}
-
-// checkedHistory is a history check the handle made at generation, against
-// the commit head.
-type checkedHistory struct {
-	generation uint64
-	head       string
-	files      *treeFiles
-}
-
-// changed records that the handle changed the files of the trace, so the
-// next scan and history check read them again.
-func (r *Repository) changed() { r.generation.Add(1) }
-
-// forget drops the remembered scan and history check. A write calls it
-// before it checks the trace, so a file changed from outside the handle is
-// reported as uncommitted rather than written over or committed.
-func (r *Repository) forget() { r.scanned, r.history = nil, nil }
 
 func location(root config.Root, project config.Project) (string, error) {
 	directory, err := root.ProjectTrace(project.ID)
@@ -196,25 +161,22 @@ func openWorkstreamDirectory(root config.Root, project config.ProjectID, stream 
 }
 
 func openStoreDirectory(root config.Root, project config.ProjectID, stream config.WorkstreamID, directory string) (*Repository, error) {
-	rel, err := filepath.Rel(root.String(), directory)
+	if _, err := filepath.Rel(root.String(), directory); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(directory)
 	if err != nil {
 		return nil, err
 	}
-	base, err := os.OpenRoot(root.String())
-	if err != nil {
-		return nil, err
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s: trace must be a directory", directory)
 	}
-	defer base.Close()
-	dir, err := base.OpenRoot(rel)
-	if err != nil {
-		return nil, err
-	}
-	return &Repository{root: root, project: project, stream: stream, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}, nil
+	return &Repository{root: root, project: project, stream: stream, directory: directory, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}, nil
 }
 
 // scoped returns the Repository instance that owns the files of the given
 // workstream of a project's own trace instance, opening and recovering its
-// dedicated trace repository on this handle's first use of it. An empty id
+// dedicated trace on this handle's first use of it. An empty id
 // returns r itself: the project's own instance. Calling scoped on a
 // workstream instance, or with a workstream not already known to this
 // project instance, is a programming error the caller must rule out first
@@ -295,13 +257,7 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 			s.closeFiles()
 		}
 	}()
-	if err := s.checkGit(); err != nil {
-		return nil, err
-	}
-	if err := s.acquire(); err != nil {
-		return nil, err
-	}
-	if err := s.recoverPublication(context.Background()); err != nil {
+	if err := s.openDatabase(false); err != nil {
 		return nil, err
 	}
 	if r.workstreams == nil {
@@ -451,29 +407,6 @@ func (r *Repository) scanAll() ([]Record, []config.WorkstreamID, error) {
 	}
 	return records, streams, nil
 }
-func (r *Repository) acquire() error {
-	if err := r.checked(".git/osmia.lock"); err != nil {
-		return err
-	}
-	f, err := r.dir.OpenFile(".git/osmia.lock", os.O_RDWR|syscall.O_NOFOLLOW, 0600)
-	if err != nil {
-		return err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return fmt.Errorf("%w: %v", ErrLocked, err)
-	}
-	r.lock = f
-	return nil
-}
-
-// Commit names the paths one published trace commit wrote or removed, and
-// holds the content it wrote for those paths whose bytes the commit was given
-// rather than read from the work tree. Observers must not modify it.
-type Commit struct {
-	Paths   []string
-	Content map[string][]byte
-}
 
 // Observe calls f after each commit this handle publishes, replacing any
 // earlier observer. f runs while the handle's lock is held, so it must return
@@ -534,7 +467,7 @@ func (r *Repository) Close() error {
 	return errors.Join(errs...)
 }
 
-// closeFiles releases this instance's own flock and directory handle,
+// closeFiles releases this instance's own flock and database,
 // without operationMu: scoped's failure path uses it to release a
 // workstream instance it opened but could not finish opening, which may run
 // inside a callback that already holds operationMu, such as Serialize's
@@ -543,7 +476,10 @@ func (r *Repository) Close() error {
 func (r *Repository) closeFiles() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.cache.mu.Lock()
+	defer r.cache.mu.Unlock()
 	var errs []error
+	errs = append(errs, r.closeDatabases())
 	if r.lock != nil {
 		// A child process forked but not yet executed shares the open file,
 		// so closing alone would leave the lock held until it executes.
@@ -554,8 +490,8 @@ func (r *Repository) closeFiles() error {
 		r.processLock.Unlock()
 		r.processLock = nil
 	}
-	r.recordFiles, r.scanned, r.history, r.verified, r.workflows = nil, nil, nil, nil, nil
-	errs = append(errs, r.dir.Close())
+	r.resetCache()
+	r.workflows = nil
 	return errors.Join(errs...)
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
@@ -610,7 +546,7 @@ const (
 	EntitiesDocument = "kb-entities"
 )
 
-// ownerActor records edits the owner made to project documents on disk.
+// ownerActor records the owner's edits of project and workstream documents.
 var ownerActor = Actor{Kind: "owner", ID: "local"}
 
 func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause string, revision int, content string) Document {
@@ -619,42 +555,27 @@ func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause 
 
 // Charter returns the latest recorded charter revision. Creation records the
 // template as the first on the default repo; member repos use that authority.
-// When charter.md differs from the latest revision, or
-// none is recorded, the file is first recorded as a new revision by the owner,
-// so every owner edit is versioned before it is used. A read with no edit
-// records nothing.
-func (r *Repository) Charter(ctx context.Context, at time.Time) (Document, error) {
+// A charter with no recorded revision is fs.ErrNotExist.
+func (r *Repository) Charter(ctx context.Context) (Document, error) {
 	r, err := r.CharterRepository()
 	if err != nil {
 		return Document{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Document{}, err
 	}
-	data, err := r.readFile("charter.md")
+	records, err := r.records(func(v Record) bool {
+		d, ok := v.(Document)
+		return ok && d.Workstream == "" && d.Path == "charter.md"
+	})
 	if err != nil {
 		return Document{}, err
 	}
-	records, _, err := r.scan()
-	if err != nil {
-		return Document{}, err
+	latest, ok := latestCharter(records)
+	if !ok {
+		return Document{}, fmt.Errorf("charter.md: %w", fs.ErrNotExist)
 	}
-	next := charterRevision(r.project, at, ownerActor, "owner-edit", 1, string(data))
-	if latest, ok := latestCharter(records); ok {
-		if latest.Content == next.Content {
-			return latest, nil
-		}
-		next.ID, next.Revision = latest.ID, latest.Revision+1
-	}
-	// The file already holds this content; rewriting it could overwrite a
-	// newer edit, which the next read then records. The commit takes the
-	// recorded bytes, not the file.
-	if err := r.append(ctx, next, false); err != nil {
-		return Document{}, err
-	}
-	return next, nil
+	return latest, nil
 }
 
 func latestCharter(records []Record) (Document, bool) {
@@ -668,9 +589,8 @@ func latestCharter(records []Record) (Document, bool) {
 	return latest, found
 }
 
-// Create initializes a dedicated local repository in an existing configuration
-// directory or a new project directory. It refuses any existing trace or Git
-// metadata. The entity map file starts as "{}" with no document revision.
+// Create initializes a project's trace database in an existing configuration
+// directory or a new project directory. It refuses any existing trace.
 func Create(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor) (*Repository, error) {
 	return createTrace(ctx, root, project, at, actor, nil)
 }
@@ -695,31 +615,18 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
-	var documents []byte
+	var records []Record
 	if project.IsDefaultRepo() {
-		documents, err = json.Marshal(charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
-		if err != nil {
-			return nil, err
-		}
-		documents = append(documents, '\n')
+		records = append(records, charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
 	}
-	if entities == nil {
-		entities = []byte("{}\n")
-	} else {
+	if entities != nil {
 		d := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: project.ID, At: at, Actor: actor, Cause: "project-create"}, Path: EntitiesPath, Content: string(entities)}
 		if err := validate(d); err != nil {
 			return nil, err
 		}
-		line, err := json.Marshal(d)
-		if err != nil {
-			return nil, err
-		}
-		documents = append(documents, append(line, '\n')...)
+		records = append(records, d)
 	}
 	if err := os.MkdirAll(root.String(), 0700); err != nil {
-		return nil, err
-	}
-	if _, err := root.ProjectTrace(project.ID); err != nil {
 		return nil, err
 	}
 	rel, err := filepath.Rel(root.String(), directory)
@@ -735,6 +642,16 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
+	// Only the project's existing configuration may precede trace creation.
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.Name() != "config.toml" {
+			return nil, fmt.Errorf("%w: %s already contains %s", ErrConflict, directory, e.Name())
+		}
+	}
 	r, err := openDirectory(root, project)
 	if err != nil {
 		return nil, err
@@ -745,90 +662,52 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 			r.Close()
 		}
 	}()
-	// Only the project's existing configuration may precede trace initialization.
-	entries, err := fs.ReadDir(r.dir.FS(), ".")
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		if e.Name() != "config.toml" {
-			return nil, fmt.Errorf("%w: %s already contains %s", ErrConflict, directory, e.Name())
-		}
-		if err := r.checked(e.Name()); err != nil {
-			return nil, err
-		}
-	}
-	// Mkdir reserves initialization across competing creators before any Git write.
-	if err := r.dir.Mkdir(".git", 0700); err != nil {
-		return nil, err
-	}
-	for _, name := range []string{".git/objects", ".git/refs/heads", "kb", "notes"} {
-		if err := r.mkdir(name); err != nil {
-			return nil, err
-		}
-	}
-	for _, f := range []struct{ name, data string }{{".git/config", gitConfig}, {".git/HEAD", "ref: refs/heads/main\n"}, {".git/osmia.lock", ""}} {
-		if err := r.writeFile(f.name, []byte(f.data)); err != nil {
-			return nil, err
-		}
-	}
-	if err := r.acquire(); err != nil {
+	if err := r.openDatabase(true); err != nil {
 		return nil, err
 	}
 	manifest := Header{Schema: "osmia.trace.project", Version: Version, ID: string(project.ID), Revision: 1, Project: project.ID, At: at, Actor: actor, Cause: "project-create"}
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	files := []struct {
-		name string
-		data []byte
-	}{{"project.json", append(data, '\n')}, {EntitiesPath, entities}, {"documents.jsonl", documents}}
-	paths := []string{"project.json", EntitiesPath, "documents.jsonl"}
-	if project.IsDefaultRepo() {
-		files = append(files, struct {
-			name string
-			data []byte
-		}{"charter.md", []byte(CharterTemplate)})
-		paths = append(paths, "charter.md")
-	}
-	for _, f := range files {
-		if err := r.writeFile(f.name, f.data); err != nil {
-			return nil, err
-		}
-	}
-	if err := r.commit(ctx, paths, "Create project trace"); err != nil {
+	if err := r.createManifest(ctx, "project.json", manifest, records, "Create project trace"); err != nil {
 		return nil, err
 	}
 	ok = true
 	return r, nil
 }
 
-// Open finishes journaled workflow publication without rewriting committed history,
-// for the project trace and for every workstream that has its own trace
-// directory. If records are corrupt it returns both a handle and a
-// diagnostic error; callers must Close that handle. Read returns valid
-// records with corruption diagnostics.
+// createManifest requires a new, empty trace. It commits the trace's
+// manifest, m under header h, at name together with records.
+func (r *Repository) createManifest(ctx context.Context, name string, m any, records []Record, message string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var one int
+	if err := r.db.QueryRowContext(ctx, "SELECT 1 FROM files WHERE path = ?", name).Scan(&one); err == nil {
+		return fmt.Errorf("%w: %s already holds a trace", ErrConflict, r.directory)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	c := change{records: records, message: message}
+	c.setFile(name, append(data, '\n'))
+	return r.publish(ctx, c)
+}
+
+// Open opens the project's trace and every workstream that has its own
+// trace directory, checking each database's integrity. If records are corrupt
+// it returns both a handle and a diagnostic error; callers must Close that
+// handle. Read returns valid records with corruption diagnostics.
 func Open(root config.Root, project config.Project) (*Repository, error) {
 	r, err := openDirectory(root, project)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.checkGit(); err != nil {
+	if err := r.openDatabase(false); err != nil {
 		r.Close()
 		return nil, err
 	}
-	if err := r.acquire(); err != nil {
-		r.Close()
-		return nil, err
-	}
-	if err := r.recoverPublication(context.Background()); err != nil {
+	if _, _, err := r.scan(); err != nil {
 		return r, err
-	}
-	_, _, err = r.scan()
-	_, historyErr := r.checkHistory(context.Background())
-	if joined := errors.Join(err, historyErr); joined != nil {
-		return r, joined
 	}
 	ids, err := r.diskStreams()
 	if err != nil {
@@ -843,9 +722,6 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 		}
 		s.mu.Lock()
 		_, streams, err := s.scan()
-		if err == nil {
-			_, err = s.checkHistory(context.Background())
-		}
 		if err == nil {
 			err = s.checkWorkflows(streams)
 		}
@@ -877,13 +753,8 @@ type manifestRecord struct {
 	Title      string `json:"title,omitempty"`
 }
 
-func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) error {
-	_, err := r.readManifest(name, schema, stream)
-	return err
-}
-
 func (r *Repository) readManifest(name, schema string, stream config.WorkstreamID) (manifestRecord, error) {
-	data, err := r.readFile(name)
+	data, err := r.file(name)
 	if err != nil {
 		return manifestRecord{}, err
 	}
@@ -988,9 +859,6 @@ func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 // is the workstream's creation time.
 func (r *Repository) workstreamManifest(stream config.WorkstreamID) (manifestRecord, error) {
 	name := "workstreams/" + string(stream) + "/workstream.json"
-	if err := r.checked(name); err != nil {
-		return manifestRecord{}, err
-	}
 	return r.readManifest(name, "osmia.trace.workstream", stream)
 }
 
@@ -1027,19 +895,16 @@ func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.Workstrea
 	return err
 }
 
-// createWorkstreamTrace creates and commits id's own dedicated trace
-// repository, whose manifest is m under a header recording cause. It refuses
-// an existing directory with ErrConflict.
+// createWorkstreamTrace creates and commits id's own dedicated trace, whose
+// manifest is m under a header recording cause. It refuses an existing
+// directory with ErrConflict.
 //
-// The repository is built under a staging directory outside
-// WorkstreamTraces and only moved into its final place, by one atomic
-// rename, once its Git history is committed. A directory listing of
-// WorkstreamTraces (diskStreams, which every concurrent read and background
-// pass uses to discover a project's workstreams) therefore never observes
-// the workstream until its trace is complete; without this, a pass that
-// opened the workstream the instant its bare directory appeared, before
-// checkGit had anything to check, would fail with a stray Git repository
-// does not exist error and could bring the service down.
+// The trace is built under a staging directory outside WorkstreamTraces and
+// only moved into its final place, by one atomic rename, once its database
+// holds the manifest and is closed. A directory listing of WorkstreamTraces
+// (diskStreams, which every concurrent read and background pass uses to
+// discover a project's workstreams) therefore never observes the workstream
+// before its trace is complete.
 func createWorkstreamTrace(ctx context.Context, root config.Root, project config.ProjectID, id config.WorkstreamID, m manifestRecord, cause, message string, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
@@ -1087,41 +952,15 @@ func createWorkstreamTrace(ctx context.Context, root config.Root, project config
 	}
 	if err := func() error {
 		defer s.Close()
-		prefix := "workstreams/" + string(id)
-		if err := s.dir.Mkdir(".git", 0700); err != nil {
-			return err
-		}
-		for _, name := range []string{".git/objects", ".git/refs/heads", prefix, prefix + "/handed", prefix + "/shed", prefix + "/amendments", prefix + "/questions", prefix + "/units", prefix + "/agents"} {
-			if err := s.mkdir(name); err != nil {
-				return err
-			}
-		}
-		for _, f := range []struct{ name, data string }{{".git/config", gitConfig}, {".git/HEAD", "ref: refs/heads/main\n"}, {".git/osmia.lock", ""}} {
-			if err := s.writeFile(f.name, []byte(f.data)); err != nil {
-				return err
-			}
-		}
-		if err := s.acquire(); err != nil {
+		if err := s.openDatabase(true); err != nil {
 			return err
 		}
 		m.Header = Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: project, Workstream: id, At: at, Actor: actor, Cause: cause}
-		data, err := json.MarshalIndent(m, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := s.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
-			return err
-		}
-		paths := []string{prefix + "/workstream.json"}
-		for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-			name = prefix + "/" + name
-			if err := s.writeFile(name, nil); err != nil {
-				return err
-			}
-			paths = append(paths, name)
-		}
-		return s.commit(ctx, paths, message)
+		return s.createManifest(ctx, "workstreams/"+string(id)+"/workstream.json", m, nil, message)
 	}(); err != nil {
+		return err
+	}
+	if err := syncDirectory(build); err != nil {
 		return err
 	}
 	if err := os.Rename(build, directory); err != nil {
@@ -1130,12 +969,15 @@ func createWorkstreamTrace(ctx context.Context, root config.Root, project config
 		}
 		return err
 	}
+	if err := syncDirectory(base); err != nil {
+		return err
+	}
 	ok = true
 	return nil
 }
 
 // CreateSessionWorkstream commits a new session workstream in its own
-// dedicated trace repository: its kind, its fixed profile, the base commit it
+// dedicated trace: its kind, its fixed profile, the base commit it
 // opened from, its branch and its optional title. It creates no
 // chief-of-staff thread: a session has none. An existing workstream is
 // refused with ErrConflict.
@@ -1159,8 +1001,8 @@ func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
 	return r.diskStreams()
 }
 
-// Generation reports how many changes this handle has made to the files of
-// the trace. It never decreases while the handle is open, and it is
+// Generation reports how many commits landed in the trace through this
+// handle. It never decreases while the handle is open, and it is
 // unchanged exactly when no write landed between two calls: a caller that
 // assembles a response from several separate reads can call it before and
 // after and retry the assembly when it differs, so the response never mixes
@@ -1212,159 +1054,9 @@ func revision(previous, next Record) error {
 	return nil
 }
 
-func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
-	return r.scanFiles(nil)
-}
-
-// scanFiles is scan over the files checkHistory returned under the same
-// lock, which it reads rather than walking and reading the trace again. A
-// scan the handle made since it last changed the files is reused; each call
-// receives its own copy of the records.
-func (r *Repository) scanFiles(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
-	if err := r.recoverPublication(context.Background()); err != nil {
-		return nil, nil, err
-	}
-	generation := r.generation.Load()
-	if s := r.scanned; s == nil || s.generation != generation {
-		records, streams, err := r.scanTrace(checked)
-		r.scanned = &scannedTrace{generation: generation, records: records, streams: streams, err: err}
-	}
-	s := r.scanned
-	records := make([]Record, len(s.records))
-	for i, v := range s.records {
-		records[i] = cloneRecord(v)
-	}
-	return records, slices.Clone(s.streams), s.err
-}
-
-// scanTrace reads and checks every record of the trace, as scanFiles
-// describes. On the project's own instance it reads only durable project
-// knowledge: the project manifest and whatever project documents
-// documents.jsonl holds. On a workstream's own instance it reads only that
-// workstream's own manifest and files. Neither instance's directory holds
-// the other's files, so this never crosses into another store.
-func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
-	read := func(name string) ([]byte, error) {
-		if data, ok := checked.read(name); ok {
-			return data, nil
-		}
-		return r.readFile(name)
-	}
-	manifest := func(name, schema string, stream config.WorkstreamID) error {
-		data, err := read(name)
-		if err != nil {
-			return err
-		}
-		_, err = r.decodeManifest(name, data, schema, stream)
-		return err
-	}
-	var diagnostics []error
-	var streams []config.WorkstreamID
-	known := map[config.WorkstreamID]bool{}
-	var required []string
-	if r.stream == "" {
-		if err := manifest("project.json", "osmia.trace.project", ""); err != nil {
-			return nil, nil, err
-		}
-		required = append(required, "documents.jsonl")
-	} else {
-		prefix := "workstreams/" + string(r.stream)
-		if err := manifest(prefix+"/workstream.json", "osmia.trace.workstream", r.stream); err != nil {
-			return nil, nil, err
-		}
-		known[r.stream] = true
-		streams = append(streams, r.stream)
-		for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-			required = append(required, prefix+"/"+name)
-		}
-	}
-	for _, name := range required {
-		if _, err := read(name); err != nil {
-			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-	var err error
-	var records []Record
-	files := map[string]recordFile{}
-	latest := map[string]Record{}
-	documents := map[string]string{}
-	recordFile := func(name string) bool {
-		parts := strings.Split(name, "/")
-		// Handed documents retain their original name and content.
-		return strings.HasSuffix(name, ".jsonl") && !(len(parts) == 4 && parts[0] == "workstreams" && parts[2] == "handed")
-	}
-	decodeFile := func(name string, data []byte, err error) {
-		if err != nil {
-			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
-			return
-		}
-		cached := r.decodedRecords(name, data)
-		valid := true
-		for i, decoded := range cached.records {
-			v, err := cloneRecord(decoded.record), decoded.err
-			if err == nil {
-				h := v.header()
-				if (h.Project != r.project && !r.importedConversationRecord(v, checked)) || (h.Workstream != "" && !known[h.Workstream]) || recordPath(v) != name {
-					err = fmt.Errorf("record identity does not match its trace path")
-				}
-			}
-			if err == nil {
-				err = revision(latest[recordKey(v)], v)
-			}
-			if err == nil {
-				if d, ok := v.(Document); ok {
-					p := scopePath(d.Header) + d.Path
-					if id, ok := documents[p]; ok && id != d.ID {
-						err = fmt.Errorf("document path has multiple identities")
-					}
-					documents[p] = d.ID
-				}
-			}
-			if err != nil {
-				valid = false
-				diagnostics = append(diagnostics, fmt.Errorf("%s:%d: %w", name, i+1, err))
-				continue
-			}
-			latest[recordKey(v)] = v
-			records = append(records, v)
-		}
-		if valid {
-			files[name] = cached
-		}
-	}
-	if checked != nil {
-		for _, name := range checked.names {
-			if !recordFile(name) {
-				continue
-			}
-			data, ok := checked.read(name)
-			if !ok {
-				data, err = r.readCheckedFile(name)
-			}
-			decodeFile(name, data, err)
-		}
-		err = nil
-	} else {
-		err = r.walk(func(parent *os.Root, name string, entry fs.DirEntry) error {
-			if !entry.IsDir() && recordFile(name) {
-				data, err := readEntry(parent, name, entry)
-				decodeFile(name, data, err)
-			}
-			return nil
-		})
-	}
-	r.recordFiles = files
-	diagnostics = append(diagnostics, err)
-	return records, streams, errors.Join(diagnostics...)
-}
-
-// Append retains every revision in JSONL and commits the affected ordinary files.
-// A file or Git failure is reported without claiming a workflow transaction;
-// records already written remain available for later reconciliation. A
-// project charter revision is refused with ErrConflict unless charter.md
-// matches the latest recorded revision; Charter records owner edits. Status
-// and priority records are refused with ErrConflict: SetStatus and
-// SetPriority are their only writers.
+// Append records one revision as its own commit. A project charter revision
+// belongs to the charter's project. Status and priority records are refused
+// with ErrConflict: SetStatus and SetPriority are their only writers.
 func (r *Repository) Append(ctx context.Context, v Record) error {
 	switch v.(type) {
 	case Status:
@@ -1378,12 +1070,12 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.append(ctx, v, true)
+	return r.append(ctx, v)
 }
 
-// append requires r.mu. writeDocument false leaves a document's ordinary file
-// as it is on disk.
-func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) error {
+// append requires r.mu. It checks v against the committed records of its
+// identity and path alone, and commits it.
+func (r *Repository) append(ctx context.Context, v Record) error {
 	if err := validate(v); err != nil {
 		return err
 	}
@@ -1396,23 +1088,8 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	r.forget()
-	checked, err := r.checkHistory(ctx)
-	if err != nil {
-		return err
-	}
-	records, streams, err := r.scanFiles(checked)
-	if err != nil {
-		return err
-	}
-	if id := v.header().Workstream; id != "" {
-		found := false
-		for _, s := range streams {
-			found = found || s == id
-		}
-		if !found {
-			return fmt.Errorf("unknown workstream %s", id)
-		}
+	if id := v.header().Workstream; id != "" && id != r.stream {
+		return fmt.Errorf("unknown workstream %s", id)
 	}
 	var agentID string
 	switch rec := v.(type) {
@@ -1441,101 +1118,76 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 			return fmt.Errorf("%w: workflow transitions are immutable", ErrConflict)
 		}
 	}
-	var previous Record
-	for _, old := range records {
-		if recordKey(old) == recordKey(v) {
-			previous = old
-		}
-		if d, ok := v.(Document); ok {
-			if p, ok := old.(Document); ok && p.Workstream == d.Workstream && p.Path == d.Path && p.ID != d.ID {
-				return fmt.Errorf("%w: document path already has an identity", ErrConflict)
-			}
-		}
-	}
-	if err := revision(previous, v); err != nil {
+	if err := r.checkRevisions(ctx, []Record{v}); err != nil {
 		return err
 	}
-	// The owner edits charter.md directly. Writing over an edit Charter has
-	// not recorded would lose it.
-	if d, ok := v.(Document); ok && writeDocument && d.Workstream == "" && d.Path == "charter.md" {
-		latest, _ := latestCharter(records)
-		current, err := r.readFile("charter.md")
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		if err == nil && string(current) != latest.Content {
-			return fmt.Errorf("%w: charter.md has an unrecorded owner edit; read the charter first", ErrConflict)
-		}
-	}
-	name := recordPath(v)
-	paths := []string{name}
-	if d, ok := v.(Document); ok {
-		paths = append(paths, scopePath(d.Header)+d.Path)
-	}
-	// Validate every destination before the first write.
-	for _, name := range paths {
-		if err := r.checked(name); err != nil {
-			return err
-		}
-	}
-	data, err := r.readFile(name)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	line, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	data = append(data, append(line, '\n')...)
-	if err := r.writeFile(name, data); err != nil {
-		return err
-	}
-	if d, ok := v.(Document); ok && writeDocument {
-		if err := r.writeFile(paths[1], []byte(d.Content)); err != nil {
-			return err
-		}
-	}
-	content := map[string][]byte{}
-	if d, ok := v.(Document); ok {
-		content[paths[1]] = []byte(d.Content)
-	}
-	// The ordinary files above are already ahead of committed history: a
-	// cancellation from here on cannot roll them back, only leave them
-	// requiring reconciliation, so the commit that reconciles them runs
-	// without the caller's cancellation, as publishTree's materialization
-	// does once it is past its own point of no return. A genuine Git
-	// failure, such as another writer's lock, still fails normally.
-	return r.commitContent(context.WithoutCancel(ctx), paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
+	return r.publish(ctx, change{records: []Record{v}, message: fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision)})
 }
 
-// Read returns all valid revisions of T in file order, with path/line diagnostics
-// for any damaged history. Callers must not ignore an accompanying error.
+// checkRevisions requires r.mu. It checks that each of records, in order,
+// is the next revision of its record with a stable identity, and that a
+// document's path has no other identity, against the committed records of
+// those identities and paths alone.
+func (r *Repository) checkRevisions(ctx context.Context, records []Record) error {
+	pending := map[string]Record{}
+	paths := map[string]string{}
+	for _, v := range records {
+		k := recordKey(v)
+		previous, ok := pending[k]
+		if !ok {
+			var err error
+			if previous, err = r.latestRevision(ctx, r.db, v); err != nil {
+				return err
+			}
+		}
+		if err := revision(previous, v); err != nil {
+			return err
+		}
+		if d, ok := v.(Document); ok {
+			p := scopePath(d.Header) + d.Path
+			id, known := paths[p]
+			if !known {
+				var err error
+				if id, known, err = documentIdentity(ctx, r.db, d.Workstream, d.Path); err != nil {
+					return err
+				}
+			}
+			if known && id != d.ID {
+				return fmt.Errorf("%w: document path already has an identity", ErrConflict)
+			}
+			paths[p] = d.ID
+		}
+		pending[k] = v
+	}
+	return nil
+}
+
+// Read returns all valid revisions of T in seq order, with diagnostics naming
+// the path and row of any damaged record. Callers must not ignore an
+// accompanying error. It never waits on a write in progress.
 func Read[T Record](r *Repository, stream config.WorkstreamID) ([]T, error) {
 	if stream != "" {
 		if err := config.CheckWorkstreamIDs(stream); err != nil {
 			return nil, err
 		}
 	}
-	target, err := r.lockQuestionRead(stream)
+	target, err := r.questionRead(stream)
 	if err != nil {
 		return nil, err
 	}
-	defer target.mu.Unlock()
-	records, streams, err := target.scan()
-	if stream != "" {
-		found := false
-		for _, id := range streams {
-			found = found || id == stream
-		}
-		if !found {
-			err = errors.Join(err, fmt.Errorf("unknown workstream %s", stream))
-		}
+	records, err := target.records(func(v Record) bool {
+		_, ok := v.(T)
+		return ok && v.header().Workstream == stream
+	})
+	if stream != "" && target.stream != stream {
+		err = errors.Join(err, fmt.Errorf("unknown workstream %s", stream))
 	}
-	var result []T
+	result := make([]T, 0, len(records))
 	for _, v := range records {
-		if t, ok := v.(T); ok && v.header().Workstream == stream {
-			result = append(result, t)
-		}
+		result = append(result, v.(T))
+	}
+	if len(result) == 0 {
+		result = nil
 	}
 	return result, err
 }

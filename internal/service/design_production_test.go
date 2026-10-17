@@ -196,7 +196,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 	added, err := f.c.AddProject(ctx, request(clone))
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte(shedCharter), 0600))
+	writeCharter(t, f.c, added.Project.ID, shedCharter)
 	main := f.upstream(t)
 	f.repos = append(f.repos, productionDesignRepo{f.project, clone, "dagger/dagger", filepath.Join(filepath.Dir(clone), "remotes", "dagger", "dagger.git"), main})
 	home := filepath.Dir(clone)

@@ -478,10 +478,19 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 // staleSpec is validSpec as the owner edits it after the seal.
 const staleSpec = validSpec + "9. Something new.\n"
 
-// editSpec writes the workstream's spec.md on disk, as the owner does.
+// editSpec records content as the workstream's next spec revision, through
+// the running service's trace or, while the service is stopped, a handle of
+// its own.
 func (f *shedFixture) editSpec(t *testing.T, stream config.WorkstreamID, content string) {
 	t.Helper()
-	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(content), 0600))
+	if active := f.s.sole(); active != nil {
+		recordSpec(t, active.repository, stream, content)
+		return
+	}
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	recordSpec(t, repo, stream, content)
 }
 
 // blocks returns the reasons the mason controller recorded the unit of the

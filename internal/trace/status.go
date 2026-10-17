@@ -150,7 +150,7 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 	content.Agents = slices.Clone(content.Agents)
 	v := Status{Header: Header{Schema: "osmia.trace.status", Version: Version, ID: StatusID, Revision: revision, Project: r.project, Workstream: stream,
 		At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: q.Request.ID, Depth: q.Request.Depth + 1}, StatusContent: content}
-	if err := r.append(ctx, v, true); err != nil {
+	if err := r.append(ctx, v); err != nil {
 		return 0, err
 	}
 	return revision, nil

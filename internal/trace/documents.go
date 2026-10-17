@@ -2,11 +2,7 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"maps"
-	"os"
-	"slices"
 	"strings"
 )
 
@@ -17,14 +13,12 @@ func prose(p string) bool {
 }
 
 // RecordDocuments records document revisions of one scope, the project or one
-// workstream, as one commit: after a failure or an interruption either every
-// revision is recorded or none is. A kb/<subsystem>.md revision with empty
-// content records the subsystem's removal, and its file is deleted. The
-// charter is owner-edited and handed input is immutable, so neither can be
-// recorded this way, and a revision of spec.md or plan.json is refused with
-// ErrConflict while the file holds an owner edit no revision records: the
-// edit is read and recorded first. Revisions are checked against the recorded
-// history before anything is written.
+// workstream, as one commit: either every revision is recorded or none is. A
+// kb/<subsystem>.md revision with empty content records the subsystem's
+// removal. The charter is recorded through EditCharter and handed input is
+// immutable, so neither can be recorded this way. Revisions are checked
+// against the recorded history of their own documents before anything is
+// written.
 func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error {
 	if len(docs) == 0 {
 		return fmt.Errorf("no documents to record")
@@ -35,11 +29,11 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	files, removed, err := r.documentFiles(ctx, docs)
+	c, err := r.documentFiles(ctx, docs)
 	if err != nil {
 		return err
 	}
-	return r.publishTree(ctx, files, removed)
+	return r.publish(ctx, c)
 }
 
 // RecordDocumentsWith records document revisions of one workstream as
@@ -60,7 +54,7 @@ func (r *Repository) RecordDocumentsWith(ctx context.Context, docs []Document, t
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	files, removed, err := r.documentFiles(ctx, docs)
+	c, err := r.documentFiles(ctx, docs)
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +67,12 @@ func (r *Repository) RecordDocumentsWith(ctx context.Context, docs []Document, t
 	if err != nil {
 		return nil, err
 	}
-	staged, states, err := r.stage(stream, log, v, nil, txs...)
+	staged, states, err := r.stage(ctx, stream, log, v, nil, txs...)
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(files, staged)
-	if err := r.publishTree(ctx, files, removed); err != nil {
+	c.add(staged)
+	if err := r.publish(ctx, c); err != nil {
 		return nil, err
 	}
 	_ = r.wake.Notify(context.Background())
@@ -86,103 +80,50 @@ func (r *Repository) RecordDocumentsWith(ctx context.Context, docs []Document, t
 }
 
 // documentFiles requires r.mu. It checks the document revisions of one scope
-// against the recorded history and returns the files of the commit that
-// records them and the paths it removes.
-func (r *Repository) documentFiles(ctx context.Context, docs []Document) (map[string][]byte, []string, error) {
+// against the recorded history of their own documents and paths, and returns
+// the commit that records them.
+func (r *Repository) documentFiles(ctx context.Context, docs []Document) (change, error) {
 	if len(docs) == 0 {
-		return nil, nil, fmt.Errorf("no documents to record")
+		return change{}, fmt.Errorf("no documents to record")
 	}
 	scope := docs[0].Workstream
 	keys := map[string]bool{}
+	paths := map[string]bool{}
+	records := make([]Record, 0, len(docs))
 	for _, d := range docs {
 		if err := validate(d); err != nil {
-			return nil, nil, err
+			return change{}, err
 		}
 		if d.Project != r.project {
-			return nil, nil, fmt.Errorf("document belongs to another project")
+			return change{}, fmt.Errorf("document belongs to another project")
 		}
 		if d.Workstream != scope {
-			return nil, nil, fmt.Errorf("documents belong to different scopes")
+			return change{}, fmt.Errorf("documents belong to different scopes")
 		}
 		if d.Path == "charter.md" {
-			return nil, nil, fmt.Errorf("%w: the charter is recorded through Charter", ErrConflict)
+			return change{}, fmt.Errorf("%w: the charter is recorded through EditCharter", ErrConflict)
+		}
+		if parts := strings.Split(d.Path, "/"); scope == "" && len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md") && !key(strings.TrimSuffix(parts[1], ".md")) {
+			return change{}, fmt.Errorf("invalid document path %q: the name must be a key", d.Path)
 		}
 		if keys[recordKey(d)] {
-			return nil, nil, fmt.Errorf("%w: document %s appears twice", ErrConflict, d.ID)
+			return change{}, fmt.Errorf("%w: document %s appears twice", ErrConflict, d.ID)
 		}
 		keys[recordKey(d)] = true
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
-	}
-	checked, err := r.checkHistory(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	records, streams, err := r.scanFiles(checked)
-	if err != nil {
-		return nil, nil, err
-	}
-	if scope != "" && !slices.Contains(streams, scope) {
-		return nil, nil, fmt.Errorf("unknown workstream %s", scope)
-	}
-	previous := map[string]Record{}
-	identities := map[string]string{}
-	for _, old := range records {
-		if d, ok := old.(Document); ok && d.Workstream == scope {
-			previous[recordKey(d)] = d
-			identities[d.Path] = d.ID
-		}
-	}
-	prefix := scopePath(docs[0].Header)
-	paths := map[string]bool{}
-	files := map[string][]byte{}
-	var removed []string
-	for _, d := range docs {
-		if id, ok := identities[d.Path]; ok && id != d.ID {
-			return nil, nil, fmt.Errorf("%w: document path already has an identity", ErrConflict)
-		}
 		if paths[d.Path] {
-			return nil, nil, fmt.Errorf("%w: document path %s appears twice", ErrConflict, d.Path)
+			return change{}, fmt.Errorf("%w: document path %s appears twice", ErrConflict, d.Path)
 		}
 		paths[d.Path] = true
-		if err := revision(previous[recordKey(d)], d); err != nil {
-			return nil, nil, err
-		}
-		// The owner edits spec.md and plan.json directly. Writing over an
-		// edit OwnerDocuments has not recorded would lose it.
-		if prev, ok := previous[recordKey(d)].(Document); ok && ownerEditable[d.ID] == d.Path {
-			current, err := r.readFile(prefix + d.Path)
-			if err != nil && !os.IsNotExist(err) {
-				return nil, nil, err
-			}
-			if err == nil && string(current) != prev.Content {
-				return nil, nil, fmt.Errorf("%w: %w: %s has an unrecorded owner edit; read it first", ErrConflict, ErrOwnerEdit, d.Path)
-			}
-		}
-		if err := publicationPath(prefix + d.Path); err != nil {
-			return nil, nil, err
-		}
-		if err := r.checked(prefix + d.Path); err != nil {
-			return nil, nil, err
-		}
-		if scope == "" && prose(d.Path) && d.Content == "" {
-			removed = append(removed, d.Path)
-		} else {
-			files[prefix+d.Path] = []byte(d.Content)
-		}
+		records = append(records, d)
 	}
-	data, err := r.readFile(prefix + "documents.jsonl")
-	if err != nil && !os.IsNotExist(err) {
-		return nil, nil, err
+	if err := ctx.Err(); err != nil {
+		return change{}, err
 	}
-	for _, d := range docs {
-		line, err := json.Marshal(d)
-		if err != nil {
-			return nil, nil, err
-		}
-		data = append(data, append(line, '\n')...)
+	if scope != "" && scope != r.stream {
+		return change{}, fmt.Errorf("unknown workstream %s", scope)
 	}
-	files[prefix+"documents.jsonl"] = data
-	return files, removed, nil
+	if err := r.checkRevisions(ctx, records); err != nil {
+		return change{}, err
+	}
+	return change{records: records, message: "Record documents"}, nil
 }

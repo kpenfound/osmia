@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
@@ -48,9 +47,8 @@ func (e *Unresolved) Error() string {
 // the workstream, or a criterion or unit of the workstream's latest recorded
 // spec or plan. It returns *Unresolved for a citation that names nothing or
 // whose knowledge-base file or plan cannot be read, and any other error for a
-// trace that cannot be read. Reading the charter first records an owner edit,
-// as every charter read does.
-func Resolve(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, citation string, now time.Time) error {
+// trace that cannot be read.
+func Resolve(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, citation string) error {
 	unresolved := func(format string, args ...any) error {
 		return &Unresolved{Citation: citation, Reason: fmt.Sprintf(format, args...)}
 	}
@@ -77,7 +75,7 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 		if err != nil {
 			return err
 		}
-		doc, err := project.Charter(ctx, now)
+		doc, err := project.Charter(ctx)
 		if err != nil {
 			return err
 		}

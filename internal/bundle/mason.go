@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
@@ -92,8 +92,8 @@ var ErrStaleSpec = errors.New("spec does not match its seal")
 var ErrResolvedWorkstream = errors.New("workstream is resolved")
 
 // Mason assembles the mason bundle of one unit of the workstream's latest
-// seal. Resolved members have no active worker bundle. It reads spec.md,
-// recording any owner edit, and refuses a spec whose hash differs from the seal,
+// seal. Resolved members have no active worker bundle. It reads the latest
+// spec.md revision and refuses a spec whose hash differs from the seal,
 // so a unit is never built against a spec the owner did not ratify. The unit is
 // read from the sealed plan revision or a final-review follow-up.
 func (f Files) Mason(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, unit string) (Mason, error) {
@@ -118,11 +118,10 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	if !ok {
 		return Mason{}, fmt.Errorf("workstream %s is not sealed", stream)
 	}
-	current, err := repo.OwnerDocuments(ctx, stream, f.now().UTC(), nil)
+	spec, err := latest(repo, stream, plan.SpecDocument)
 	if err != nil {
 		return Mason{}, err
 	}
-	spec := current[plan.SpecDocument]
 	if hash := seal.SpecHash(spec.Content); hash != s.SpecHash {
 		return Mason{}, fmt.Errorf("%w: %s revision %d hashes to %s, seal %d records %s", ErrStaleSpec, plan.SpecPath, spec.Revision, hash, s.Seal, s.SpecHash)
 	}
@@ -192,11 +191,18 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	return m, nil
 }
 
-func (f Files) now() time.Time {
-	if f.Now != nil {
-		return f.Now()
+// latest returns the latest revision of a workstream document.
+func latest(repo *trace.Repository, stream config.WorkstreamID, id string) (trace.Document, error) {
+	documents, err := trace.Read[trace.Document](repo, stream)
+	if err != nil {
+		return trace.Document{}, err
 	}
-	return time.Now()
+	for _, d := range slices.Backward(documents) {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return trace.Document{}, fmt.Errorf("workstream %s records no %s: %w", stream, id, fs.ErrNotExist)
 }
 
 // revision returns the given revision of a workstream document.

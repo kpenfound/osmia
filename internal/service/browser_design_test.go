@@ -34,7 +34,7 @@ func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *te
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)

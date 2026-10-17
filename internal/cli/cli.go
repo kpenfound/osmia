@@ -40,6 +40,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   project memory <project-id>
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
+  edit charter <project-id> [--from FILE]
+  edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
   upstream <workstream-id> <base-workstream-id> [--json]
   archive <workstream-id> [--json]  permanently delete trace; retain title
@@ -88,7 +90,7 @@ type options struct {
 	root, socket, reason, project, base         string
 	messageFile, messagesFile                   string
 	upstream, fork, clone, baseBranch           string
-	profile, title                              string
+	profile, title, from                        string
 	json, hard, reasonSet, help, target, accept bool
 	skipDebate, version, detach                 bool
 	args                                        []string
@@ -108,7 +110,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title":
+		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -151,6 +153,8 @@ func parse(args []string) (o options, err error) {
 				o.profile = value
 			case "--title":
 				o.title = value
+			case "--from":
+				o.from = value
 			}
 		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
@@ -257,6 +261,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1
 	case "handin":
 		valid = len(a) == 2
+	case "edit":
+		valid = len(a) == 2 && (a[0] == "charter" || a[0] == "spec" || a[0] == "plan") && !o.json
 	case "priority":
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
@@ -279,7 +285,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -321,6 +327,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	defer c.Close()
 	fail := func(err error) int {
 		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+	}
+	if cmd == "edit" {
+		return runEdit(ctx, c, a[0], a[1], o.from, stdin, stdout, stderr)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -567,7 +576,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Workstream %s handed in to project %s\nState: %s\nHanded: %s\nSource: %s\n", result.Workstream, result.Project, result.State, result.Handed, result.Source)
+		fmt.Fprintf(stdout, "Workstream %s handed in to project %s\nState: %s\nSource: %s\n", result.Workstream, result.Project, result.State, result.Source)
 		if result.SkipDebate {
 			fmt.Fprintln(stdout, "Debate: skipped; ratify the spec and the plan once they are drafted")
 		}
@@ -1454,9 +1463,9 @@ func showProject(w io.Writer, p *service.ProjectView) {
 	if c := p.CharterState; c != nil {
 		state := "ready"
 		if !c.Ready {
-			state = "empty; write numbered rules before handing in work"
+			state = "empty; write numbered rules with osmia edit charter " + string(p.ID) + " before handing in work"
 		}
-		fmt.Fprintf(w, "Charter: %s (%d rules, revision %d) %s\n", state, c.Rules, c.Revision, p.Charter)
+		fmt.Fprintf(w, "Charter: %s (%d rules, revision %d)\n", state, c.Rules, c.Revision)
 		for _, d := range c.Diagnostics {
 			fmt.Fprintf(w, "  charter.md:%d: %s\n", d.Line, d.Message)
 		}
@@ -1948,7 +1957,7 @@ func report(w io.Writer, err error, project bool) int {
 	case service.NotFound:
 		code, msg = 4, "project not found; check the project ID with status"
 	case service.CharterEmpty:
-		code, msg = 4, "the project's charter has no rules; write the charter before handing in work"
+		code, msg = 4, "the project's charter has no rules; write it with osmia edit charter <project-id> before handing in work"
 	case service.Malformed:
 		code, msg = 4, "request rejected; check client and service API versions"
 	case service.Validation:

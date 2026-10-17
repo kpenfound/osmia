@@ -93,7 +93,7 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 		}
 	}
 	s.failPublication = func(step string) error {
-		if step == "before-ref" {
+		if step == boundaryBeforeCommit {
 			return errors.New("injected")
 		}
 		return nil

@@ -192,11 +192,11 @@ func (r *Repository) LogAssumption(ctx context.Context, agent string, scope core
 		Path:    AssumptionsPath,
 		Content: string(data),
 	}
-	files, removed, err := r.documentFiles(ctx, []Document{doc})
+	files, err := r.documentFiles(ctx, []Document{doc})
 	if err != nil {
 		return Assumption{}, err
 	}
-	if err := r.publishTree(ctx, files, removed); err != nil {
+	if err := r.publish(ctx, files); err != nil {
 		return Assumption{}, err
 	}
 	return a, nil

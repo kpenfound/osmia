@@ -84,9 +84,7 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
-	traceDir, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte(charter), 0600))
+	recordCharter(t, repo, charter)
 	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff}
 	created := map[config.WorkstreamID]bool{}
 	for _, a := range askers {
@@ -539,9 +537,7 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
 	defer repo.Close()
-	traceDir, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
+	recordCharter(t, repo, "# Charter\n\n1. Keep state in files.\n")
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
 		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
@@ -590,9 +586,7 @@ func TestAnswersAreNotDeliveredToMergedUnits(t *testing.T) {
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
 	defer repo.Close()
-	traceDir, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
+	recordCharter(t, repo, "# Charter\n\n1. Keep state in files.\n")
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
 		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}

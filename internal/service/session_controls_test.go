@@ -41,7 +41,7 @@ func newSessionControlsFixture(t *testing.T) (*Service, *Client, Options, config
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	must(t, err)
 	return s, c, opts, added.Project.ID, resp.Session.Workstream, engine, clone
@@ -682,7 +682,7 @@ func TestSessionCheckOutlivesDefaultWriteTimeout(t *testing.T) {
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	must(t, err)
 	stream := resp.Session.Workstream

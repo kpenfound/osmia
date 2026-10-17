@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -108,17 +107,8 @@ func TestWorkflowRoundTripAndIdentity(t *testing.T) {
 }
 
 func TestWorkflowPublicationFailures(t *testing.T) {
-	pre := []string{"objects-written", "objects-synced", "journal-written", "before-ref"}
-	for _, phase := range []string{"written", "synced", "renamed", "directory-synced"} {
-		pre = append(pre, "file:"+publicationFile+":"+phase)
-	}
-	pre = append(pre, "file:.git/refs/heads/main:written", "file:.git/refs/heads/main:synced")
-	post := []string{"file:.git/refs/heads/main:renamed", "file:.git/refs/heads/main:directory-synced", "ref-published", "recovery-ref-synced", "materialized:events.jsonl", "materialized:workflow.json", "before-journal-removal"}
-	for _, name := range []string{"events.jsonl", "workflow.json"} {
-		for _, phase := range []string{"written", "synced", "renamed", "directory-synced"} {
-			post = append(post, "file:workstreams/"+string(streamID)+"/"+name+":"+phase)
-		}
-	}
+	pre := []string{boundaryBeforeCommit}
+	post := []string{boundaryCommitted}
 	for _, step := range append(pre, post...) {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
@@ -169,9 +159,6 @@ func TestWorkflowPublicationFailures(t *testing.T) {
 			transact(t, r, tx)
 			if got := ready(t, r, at); len(got) != 3 {
 				t.Fatalf("duplicate retry: %#v", got)
-			}
-			if _, err := mustScoped(t, r, streamID).dir.Stat(publicationFile); !os.IsNotExist(err) {
-				t.Fatalf("journal retained: %v", err)
 			}
 		})
 	}
@@ -343,7 +330,7 @@ func TestWorkflowConcurrentWritersAndClaimers(t *testing.T) {
 }
 
 func TestDeliveryPublicationFailure(t *testing.T) {
-	for _, step := range []string{"before-ref", "ref-published", "materialized:workflow.json"} {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
 			s := mustScoped(t, r, streamID)
@@ -372,7 +359,7 @@ func TestDeliveryPublicationFailure(t *testing.T) {
 			}
 			defer r.Close()
 			want := 0
-			if step == "before-ref" {
+			if step == boundaryBeforeCommit {
 				want = 1
 			}
 			if got := ready(t, r, at); len(got) != want {
@@ -409,20 +396,9 @@ func TestWorkflowRejectsInvalidAndCorruptData(t *testing.T) {
 	}
 	tx := transaction("tx", 0, "", "active", 1)
 	transact(t, r, tx)
-	name := "workstreams/" + string(streamID) + "/workflow.json"
-	data, err := s.readFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.Replace(string(data), `"expected_version": 0`, `"expected_version": 99`, 1))
-	if err := s.writeFile(name, data); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
-		t.Fatal(err)
-	}
+	storeExec(t, s, `UPDATE workflow_log SET body = replace(body, '"expected_version":0', '"expected_version":99') WHERE list = 'transactions'`)
 	r.Close()
-	r, err = Open(root, p)
+	r, err := Open(root, p)
 	if r != nil {
 		defer r.Close()
 	}
@@ -469,31 +445,6 @@ func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
 	}
 }
 
-func TestLoadWorkflowSeesCommittedChanges(t *testing.T) {
-	r, _, _ := create(t)
-	s := mustScoped(t, r, streamID)
-	ctx := context.Background()
-	transact(t, r, transaction("tx", 0, "", "active", 1))
-	if _, _, err := s.loadWorkflow(streamID); err != nil {
-		t.Fatal(err)
-	}
-	name := "workstreams/" + string(streamID) + "/workflow.json"
-	data, err := s.readFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.Replace(string(data), `"expected_version": 0`, `"expected_version": 99`, 1))
-	if err := s.writeFile(name, data); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.loadWorkflow(streamID); !errors.Is(err, ErrConflict) {
-		t.Fatalf("changed workflow accepted: %v", err)
-	}
-}
-
 func TestWorkflowProcessInterruption(t *testing.T) {
 	if step := os.Getenv("OSMIA_WORKFLOW_CRASH_STEP"); step != "" {
 		root, err := config.ResolveRoot(os.Getenv("OSMIA_WORKFLOW_ROOT"), "")
@@ -515,7 +466,7 @@ func TestWorkflowProcessInterruption(t *testing.T) {
 		_, err = r.Transact(context.Background(), transaction("crashed", 0, "", "active", 2))
 		t.Fatalf("crash boundary not reached: %v", err)
 	}
-	for _, step := range []string{"objects-written", "before-ref", "ref-published", "materialized:events.jsonl"} {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
 			r.Close()
@@ -532,7 +483,7 @@ func TestWorkflowProcessInterruption(t *testing.T) {
 			}
 			defer r.Close()
 			want := 0
-			if step == "ref-published" || step == "materialized:events.jsonl" {
+			if step == boundaryCommitted {
 				want = 2
 			}
 			if got := ready(t, r, at); len(got) != want {

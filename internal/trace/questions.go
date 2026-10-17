@@ -248,7 +248,7 @@ func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Sc
 	}
 	tx := questionTransition(v, h, id, "", QuestionOpen, fmt.Sprintf("The %s asked question %s", scope.Role, id))
 	tx.Events = []Event{Notice(tx.Transition.ID, "question", fmt.Sprintf("Question %s is open, asked by the %s: %s", id, scope.Role, strings.TrimSpace(text)))}
-	files, _, err := r.stage(stream, log, v, []Record{question}, tx)
+	files, _, err := r.stage(ctx, stream, log, v, []Record{question}, tx)
 	if err != nil {
 		return Question{}, err
 	}
@@ -384,7 +384,7 @@ func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope cor
 		}
 	}
 	tx := questionTransition(v, h, localID, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", localID, strings.Join(citations, ", ")))
-	files, _, err := target.stage(stream, log, v, []Record{ruling}, tx)
+	files, _, err := target.stage(ctx, stream, log, v, []Record{ruling}, tx)
 	if err != nil {
 		return Ruling{}, err
 	}
@@ -499,7 +499,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 		}
 	}
 	// The project's inbox number is reserved before any workstream's own
-	// commit, in the project's own trace repository: a crash between the
+	// commit, in the project's own trace: a crash between the
 	// two leaves the number unused, never reused, and the escalation is
 	// retried with a freshly reserved one.
 	inbox, err := project.reserveInboxNumber(ctx)
@@ -552,7 +552,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 				revisions = append(revisions, next)
 				txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, batch)))
 			}
-			files, _, err := mr.stage(member, log, v, revisions, txs...)
+			files, _, err := mr.stage(ctx, member, log, v, revisions, txs...)
 			if err != nil {
 				return err
 			}

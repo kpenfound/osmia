@@ -357,7 +357,7 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if !exists {
 		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("%w %s", errNoFeatureBranch, featureBranch(stream))
 	}
-	charter, err := a.repository.Charter(ctx, a.s.now())
+	charter, err := a.repository.Charter(ctx)
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}

@@ -3,7 +3,6 @@ package bundle_test
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -54,6 +53,25 @@ func sealedWith(t *testing.T, planContent string) fixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+// revise records content as the next revision of the first workstream's
+// document id at path.
+func (f fixture) revise(t *testing.T, id, path, content string) {
+	t.Helper()
+	documents, err := trace.Read[trace.Document](f.repo, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := document(id, path, content)
+	for _, old := range documents {
+		if old.ID == id {
+			d.Revision = old.Revision + 1
+		}
+	}
+	if err := f.repo.RecordDocuments(context.Background(), []trace.Document{d}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f fixture) mason(unit string) (bundle.Mason, error) {
@@ -114,10 +132,7 @@ func TestMasonBundleHoldsExactlyTheUnit(t *testing.T) {
 func TestMasonBundleRefusesASpecEditedAfterTheSeal(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
-	path := f.streamFile(t, first, plan.SpecPath)
-	if err := os.WriteFile(path, []byte(masonSpec+"4. Something new.\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	f.revise(t, plan.SpecDocument, plan.SpecPath, masonSpec+"4. Something new.\n")
 	_, err := f.mason("resume")
 	want := "spec does not match its seal: spec.md revision 2 hashes to " + seal.SpecHash(masonSpec+"4. Something new.\n") + ", seal 1 records " + seal.SpecHash(masonSpec)
 	if !errors.Is(err, bundle.ErrStaleSpec) || err.Error() != want {
@@ -144,9 +159,7 @@ func TestMasonBundleReadsTheSealedPlan(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
 	edited := strings.Replace(masonPlan, `"footprint": ["cmd"]`, `"footprint": ["internal"]`, 1)
-	if err := os.WriteFile(f.streamFile(t, first, plan.PlanPath), []byte(edited), 0600); err != nil {
-		t.Fatal(err)
-	}
+	f.revise(t, plan.PlanDocument, plan.PlanPath, edited)
 	m, err := f.mason("dedupe")
 	if err != nil {
 		t.Fatal(err)
@@ -159,12 +172,8 @@ func TestMasonBundleReadsTheSealedPlan(t *testing.T) {
 func TestMasonBundleNamesTheSealedSpecRevision(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
-	path := f.streamFile(t, first, plan.SpecPath)
 	for _, content := range []string{masonSpec + "4. Later.\n", masonSpec} {
-		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-			t.Fatal(err)
-		}
-		f.mason("resume")
+		f.revise(t, plan.SpecDocument, plan.SpecPath, content)
 	}
 	m, err := f.mason("resume")
 	if err != nil {

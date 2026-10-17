@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -45,13 +46,16 @@ func TestPrepareDesignWorkgroupFailureAndRetry(t *testing.T) {
 					t.Fatal(err)
 				}
 				if failure == "open-damaged" {
-					restore, err = os.ReadFile(filepath.Join(directory, "project.json"))
+					db, err := sql.Open("sqlite", databaseDSN(TraceDatabase(directory)))
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(filepath.Join(directory, "project.json"), []byte("{not json}"), 0600); err != nil {
+					err = db.QueryRow("SELECT content FROM files WHERE path = 'project.json'").Scan(&restore)
+					db.Close()
+					if err != nil {
 						t.Fatal(err)
 					}
+					closedStoreExec(t, directory, "UPDATE files SET content = ? WHERE path = 'project.json'", []byte("{not json}"))
 				}
 			}
 			if failure == "directory-file" {
@@ -102,10 +106,8 @@ func TestPrepareDesignWorkgroupFailureAndRetry(t *testing.T) {
 				t.Fatal("failed preparation retained a shared handle")
 			}
 			if restore != nil {
-				// Repair the damaged bytes without discarding committed history.
-				if err := os.WriteFile(filepath.Join(directory, "project.json"), restore, 0600); err != nil {
-					t.Fatal(err)
-				}
+				// Repair the damaged manifest without discarding committed history.
+				closedStoreExec(t, directory, "UPDATE files SET content = ? WHERE path = 'project.json'", restore)
 			}
 			if failure == "directory-file" {
 				if err := os.Remove(directory); err != nil {

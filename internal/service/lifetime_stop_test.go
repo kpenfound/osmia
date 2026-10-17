@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +36,7 @@ func TestSecondLifetimeSeesNoWorkFromTheFirst(t *testing.T) {
 	case <-time.After(demoTimeout):
 		t.Fatal("the blocking pass never started")
 	}
-	head := strings.TrimSpace(demoGit(t, "", "-C", f.trace, "rev-parse", "HEAD"))
+	head := traceCommits(t, f.trace)
 
 	f.stop(t)
 
@@ -46,8 +45,8 @@ func TestSecondLifetimeSeesNoWorkFromTheFirst(t *testing.T) {
 	default:
 		t.Fatal("stop returned before the pass it started had returned")
 	}
-	if got := strings.TrimSpace(demoGit(t, "", "-C", f.trace, "rev-parse", "HEAD")); got != head {
-		t.Fatalf("the trace moved after stop returned: %s, was %s", got, head)
+	if got := traceCommits(t, f.trace); got != head {
+		t.Fatalf("the trace moved after stop returned: %d commits, was %d", got, head)
 	}
 	// A fresh handle on the same trace: a leftover handle from the first
 	// lifetime, holding its exclusive lock, would make this fail.

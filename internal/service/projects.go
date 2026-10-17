@@ -41,8 +41,7 @@ func projectView(root config.Root, p config.Project) ProjectView {
 	// ProjectTrace resolves the shadow project to its own directory outside
 	// "projects", so this must not hand-join the shared-layout path.
 	directory, _ := root.ProjectTrace(p.ID)
-	charterDirectory, _ := root.ProjectTrace(p.Group())
-	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Charter: filepath.Join(charterDirectory, "charter.md"), Repos: []RepoView{repoView(root, p)}}
+	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Repos: []RepoView{repoView(root, p)}}
 }
 
 // repoView names one repo's own settings and trace.
@@ -300,7 +299,7 @@ func incomplete(id config.ProjectID, err error) *APIError {
 }
 func (s *Service) added(p config.Project) ProjectResponse {
 	view := s.projectGroupView(p)
-	return ProjectResponse{Project: view, NextStep: "Write the charter in " + view.Charter + " before handing in work."}
+	return ProjectResponse{Project: view, NextStep: "Write the charter with: osmia edit charter " + string(view.ID)}
 }
 
 func (s *Service) addedRepo(p config.Project) ProjectResponse {
@@ -363,17 +362,20 @@ func (s *Service) readPending() (*pendingProject, error) {
 	return &p, nil
 }
 
-// tracePublished reports whether the trace at directory has committed history:
-// creation publishes its first commit last, so the reference proves completion.
-func tracePublished(directory string) bool {
-	info, err := os.Lstat(filepath.Join(directory, ".git", "refs", "heads", "main"))
-	return err == nil && info.Mode().IsRegular()
+// tracePublished reports whether the trace at directory is complete:
+// creation commits the project manifest in its first and only commit, so the
+// manifest proves completion.
+func tracePublished(directory string) (bool, error) {
+	return trace.Published(directory)
 }
 
-// discardUnpublished removes an interrupted trace initialization that never
-// committed, keeping the configuration file. Nothing with history is touched.
+// discardUnpublished removes an interrupted trace creation that never
+// committed, keeping the configuration file. A complete trace is never
+// touched.
 func discardUnpublished(directory string) error {
-	if tracePublished(directory) {
+	if published, err := tracePublished(directory); err != nil {
+		return err
+	} else if published {
 		return fmt.Errorf("%s: trace has history", directory)
 	}
 	entries, err := os.ReadDir(directory)
@@ -412,7 +414,11 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err != nil {
 		return p, err
 	}
-	if !tracePublished(directory) {
+	published, err := tracePublished(directory)
+	if err != nil {
+		return p, err
+	}
+	if !published {
 		if err := config.WriteProjectConfig(projectPath, p); err != nil {
 			return p, err
 		}

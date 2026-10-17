@@ -3,7 +3,6 @@ package trace
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -70,12 +69,8 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 		t.Fatalf("latest: %+v", got)
 	}
 	s := mustScoped(t, r, streamID)
-	data, err := os.ReadFile(s.directory + "/workstreams/" + string(streamID) + "/status.jsonl")
-	if err != nil || strings.Count(string(data), "\n") != 2 {
-		t.Fatalf("status log: %q %v", data, err)
-	}
-	if out, err := s.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
-		t.Fatalf("status not committed: %q %v", out, err)
+	if bodies := storedBodies(t, s, "workstreams/"+string(streamID)+"/status.jsonl"); len(bodies) != 2 {
+		t.Fatalf("status log: %q", bodies)
 	}
 
 	// A restarted service reads the same status.

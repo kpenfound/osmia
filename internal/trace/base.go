@@ -126,9 +126,9 @@ func (r *Repository) SetWorkstreamBase(ctx context.Context, stream, base config.
 		return WorkstreamBase{}, err
 	}
 	d := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: "workstream-base", Revision: next.Revision, Project: r.project, Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-base"}, Path: "base.json", Content: string(data)}
-	files, removed, err := r.documentFiles(ctx, []Document{d})
+	files, err := r.documentFiles(ctx, []Document{d})
 	if err != nil {
 		return WorkstreamBase{}, err
 	}
-	return next, r.publishTree(ctx, files, removed)
+	return next, r.publish(ctx, files)
 }

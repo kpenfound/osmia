@@ -137,7 +137,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 		t.Fatal(err)
 	}
 	traceDir := filepath.Join(root, "projects", string(id))
-	if added.Project.Trace != traceDir || added.Project.Charter != filepath.Join(traceDir, "charter.md") || !strings.Contains(added.NextStep, added.Project.Charter) || added.Project.Name != "dagger" || added.Project.BaseBranch != "main" {
+	if added.Project.Trace != traceDir || added.NextStep != "Write the charter with: osmia edit charter "+string(id) || added.Project.Name != "dagger" || added.Project.BaseBranch != "main" {
 		t.Fatalf("%+v", added)
 	}
 	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
@@ -151,7 +151,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if string(projectText) != "version = 1\nname = \"dagger\"\nupstream = \"dagger/dagger\"\nfork = \"owner/dagger\"\nclone = "+fmt.Sprintf("%q", added.Project.Clone)+"\nbase_branch = \"main\"\nlanding = \"commit-per-unit\"\n" {
 		t.Fatalf("project configuration:\n%s", projectText)
 	}
-	charter, err := os.ReadFile(added.Project.Charter)
+	charter, err := projectDocument(t, s.cfg.Root, id, "charter.md")
 	must(t, err)
 	if string(charter) != trace.CharterTemplate || !osmiacharter.Parse(trace.CharterTemplate).Empty() {
 		t.Fatalf("charter: %q", charter)
@@ -160,7 +160,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 		t.Fatal("clone changed")
 	}
 	// The seeded entity map is the first revision of kb/entities.json.
-	entities, err := os.ReadFile(filepath.Join(traceDir, trace.EntitiesPath))
+	entities, err := projectDocument(t, s.cfg.Root, id, trace.EntitiesPath)
 	must(t, err)
 	seeded, err := kb.Parse(entities)
 	must(t, err)
@@ -219,7 +219,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if !strings.Contains(err.Error(), string(id)) || !strings.Contains(err.Error(), string(project)) {
 		t.Fatal(err)
 	}
-	traceBefore := snapshot(t, traceDir)
+	traceBefore := traceState(t, traceDir)
 	removed, err := c.RemoveProject(ctx, id)
 	must(t, err)
 	if removed.Project.ID != id || removed.Project.Trace != traceDir || !strings.Contains(removed.NextStep, traceDir) {
@@ -230,7 +230,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if string(text) != commentedConfig {
 		t.Fatalf("configuration text after remove:\n%s", text)
 	}
-	if !reflect.DeepEqual(traceBefore, snapshot(t, traceDir)) || !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {
+	if traceBefore != traceState(t, traceDir) || !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {
 		t.Fatal("remove changed the trace or the clone")
 	}
 	cfg, err = c.Configuration(ctx)
@@ -255,7 +255,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if readded.Project.ID == id || readded.Project.Trace == traceDir {
 		t.Fatalf("identity reused: %+v", readded)
 	}
-	if !reflect.DeepEqual(traceBefore, snapshot(t, traceDir)) {
+	if traceBefore != traceState(t, traceDir) {
 		t.Fatal("archived trace changed")
 	}
 	if names := projectDirectories(t, root); len(names) != 2 || len(bound) != 2 || bound[1] != readded.Project.ID {
@@ -345,10 +345,9 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 						return nil
 					}
 					if step == "project-config-written" {
-						// Trace initialization interrupted before its first commit.
+						// Trace creation interrupted before its first commit.
 						for _, name := range projectDirectories(t, root) {
-							must(t, os.MkdirAll(filepath.Join(root, "projects", name, ".git", "objects"), 0700))
-							must(t, os.WriteFile(filepath.Join(root, "projects", name, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0600))
+							traceExec(t, filepath.Join(root, "projects", name), "CREATE TABLE files (path TEXT PRIMARY KEY, content BLOB NOT NULL)")
 						}
 					}
 					return crash
@@ -402,7 +401,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
 					t.Fatal("journal retained")
 				}
-				charter, err := os.ReadFile(cfg.Project.Charter)
+				charter, err := projectDocument(t, s.cfg.Root, id, "charter.md")
 				must(t, err)
 				if string(charter) != trace.CharterTemplate {
 					t.Fatalf("charter: %q", charter)
@@ -416,15 +415,15 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 					t.Fatalf("extraction: %+v", x)
 				}
 				awaitExtractionAcknowledged(t, s)
-				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "1" {
-					t.Fatalf("project trace history: %s", out)
+				if n := traceCommits(t, filepath.Join(root, "projects", string(id))); n != 1 {
+					t.Fatalf("project trace history: %d commits", n)
 				}
 				loaded, err := config.Load(opts.Config)
 				must(t, err)
 				librarianTrace, err := loaded.Root.WorkstreamTrace(id, librarianWorkstream(id))
 				must(t, err)
-				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(librarianTrace, ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "9" {
-					t.Fatalf("librarian workstream trace history: %s", out)
+				if n := traceCommits(t, librarianTrace); n != 9 {
+					t.Fatalf("librarian workstream trace history: %d commits", n)
 				}
 				// The seed is committed with the trace, so recovery never leaves a
 				// trace without its first entity map revision.
@@ -671,4 +670,13 @@ func TestRepoAddResolvesItsOwnSettingsAndRecoversAfterInterruption(t *testing.T)
 	_, err = c.RemoveProject(ctx, primary)
 	assertCode(t, err, Validation)
 	must(t, s.Close())
+}
+
+// traceState describes a project's trace for comparison: its commit count
+// and its configuration.
+func traceState(t *testing.T, directory string) string {
+	t.Helper()
+	config, err := os.ReadFile(filepath.Join(directory, "config.toml"))
+	must(t, err)
+	return fmt.Sprintf("%d commits\n%s", traceCommits(t, directory), config)
 }

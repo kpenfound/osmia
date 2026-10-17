@@ -863,7 +863,7 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, w
 	if !ok {
 		return nil, fmt.Errorf("workstream %s has no handed input", stream)
 	}
-	charter, err := d.repository.Charter(ctx, d.s.now())
+	charter, err := d.repository.Charter(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,20 +1015,7 @@ func (d *drafter) validate(specDoc, planDoc trace.Document) ([]string, error) {
 // entity map. It reads nothing, so a caller that already holds the trace can
 // use it.
 func validateDraft(spec, graph string, entities kb.Map) []string {
-	parsed, parseErr := plan.Parse([]byte(graph))
-	if parseErr != nil {
-		parsed = plan.Plan{Version: plan.Version}
-	}
-	var out []string
-	for _, p := range plan.Validate(plan.ParseSpec(spec), parsed, entities) {
-		if parseErr == nil || p.Kind == plan.SpecProblem {
-			out = append(out, p.Error())
-		}
-	}
-	if parseErr != nil {
-		out = append(out, plan.PlanPath+": "+parseErr.Error())
-	}
-	return out
+	return plan.DraftProblems(spec, graph, entities)
 }
 
 // sketch moves the workstream from handed to sketched for a valid draft. The

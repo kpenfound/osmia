@@ -11,7 +11,7 @@ import (
 )
 
 func TestJoinCrossRepoWorkgroupPublishesLocatorAndChiefTogether(t *testing.T) {
-	for _, step := range []string{"before-ref", "ref-published"} {
+	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
 			sr := mustScoped(t, r, streamID)
@@ -40,7 +40,7 @@ func TestJoinCrossRepoWorkgroupPublishesLocatorAndChiefTogether(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, chiefErr := reopened.ChiefOfStaffThread(streamID)
-			if step == "before-ref" {
+			if step == boundaryBeforeCommit {
 				if pointer != "" || chiefErr != nil {
 					t.Fatalf("partial unpublished transfer: %s %v", pointer, chiefErr)
 				}

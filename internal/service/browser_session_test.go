@@ -43,7 +43,7 @@ func sessionWebFixture(t *testing.T) (*Service, *Client, config.ProjectID, *sess
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, engine, clone
 }
 

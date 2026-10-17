@@ -1,4 +1,5 @@
-// Package trace stores service-owned records in a project's dedicated Git repository.
+// Package trace stores service-owned records in dedicated trace databases:
+// one for each project and one for each workstream.
 package trace
 
 import (

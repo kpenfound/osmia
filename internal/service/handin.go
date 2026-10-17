@@ -61,15 +61,15 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 	if errors.Is(err, errNoActiveProject) {
 		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	view := projectView(cfg.Root, cfg.For(req.Project).Project)
+	edit := "osmia edit charter " + string(cfg.For(req.Project).Project.Group())
 	if errors.Is(err, errNoTrace) {
 		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
 	if err != nil {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot read or record the charter of project %s; check %s and the trace repository", req.Project, view.Charter)}
+		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the charter of project %s; check the project trace", req.Project)}
 	}
 	if c.Empty() {
-		return HandInResponse{}, &APIError{CharterEmpty, fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") in %s", req.Project, view.Charter)}
+		return HandInResponse{}, &APIError{CharterEmpty, fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: %s", req.Project, edit)}
 	}
 	if !handInKey.MatchString(req.Key) {
 		return HandInResponse{}, &APIError{Validation, "key must be 1 to 128 letters, digits, '_' or '-', starting with a letter or digit"}
@@ -263,8 +263,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 	if err != nil {
 		return h.failed("recording the handed state of")
 	}
-	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value,
-		Handed: filepath.Join(h.trace, "workstreams", string(stream), filepath.FromSlash(doc.Path)), Source: h.source, SkipDebate: req.SkipDebate}, true, nil
+	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value, Source: h.source, SkipDebate: req.SkipDebate}, true, nil
 }
 
 // handInSource returns the recorded source of the request's input and the

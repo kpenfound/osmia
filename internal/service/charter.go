@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
@@ -17,15 +16,13 @@ var (
 	errNoTrace         = errors.New("project has no trace")
 )
 
-// loadCharter returns the active project's charter through the trace, which
-// records any owner edit first. Every service reader of the charter goes
-// through it, so none sees an unrecorded edit.
+// loadCharter returns the active project's latest charter revision.
 func (s *Service) loadCharter(ctx context.Context, id config.ProjectID) (trace.Document, charter.Charter, error) {
 	repository, err := s.repository(id)
 	if err != nil {
 		return trace.Document{}, charter.Charter{}, err
 	}
-	doc, err := repository.Charter(ctx, time.Now().UTC())
+	doc, err := repository.Charter(ctx)
 	if err != nil {
 		return trace.Document{}, charter.Charter{}, err
 	}
@@ -57,9 +54,9 @@ func (s *Service) charterRepository(id config.ProjectID) (*trace.Repository, err
 }
 
 // Context returns the provider that assembles turn bundles for the active
-// project. Its charter reads record owner edits as loadCharter does.
+// project.
 func (s *Service) Context() bundle.Provider {
-	return hearsay.Provider{Local: bundle.Files{Repository: s.repository, Now: s.now}, Config: s.current, Health: &s.memory}
+	return hearsay.Provider{Local: bundle.Files{Repository: s.repository}, Config: s.current, Health: &s.memory}
 }
 
 func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
@@ -72,5 +69,5 @@ func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
 
 // contextFor keeps the trace and configuration available to draining operations.
 func (s *Service) contextFor(repo *trace.Repository) bundle.Provider {
-	return hearsay.Provider{Local: bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }, Now: s.now}, Config: func() *config.Config { return s.about(repo) }, Health: &s.memory}
+	return hearsay.Provider{Local: bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }}, Config: func() *config.Config { return s.about(repo) }, Health: &s.memory}
 }

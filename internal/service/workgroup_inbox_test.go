@@ -104,11 +104,8 @@ clone = "`+home2+`"
 		}
 		// The chief's answer to either cross-repo member's question cites
 		// charter#1, which must resolve against that member's own project
-		// (through ProjectFor), exactly as the workgroup-wiring fixture's
-		// own raw charter.md write lets its citation resolve.
-		traceDir, err := cfg.Root.ProjectTrace(p.ID)
-		must(t, err)
-		must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files under the root.\n"), 0600))
+		// (through ProjectFor), as in the workgroup-wiring fixture.
+		recordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
 		must(t, repo.Close())
 	}
 

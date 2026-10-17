@@ -108,7 +108,7 @@ func (s *Service) configuration() ConfigResponse {
 		if err == nil {
 			view.CharterState = &state
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read the charter; check the trace at " + view.Trace + ", and write the charter with: osmia edit charter " + string(view.ID)})
 		}
 		out.Projects = append(out.Projects, view)
 	}

@@ -134,7 +134,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			if requestedID != "" {
 				return priorityRefusal("discovery not found; create it with a stable key, description and criterion")
 			}
-			if err := questions.Resolve(ctx, r, stream, in.Criterion, now()); err != nil || !strings.HasPrefix(in.Criterion, "spec#") {
+			if err := questions.Resolve(ctx, r, stream, in.Criterion); err != nil || !strings.HasPrefix(in.Criterion, "spec#") {
 				return priorityRefusal("discovery requires an existing spec criterion")
 			}
 		}

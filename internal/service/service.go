@@ -26,6 +26,7 @@ import (
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
@@ -749,11 +750,14 @@ func (s *Service) cleanupSocket() {
 }
 
 // openAll opens the runtime of every active project of cfg that has a trace,
-// in active_projects order. A project whose trace migration from the shared
-// layout could not complete is logged and left unopened, so it is not
-// scheduled this run; every other project still opens. Any other failure
-// opens none.
+// in active_projects order, after moving every cross-repo workgroup's Git
+// trace to its database. A project whose trace migration could not complete
+// is logged and left unopened, so it is not scheduled this run; every other
+// project still opens. Any other failure opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
+	if err := trace.MigrateWorkgroups(context.Background(), cfg.Root, s.migrationLog); err != nil {
+		s.log().Warn("workgroup trace migration incomplete", "error", err.Error())
+	}
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
 		p, err := s.open(cfg.For(id))
@@ -1062,12 +1066,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	_, manifestErr := os.Lstat(filepath.Join(directory, "project.json"))
-	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
-	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
+	if exists, err := trace.HasTrace(directory); err != nil {
+		return nil, nil, nil, err
+	} else if !exists {
 		return nil, nil, nil, nil
 	}
-	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, s.migrationLog); err != nil {
+	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, plan.DraftCheck(directory), s.migrationLog); err != nil {
 		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)

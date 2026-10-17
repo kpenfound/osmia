@@ -1,15 +1,15 @@
 # Charter
 
-Each project has one charter, `<root>/projects/<project-id>/charter.md`: your
-rules as a contributor to that project. You edit the file directly. Plans,
-reviews and the committee cite its rules, so Osmia refuses to hand in work
-while it has none. This is the default repo's trace directory; every additional
-repo in the project uses this same authoritative charter. KB, entities and
-repository settings remain per repo.
+Each project has one charter: your rules as a contributor to that project. It
+is the `charter.md` document in the default repo's trace, and you edit it with
+`osmia edit charter <project-id>` or in the web UI. Plans, reviews and the
+committee cite its rules, so Osmia refuses to hand in work while it has none.
+Every additional repo in the project uses this same authoritative charter. KB,
+entities and repository settings remain per repo.
 
 ## Template
 
-`osmia project add` writes a template with guidance headings for scope,
+`osmia project add` records a template with guidance headings for scope,
 dependencies, testing and pull-request shape. The guidance sits in HTML
 comments. The template states that the repository's own contributor documents
 (CONTRIBUTING, AGENTS.md, CLAUDE.md and similar) are binding. It contains no
@@ -52,13 +52,15 @@ A charter is **empty** when it has no rules. Guidance alone is empty.
 
 ## Owner edits and revisions
 
-The charter is a trace document. Creation
-records the template as revision 1. Whenever the service reads the charter
-(`osmia status` and hand-in), it compares `charter.md` with the latest recorded
-revision. If they differ, it first records the file as a new revision with the
-owner as actor and cause `owner-edit`, then uses that revision. Reading again
-without an edit records nothing. Every edit you make is versioned before any
-reader sees it.
+The charter is a trace document, and every change to it is a revision.
+Creation records the template as revision 1. `osmia edit charter <project-id>`
+opens the latest revision in `$VISUAL` or `$EDITOR`, or reads it from a file
+with `--from <file>`, and records what you save as the next revision, with the
+owner as actor and cause `owner-edit`. The web UI's charter editor records an
+edit the same way. Each edit names the revision it started from; if another
+revision was recorded since, the edit is refused as a conflict and nothing is
+recorded, so you edit again from the latest. Saving unchanged content records
+nothing. See the [command line](cli.md).
 
 ## Rules from your rulings
 
@@ -66,7 +68,7 @@ When a ruling you gave a workstream is a standing rule for the project, its
 chief of staff proposes the rule for the charter. You ratify or decline it with
 `osmia charter` or by telling the chief of staff (see the
 [command line](cli.md)).
-A ratified rule is appended to `charter.md` by the service, not by you: it
+A ratified rule is appended to the charter by the service, not by you: it
 takes the number after your highest rule and goes under a `## Standing rulings`
 heading at the end, which is added when the charter does not already end under
 it:
@@ -80,7 +82,8 @@ it:
 The comment names the ruling the rule came from; it is not part of the rule's
 text. The revision that appends the rule is recorded with the actor
 `service`/`charter`. If you edit the charter while the rule is being written,
-your edit is recorded as your revision and the rule is appended after it.
+your edit is recorded as your revision and the rule is appended to it as the
+next revision.
 Every later bundle on the project carries the ratified rule as a notice. A
 declined proposal leaves the charter as it is.
 
@@ -91,5 +94,5 @@ many rules it has, the recorded revision and any numbering diagnostics. The
 same data is `project.charter_state` in the `/v1/config` response.
 
 `osmia handin` checks the charter first. With an empty charter it fails with
-`charter_empty`, naming the project and the path to `charter.md`, and
-creates nothing. See the [command line](cli.md) for the rest of hand-in.
+`charter_empty`, naming the project and the command that edits its charter,
+`osmia edit charter <project-id>`, and creates nothing. See the [command line](cli.md) for the rest of hand-in.

@@ -254,7 +254,7 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 
 func (s *Service) reconcileGroupApproval(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) error {
 	wt, g, err := s.approvalTrace(ctx, repo, id)
-	if errors.Is(err, errWorkgroupJoining) || errors.Is(err, trace.ErrLocked) {
+	if errors.Is(err, errWorkgroupJoining) || errors.Is(err, trace.ErrLocked) || errors.Is(err, trace.ErrMembershipChanged) {
 		return nil
 	}
 	if err != nil {

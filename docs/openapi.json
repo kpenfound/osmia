@@ -5209,9 +5209,6 @@
       },
       "HandInResponse": {
         "properties": {
-          "handed": {
-            "type": "string"
-          },
           "project": {
             "type": "string"
           },
@@ -5672,9 +5669,6 @@
       "ProjectView": {
         "properties": {
           "base_branch": {
-            "type": "string"
-          },
-          "charter": {
             "type": "string"
           },
           "charter_state": {

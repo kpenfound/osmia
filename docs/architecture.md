@@ -28,7 +28,10 @@ chief thread and group decisions. Direct one-repo groups keep their existing
 chief thread in the workstream trace; selection of a different repo adopts the
 original conversation into the workgroup trace even for one selected member.
 Nothing is authoritative in two places, and every trace stays
-outside target clones. Go reads current state on each reconciliation pass;
+outside target clones. Each trace is one SQLite database, `trace.db`, in its
+own directory under the root; every document is a revision in it, so the
+owner edits the charter, spec and plan with `osmia edit` or the web UI, never
+as files. Every write is one database transaction. Go reads current state on each reconciliation pass;
 an event wakes a pass early but does not carry the state transition.
 
 One owner start hands the design brief to production drafting and allocation;
@@ -67,12 +70,12 @@ Merge-only dependency handling is a Go controller: contract edges resolve on
 the ratified contract, and hard-block and merge-order edges on the recorded
 upstream PR merge. Expected waits have no inbox or notification side effect.
 
-A project whose trace still uses the older shared layout, with every
-workstream's records inside the project's own repository, is migrated
-automatically and resumably before it is opened. Permanently archiving a
-workstream deletes its own trace repository and temporary workspaces, once
-any busy or pending work has cleared and the knowledge base has absorbed its
-learnings; it does not rewrite or prune Git history. See
+A trace still kept as a Git repository is migrated to its database
+automatically and resumably before its project is opened. Permanently
+archiving a workstream closes its database, moves its trace directory aside
+and deletes it, together with its temporary workspaces, once any busy or
+pending work has cleared and the knowledge base has absorbed its learnings.
+See
 [design §4.5](design.md#45-where-they-live) and
 [§5.1](design.md#51-feature-states).
 
@@ -188,7 +191,7 @@ Osmia.
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
 root holds its own `config.toml`. Runtime overrides, project configuration,
-repo knowledge traces, workgroup traces and workstream trace repositories and workspaces live
+repo knowledge traces, workgroup traces and workstream trace databases and workspaces live
 in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access

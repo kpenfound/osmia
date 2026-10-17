@@ -2,15 +2,16 @@
 
 How to find out, from a factory's own records, why a workstream is stuck,
 looping or expensive. The trace records every transition, turn and session,
-so a question about what the factory did is answered from files, not from
-memory or guesses. The method moves from counts to a timeline, from the
+so a question about what the factory did is answered from its databases, not
+from memory or guesses. The method moves from counts to a timeline, from the
 timeline to the one pattern that repeats, and from that pattern to the code
 that produces it.
 
 ## Ground rules
 
-- Read only. Analysis never writes to the root. Stop the service, or leave it
-  running and read, but never open the trace with Osmia's own code while the
+- Read only. Analysis never writes to the root. Open each trace with
+  `sqlite3 -readonly`, which reads while the service runs and never waits on
+  or blocks its writes. Never open a trace with Osmia's own code while the
   service holds it.
 - Inspect Jujutsu workspaces with `jj --ignore-working-copy`; any other `jj`
   command snapshots the working copy and changes the record you are reading.
@@ -20,30 +21,44 @@ that produces it.
 
 ## Where the evidence lives
 
-Paths are under the root, `~/.local/share/osmia` by default.
+Paths are under the root, `~/.local/share/osmia` by default. Each trace is
+one SQLite database, `trace.db`, in its own directory.
 
 | Path | What it answers |
 |---|---|
 | `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`), profile overrides |
 | `projects/<p>/config.toml` | The repo's clone path, base branch, landing style and optional group_id |
-| `workstreams/<p>/<w>/workstream.json` | When the workstream was created and its workspace backend |
-| `.../events.jsonl` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
-| `.../ledger.jsonl` | One cost record per session: `.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `.entry.At`, `.entry.Usage` (`CostUSD`, `Turns`) |
-| `.../agents/<agent>/log.jsonl` | Each turn's request (`actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
-| `.../workflow.json` | `transactions[].events[]` with their `operation`, and `operations[]`: each attempt's `claim`, `observe`, `effect`, `retry` (with `failure` and `retry_at`) and `result`; `threads`: each agent's queued turns with their `claim`, `attempts` and `completed_at`, and the `request_id` and `response_id` of the turn's records in the agent's `log.jsonl` |
-| `.../status.jsonl` | The chief of staff's status revisions: `goal`, `note`, `agents` |
-| `.../tools/` | One audit record per tool call: `scope.Role`, `scope.Turn`, `name` |
-| `.../units/<u>/` | `report.json`, `review.json`, `rebase.json`, `landing.json`, `checks-<n>.json` |
-| `.../drift/rebase.json` | The latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
+| `projects/<p>/trace.db` | The repo's knowledge: charter (default repo), KB, entity map, role notes, lasting decisions |
+| `workstreams/<p>/<w>/trace.db` | The workstream's complete trace |
 | `units/<p>/<w>/<u>`, `drifts/<p>/<w>` | Unit and drift resolution workspaces |
 
+A trace database has five tables:
+
+| Table | What it holds |
+|---|---|
+| `records` | Every record revision: `seq` (commit order), `path`, `schema`, `id`, `revision` and `body`, the record's JSON. `path` is the record's logical path, such as `workstreams/<w>/events.jsonl` |
+| `files` | `path` and `content` of the manifests (`project.json`, `workstreams/<w>/workstream.json`: creation time and workspace backend), role notes and inbox numbering |
+| `workflow_log` | The workflow's append-only lists: `list` is `transactions` (each with its `events[]` and their `operation`), `deliveries` or `operations` (each attempt's `claim`, `observe`, `effect`, `retry` with `failure` and `retry_at`, and `result`) |
+| `workflow_threads` | Each agent's thread by `agent_id`: its queued turns with their `claim`, `attempts` and `completed_at`, and the `request_id` and `response_id` of the turn's records |
+| `commits` | One row per write, with its time and message |
+
+The records you will read most, by `schema`:
+
+| `schema` | What it answers |
+|---|---|
+| `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
+| `osmia.trace.cost` | One cost record per session: `$.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `$.entry.At`, `$.entry.Usage` (`CostUSD`, `Turns`) |
+| `osmia.trace.turn-request`, `osmia.trace.turn-response` | Each turn's request (`agent_id`, `actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
+| `osmia.trace.status` | The chief of staff's status revisions: `goal`, `note`, `agents` |
+| `osmia.trace.document` | Every document revision: `$.path` names the document and `$.content` holds it. The latest revision of a document is its row with the highest `seq`. `tools/<id>.json` is one audit record per tool call (`scope.Role`, `scope.Turn`, `name`); `units/<u>/` holds `report.json`, `review.json`, `rebase.json`, `landing.json` and `checks-<n>.json`; `drift/rebase.json` is the latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
+
 Each repo's librarian has a workstream of its own, `w_` followed by the
-first 32 hex digits of `sha256("librarian:<project id>")`. Its
-`workflow.json` holds the knowledge base extraction and refresh operations.
+first 32 hex digits of `sha256("librarian:<project id>")`. Its workflow holds
+the knowledge base extraction and refresh operations.
 
 Here `<p>` is the repo registration ID. Its default project's charter is shared,
 but its KB and settings are local. For a cross-repo workgroup also inspect
-`workgroups/<group-id>/`: the authoritative project spec, membership, original
+`workgroups/<group-id>/trace.db`: the authoritative project spec, membership, original
 shared chief conversation, consolidated questions and approved change journals
 are there, outside member traces. Member roles' asking-turn links lead back to
 their own traces. A published `delivered` workflow state is not itself a merge;
@@ -66,12 +81,16 @@ Active, high-session workstreams are where to start.
 
 ```sh
 cd ~/.local/share/osmia/workstreams
-for w in */*/; do
-  id=$(basename $w)
-  state=$(jq -r 'select(.subject=="feature") | .to' $w/events.jsonl | tail -1)
-  sessions=$(wc -l < $w/ledger.jsonl 2>/dev/null)
-  goal=$(tail -1 $w/status.jsonl 2>/dev/null | jq -r '.goal // empty' | head -c 80)
-  echo "$id [$state] sessions=$sessions $goal"
+for db in */*/trace.db; do
+  id=$(basename $(dirname $db))
+  sqlite3 -readonly -separator ' ' $db "
+    SELECT '$id',
+      '[' || coalesce((SELECT json_extract(body, '\$.to') FROM records
+        WHERE schema = 'osmia.trace.transition' AND json_extract(body, '\$.subject') = 'feature'
+        ORDER BY seq DESC LIMIT 1), '') || ']',
+      'sessions=' || (SELECT count(*) FROM records WHERE schema = 'osmia.trace.cost'),
+      coalesce((SELECT substr(json_extract(body, '\$.goal'), 1, 80) FROM records
+        WHERE schema = 'osmia.trace.status' ORDER BY seq DESC LIMIT 1), '')"
 done
 ```
 
@@ -83,10 +102,14 @@ sessions far above mason sessions, or nearly all of a role's sessions on one
 or two units, means something repeats.
 
 ```sh
-W=workstreams/<p>/<w>
-jq -r '[.entry.Scope.Role, .entry.Usage.CostUSD] | @tsv' $W/ledger.jsonl \
-  | awk -F'\t' '{n[$1]++; c[$1]+=$2} END {for (r in n) printf "%-16s %5d $%.2f\n", r, n[r], c[r]}'
-jq -r '[.entry.Scope.Role, .entry.Scope.Unit] | @tsv' $W/ledger.jsonl | sort | uniq -c | sort -nr
+W=workstreams/<p>/<w>/trace.db
+sqlite3 -readonly $W "
+  SELECT printf('%-16s %5d \$%.2f', json_extract(body, '\$.entry.Scope.Role'), count(*),
+    sum(json_extract(body, '\$.entry.Usage.CostUSD')))
+  FROM records WHERE schema = 'osmia.trace.cost' GROUP BY json_extract(body, '\$.entry.Scope.Role')"
+sqlite3 -readonly $W "
+  SELECT count(*), json_extract(body, '\$.entry.Scope.Role'), json_extract(body, '\$.entry.Scope.Unit')
+  FROM records WHERE schema = 'osmia.trace.cost' GROUP BY 2, 3 ORDER BY 1 DESC"
 ```
 
 ## 3. Build a timeline
@@ -96,8 +119,14 @@ beside them. Find the point where the session rate jumps while the states stop
 moving. The transitions just before that point are where the stall began.
 
 ```sh
-jq -r '[(.entry.At | .[0:13]), .entry.Scope.Role] | @tsv' $W/ledger.jsonl | sort | uniq -c
-jq -r 'select(.unit != null) | [.at[0:19], .unit, .from, .to] | @tsv' $W/events.jsonl
+sqlite3 -readonly $W "
+  SELECT count(*), substr(json_extract(body, '\$.entry.At'), 1, 13), json_extract(body, '\$.entry.Scope.Role')
+  FROM records WHERE schema = 'osmia.trace.cost' GROUP BY 2, 3 ORDER BY 2, 3"
+sqlite3 -readonly -separator '	' $W "
+  SELECT substr(json_extract(body, '\$.at'), 1, 19), json_extract(body, '\$.unit'),
+    json_extract(body, '\$.from'), json_extract(body, '\$.to')
+  FROM records WHERE schema = 'osmia.trace.transition' AND json_extract(body, '\$.unit') IS NOT NULL
+  ORDER BY seq"
 ```
 
 ## 4. Find the repeating pattern
@@ -106,8 +135,13 @@ A loop shows up as the same transition many times: a subject that moves to
 the state it is in, with the same reason each time.
 
 ```sh
-jq -r 'select(.from == .to) | [.subject, .reason[0:80]] | @tsv' $W/events.jsonl | sort | uniq -c | sort -nr | head
-jq -r 'select(.schema=="osmia.trace.turn-request") | .cause' $W/agents/chief_of_staff/log.jsonl \
+sqlite3 -readonly $W "
+  SELECT count(*), json_extract(body, '\$.subject'), substr(json_extract(body, '\$.reason'), 1, 80)
+  FROM records WHERE schema = 'osmia.trace.transition' AND json_extract(body, '\$.from') = json_extract(body, '\$.to')
+  GROUP BY 2, 3 ORDER BY 1 DESC LIMIT 10"
+sqlite3 -readonly $W "
+  SELECT json_extract(body, '\$.cause') FROM records
+  WHERE schema = 'osmia.trace.turn-request' AND json_extract(body, '\$.agent_id') = 'chief_of_staff'" \
   | sed -E 's/[0-9]+/N/g' | sort | uniq -c | sort -nr | head
 ```
 
@@ -128,10 +162,13 @@ that thing, then look at whatever should have done it.
   only the stuck one. Some gates are project-wide.
 
   ```sh
-  jq -r '([.operations[]? | select(.result != null) | .event_id] | unique) as $done
-    | .transactions[] | .events[]? | select(.operation != null)
-    | select((.id as $id | $done | index($id)) | not)
-    | [.operation.action, .id, .body] | @tsv' $W/workflow.json
+  sqlite3 -readonly -separator '	' $W "
+    SELECT json_extract(e.value, '\$.operation.action'), json_extract(e.value, '\$.id'), json_extract(e.value, '\$.body')
+    FROM workflow_log t, json_each(t.body, '\$.events') e
+    WHERE t.list = 'transactions' AND json_extract(e.value, '\$.operation') IS NOT NULL
+      AND json_extract(e.value, '\$.id') NOT IN (
+        SELECT json_extract(body, '\$.event_id') FROM workflow_log
+        WHERE list = 'operations' AND json_extract(body, '\$.result') IS NOT NULL)"
   ```
 
 - Line up timestamps across workstreams. A stall that starts seconds after
@@ -141,9 +178,15 @@ that thing, then look at whatever should have done it.
   means the retry backoff is not working.
 
   ```sh
-  jq -r --arg e <event id> '[.operations[] | select(.event_id==$e)]
-    | length, (map(.kind) | group_by(.) | map("\(.[0]) \(length)")),
-      (map(select(.failure)) | last | .failure[0:300])' $W/workflow.json
+  E='<event id>'
+  sqlite3 -readonly $W "
+    SELECT count(*) FROM workflow_log WHERE list = 'operations' AND json_extract(body, '\$.event_id') = '$E';
+    SELECT json_extract(body, '\$.kind'), count(*) FROM workflow_log
+      WHERE list = 'operations' AND json_extract(body, '\$.event_id') = '$E' GROUP BY 1;
+    SELECT substr(json_extract(body, '\$.failure'), 1, 300) FROM workflow_log
+      WHERE list = 'operations' AND json_extract(body, '\$.event_id') = '$E'
+        AND json_extract(body, '\$.failure') IS NOT NULL
+      ORDER BY seq DESC LIMIT 1;"
   ```
 
 - Check the repository itself. Use `git merge-base --is-ancestor` on the
@@ -160,8 +203,10 @@ done. An empty diff may be correct because upstream already contains the
 change.
 
 ```sh
-jq -r 'select(.schema != "osmia.trace.turn-request") | [.turn_id, (.result.FinalResponse // "")[0:200]] | @tsv' \
-  $W/agents/<agent>/log.jsonl | sed -n '1,3p;$p'
+sqlite3 -readonly -separator '	' $W "
+  SELECT json_extract(body, '\$.turn_id'), substr(coalesce(json_extract(body, '\$.result.FinalResponse'), ''), 1, 200)
+  FROM records WHERE schema = 'osmia.trace.turn-response' AND json_extract(body, '\$.agent_id') = '<agent>'
+  ORDER BY seq" | sed -n '1,3p;$p'
 ```
 
 ## 7. Confirm in the code
@@ -190,8 +235,13 @@ what they achieve.
    that only reads files and rewrites its status did not need to run.
 
    ```sh
-   find */*/tools -name '*-1.json' -print0 | xargs -0 cat \
-     | jq -r 'select(.scope.Role=="chief_of_staff") | .name' | sort | uniq -c | sort -nr
+   for db in */*/trace.db; do
+     sqlite3 -readonly $db "
+       SELECT json_extract(json_extract(body, '\$.content'), '\$.name') FROM records
+       WHERE schema = 'osmia.trace.document' AND json_extract(body, '\$.path') LIKE 'tools/%'
+         AND revision = 1
+         AND json_extract(json_extract(body, '\$.content'), '\$.scope.Role') = 'chief_of_staff'"
+   done | sort | uniq -c | sort -nr
    ```
    (run from `~/.local/share/osmia/workstreams`)
 

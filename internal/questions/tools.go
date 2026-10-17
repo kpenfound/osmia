@@ -158,7 +158,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			if _, ok := plan.ParseCitation(c); !ok && !strings.HasPrefix(c, "plan#") {
 				return encode(refusal{Reason: "amendments cite only spec#<n> or plan#<unit>"})
 			}
-			if err := Resolve(ctx, repository, target, c, now()); err != nil {
+			if err := Resolve(ctx, repository, target, c); err != nil {
 				var unresolved *Unresolved
 				if errors.As(err, &unresolved) {
 					return encode(refusal{Reason: unresolved.Error()})
@@ -227,7 +227,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			return refuse(err)
 		}
 		for _, c := range input.Citations {
-			if err := Resolve(ctx, repository, member, c, now()); err != nil {
+			if err := Resolve(ctx, repository, member, c); err != nil {
 				var unresolved *Unresolved
 				if errors.As(err, &unresolved) {
 					return encode(refusal{Reason: unresolved.Error()})

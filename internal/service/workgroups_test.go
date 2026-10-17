@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -77,16 +76,12 @@ func archiveRecord(t *testing.T, store *runtime.Store, stream config.WorkstreamI
 	return runtime.Archive{}, false
 }
 
-// workstreamTraceUnchanged fails t if any file that existed in before, a
-// snapshot of a workstream's own dedicated trace directory, differs in
-// after: migration must never rewrite a workstream's own trace.
-func workstreamTraceUnchanged(t *testing.T, before, after map[string]string) {
+// workstreamTraceUnchanged fails t if the workstream's own trace holds a
+// commit it did not hold before: migration must never write to it.
+func workstreamTraceUnchanged(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, before int) {
 	t.Helper()
-	for path, content := range before {
-		got, ok := after[path]
-		if !ok || got != content {
-			t.Fatalf("workstream trace file changed by migration: %s", path)
-		}
+	if after := traceCommits(t, workstreamTraceDirectory(t, root, project, stream)); after != before {
+		t.Fatalf("workstream %s trace went from %d to %d commits during migration", stream, before, after)
 	}
 }
 
@@ -158,15 +153,18 @@ func TestStartupWrapsExistingWorkstreamsInOneWorkgroupEachAndExcludesSessions(t 
 		t.Fatal("archive record missing before migration")
 	}
 
-	root := opts.Config.Root
-	traceDir := filepath.Join(root, "projects", string(project))
-	charterBefore := snapshot(t, traceDir)
-	buildingBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(building)))
-	secondBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(second)))
-	sessionBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(session)))
-	deliveredBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(delivered)))
-	abandonedBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(abandoned)))
-	archivedBefore := snapshot(t, filepath.Join(root, "workstreams", string(project), string(archived)))
+	documentsBefore := map[string][]byte{}
+	for _, name := range []string{"charter.md", trace.EntitiesPath} {
+		content, err := projectDocument(t, s.cfg.Root, project, name)
+		must(t, err)
+		documentsBefore[name] = content
+	}
+	buildingBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, building))
+	secondBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, second))
+	sessionBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, session))
+	deliveredBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, delivered))
+	abandonedBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, abandoned))
+	archivedBefore := traceCommits(t, workstreamTraceDirectory(t, s.cfg.Root, project, archived))
 
 	must(t, s.Close())
 	s, c = start(t, opts)
@@ -213,23 +211,22 @@ func TestStartupWrapsExistingWorkstreamsInOneWorkgroupEachAndExcludesSessions(t 
 		t.Fatal("archived workstream's trace was removed by migration")
 	}
 
-	// charter.md and the entity map, read from the project directory the
-	// same way the owner and factory read them, are unchanged: migration
-	// only ever adds workgroups.json as a new revision.
-	for _, name := range []string{"charter.md", trace.EntitiesPath} {
-		before, err := os.ReadFile(filepath.Join(traceDir, name))
+	// The charter and the entity map are unchanged: migration only ever
+	// adds workgroups.json as a new revision.
+	for name, before := range documentsBefore {
+		after, err := projectDocument(t, s.cfg.Root, project, name)
 		must(t, err)
-		if string(before) != charterBefore[filepath.Join(traceDir, name)] {
+		if string(after) != string(before) {
 			t.Fatalf("%s changed by migration", name)
 		}
 	}
 	// Each workstream's own dedicated trace is untouched.
-	workstreamTraceUnchanged(t, buildingBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(building))))
-	workstreamTraceUnchanged(t, secondBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(second))))
-	workstreamTraceUnchanged(t, sessionBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(session))))
-	workstreamTraceUnchanged(t, deliveredBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(delivered))))
-	workstreamTraceUnchanged(t, abandonedBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(abandoned))))
-	workstreamTraceUnchanged(t, archivedBefore, snapshot(t, filepath.Join(root, "workstreams", string(project), string(archived))))
+	workstreamTraceUnchanged(t, s.cfg.Root, project, building, buildingBefore)
+	workstreamTraceUnchanged(t, s.cfg.Root, project, second, secondBefore)
+	workstreamTraceUnchanged(t, s.cfg.Root, project, session, sessionBefore)
+	workstreamTraceUnchanged(t, s.cfg.Root, project, delivered, deliveredBefore)
+	workstreamTraceUnchanged(t, s.cfg.Root, project, abandoned, abandonedBefore)
+	workstreamTraceUnchanged(t, s.cfg.Root, project, archived, archivedBefore)
 
 	// Restarting again changes nothing further and duplicates nothing.
 	must(t, s.Close())

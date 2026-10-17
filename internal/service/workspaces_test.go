@@ -82,8 +82,8 @@ func newWorkspacesFixture(t *testing.T, setting string) *workspacesFixture {
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
-	f.handInFixture = &handInFixture{s: s, c: c, project: added.Project.ID, trace: added.Project.Trace, charter: added.Project.Charter, home: filepath.Dir(clone)}
+	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	f.handInFixture = &handInFixture{s: s, c: c, project: added.Project.ID, trace: added.Project.Trace, home: filepath.Dir(clone)}
 	return f
 }
 

@@ -57,11 +57,11 @@ func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter
 	h.Actor = Actor{Kind: "agent", ID: agent}
 	h.Depth++
 	doc := Document{Header: h, Path: "inspections/" + id + ".json", Content: string(data)}
-	files, removed, err := r.documentFiles(ctx, []Document{doc})
+	files, err := r.documentFiles(ctx, []Document{doc})
 	if err != nil {
 		return "", err
 	}
-	return "inspection#" + id, r.publishTree(ctx, files, removed)
+	return "inspection#" + id, r.publish(ctx, files)
 }
 
 func (r *Repository) CodeInspection(stream config.WorkstreamID, id string) (CodeInspection, error) {

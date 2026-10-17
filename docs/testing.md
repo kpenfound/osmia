@@ -55,23 +55,22 @@ passing, failing and incomplete runs. No test reaches a Dagger engine.
 
 ## Keep service tests focused
 
-Service lifecycle tests start real reconcilers and write durable traces in local
-Git repositories. The Go check mounts `/tmp` in memory for its test
-commands. Temporary repositories survive service restarts within that command
-and are discarded when the command ends. This exercises real Git, Jujutsu and
+Service lifecycle tests start real reconcilers and write durable traces to
+their SQLite databases, with target repositories in local Git repositories. The
+Go check mounts `/tmp` in memory for its test commands. Temporary traces and
+repositories survive service restarts within that command and are discarded
+when the command ends. This exercises real databases, Git, Jujutsu and
 filesystem operations, including the service's durability calls, without paying
 for container-layer disk writes on every fixture transaction.
 
-An open trace handle holds the trace's lock, so only the handle changes its
-files. Reads reuse the handle's latest scan and history check until it next
-writes or HEAD moves, and callers receive independent copies of mutable fields.
-Every write checks the trace files against HEAD again before it changes
-anything, so a file changed from outside the handle stops the write rather than
-being committed; a test that edits trace files under an open handle sees the
-edit at its next write or when it reopens the trace. When a write changes the
-files, decoded JSONL records are reused only when the file bytes match. Each
-project retains at most 16 MiB of encoded JSONL in this cache, along with its
-decoded records; larger files are decoded without retention. Frequent polling
+An open trace handle holds the trace's lock, so only the handle writes its
+database. Each write is one transaction that checks only the records it
+revises. Reads take no write lock: the handle decodes each committed record
+once, keeps it, and reads only the records committed since; callers receive
+independent copies of mutable fields. Tests outside the trace package write trace state through the trace
+API or the service's edit endpoints, never by changing the database or files
+under an open handle, and assert on commits through the trace's commit count.
+Frequent polling
 competes with the controllers doing the work. Parallel tests also share the
 container's CPU and filesystem, so adding parallelism can increase contention.
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -150,7 +149,7 @@ func newArchitectFixtureCounting(t *testing.T) (*architectFixture, *atomic.Int64
 	added, err := f.c.AddProject(context.Background(), request(clone))
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n2. Every change has a test.\n"), 0600))
+	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 	return f, passed
 }
 

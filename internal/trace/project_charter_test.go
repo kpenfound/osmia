@@ -3,8 +3,7 @@ package trace
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"reflect"
 	"testing"
 
@@ -35,7 +34,7 @@ func TestRepoCharterUsesProjectAuthorityAndPreservesLegacyHistory(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	if _, err := repo.Charter(ctx, at); err == nil {
+	if _, err := repo.Charter(ctx); err == nil {
 		t.Fatal("unbound member used its local charter")
 	}
 	repo.SetCharterResolver(func(id config.ProjectID) (*Repository, error) {
@@ -48,7 +47,7 @@ func TestRepoCharterUsesProjectAuthorityAndPreservesLegacyHistory(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := repo.Charter(ctx, at)
+	got, err := repo.Charter(ctx)
 	if err != nil || got != current {
 		t.Fatalf("member charter: %+v %v", got, err)
 	}
@@ -59,14 +58,14 @@ func TestRepoCharterUsesProjectAuthorityAndPreservesLegacyHistory(t *testing.T) 
 	if _, err := primary.EditCharter(ctx, current.Revision, "stale", at); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale edit: %v", err)
 	}
-	if direct, err := primary.Charter(ctx, at); err != nil || direct != got {
+	if direct, err := primary.Charter(ctx); err != nil || direct != got {
 		t.Fatalf("default charter: %+v %v", direct, err)
 	}
 	if after := charterRevisions(t, repo); !reflect.DeepEqual(before, after) {
 		t.Fatalf("member history changed: %+v", after)
 	}
-	if data, err := os.ReadFile(filepath.Join(repo.directory, "charter.md")); err != nil || string(data) != old.Content {
-		t.Fatalf("legacy file: %q %v", data, err)
+	if got := fileOf(t, repo, "charter.md"); got != old.Content {
+		t.Fatalf("legacy charter: %q", got)
 	}
 	docs, err := repo.ProjectDocuments()
 	if err != nil {
@@ -90,14 +89,12 @@ func TestRepoCharterUsesProjectAuthorityAndPreservesLegacyHistory(t *testing.T) 
 		t.Fatal(err)
 	}
 	repo.SetCharterResolver(func(config.ProjectID) (*Repository, error) { return primary, nil })
-	if reopened, err := repo.Charter(ctx, at); err != nil || reopened != got {
+	if reopened, err := repo.Charter(ctx); err != nil || reopened != got {
 		t.Fatalf("reopened charter: %+v %v", reopened, err)
 	}
 	// No fallback to legacy policy when the authority cannot be read.
-	if err := os.Remove(filepath.Join(primary.directory, "charter.md")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.Charter(ctx, at); err == nil {
+	storeExec(t, primary, "DELETE FROM records WHERE path = 'documents.jsonl' AND id = 'charter'")
+	if _, err := repo.Charter(ctx); err == nil {
 		t.Fatal("missing authority fell back to local policy")
 	}
 }
@@ -110,14 +107,14 @@ func TestNewMemberRepoHasNoCharterOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	if _, err := os.Stat(filepath.Join(repo.directory, "charter.md")); !os.IsNotExist(err) {
+	if _, err := repo.file("charter.md"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("member charter exists: %v", err)
 	}
 	if docs := charterRevisions(t, repo); len(docs) != 0 {
 		t.Fatalf("member charter revisions: %+v", docs)
 	}
 	repo.SetCharterResolver(func(config.ProjectID) (*Repository, error) { return primary, nil })
-	if d, err := repo.Charter(context.Background(), at); err != nil || d.Project != p.GroupID {
+	if d, err := repo.Charter(context.Background()); err != nil || d.Project != p.GroupID {
 		t.Fatalf("shared charter: %+v %v", d, err)
 	}
 }

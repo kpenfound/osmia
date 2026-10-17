@@ -61,8 +61,12 @@ func onWorkspaces(t *testing.T, opts Options, backend string) {
 // backendOf returns the workspace backend the workstream's manifest records.
 func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "workstream.json"))
+	root, err := config.ResolveRoot(f.opts.Config.Root, "")
 	must(t, err)
+	data, ok := traceFile(t, workstreamTraceDirectory(t, root, f.project, stream), "workstreams/"+string(stream)+"/workstream.json")
+	if !ok {
+		t.Fatalf("workstream %s has no manifest", stream)
+	}
 	var manifest struct {
 		Workspaces string `json:"workspaces"`
 	}

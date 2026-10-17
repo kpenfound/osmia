@@ -139,25 +139,32 @@ Osmia feature branch and opens a pull request against the configured base
 branch; it does not push to that base branch or merge the request.
 
 The command prints the project ID (`p_…`). The service creates the project's
-trace repository under `<root>/projects/<project-id>/`, outside your clone, seeds
+trace, `<root>/projects/<project-id>/trace.db`, outside your clone, seeds
 a map of the repository's subsystems, and asks the librarian for the first
 knowledge-base extraction. `osmia status` shows the extraction
 `succeeded` when it has finished. Registration never writes to your clone; see
 [project registration](configuration.md#project-registration).
 
 Hand-in is refused until the project has a charter with at least one rule. The
-charter is your rules as a contributor to this project, in
-`<root>/projects/<project-id>/charter.md`. Open it and write numbered rules
-under the template's headings:
+charter is your rules as a contributor to this project. Open it in your editor
+(`$VISUAL`, or else `$EDITOR`):
+
+```sh
+osmia edit charter p_…
+```
+
+and write numbered rules under the template's headings:
 
 ```markdown
 1. Every bug fix comes with a test that fails without it.
 2. Run the full suite before opening a pull request.
 ```
 
-There is nothing further to ratify: the service records your edit as a new
-charter revision the next time it reads the file, and `osmia status` then shows
-`Charter: ready (2 rules, revision 2)`. Rules later proposed by the chief of
+Save and quit. The command records your edit as the next charter revision and
+prints its number; there is nothing further to ratify, and `osmia status` then
+shows `Charter: ready (2 rules, revision 2)`. To write the charter from a file
+instead, use `osmia edit charter p_… --from charter.md`; the project pane's
+charter editor does the same. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 

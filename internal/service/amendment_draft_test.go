@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -166,7 +165,7 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			if len(candidate) != 3 {
 				t.Fatalf("candidate docs: %+v", candidate)
 			}
-			data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "amendments/1/affected.json"))
+			data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "amendments/1/affected.json")
 			must(t, err)
 			var affected amendmentAffected
 			must(t, json.Unmarshal(data, &affected))

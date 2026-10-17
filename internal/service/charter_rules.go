@@ -22,7 +22,8 @@ import (
 var charterActor = trace.Actor{Kind: "service", ID: "charter"}
 
 // charterWriteAttempts bounds how often one pass rereads the charter after
-// an owner edit it did not record refused the write of a ratified rule.
+// the owner's concurrent edit took the revision a ratified rule was written
+// against.
 const charterWriteAttempts = 3
 
 // CharterDecisionRequest is the owner's decision on a charter proposal:
@@ -301,11 +302,10 @@ func (c charterer) Pass(ctx context.Context) error {
 // then records the number and the charter revision in the proposal and moves
 // it to chartered, which tells the workstream's chief of staff. The charter
 // revision's cause is the proposal's path, so a charter revision recorded
-// before a stop is found again rather than appended twice. The charter is
-// read through the trace, which records an owner edit first, and written
-// through it, which refuses to overwrite an owner edit made since the read:
-// the write then reads the charter again, up to charterWriteAttempts times in
-// one pass, and later passes try again.
+// before a stop is found again rather than appended twice. The write is the
+// revision after the one read, so an owner edit recorded since the read
+// refuses it: the write then reads the charter again, up to
+// charterWriteAttempts times in one pass, and later passes try again.
 func (c charterer) write(ctx context.Context, p trace.CharterProposalState) error {
 	source := charterSource(p)
 	authority, err := c.repository.CharterRepository()
@@ -317,7 +317,7 @@ func (c charterer) write(ctx context.Context, p trace.CharterProposalState) erro
 		return err
 	}
 	for attempt := 0; written == nil && attempt < charterWriteAttempts; attempt++ {
-		current, err := c.repository.Charter(ctx, c.s.now())
+		current, err := c.repository.Charter(ctx)
 		if err != nil {
 			return err
 		}

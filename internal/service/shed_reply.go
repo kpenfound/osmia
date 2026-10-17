@@ -636,37 +636,10 @@ func (d *debate) recordReply(ctx context.Context, operation string, stream confi
 		return coreadapter.OperationResult{}, err
 	}
 	replyDoc := trace.Document{Header: header(in.documentID(), 1), Path: in.path(), Content: string(data)}
-	err = d.repository.RecordDocuments(ctx, append(docs, replyDoc))
-	if errors.Is(err, trace.ErrOwnerEdit) && reply.Redraft != nil {
-		// The owner has edited a file the redraft changes and the edit is not
-		// recorded yet. The redraft must not write over it, so it is given up
-		// like an invalid one and the answer is recorded on its own.
-		if reply, replyDoc, err = d.withoutRedraft(stream, in, reply, header); err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		err = d.repository.RecordDocuments(ctx, []trace.Document{replyDoc})
-	}
-	if err != nil {
+	if err := d.repository.RecordDocuments(ctx, append(docs, replyDoc)); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	return d.replied(ctx, operation, stream, in, reply)
-}
-
-// withoutRedraft gives up a redraft the owner's own unrecorded edit stands in
-// the way of: the reply keeps its answers, records why the redraft was given
-// up, and the revision the round debated stays.
-func (d *debate) withoutRedraft(stream config.WorkstreamID, in roundInput, reply shed.Reply, header func(string, int) trace.Header) (shed.Reply, trace.Document, error) {
-	edited, err := d.repository.OwnerEdits(stream)
-	if err != nil {
-		return reply, trace.Document{}, err
-	}
-	reply.Redraft = nil
-	reply.Problems = append(reply.Problems, fmt.Sprintf("the redraft is not recorded: the owner has edited %s and the edit is not recorded yet, so the redraft would write over it", strings.Join(edited, " and ")))
-	data, err := shed.EncodeReply(reply)
-	if err != nil {
-		return reply, trace.Document{}, err
-	}
-	return reply, trace.Document{Header: header(in.documentID(), 1), Path: in.path(), Content: string(data)}, nil
 }
 
 // replied moves the shed to replied-<n> or redrafted-<n> for a recorded
@@ -928,7 +901,7 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	charter, err := d.repository.Charter(ctx, d.s.now())
+	charter, err := d.repository.Charter(ctx)
 	if err != nil {
 		return nil, err
 	}

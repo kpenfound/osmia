@@ -157,7 +157,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if s.Seal != report.Seal && !amendment.CarriesReport(applications, unit, report.Seal, s.Seal) {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s report seal %d is not the current seal", unit, report.Seal)
 	}
-	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "reviewer", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
+	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "reviewer", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }}
 	mason, err := files.Mason(ctx, m.repository.Project(), stream, unit)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
