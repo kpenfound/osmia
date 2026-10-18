@@ -256,7 +256,7 @@ func TestCancelUpstreamIncludesDependentsInSharedImpact(t *testing.T) {
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	c, api := f.s.requestChange(context.Background(), string(f.origin), ChangeRequest{Key: "cancel-server", Kind: "cancel", Scope: "workstream", Workstream: f.stream1, Change: "Cancel the server and its dependent client"})

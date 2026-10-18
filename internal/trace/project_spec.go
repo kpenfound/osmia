@@ -252,16 +252,47 @@ func readProjectSpecs(r *Repository) ([]projectSpecEntry, int, error) {
 // ProjectSpecFor returns the recorded project spec of workgroup, and whether
 // one is recorded. r must be the project's own repository.
 func ProjectSpecFor(r *Repository, workgroup config.WorkgroupID) (ProjectSpec, bool, error) {
-	entries, _, err := readProjectSpecs(r)
+	spec, _, found, err := ProjectSpecWithRevisionFor(r, workgroup)
+	return spec, found, err
+}
+
+// ProjectSpecWithRevisionFor reads the spec and its trace document revision
+// from the same snapshot.
+func ProjectSpecWithRevisionFor(r *Repository, workgroup config.WorkgroupID) (ProjectSpec, int, bool, error) {
+	entries, revision, err := readProjectSpecs(r)
 	if err != nil {
-		return ProjectSpec{}, false, err
+		return ProjectSpec{}, 0, false, err
 	}
 	for _, e := range entries {
 		if e.Workgroup == workgroup {
-			return e.Spec, true, nil
+			return e.Spec, revision, true, nil
 		}
 	}
-	return ProjectSpec{}, false, nil
+	return ProjectSpec{}, 0, false, nil
+}
+
+// RecordedProjectSpecRevision locates a recorded revision with exactly spec's
+// content, including when an immutable approval predates explicit revision pins.
+func RecordedProjectSpecRevision(r *Repository, workgroup config.WorkgroupID, spec ProjectSpec) (int, error) {
+	docs, err := Read[Document](r, "")
+	if err != nil {
+		return 0, err
+	}
+	for _, doc := range slices.Backward(docs) {
+		if doc.ID != ProjectSpecsDocument {
+			continue
+		}
+		var file projectSpecsFile
+		if err := json.Unmarshal([]byte(doc.Content), &file); err != nil {
+			return 0, err
+		}
+		for _, entry := range file.Specs {
+			if entry.Workgroup == workgroup && equalJSON(entry.Spec, spec) {
+				return doc.Revision, nil
+			}
+		}
+	}
+	return 0, nil
 }
 
 // ProjectSpecOf returns the recorded project spec of the workgroup stream
@@ -383,10 +414,10 @@ func projectSpecOfLocked(project *Repository, v *workflowView, member config.Wor
 // RecordProjectSpec validates spec against workgroup's members, refusing
 // and writing nothing if a graph edge names an unknown member or an edge of
 // any type forms a cycle, or a slice is invalid or repeated. Otherwise it
-// records spec as workgroup's project spec in one commit, replacing any
-// earlier revision recorded for the same workgroup; it is the one owner
-// ratification that seals the project spec, its graph and every member's
-// slice together. r must be the project's own repository.
+// appends spec as the next document revision of the workgroup's project
+// spec. Earlier revisions remain readable. One owner ratification seals
+// the project spec, its graph and every member's slice together.
+// r must be the project's own repository.
 func RecordProjectSpec(ctx context.Context, r *Repository, workgroup Workgroup, spec ProjectSpec, at time.Time, actor Actor, cause string) error {
 	if err := spec.valid(workgroup.Members); err != nil {
 		return err

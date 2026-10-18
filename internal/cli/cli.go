@@ -51,7 +51,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   shed skip <workstream-id> [--json]
   shed more <workstream-id> <rounds> [--json]
   shed redraft <workstream-id> <note> [--json]
-  ratify <workstream-id> [--json]
+  packet <workstream-id> [--json]
+  ratify <workstream-id> [--project-spec-revision N --spec-revision N --plan-revision N] [--json]
   amendment <workstream-id> <n> [approve|reject|round|overrule [note]] [--json]
   delivery <workstream-id> [--json]
   merged <workstream-id> [--json]
@@ -87,13 +88,14 @@ serve runs in the foreground unless --detach is set. Detached logs are in root/s
 `
 
 type options struct {
-	root, socket, reason, project, base         string
-	messageFile, messagesFile                   string
-	upstream, fork, clone, baseBranch           string
-	profile, title, from                        string
-	json, hard, reasonSet, help, target, accept bool
-	skipDebate, version, detach                 bool
-	args                                        []string
+	root, socket, reason, project, base             string
+	messageFile, messagesFile                       string
+	upstream, fork, clone, baseBranch               string
+	profile, title, from                            string
+	json, hard, reasonSet, help, target, accept     bool
+	skipDebate, version, detach                     bool
+	projectSpecRevision, specRevision, planRevision int
+	args                                            []string
 }
 
 func parse(args []string) (o options, err error) {
@@ -110,7 +112,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from":
+		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -155,6 +157,19 @@ func parse(args []string) (o options, err error) {
 				o.title = value
 			case "--from":
 				o.from = value
+			case "--project-spec-revision", "--spec-revision", "--plan-revision":
+				n, err := strconv.Atoi(value)
+				if err != nil || n < 1 {
+					return o, errors.New("revision must be a positive integer")
+				}
+				switch key {
+				case "--project-spec-revision":
+					o.projectSpecRevision = n
+				case "--spec-revision":
+					o.specRevision = n
+				case "--plan-revision":
+					o.planRevision = n
+				}
 			}
 		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
@@ -235,7 +250,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon", "upstream":
 		valid = len(a) == 2
-	case "ratify", "archive", "unarchive", "merged", "rebase":
+	case "packet", "ratify", "archive", "unarchive", "merged", "rebase":
 		valid = len(a) == 1
 	case "amendment":
 		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule}, a[2])
@@ -283,6 +298,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "send" && len(a) == 3 ||
 			(a[0] == "read" || a[0] == "start") && len(a) == 2)
 	}
+	explicitRatify := o.projectSpecRevision > 0 || o.specRevision > 0 || o.planRevision > 0
+	if explicitRatify && (cmd != "ratify" || o.projectSpecRevision == 0 || o.specRevision == 0 || o.planRevision == 0) {
+		return invalid()
+	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
 	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
@@ -326,7 +345,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "edit" {
 		return runEdit(ctx, c, a[0], a[1], o.from, stdin, stdout, stderr)
@@ -720,19 +739,31 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Shed of workstream %s: %s\n%s\n", result.Workstream, result.Action, result.Detail)
 		return 0
 	}
-	if cmd == "ratify" {
+	if cmd == "packet" || cmd == "ratify" {
 		id, err := config.ParseWorkstreamID(a[0])
 		if err != nil {
 			return invalid()
 		}
-		// The packet names the revisions the owner read, and ratification
-		// pins them: revisions the architect or the owner moved since are the
-		// service's to refuse.
-		packet, err := c.Packet(ctx, id)
-		if err != nil {
-			return fail(err)
+		specRevision, planRevision := o.specRevision, o.planRevision
+		if !explicitRatify {
+			packet, err := c.Packet(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if cmd == "packet" {
+				if o.json {
+					return output(stdout, stderr, packet)
+				}
+				showPacket(stdout, id, packet)
+				return 0
+			}
+			if packet.ProjectSpec != nil || packet.ProjectSpecRevision > 0 {
+				fmt.Fprintf(stderr, "Project spec revision %d; spec.md revision %d; plan.json revision %d. Read the packet again with osmia packet %s, then ratify with its --project-spec-revision, --spec-revision and --plan-revision.\n", packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, id)
+				return 5
+			}
+			specRevision, planRevision = packet.Packet.Revision.Spec, packet.Packet.Revision.Plan
 		}
-		result, err := c.Ratify(ctx, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+		result, err := c.Ratify(ctx, id, specRevision, planRevision, o.projectSpecRevision)
 		if err != nil {
 			return fail(err)
 		}
@@ -740,6 +771,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
+		if o.projectSpecRevision > 0 {
+			fmt.Fprintf(stdout, "Project spec revision %d approved.\n", o.projectSpecRevision)
+		}
 		return 0
 	}
 	if cmd == "amendment" {
@@ -1411,6 +1445,31 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fmt.Fprintf(stdout, "%s %s: applied=%t\n", cmd, scope, ack.Applied)
 	showRuntime(stdout, rt)
 	return 0
+}
+
+// showPacket presents the packet and the exact pins needed for a cross-repo decision.
+func showPacket(w io.Writer, id config.WorkstreamID, packet service.PacketResponse) {
+	fmt.Fprintf(w, "Packet revision %d of workstream %s: spec.md revision %d and plan.json revision %d\n", packet.Revision, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	fmt.Fprintf(w, "%s\n%s\n", packet.Packet.Conclusion, packet.Packet.Recommendation)
+	for _, entry := range packet.Packet.Dissent {
+		content, _ := json.MarshalIndent(entry, "", "  ")
+		fmt.Fprintln(w, string(content))
+	}
+	if spec := packet.ProjectSpec; spec != nil {
+		fmt.Fprintf(w, "\nProject spec revision %d\n%s\n", packet.ProjectSpecRevision, spec.Behavior)
+		for _, contract := range spec.Contracts {
+			fmt.Fprintf(w, "Contract %s: %s\n", contract.Name, contract.Text)
+		}
+		for _, edge := range spec.Graph {
+			fmt.Fprintf(w, "%s -> %s: %s\n", edge.From, edge.To, edge.Type)
+		}
+		for _, slice := range spec.Slices {
+			fmt.Fprintf(w, "\nMember %s (contract criteria %v)\nspec.md:\n%s\nplan.json:\n%s\n", slice.Workstream, slice.ContractCriteria, slice.Spec, slice.Plan)
+		}
+	}
+	if packet.ProjectSpecRevision > 0 {
+		fmt.Fprintf(w, "\nAfter reading, ratify with: osmia ratify %s --project-spec-revision %d --spec-revision %d --plan-revision %d\n", id, packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	}
 }
 
 func output(w, stderr io.Writer, v any) int {

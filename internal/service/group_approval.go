@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -136,7 +135,7 @@ func groupApprovalResponse(project config.ProjectID, stream config.WorkstreamID,
 }
 
 // resumeGroupApproval also serves retries after the members have left the shed.
-func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin) (RatifyResponse, bool, *APIError) {
+func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError) {
 	lock := s.groupApprovalLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -155,6 +154,9 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 	}
 	if !found {
 		return RatifyResponse{}, false, nil
+	}
+	if decision.ProjectSpecRevision > 0 && projectSpecRevision != decision.ProjectSpecRevision {
+		return RatifyResponse{}, true, &APIError{Conflict, projectSpecCatchingUp}
 	}
 	matched := false
 	for _, member := range decision.Members {
@@ -325,14 +327,14 @@ func (s *Service) reconcileGroupApproval(ctx context.Context, repo *trace.Reposi
 // and the recorded project slices must match those exact revisions. Missing
 // coverage grants nothing; the existing owner ratification remains available.
 func (s *Service) recoverMemberApprovals(ctx context.Context, wt *trace.Repository, g trace.Workgroup) (trace.GroupApproval, bool, error) {
-	spec, found, err := trace.ProjectSpecFor(wt, g.ID)
+	spec, revision, found, err := trace.ProjectSpecWithRevisionFor(wt, g.ID)
 	if err != nil || !found {
 		return trace.GroupApproval{}, false, err
 	}
 	if err := trace.ValidateGraph(g.Members[1:], spec.Graph); err != nil {
 		return trace.GroupApproval{}, false, nil
 	}
-	decision := trace.GroupApproval{Workgroup: g.ID, ProjectSpec: spec}
+	decision := trace.GroupApproval{Workgroup: g.ID, ProjectSpec: spec, ProjectSpecRevision: revision}
 	for _, stream := range g.Members[1:] {
 		project, _, repo, api := s.conversationTrace(string(stream))
 		if api != nil {
@@ -342,20 +344,9 @@ func (s *Service) recoverMemberApprovals(ctx context.Context, wt *trace.Reposito
 		if err != nil || !found {
 			return trace.GroupApproval{}, false, err
 		}
-		slice, covered := trace.SliceFor(spec, stream)
-		if !covered {
-			return trace.GroupApproval{}, false, nil
-		}
-		specDoc, err := trace.Get[trace.Document](repo, stream, plan.SpecDocument, r.Revision.Spec)
-		if err != nil {
+		matches, err := sliceMatchesPin(spec, repo, stream, r.Revision)
+		if err != nil || !matches {
 			return trace.GroupApproval{}, false, err
-		}
-		planDoc, err := trace.Get[trace.Document](repo, stream, plan.PlanDocument, r.Revision.Plan)
-		if err != nil {
-			return trace.GroupApproval{}, false, err
-		}
-		if slice.Spec != specDoc.Content || slice.Plan != planDoc.Content {
-			return trace.GroupApproval{}, false, nil
 		}
 		content, err := shed.EncodeRatification(r.Ratification)
 		if err != nil {

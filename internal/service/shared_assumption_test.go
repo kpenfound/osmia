@@ -21,7 +21,7 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	const shared = "Reuse the established offset retry policy."

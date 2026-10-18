@@ -126,6 +126,8 @@ What must be true when the feature is done: the intended behaviour, what it must
 
 This spec describes the request's intended outcome. The repository does not carry it and nobody upstream maintains it as ongoing codebase documentation. It is the statement of intent that everything downstream is argued against: the plan turns it into units with acceptance a reviewer can check, the mason builds its unit against it, and the final read judges whether the assembled feature delivers it. The flow is spec, then plan, then implementation, and the owner approves intent and an initial working plan before a mason starts. What is not enforced is coverage as arithmetic. Each unit's reviewer verifies the criteria it serves in detail; the final read judges the feature as a whole, and you decide at delivery.
 
+Before approval, the service refreshes a cross-repo project spec's slice text from the members' latest recorded specs and plans, appending a revision without an agent turn. The shared behavior, contracts, graph and slice contract criteria remain unchanged. The packet identifies its project-spec revision; ratification carries that revision back and refuses if it has changed or the slices are still catching up with member revisions. Refresh and approval are serialized, and an existing group approval stops refreshes. In the CLI, `osmia packet <workstream>` displays the project spec and the revisions to approve. Cross-repo ratification requires those owner-read pins as `--project-spec-revision N --spec-revision N --plan-revision N`; it never substitutes a fresh packet for them. Without those flags it reports the current pins, asks the owner to read the packet again and records nothing. Single-workstream `osmia ratify <workstream>` uses its packet as usual.
+
 A slice's contract sections are read-only to its workstream roles. A contract change from a question, revision or drift amendment becomes a project-level amendment; it is never applied locally to one slice. Units cite the slice criteria they implement.
 
 Retention has two levels. When a workstream resolves (merged or cancelled), its own slice, spec, plan and workspaces leave active state and new bundles. The project spec remains active for the shared chief and every unresolved member until every member resolves, including dependents waiting on or repairing after an upstream merge. Then it leaves active state. At both levels traces, project-spec history, rulings and owner decisions are retained until owner archive; delivery or resolution never deletes them. Active worker bundles are refused for resolved members, and the chief's staged view omits their own spec and plan. The historical documents remain available through trace context readers.
@@ -726,7 +728,8 @@ osmia archive <workstream>      permanently delete a terminal workstream’s tra
 osmia profiles [set <role> <profile>|clear <role>]
 osmia reload
 osmia trace <workstream> [unit|criterion|commit]
-osmia ratify <workstream>            after reading the packet
+osmia packet <workstream> [--json]   read the packet and project spec, including revision pins
+osmia ratify <workstream> [--project-spec-revision N --spec-revision N --plan-revision N]   use the pins displayed by packet for cross-repo work
 osmia merged <workstream>            an assembled branch you merged into upstream yourself, recorded delivered
 osmia session open <repo-id> --profile default   a session for exploratory work; chat happens on the web page or the API
 osmia session commit <session> "..."          commit every worktree change onto the session's branch

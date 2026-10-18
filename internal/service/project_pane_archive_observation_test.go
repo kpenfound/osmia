@@ -68,7 +68,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					packet = got
 					return err == nil
 				})
-				_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+				_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 				must(t, err)
 				lifecycleAwait(t, f, "single-member completed seal", func() bool {
 					repo, err := f.s.repository(f.project)

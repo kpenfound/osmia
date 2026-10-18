@@ -28,7 +28,7 @@ func TestCrossRepoBuildPreservesConcurrentFeatureTransition(t *testing.T) {
 			packet := f.awaitPacket(t)
 			gate.step = "build-workflow-checked:" + string(f.stream1)
 			gate.armed.Store(true)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
 			gate.await(t)
 

@@ -952,7 +952,7 @@ func TestDesignProductionStartDraftRatifyAndRestart(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	f.checkContinuation(t)
-	if _, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan); err != nil {
+	if _, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision); err != nil {
 		t.Fatal(err)
 	}
 	f.awaitApproved(t)
@@ -997,7 +997,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 				packet := f.awaitPacket(t)
 				ratifyDone = make(chan error, 1)
 				go func() {
-					_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+					_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 					ratifyDone <- err
 				}()
 			}
@@ -1027,7 +1027,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 			packet := f.awaitPacket(t)
 			f.checkContinuation(t)
 			if ratifyDone == nil {
-				_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+				_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 				must(t, err)
 			}
 			f.awaitApproved(t)
@@ -1062,7 +1062,7 @@ func TestDesignProductionRatificationRefusesInvalidPacketBeforeDecisions(t *test
 			// endpoint's validation independently of architect-tool validation.
 			writeCorruptedProjectSpec(t, wt, id, spec)
 			must(t, wt.Close())
-			if _, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan); err == nil {
+			if _, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision); err == nil {
 				t.Fatal("invalid packet received owner approval")
 			}
 			for i, member := range []config.WorkstreamID{f.stream1, f.stream2} {
@@ -1123,7 +1123,7 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 	f.hook.Store(hook)
 	returned := make(chan error, 1)
 	go func() {
-		_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+		_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 		returned <- err
 	}()
 	select {
@@ -1256,7 +1256,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	f.stop(t)
@@ -1508,7 +1508,7 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 	if packet.ProjectSpec != nil {
 		t.Fatal("one affected repo introduced a project-spec gate")
 	}
-	out, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	out, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	if len(out.Members) != 0 || out.Sealing != "requested" {
 		t.Fatalf("single-member owner contract changed: %+v", out)
@@ -1542,7 +1542,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	reached := make(chan agent.Request, 1)

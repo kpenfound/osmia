@@ -39,7 +39,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			address, unit := f.stream1, "accept"
 			gate.step = step + ":" + string(address) + ":" + unit
 			gate.armed.Store(true)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
 			gate.await(t)
 			repo, err := f.s.repository(f.project)

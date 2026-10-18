@@ -29,10 +29,11 @@ type GroupMemberApproval struct {
 // GroupApproval is the sole effective approval of a cross-repo draft. Member
 // decisions and seals are preparations until this record is complete.
 type GroupApproval struct {
-	Workgroup   config.WorkgroupID    `json:"workgroup"`
-	ProjectSpec ProjectSpec           `json:"project_spec"`
-	Members     []GroupMemberApproval `json:"members"`
-	Complete    bool                  `json:"complete"`
+	ProjectSpecRevision int                   `json:"project_spec_revision,omitempty"`
+	Workgroup           config.WorkgroupID    `json:"workgroup"`
+	ProjectSpec         ProjectSpec           `json:"project_spec"`
+	Members             []GroupMemberApproval `json:"members"`
+	Complete            bool                  `json:"complete"`
 }
 
 func ReadGroupApproval(r *Repository, host config.WorkstreamID) (GroupApproval, Document, bool, error) {

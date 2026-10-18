@@ -376,7 +376,7 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 	}
 
 	// One owner ratify seals the project spec and both members.
-	out, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	out, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	if len(out.Members) != 2 {
 		t.Fatalf("ratify did not seal every member: %+v", out)
@@ -442,7 +442,7 @@ func TestRatifyWorkgroupRefusesAnInvalidGraphWithNothingRecorded(t *testing.T) {
 	}
 	must(t, wt.Close())
 
-	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan); !failed(err, Validation) || !strings.Contains(err.Error(), "project spec graph is invalid") {
+	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, defective.Revision); !failed(err, Validation) || !strings.Contains(err.Error(), "project spec graph is invalid") {
 		t.Fatalf("ratify did not refuse the defective graph: %v", err)
 	}
 	f.assertApprovalRefused(t, workgroup, defective)
@@ -484,7 +484,7 @@ func TestRatifyWorkgroupRefusesWhenAMemberHasNoSlice(t *testing.T) {
 	if !found || !equalJSONTest(current, spec) || len(current.Slices) != 1 || current.Slices[0].Workstream != f.stream1 {
 		t.Fatalf("ratify's project-spec lookup does not see the missing-slice revision: %+v", current)
 	}
-	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan); !failed(err, Conflict) || !strings.Contains(err.Error(), "workstream "+string(f.stream2)+" has no slice") {
+	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, defective.Revision); !failed(err, Conflict) || !strings.Contains(err.Error(), "workstream "+string(f.stream2)+" has no slice") {
 		t.Fatalf("ratify did not refuse the missing slice: %v", err)
 	}
 	f.assertApprovalRefused(t, workgroup, defective)
@@ -503,7 +503,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 	f.hook.Store(hook)
 	finished := make(chan error, 1)
 	go func() {
-		_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+		_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 		finished <- err
 	}()
 	select {
@@ -516,7 +516,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 	<-finished
 	f.start(t)
 	f.awaitApproved(t)
-	out, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	out, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	if len(out.Members) != 2 || out.Sealing != "succeeded" {
 		t.Fatalf("retry: %+v", out)

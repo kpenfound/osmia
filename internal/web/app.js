@@ -2086,7 +2086,12 @@
     // an objection or a request for a redraft, which the shed may still
     // leave open with updated dissent, so those do not dismiss it.
     if (decision === 'ratify') {
+      const packet = views[detailOf(entry)];
+      if (packet && packet.project_spec_revision) {
+        body.project_spec_revision = packet.project_spec_revision;
+      }
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail, undefined, decisionKey(entry));
+      mark([detailOf(entry)]);
       return;
     }
     if (decision === 'sustain') {
@@ -2166,6 +2171,9 @@
     const dissent = all.filter((o) => o.by !== 'chief_of_staff');
     const dismissed = all.filter((o) => o.by === 'chief_of_staff');
     d.detail.replaceChildren(...[
+      view.project_spec ? el('details', { 'data-field': 'project-spec' },
+        el('summary', {}, 'Project spec revision ' + view.project_spec_revision),
+        el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },
           el('strong', {}, o.id),
