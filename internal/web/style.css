@@ -400,6 +400,20 @@ svg {
   padding: 0.5rem 0.6rem;
 }
 
+.sidebar-workgroup {
+  border-left: 2px solid var(--line);
+}
+
+.sidebar-workgroup-title {
+  padding: 0.5rem 0.6rem 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sidebar-workgroup > .rows {
+  padding: 0 0 0.25rem 0.25rem;
+}
+
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -760,6 +760,8 @@
 
   // rows keeps each workstream's row in the list between renders.
   const rows = new Map();
+  const sidebarGroups = new Map();
+  const archivedSidebarGroups = new Map();
 
   function row(id) {
     let r = rows.get(id);
@@ -826,13 +828,43 @@
       ].filter((node) => node !== null));
       return r.node;
     };
-    place(byId('archived-list'), archived.map(entry));
+    // A group's newest member determines its position. Keep member controls
+    // connected across updates, including when a member is archived.
+    const groupedEntries = (work, cache) => {
+      const nodes = [];
+      const members = new Map();
+      for (const w of work) {
+        if (!w.workgroup || w.workgroup.members.length < 2) {
+          nodes.push(entry(w));
+          continue;
+        }
+        const id = w.workgroup.id;
+        if (!members.has(id)) {
+          members.set(id, []);
+          let group = cache.get(id);
+          if (!group) {
+            group = { list: el('ul', { class: 'rows' }) };
+            group.node = el('li', { class: 'sidebar-workgroup', 'data-sidebar-workgroup': id },
+              el('div', { class: 'sidebar-workgroup-title' }, 'Workgroup'), group.list);
+            cache.set(id, group);
+          }
+          nodes.push(group.node);
+        }
+        members.get(id).push(entry(w));
+      }
+      for (const [id, group] of cache) {
+        if (members.has(id)) place(group.list, members.get(id));
+        else cache.delete(id);
+      }
+      return nodes;
+    };
+    place(byId('archived-list'), groupedEntries(archived, archivedSidebarGroups));
     const work = streams().filter((w) => !w.archived);
     if (work.length === 0) {
       list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
       return;
     }
-    place(list, work.map(entry));
+    place(list, groupedEntries(work, sidebarGroups));
   }
 
   let paneRendered = '';

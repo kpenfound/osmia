@@ -183,7 +183,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	f.rule(t, "1")
 	f.awaitTurn(t, asking, masonAgent("resume"), questions.TurnID("1"))
-	completedTurn(t, f, asking, masonAgent("resume"), 1)
+	f.awaitCompleted(t, asking, masonAgent("resume"), questions.TurnID("1"))
 	// The answer supplies no done report, so a clarify turn follows. It
 	// leaves the unit implementing, with no further park or resume.
 	awaitPasses(t, passed, 3)

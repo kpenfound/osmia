@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -122,6 +123,14 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		})
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, err
 	}
+	chiefTurn := f.engine.turns["*"]
+	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if strings.Contains(req.Prompt, "Report the shared workgroup goal.") {
+			_, err := callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
+			return questionResult(req, "pane-chief-status", "Reported the shared goal."), err
+		}
+		return chiefTurn(ctx, req, turn, tools)
+	}
 	f.engine.mu.Unlock()
 	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
@@ -130,6 +139,48 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.await("the original design chat", `!document.querySelector('[data-view="design"]').hidden`)
 	p.click("#design-start")
 	packet := f.awaitPacket(t)
+	// Both selected repos allocate real members. Their shared chief gives
+	// them the same goal; the adopted design origin is a conversation host.
+	originRepo, err := f.s.repository(f.project)
+	must(t, err)
+	selected, found, err := designSelectionOf(originRepo, f.origin)
+	must(t, err)
+	if !found || len(selected.Members) != 2 || selected.Members[0].Repo != f.project || selected.Members[1].Repo != f.project2 {
+		t.Fatalf("affected-repo selection: %+v", selected)
+	}
+	_, err = f.c.Send(context.Background(), f.origin, "Report the shared workgroup goal.")
+	must(t, err)
+	f.wait(t, "both members have the shared goal", func() bool {
+		listed, err := f.c.Statuses(context.Background())
+		must(t, err)
+		return len(listed.Workstreams) == 2 && listed.Workstreams[0].Status != nil && listed.Workstreams[1].Status != nil &&
+			listed.Workstreams[0].Status.Goal == "Ship resumable uploads." && listed.Workstreams[1].Status.Goal == "Ship resumable uploads."
+	})
+	listed, err := f.c.Statuses(context.Background())
+	must(t, err)
+	if len(listed.Workstreams) != 2 {
+		t.Fatalf("expected two real members with no design host: %+v", listed.Workstreams)
+	}
+	for _, w := range listed.Workstreams {
+		if w.Workstream != f.stream1 && w.Workstream != f.stream2 || w.Workgroup == nil || w.Workgroup.ID != selected.Group ||
+			len(w.Workgroup.Members) != 2 || w.Workgroup.Conversation == nil || w.Workgroup.Conversation.Workstream != f.origin ||
+			w.Status == nil || w.Status.Goal != "Ship resumable uploads." {
+			t.Fatalf("member presentation: %+v", w)
+		}
+	}
+	p.run(chromedp.Reload())
+	sidebarGroup := `#workstream-list [data-sidebar-workgroup="` + string(selected.Group) + `"]`
+	p.await("both same-titled members in one sidebar workgroup", `document.querySelectorAll('#workstream-list > li').length === 1 && document.querySelectorAll(`+quote(sidebarGroup+` [data-select]`)+`).length === 2`)
+	p.await("the design host is absent from the sidebar", `document.querySelector('[data-select="`+string(f.origin)+`"]') === null`)
+	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
+		repoName := "dagger"
+		if i == 1 {
+			repoName = "client"
+		}
+		selector := sidebarGroup + ` [data-select="` + string(id) + `"]`
+		p.awaitText(selector+` [data-field=goal]`, "Ship resumable uploads.")
+		p.awaitText(selector+` [data-field=project]`, "dagger / "+repoName)
+	}
 	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
