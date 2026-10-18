@@ -274,6 +274,17 @@ func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.W
 	if !found || len(g.Members) < 2 {
 		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s has no recorded project spec yet; the architect has not finished drafting it", id)}
 	}
+	if _, _, approved, err := trace.ReadGroupApproval(wt, g.Members[0]); err != nil {
+		return RatifyResponse{}, failed
+	} else if !approved {
+		message, err := s.contractGuardRefusal(wt, g, spec)
+		if err != nil {
+			return RatifyResponse{}, failed
+		}
+		if message != "" {
+			return RatifyResponse{}, &APIError{Conflict, message}
+		}
+	}
 	if projectSpecRevision < 1 || projectSpecRevision != revision {
 		return RatifyResponse{}, &APIError{Conflict, projectSpecCatchingUp}
 	}

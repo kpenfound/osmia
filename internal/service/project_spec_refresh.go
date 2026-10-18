@@ -29,10 +29,6 @@ func sliceMatchesPin(spec trace.ProjectSpec, repo *trace.Repository, member conf
 	return slice.Spec == specDoc.Content && slice.Plan == planDoc.Content, nil
 }
 
-// memberSliceRefreshAllowed is the per-member policy seam for protecting
-// architect-owned contract criteria during a mechanical refresh.
-func memberSliceRefreshAllowed(slice trace.Slice, spec, plan string) bool { return true }
-
 func (s *Service) projectSpecRefreshPass(ctx context.Context, repository *trace.Repository) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
