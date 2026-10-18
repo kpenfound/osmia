@@ -60,6 +60,11 @@ func TestGroupApprovalRequiresLiveMemberTraceAndHonorsShutdown(t *testing.T) {
 
 func newCrossRepoRatifyFixture(t *testing.T, configure ...func(*Options)) *crossRepoRatifyFixture {
 	t.Helper()
+	return crossRepoFixture(t, true, configure...)
+}
+
+func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)) *crossRepoRatifyFixture {
+	t.Helper()
 	f := newArchitectFixture(t, configure...)
 	home := filepath.Dir(f.clone)
 	clone2 := filepath.Join(home, "clone2")
@@ -73,21 +78,16 @@ func newCrossRepoRatifyFixture(t *testing.T, configure ...func(*Options)) *cross
 	must(t, err)
 	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n")
 	cf := &crossRepoRatifyFixture{architectFixture: f, project2: added.Project.ID}
-	cf.stream1 = cf.handInSkipping(t, cf.project, "upload-server")
-	cf.stream2 = cf.handInSkipping(t, cf.project2, "upload-client")
+	handIn := func(project config.ProjectID, key string) config.WorkstreamID {
+		content := "Build " + key
+		out, err := cf.c.HandIn(context.Background(), HandInRequest{Project: project, Key: key, Stdin: &content, SkipDebate: skipDebate})
+		must(t, err)
+		return out.Workstream
+	}
+	cf.stream1 = handIn(cf.project, "upload-server")
+	cf.stream2 = handIn(cf.project2, "upload-client")
 	cf.scriptDrafts(t)
 	return cf
-}
-
-// handInSkipping hands in a document into project, skipping debate, the way
-// a two-repo workgroup's members are handed in before their project spec is
-// drafted.
-func (f *crossRepoRatifyFixture) handInSkipping(t *testing.T, project config.ProjectID, key string) config.WorkstreamID {
-	t.Helper()
-	content := "Build " + key
-	out, err := f.c.HandIn(context.Background(), HandInRequest{Project: project, Key: key, Stdin: &content, SkipDebate: true})
-	must(t, err)
-	return out.Workstream
 }
 
 // scriptDrafts installs the fake architect's behaviour for both members'
