@@ -1190,7 +1190,7 @@
       ' · ', el('span', { 'data-field': 'profile' }, s.profile),
       ' · ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
     const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta', 'data-ann': 'when' }, when(s.started_at))];
-    const node = el('li', { class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
+    const node = el('li', { id: 'feed-turn-' + s.turn, class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
     if (!report) {
       node.append(el('div', { class: 'event-line' }, ...head));
       return node;
@@ -1211,14 +1211,81 @@
 
   function renderTransition(e) {
     const t = e.transition;
-    return el('li', { class: 'entry event', 'data-kind': 'transition', 'data-unit': t.unit || '', 'data-to': t.to },
+    return el('li', { class: 'entry event', 'data-kind': 'transition', 'data-subject': t.subject || '', 'data-unit': t.unit || '', 'data-from': t.from, 'data-to': t.to },
       el('div', { class: 'event-line', title: t.reason },
         el('span', { class: 'dot', 'aria-hidden': 'true' }),
         el('span', { 'data-field': 'transition' },
-          el('span', { 'data-ann': 'role' }, t.unit ? 'Unit ' + t.unit : 'Workstream'), ': ', t.from ? t.from + ' → ' : '',
-          el('strong', { 'data-ann': 'action' }, t.to)),
-        t.reason ? el('span', { class: 'reason' }, t.reason) : null,
+          el('span', { 'data-field': 'subject', 'data-ann': 'role' }, transitionSubject(t)), ': ',
+          t.from ? el('span', { 'data-field': 'from' }, t.from) : null, t.from ? ' → ' : '',
+          el('strong', { 'data-field': 'to', 'data-ann': 'action' }, t.to)),
+        t.reason ? el('span', { class: 'reason', 'data-field': 'reason' }, t.reason) : null,
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+  }
+
+  function transitionSubject(t) {
+    const subject = t.subject || '';
+    if (subject === 'feature' || (!subject && !t.unit)) return 'Workstream';
+    if (t.unit && (!subject || subject === 'unit-' + t.unit)) return 'Unit ' + t.unit;
+    if (subject.startsWith('unit-') && subject.endsWith('-checks')) return 'Unit checks ' + (t.unit || subject.slice(5, -7));
+    if (subject.startsWith('unit-') && t.unit && t.unit.length > 64) return 'Unit ' + t.unit;
+    const label = subject.replaceAll(/[-_]/g, ' ');
+    return label.charAt(0).toUpperCase() + label.slice(1) + (t.unit ? ' · Unit ' + t.unit : '');
+  }
+
+  function checkState(state) {
+    return state === 'incomplete' ? 'not completed' : state;
+  }
+
+  function checkSelection(selection, running) {
+    if (!selection) return null;
+    if (selection.mode === 'selected') {
+      return el('p', { 'data-field': 'selection' }, 'checking ',
+        el('span', { 'data-field': 'selected' }, String(selection.selected)), ' of ',
+        el('span', { 'data-field': 'judged' }, String(selection.judged)),
+        selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ' · narrowed from ' + selection.listed + ' listed') : null);
+    }
+    const reasons = {
+      disabled: 'the Jev boost is off', declined: 'Jev declined', too_many_checks: 'too many checks',
+      change_too_large: 'the change is too large', unlisted: 'checks could not be listed',
+      no_checks: 'no check links were listed', diff_unreadable: 'the change could not be read'
+    };
+    const reason = reasons[selection.reason] || (selection.reason || '').replaceAll('_', ' ');
+    return el('p', { 'data-field': 'selection' }, running ? 'checking every check' : 'every check ran',
+      reason ? ': ' : '', el('span', { 'data-field': 'reason' }, reason),
+      selection.detail ? el('span', { 'data-field': 'detail' }, ' · ' + selection.detail) : null);
+  }
+
+  function renderChecks(e) {
+    const unit = e.kind === 'unit_checks';
+    const run = unit ? e.unit_checks : e.final_checks;
+    const label = unit ? 'Unit ' + run.unit + ' · check run ' + run.run : 'Final review ' + run.review + ' · checks' + (run.attempt ? ' · attempt ' + run.attempt : '');
+    return el('li', { class: 'entry event check-entry', 'data-kind': e.kind, 'data-unit': run.unit || '', 'data-run': run.run || '', 'data-review': run.review || '', 'data-attempt': run.attempt || '', 'data-state': run.state },
+      el('div', { class: 'event-line' },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-field': 'checks', 'data-ann': 'role' }, label),
+        el('span', { 'data-field': 'state', 'data-ann': 'action' }, checkState(run.state)),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
+      unit ? checkSelection(run.selection, run.state === 'running') : el('p', { 'data-field': 'selection' },
+        run.state === 'running' ? 'checking every check on the rebased branch' :
+          run.state === 'incomplete' ? 'every check required on the rebased branch' : 'every check ran on the rebased branch'),
+      run.failed && run.failed.length ? el('ul', { class: 'notes', 'data-field': 'failed' }, ...run.failed.map(link => el('li', {}, link))) : null,
+      run.error ? el('p', { 'data-field': 'error' }, run.error) : null);
+  }
+
+  function renderFinalReview(e) {
+    const r = e.final_review;
+    return el('li', { class: 'entry event check-entry', 'data-kind': 'final_review', 'data-review': r.review, 'data-state': r.state },
+      el('div', { class: 'event-line' },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-ann': 'role' }, 'Final review ' + r.review),
+        el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, r.state),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
+      r.reader ? el('p', { 'data-field': 'reader' }, 'Reader ' + r.reader,
+        r.turn ? el('a', { href: '#feed-turn-' + r.turn, 'data-field': 'turn' }, ' · turn ' + r.turn) : null) : null,
+      r.state === 'reviewed' ? el('p', { 'data-field': 'findings' },
+        el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' · ',
+        el('span', { 'data-field': 'gaps' }, r.gaps + ' uncovered criteria')) : null,
+      r.failure ? el('p', { 'data-field': 'failure' }, r.failure) : null);
   }
 
   // renderFeed shows the workstream's feed: the conversation with the chief
@@ -1249,6 +1316,11 @@
           return renderSession(e, c);
         case 'transition':
           return renderTransition(e);
+        case 'unit_checks':
+        case 'final_checks':
+          return renderChecks(e);
+        case 'final_review':
+          return renderFinalReview(e);
         default:
           return renderConversationEntry(e);
       }

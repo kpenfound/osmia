@@ -409,14 +409,15 @@ func amendmentRoundPath(parts []string) bool {
 
 // unitPath reports whether parts name a unit record of a workstream,
 // units/<unit>/report.json, review.json, landing.json, rebase.json,
-// change.json, dispatch.json, checks-<n>.json, checks-<n>-output.txt, ruling-<n>.json,
+// change.json, dispatch.json, checks-<n>.json, checks-<n>-selection.json,
+// checks-<n>-output.txt, ruling-<n>.json,
 // mason-ruling-<n>.json, move-<n>.json or chief-<contest>.json, where the
 // unit and the contest are keys.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
 	}
-	if checkOutputName(parts[2]) {
+	if checkOutputName(parts[2]) || checkSelectionName(parts[2]) {
 		return true
 	}
 	if contest, ok := strings.CutPrefix(parts[2], "chief-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
@@ -448,7 +449,7 @@ func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
-	if checkOutputName(parts[1]) {
+	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
@@ -456,6 +457,19 @@ func finalPath(parts []string) bool {
 		return true
 	}
 	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
+}
+
+func checkSelectionName(name string) bool {
+	n := strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-selection.json")
+	return strings.HasPrefix(name, "checks-") && strings.HasSuffix(name, "-selection.json") && shedRound.MatchString("round-"+n)
+}
+
+func finalCheckAttemptName(name string) bool {
+	if !strings.HasPrefix(name, "checks-") || !strings.HasSuffix(name, "-started.json") {
+		return false
+	}
+	review, attempt, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-started.json"), "-attempt-")
+	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+attempt)
 }
 
 func checkOutputName(name string) bool {

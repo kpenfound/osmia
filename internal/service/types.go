@@ -1024,19 +1024,23 @@ type FeedResponse struct {
 // and "action" are the conversation with the chief of staff, as
 // ConversationEntry describes them, with Turn, Text and State. Kind "status"
 // is a status the chief of staff wrote, with Status. Kind "session" is an
-// agent turn that started, other than one answering an owner message, with
-// Session. Kind "transition" is a change of the workstream's state or of one
-// of its units' states, with Transition. At is when the entry happened; a
-// session's is when it started.
+// agent turn that started, with Session. Kind "transition" is any recorded
+// workflow state change, with Transition. Kind "unit_checks" summarizes a
+// unit check run, "final_checks" a final check attempt, and "final_review"
+// a final review outcome. At is when the entry first became observable;
+// sessions and final check attempts use their recorded start time.
 type FeedEntry struct {
-	Kind       string          `json:"kind"`
-	At         time.Time       `json:"at"`
-	Turn       string          `json:"turn,omitempty"`
-	Text       string          `json:"text,omitempty"`
-	State      TurnState       `json:"state,omitempty"`
-	Status     *StatusView     `json:"status,omitempty"`
-	Session    *FeedSession    `json:"session,omitempty"`
-	Transition *FeedTransition `json:"transition,omitempty"`
+	Kind        string           `json:"kind"`
+	At          time.Time        `json:"at"`
+	Turn        string           `json:"turn,omitempty"`
+	Text        string           `json:"text,omitempty"`
+	State       TurnState        `json:"state,omitempty"`
+	Status      *StatusView      `json:"status,omitempty"`
+	Session     *FeedSession     `json:"session,omitempty"`
+	Transition  *FeedTransition  `json:"transition,omitempty"`
+	UnitChecks  *FeedUnitChecks  `json:"unit_checks,omitempty"`
+	FinalChecks *FeedFinalChecks `json:"final_checks,omitempty"`
+	FinalReview *FeedFinalReview `json:"final_review,omitempty"`
 }
 
 // FeedSession is one agent turn. State is running, done, waiting (the turn
@@ -1057,14 +1061,66 @@ type FeedSession struct {
 	Failure   string     `json:"failure,omitempty"`
 }
 
-// FeedTransition is a state change of the workstream, when Unit is empty, or
-// of one of its units, with who made it and why.
+// FeedTransition identifies the workflow subject that changed, with who
+// made it and why. Unit identifies the affected unit when recorded.
 type FeedTransition struct {
-	Unit   string `json:"unit,omitempty"`
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Actor  string `json:"actor"`
-	Reason string `json:"reason"`
+	Subject string `json:"subject" description:"Recorded workflow subject, such as feature, unit-upload, unit-upload-checks, final-review or question_1."`
+	Unit    string `json:"unit,omitempty"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Actor   string `json:"actor"`
+	Reason  string `json:"reason"`
+}
+
+// FeedCheckSelection summarizes the durable selection without check output.
+// Selected is the count of chosen links; Judged is the post-narrowing count
+// Jev was asked about. Listed is omitted when the trace has no listed total.
+type FeedCheckSelection struct {
+	Mode     string `json:"mode" enum:"selected,full"`
+	Selected int    `json:"selected"`
+	Judged   int    `json:"judged"`
+	Listed   *int   `json:"listed,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+// FeedUnitChecks is one run, observable once its selection is recorded.
+// Only a recorded result can change running to a terminal state.
+type FeedUnitChecks struct {
+	Unit       string              `json:"unit"`
+	Run        int                 `json:"run"`
+	State      string              `json:"state" enum:"running,passed,failed,incomplete,superseded"`
+	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs that did not record a selection."`
+	Failed     []string            `json:"failed,omitempty" description:"Links of failed checks; captured output stays in the trace."`
+	Error      string              `json:"error,omitempty"`
+	StartedAt  time.Time           `json:"started_at"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty"`
+}
+
+// FeedFinalChecks is one attempt to run every check for a final review.
+// Attempt and StartedAt are absent without durable attempt start evidence;
+// such entries describe recorded results only, never running checks.
+type FeedFinalChecks struct {
+	Review     int        `json:"review"`
+	Attempt    int        `json:"attempt,omitempty"`
+	State      string     `json:"state" enum:"running,passed,failed,incomplete"`
+	Failed     []string   `json:"failed,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// FeedFinalReview is a recorded review outcome. Reader and Turn identify its
+// session entry. Blocking counts blocking findings; Gaps counts uncovered
+// criteria, separately from findings.
+type FeedFinalReview struct {
+	Review   int    `json:"review"`
+	State    string `json:"state" enum:"reviewed,failed"`
+	Reader   string `json:"reader,omitempty"`
+	Turn     string `json:"turn,omitempty"`
+	Blocking int    `json:"blocking"`
+	Gaps     int    `json:"gaps"`
+	Failure  string `json:"failure,omitempty"`
 }
 
 // EventKind names the view an event of the client event stream announces a

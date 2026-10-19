@@ -532,6 +532,9 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	}
 	var captured string
 	run := UnitCheckRun{Unit: in.Unit, Run: in.Run, Operation: op.ID, Candidate: in.Candidate, Base: in.Base, Report: in.Report, ExitCode: -1, StartedAt: c.s.now()}
+	if _, err := c.restoreSelection(in, &run); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	incomplete := func(err error) (coreadapter.OperationResult, error) {
 		if ctx.Err() != nil {
 			return coreadapter.OperationResult{}, ctx.Err()
@@ -571,7 +574,10 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if err := g.Export(ctx, in.Candidate, dir); err != nil {
 		return incomplete(fmt.Errorf("candidate export: %w", err))
 	}
-	selection := c.selectChecks(ctx, in, dir, diff, checks)
+	selection, err := c.selection(ctx, in, &run, dir, diff, checks)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	run.Selection = &selection
 	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
 	timeout := c.s.about(c.repository).Project.CheckTimeout()

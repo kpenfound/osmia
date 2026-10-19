@@ -29,11 +29,13 @@ const (
 
 // CheckSelection is which checks a run ran and why. A selected run ran Links,
 // chosen by Jev judgment Judgment from Candidates check links. A full run ran
-// every check, because of Reason, with Detail.
+// every check, because of Reason, with Detail. Listed is the number of links
+// the project listed, before narrowing, or nil when listing did not complete.
 type CheckSelection struct {
 	Mode       string   `json:"mode"`
 	Links      []string `json:"links,omitempty"`
 	Candidates int      `json:"candidates,omitempty"`
+	Listed     *int     `json:"listed,omitempty"`
 	Judgment   string   `json:"judgment,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
 	Detail     string   `json:"detail,omitempty"`
@@ -74,7 +76,7 @@ func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff st
 // waits for the project's modules to load, so it is skipped while the boost
 // is off. The unit check run and the session check control both ask through
 // this one function, so either reuses exactly the same selection.
-func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, checks ReviewChecks) CheckSelection {
+func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, checks ReviewChecks) (selection CheckSelection) {
 	if j.Status().Mode == jev.ModeDisabled {
 		return fullSelection(string(jev.ReasonDisabled), "")
 	}
@@ -82,6 +84,8 @@ func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Reposi
 	if err != nil {
 		return fullSelection(selectionUnlisted, err.Error())
 	}
+	listed := len(links)
+	defer func() { selection.Listed = &listed }()
 	if len(links) == 0 {
 		return fullSelection(selectionNoChecks, "the project lists no check links")
 	}
@@ -111,6 +115,7 @@ func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Reposi
 	if decision.Outcome != jev.Accepted {
 		s := fullSelection(string(decision.Reason), decision.Detail)
 		s.Judgment = decision.ID
+		s.Candidates = len(candidates)
 		return s
 	}
 	return CheckSelection{Mode: selectionSelected, Links: checkselect.Selected(*decision.Response, candidates, checkselect.Threshold), Candidates: len(candidates), Judgment: decision.ID}

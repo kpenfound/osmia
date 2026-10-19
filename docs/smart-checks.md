@@ -54,8 +54,13 @@ every check on the rebased feature branch.
 
 ## What a run records
 
-The run's record, `units/<unit>/checks-<n>.json` in the workstream's trace,
-holds its selection beside the command, exit status and output:
+As soon as a unit run chooses its checks, before `dagger check` starts, it
+records `units/<unit>/checks-<n>-selection.json` in the workstream's trace.
+This immutable start evidence holds the unit, run, operation, candidate, base,
+report revision, diff digest, start time and selection. It has no result, so
+an interrupted run remains started and unfinished. The finished run's record,
+`units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
+exit status and output:
 
 ```json
 "selection": {
@@ -65,6 +70,7 @@ holds its selection beside the command, exit status and output:
     "dag+check://go/packages/tests/test?go-package=internal/service"
   ],
   "candidates": 37,
+  "listed": 214,
   "judgment": "judgment_4f1c..."
 }
 ```
@@ -74,6 +80,7 @@ holds its selection beside the command, exit status and output:
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
 | `links` | The links passed to `dagger check`, for a selected run |
 | `candidates` | How many links Jev was asked about, after narrowing |
+| `listed` | Total links the project listed, before narrowing; absent when listing was skipped or failed, and in older records |
 | `judgment` | The judgment record the selection rests on, also set on a full run whose judgment fell back |
 | `reason`, `detail` | Why a full run ran every check |
 
@@ -106,6 +113,11 @@ check ran: Jev did not select them (declined: no check reached probability
 notice, in the reviewer's prompt with the check evidence, and in the verdict a
 mason receives when checks fail.
 
+The selected and candidate counts describe the saving as "checking 2 of 37".
+When narrowing reduced the list, `listed` also explains that those 37 were
+narrowed from 214 listed links. An absent total stays unknown; no total is
+inferred for older runs.
+
 The factory runs checks with `--progress=report --failfast`. It records the
 complete combined output beside the check record in `checks-<n>-output.txt`
 and names that document in `output_path` with its `output_revision`. The
@@ -117,8 +129,9 @@ uses the complete output, independently of the excerpt limit.
 ## Restarts and new runs
 
 A judgment is identified by the check run that asked, the task, its version
-and the exact request. A run retried after a restart reads back the decision
-it already used instead of asking again. A new run, for a revised or rebased
+and the exact request. A run retried after a restart reads back its selection
+record, including a full run's fallback, instead of listing or asking again. Recording the same
+run again keeps one selection record. A new run, for a revised or rebased
 candidate, asks afresh. A judgment interrupted twice falls back as
 `interrupted`.
 
