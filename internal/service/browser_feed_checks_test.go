@@ -1,0 +1,274 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	cdppage "github.com/chromedp/cdproto/page"
+	"github.com/chromedp/chromedp"
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// startFeedChecks restarts a seeded service with its real controllers and HTTP
+// listeners. Only the requested operation is admitted, once the page is ready;
+// unrelated agent turns and delivery never run.
+func startFeedChecks(t *testing.T, f *shedFixture, checks ReviewChecks, action string) func() {
+	t.Helper()
+	file, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
+	must(t, err)
+	_, err = file.WriteString("\n[listen]\nweb = \"127.0.0.1:0\"\n")
+	must(t, err)
+	must(t, file.Close())
+	var ready atomic.Bool
+	ticks := make(chan time.Time, 1)
+	f.opts.Reconciliation.Ticks = ticks
+	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+		return !ready.Load() || op.Action != action
+	}
+	f.opts.reviewChecks = checks
+	f.start(t)
+	t.Cleanup(func() { f.stop(t) })
+	return func() { ready.Store(true); ticks <- f.clock.Now() }
+}
+
+// openCheckFeed observes the page's actual EventSource without replacing any
+// feed response. Disabling interval callbacks makes a missing event fail even
+// if the configuration poll would otherwise refresh the page later.
+func openCheckFeed(t *testing.T, f *shedFixture, stream config.WorkstreamID) *page {
+	t.Helper()
+	p := openBrowser(t)
+	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`
+   window.feedEvents = [];
+   window.sameFeedDocument = true;
+   window.setInterval = () => 0;
+   const ServiceEvents = window.EventSource;
+   window.EventSource = class extends ServiceEvents {
+    constructor(...args) {
+     super(...args);
+     this.addEventListener('workstream', event => feedEvents.push(JSON.parse(event.data)));
+    }
+   };`).Do(ctx)
+		return err
+	}))
+	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(stream)
+	p.awaitText(`[data-workstream="`+string(stream)+`"] [data-kind=transition][data-subject=feature]`, "Workstream")
+	p.eval(`window.feedEvents.length = 0`, nil)
+	return p
+}
+
+func awaitFeedEvent(p *page, stream config.WorkstreamID) {
+	p.t.Helper()
+	p.await("the workstream notification on the page's EventSource", `window.feedEvents.some(event => event.workstream === `+quote(string(stream))+`)`)
+	p.await("the same document", `window.sameFeedDocument === true`)
+	p.eval(`window.feedEvents.length = 0`, nil)
+}
+
+func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"selected", "narrowed", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			checks := newHeldChecks()
+			count, judged, selected := 113, 113, 3
+			if mode == "narrowed" {
+				count, judged, selected = checkselect.MaxQuestions+1, 1, 1
+			}
+			for i := range count {
+				checks.links = append(checks.links, fmt.Sprintf("dag+check://go/packages/tests/test?go-package=internal/trace&go-test=Test%03d", i))
+			}
+			f, stream, repo := newChecksFixture(t, "browser-unit-checks", checks)
+			must(t, repo.Close())
+			allow := startFeedChecks(t, f, checks, CheckAction)
+			if mode != "full" {
+				answers := map[string]systemone.Answer{}
+				for i := range judged {
+					probability := 0.1
+					if i < selected {
+						probability = 0.9
+					}
+					answers[checkselect.Question(i)] = jevtest.Noul(probability)
+				}
+				boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
+			}
+			p := openCheckFeed(t, f, stream)
+			const entry = `[data-kind=unit_checks][data-unit=resume][data-run="1"]`
+			p.await("checks have not started", `!document.querySelector(`+quote(entry)+`)`)
+			allow()
+			ran := awaitCheck(t, checks.entered)
+			awaitFeedEvent(p, stream)
+			p.await("the running check entry", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
+			p.awaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
+			selection := "checking " + strconv.Itoa(selected) + " of " + strconv.Itoa(judged)
+			if mode == "full" {
+				selection = "checking every check: the Jev boost is off"
+				if len(ran) != 0 {
+					t.Fatalf("full run selected links: %v", ran)
+				}
+			} else if len(ran) != selected {
+				t.Fatalf("runner received %v, want %d selected checks", ran, selected)
+			}
+			p.awaitText(entry+` [data-field=selection]`, selection)
+			if mode == "narrowed" {
+				p.awaitText(entry+` [data-field=listed]`, "narrowed from 129 listed")
+			}
+			assertFeedAnnotations(t, p, entry, 1)
+			// A recorded failure tests both the terminal state and wrapping a long
+			// check link on a phone. The full run completes successfully.
+			state := ChecksFailed
+			failed := checks.links[0]
+			outcome := checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport(failed)}}
+			if mode == "full" {
+				state = ChecksPassed
+				outcome = checkOutcome{result: CheckResult{Output: passedReport}}
+			}
+			checks.release <- outcome
+			awaitFeedEvent(p, stream)
+			p.await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
+			if mode == "full" {
+				selection = "every check ran: the Jev boost is off"
+			} else {
+				p.awaitText(entry+` [data-field=failed]`, failed)
+			}
+			p.awaitText(entry+` [data-field=selection]`, selection)
+			p.await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)
+			assertFeedAnnotations(t, p, entry, 1)
+		})
+	}
+}
+
+func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {
+	t.Parallel()
+	f, stream, repo, reviewer := newFinalFixture(t, "browser-final-checks")
+	_, _ = assembleBoth(t, f, repo, reviewer, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "The branch works together.", "findings": []any{}})
+		return err
+	})
+	must(t, repo.Close())
+	checks := newHeldChecks()
+	preparing, release := make(chan string, 1), make(chan struct{})
+	f.opts.boundary = func(ctx context.Context, name string) error {
+		if name == "final-rebase-replaying" || name == "final-checks-exporting" {
+			preparing <- name
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	allow := startFeedChecks(t, f, checks, FinalReviewAction)
+	p := openCheckFeed(t, f, stream)
+	const entry = `[data-kind=final_checks][data-review="1"][data-attempt="1"]`
+	allow()
+	for _, boundary := range []string{"final-rebase-replaying", "final-checks-exporting"} {
+		if got := awaitCheck(t, preparing); got != boundary {
+			t.Fatalf("preparing %s, want %s", got, boundary)
+		}
+		if starts := finalCheckStarts(t, f.repository(), stream); len(starts) != 0 {
+			t.Fatalf("checks started during %s: %+v", boundary, starts)
+		}
+		p.await("no check entry during "+boundary, `!document.querySelector('[data-kind=final_checks]')`)
+		release <- struct{}{}
+	}
+	if ran := awaitCheck(t, checks.entered); len(ran) != 0 {
+		t.Fatalf("final checks selected links: %v", ran)
+	}
+	awaitFeedEvent(p, stream)
+	p.await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
+	p.awaitText(entry+` [data-field=selection]`, "checking every check on the rebased branch")
+	p.await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
+	assertFeedAnnotations(t, p, entry, 1)
+	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	awaitFeedEvent(p, stream)
+	p.await("the final checks passed", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'passed'`)
+	const outcome = `[data-kind=final_review][data-review="1"]`
+	p.awaitText(outcome+` [data-field=outcome]`, "reviewed")
+	p.awaitText(outcome+` [data-field=blocking]`, "0 blocking findings")
+	p.awaitText(outcome+` [data-field=gaps]`, "0 uncovered criteria")
+	p.awaitText(outcome+` [data-field=turn]`, turn)
+	session := `[data-kind=session][data-turn="` + turn + `"]`
+	p.await("the final reader's completed turn", `document.querySelector(`+quote(session)+`)?.dataset.state === 'done'`)
+	p.awaitText(session+` [data-field=profile]`, "default")
+	const transition = `[data-kind=transition][data-subject=final-review][data-to=reviewed-1]`
+	p.awaitText(transition+` [data-field=subject]`, "Final review")
+	p.awaitText(transition+` [data-field=from]`, "requested-1")
+	p.awaitText(transition+` [data-field=to]`, "reviewed-1")
+	p.awaitText(transition+` [data-field=reason]`, "final review 1 read")
+	assertFeedAnnotations(t, p, entry+", "+outcome+", "+transition, 3)
+	// The link identifies the same agent turn shown in the feed.
+	var linked bool
+	p.eval(`document.querySelector(`+quote(outcome+` [data-field=turn]`)+`).hash === '#' + document.querySelector(`+quote(session)+`).id`, &linked)
+	if !linked {
+		t.Fatal("final review does not link its reader turn")
+	}
+}
+
+func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
+	t.Parallel()
+	f := newPageFixture(t)
+	p := openBrowser(t)
+	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(stream)
+	repo := f.s.sole().repository
+	at := f.s.now()
+	selection := &CheckSelection{Mode: selectionSelected, Links: []string{"dag://go/check"}, Candidates: 113}
+	for i, state := range []string{ChecksPassed, ChecksIncomplete, ChecksSuperseded} {
+		run := i + 1
+		errorText := ""
+		if state == ChecksIncomplete {
+			errorText = "check runner lost its connection"
+		}
+		if state == ChecksSuperseded {
+			errorText = "the candidate was replaced"
+		}
+		feedDocument(t, repo, stream, checkDocumentID("upload", run), checkPath("upload", run), 1, at,
+			UnitCheckRun{Unit: "upload", Run: run, Status: state, Selection: selection, Error: errorText, StartedAt: at, FinishedAt: at})
+		entry := `[data-kind=unit_checks][data-unit=upload][data-run="` + strconv.Itoa(run) + `"]`
+		p.awaitText(entry+` [data-field=state]`, checkStateLabel(state))
+		p.awaitText(entry+` [data-field=selection]`, "checking 1 of 113")
+		p.await("no invented listed total", `!document.querySelector(`+quote(entry+` [data-field=listed]`)+`)`)
+		if errorText != "" {
+			p.awaitText(entry+` [data-field=error]`, errorText)
+		}
+	}
+	// Legacy final results have no start/attempt evidence; they still render
+	// alongside a separately started retry and a failed review outcome.
+	feedDocument(t, repo, stream, finalChecksDocument(1), finalChecksPath(1), 1, at,
+		FinalCheckRun{Review: 1, Status: ChecksIncomplete, Error: "engine unavailable", FinishedAt: at})
+	feedDocument(t, repo, stream, finalCheckAttemptDocument(1, 2), finalCheckAttemptPath(1, 2), 1, at,
+		FinalCheckAttempt{Review: 1, Attempt: 2, StartedAt: at})
+	feedDocument(t, repo, stream, finalReportDocument, finalReportPath, 1, at,
+		FinalReport{Review: 1, Outcome: finalFailed, Failure: "reader did not produce a report"})
+	p.awaitText(`[data-kind=final_checks][data-attempt=""] [data-field=state]`, "not completed")
+	p.awaitText(`[data-kind=final_checks][data-attempt=""] [data-field=error]`, "engine unavailable")
+	p.awaitText(`[data-kind=final_checks][data-attempt="2"] [data-field=state]`, "running")
+	p.awaitText(`[data-kind=final_review] [data-field=failure]`, "reader did not produce a report")
+	assertFeedAnnotations(t, p, `[data-kind=unit_checks], [data-kind=final_checks], [data-kind=final_review]`, 6)
+}
+
+func checkStateLabel(state string) string {
+	if state == ChecksIncomplete {
+		return "not completed"
+	}
+	return state
+}
