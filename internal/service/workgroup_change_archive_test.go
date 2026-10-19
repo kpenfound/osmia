@@ -252,7 +252,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			f.engine.mu.Unlock()
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
 			f.awaitApproved(t)
 			repo, err := f.s.repository(survivorProject)
@@ -717,7 +717,7 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	defer func() { f.stop(t) }()
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	repo, err := f.s.repository(f.project)
@@ -729,7 +729,7 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	gate.armed.Store(true)
 	retry := make(chan error, 1)
 	go func() {
-		_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+		_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 		retry <- err
 	}()
 	select {

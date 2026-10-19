@@ -760,6 +760,8 @@
 
   // rows keeps each workstream's row in the list between renders.
   const rows = new Map();
+  const sidebarGroups = new Map();
+  const archivedSidebarGroups = new Map();
 
   function row(id) {
     let r = rows.get(id);
@@ -826,13 +828,43 @@
       ].filter((node) => node !== null));
       return r.node;
     };
-    place(byId('archived-list'), archived.map(entry));
+    // A group's newest member determines its position. Keep member controls
+    // connected across updates, including when a member is archived.
+    const groupedEntries = (work, cache) => {
+      const nodes = [];
+      const members = new Map();
+      for (const w of work) {
+        if (!w.workgroup || w.workgroup.members.length < 2) {
+          nodes.push(entry(w));
+          continue;
+        }
+        const id = w.workgroup.id;
+        if (!members.has(id)) {
+          members.set(id, []);
+          let group = cache.get(id);
+          if (!group) {
+            group = { list: el('ul', { class: 'rows' }) };
+            group.node = el('li', { class: 'sidebar-workgroup', 'data-sidebar-workgroup': id },
+              el('div', { class: 'sidebar-workgroup-title' }, 'Workgroup'), group.list);
+            cache.set(id, group);
+          }
+          nodes.push(group.node);
+        }
+        members.get(id).push(entry(w));
+      }
+      for (const [id, group] of cache) {
+        if (members.has(id)) place(group.list, members.get(id));
+        else cache.delete(id);
+      }
+      return nodes;
+    };
+    place(byId('archived-list'), groupedEntries(archived, archivedSidebarGroups));
     const work = streams().filter((w) => !w.archived);
     if (work.length === 0) {
       list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
       return;
     }
-    place(list, work.map(entry));
+    place(list, groupedEntries(work, sidebarGroups));
   }
 
   let paneRendered = '';
@@ -2086,7 +2118,12 @@
     // an objection or a request for a redraft, which the shed may still
     // leave open with updated dissent, so those do not dismiss it.
     if (decision === 'ratify') {
+      const packet = views[detailOf(entry)];
+      if (packet && packet.project_spec_revision) {
+        body.project_spec_revision = packet.project_spec_revision;
+      }
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail, undefined, decisionKey(entry));
+      mark([detailOf(entry)]);
       return;
     }
     if (decision === 'sustain') {
@@ -2166,6 +2203,9 @@
     const dissent = all.filter((o) => o.by !== 'chief_of_staff');
     const dismissed = all.filter((o) => o.by === 'chief_of_staff');
     d.detail.replaceChildren(...[
+      view.project_spec ? el('details', { 'data-field': 'project-spec' },
+        el('summary', {}, 'Project spec revision ' + view.project_spec_revision),
+        el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },
           el('strong', {}, o.id),

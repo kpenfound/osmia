@@ -225,6 +225,12 @@ func draftAt(value string) func(string, string) bool {
 	return func(_, draft string) bool { return draft == value }
 }
 
+func (f *architectFixture) transitionRecorded(t *testing.T, stream config.WorkstreamID, id string) func(string, string) bool {
+	return func(_, _ string) bool {
+		return slices.ContainsFunc(f.transitions(t, stream), func(tr trace.Transition) bool { return tr.ID == id })
+	}
+}
+
 func (f *architectFixture) documents(t *testing.T, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](f.repository(), stream)
@@ -540,7 +546,8 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	// Draft 1 delivers no plan through the tool but leaves bytes that are not
 	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
 	// cycle and an unaddressed criterion; draft 3 a valid plan. Drafts 2 and 3
-	// wait until the test has seen the state the previous draft left.
+	// wait until the test has seen the recorded invalid transition, because
+	// the service moves straight on to the next drafting state.
 	sawInvalid1, sawInvalid2 := make(chan struct{}), make(chan struct{})
 	gate := func(ctx context.Context, open <-chan struct{}) error {
 		select {
@@ -599,7 +606,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 			return errors.Join(problems...)
 		})
 	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, draftAt("invalid-1"))
+	f.await(t, stream, f.transitionRecorded(t, stream, "draft-1-invalid"))
 	// The invalid draft is recorded with its problems and the state stays
 	// handed; the chief of staff hears nothing yet.
 	if docs := f.documents(t, stream, plan.SpecDocument); len(docs) != 1 || docs[0].Content != validSpec || docs[0].Actor != architectActor {
@@ -609,7 +616,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		t.Fatalf("plan after draft 1: %+v", docs)
 	}
 	close(sawInvalid1)
-	f.await(t, stream, draftAt("invalid-2"))
+	f.await(t, stream, f.transitionRecorded(t, stream, "draft-2-invalid"))
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != cyclicPlan || docs[0].Revision != 1 {
 		t.Fatalf("plan after draft 2: %+v", docs)
 	}

@@ -113,6 +113,44 @@ func (s *Service) packet(raw string) (PacketResponse, *APIError) {
 	out := PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: doc.Revision, At: doc.At}
 	if spec, _, found, err := repository.ProjectSpecOf(stream); err == nil && found {
 		out.ProjectSpec = &spec
+		id, err := repository.CrossRepoWorkgroupOf(stream)
+		if err != nil {
+			return PacketResponse{}, &APIError{Internal, err.Error()}
+		}
+		if id != "" {
+			wt, err := trace.OpenWorkgroupAuthority(s.current().Root, id)
+			if wt != nil {
+				defer wt.Close()
+			}
+			if err != nil {
+				return PacketResponse{}, &APIError{Internal, err.Error()}
+			}
+			spec, revision, found, err := trace.ProjectSpecWithRevisionFor(wt, id)
+			if err != nil {
+				return PacketResponse{}, &APIError{Internal, err.Error()}
+			}
+			if found {
+				out.ProjectSpec, out.ProjectSpecRevision = &spec, revision
+				_, g, _, err := repository.CrossRepoProjectSpec(id)
+				if err != nil {
+					return PacketResponse{}, &APIError{Internal, err.Error()}
+				}
+				approval, _, approved, err := trace.ReadGroupApproval(wt, g.Members[0])
+				if err != nil {
+					return PacketResponse{}, &APIError{Internal, err.Error()}
+				}
+				if approved {
+					out.ProjectSpec, out.ProjectSpecRevision = &approval.ProjectSpec, approval.ProjectSpecRevision
+					if out.ProjectSpecRevision == 0 {
+						revision, err := trace.RecordedProjectSpecRevision(wt, id, approval.ProjectSpec)
+						if err != nil {
+							return PacketResponse{}, &APIError{Internal, err.Error()}
+						}
+						out.ProjectSpecRevision = revision
+					}
+				}
+			}
+		}
 	}
 	return out, nil
 }
@@ -139,7 +177,14 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 		return RatifyResponse{}, &APIError{Internal, err.Error()}
 	}
 	if id != "" {
-		out, found, api := s.resumeGroupApproval(ctx, repo, stream, id, shed.Pin{Spec: req.Spec, Plan: req.Plan})
+		required, err := repo.GroupApprovalRequired(stream)
+		if err != nil {
+			return RatifyResponse{}, &APIError{Internal, err.Error()}
+		}
+		if required && req.ProjectSpecRevision < 1 {
+			return RatifyResponse{}, &APIError{Conflict, projectSpecCatchingUp}
+		}
+		out, found, api := s.resumeGroupApproval(ctx, repo, stream, id, shed.Pin{Spec: req.Spec, Plan: req.Plan}, req.ProjectSpecRevision)
 		if found {
 			return out, api
 		}
@@ -160,7 +205,7 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 	if !required {
 		return s.ratifyMember(ctx, o, asked)
 	}
-	return s.ratifyWorkgroup(ctx, o, workgroup, asked)
+	return s.ratifyWorkgroup(ctx, o, workgroup, asked, req.ProjectSpecRevision)
 }
 
 // ratifyMember is the single-workstream ratification: unchanged from what
@@ -207,17 +252,41 @@ func (s *Service) ratifyMember(ctx context.Context, o *shedOwner, asked shed.Pin
 	return RatifyResponse{Project: o.project, Workstream: o.stream, Round: record.Round, Spec: asked.Spec, Plan: asked.Plan, Sealing: "requested", Detail: reason + "; the sealing is asked for"}, nil
 }
 
+const projectSpecCatchingUp = "the project spec is catching up with the latest member revisions; read the packet again"
+
 // ratifyWorkgroup validates the entire draft before recording one durable
 // owner decision. Member decisions and seals are preparations; only durable
 // group completion grants effective ratification and production admission.
-func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.WorkgroupID, asked shed.Pin) (RatifyResponse, *APIError) {
+func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, *APIError) {
+	lock := s.groupApprovalLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	failed := &APIError{Internal, fmt.Sprintf("cannot read the project spec of workgroup %s; check the trace repository", id)}
-	spec, g, found, err := o.repository.CrossRepoProjectSpec(id)
+	wt, g, err := s.approvalTrace(ctx, o.repository, id)
+	if err != nil {
+		return RatifyResponse{}, failed
+	}
+	defer wt.Close()
+	spec, revision, found, err := trace.ProjectSpecWithRevisionFor(wt, id)
 	if err != nil {
 		return RatifyResponse{}, failed
 	}
 	if !found || len(g.Members) < 2 {
 		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s has no recorded project spec yet; the architect has not finished drafting it", id)}
+	}
+	if _, _, approved, err := trace.ReadGroupApproval(wt, g.Members[0]); err != nil {
+		return RatifyResponse{}, failed
+	} else if !approved {
+		message, err := s.contractGuardRefusal(wt, g, spec)
+		if err != nil {
+			return RatifyResponse{}, failed
+		}
+		if message != "" {
+			return RatifyResponse{}, &APIError{Conflict, message}
+		}
+	}
+	if projectSpecRevision < 1 || projectSpecRevision != revision {
+		return RatifyResponse{}, &APIError{Conflict, projectSpecCatchingUp}
 	}
 	real := g.Members[1:]
 	if err := trace.ValidateGraph(real, spec.Graph); err != nil {
@@ -232,15 +301,14 @@ func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.W
 	pins := make(map[config.WorkstreamID]shed.Pin, len(real))
 	var refused []string
 	for _, m := range real {
-		mo, pin := o, asked
-		if m != o.stream {
-			var api *APIError
-			mo, api = s.shedAction(string(m), InShedState, SketchedState)
-			if api != nil {
-				refused = append(refused, fmt.Sprintf("workstream %s: %s", m, api.Message))
-				continue
-			}
-			pin = mo.pin
+		mo, api := s.shedAction(string(m), InShedState, SketchedState)
+		if api != nil {
+			refused = append(refused, fmt.Sprintf("workstream %s: %s", m, api.Message))
+			continue
+		}
+		pin := mo.pin
+		if m == o.stream {
+			pin = asked
 		}
 		owners[m], pins[m] = mo, pin
 		entries, err := Dissent(mo.repository, mo.stream)
@@ -257,31 +325,21 @@ func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.W
 		if len(memberRefusals) > 0 {
 			continue
 		}
-		slice, _ := trace.SliceFor(spec, m)
-		specDoc, err := trace.Get[trace.Document](mo.repository, m, plan.SpecDocument, pin.Spec)
+		matches, err := sliceMatchesPin(spec, mo.repository, m, pin)
 		if err != nil {
 			return RatifyResponse{}, &APIError{Internal, err.Error()}
 		}
-		planDoc, err := trace.Get[trace.Document](mo.repository, m, plan.PlanDocument, pin.Plan)
-		if err != nil {
-			return RatifyResponse{}, &APIError{Internal, err.Error()}
-		}
-		if slice.Spec != specDoc.Content || slice.Plan != planDoc.Content {
-			refused = append(refused, fmt.Sprintf("workstream %s: the project slice differs from the packet revisions", m))
+		if !matches {
+			refused = append(refused, fmt.Sprintf("workstream %s: %s", m, projectSpecCatchingUp))
 		}
 	}
 	if len(refused) > 0 {
 		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s is not ratified:\n- %s", id, strings.Join(refused, "\n- "))}
 	}
-	lock := s.groupApprovalLock(id)
-	lock.Lock()
-	defer lock.Unlock()
-	wt, group, err := s.approvalTrace(ctx, o.repository, id)
-	if err != nil {
+	if err := s.step("group-ratify-validated"); err != nil {
 		return RatifyResponse{}, &APIError{Internal, err.Error()}
 	}
-	defer wt.Close()
-	decision, _, exists, err := trace.ReadGroupApproval(wt, group.Members[0])
+	decision, _, exists, err := trace.ReadGroupApproval(wt, g.Members[0])
 	if err != nil {
 		return RatifyResponse{}, &APIError{Internal, err.Error()}
 	}
@@ -294,7 +352,7 @@ func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.W
 		}
 	}
 	if !exists {
-		decision = trace.GroupApproval{Workgroup: id, ProjectSpec: spec}
+		decision = trace.GroupApproval{Workgroup: id, ProjectSpec: spec, ProjectSpecRevision: revision}
 		for _, m := range real {
 			mo, pin := owners[m], pins[m]
 			entries, err := Dissent(mo.repository, m)
@@ -308,7 +366,7 @@ func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.W
 			}
 			decision.Members = append(decision.Members, trace.GroupMemberApproval{Project: mo.project, Workstream: m, Spec: pin.Spec, Plan: pin.Plan, Round: mo.round, Record: content})
 		}
-		if err := trace.RecordGroupApproval(ctx, wt, group.Members[0], decision, s.now(), ownerActor); err != nil {
+		if err := trace.RecordGroupApproval(ctx, wt, g.Members[0], decision, s.now(), ownerActor); err != nil {
 			return RatifyResponse{}, &APIError{Internal, err.Error()}
 		}
 	}

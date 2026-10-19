@@ -569,7 +569,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Fatalf("draft workgroup: %v", api)
 	}
 	packets := f.awaitDecisionPackets(t)
-	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan); err != nil {
+	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, packets[0].ProjectSpecRevision); err != nil {
 		t.Fatalf("ratify: %v", err)
 	}
 

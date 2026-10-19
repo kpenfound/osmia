@@ -117,7 +117,7 @@ func TestHandInProductionSelectsDraftsRatifiesAndRestarts(t *testing.T) {
 				must(t, os.Remove(req.Path))
 			}
 			checkHandInRetry(t, f, req)
-			_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+			_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
 			f.awaitApproved(t)
 			f.stop(t)
@@ -158,7 +158,7 @@ func TestHandInProductionRecoversSelectionAllocationJoinAndSeal(t *testing.T) {
 				packet := f.awaitPacket(t)
 				ratified = make(chan error, 1)
 				go func() {
-					_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+					_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 					ratified <- err
 				}()
 			}
@@ -194,7 +194,7 @@ func TestHandInProductionRecoversSelectionAllocationJoinAndSeal(t *testing.T) {
 			checkHandInRetry(t, f, req)
 			f.checkContinuation(t)
 			if ratified == nil {
-				_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+				_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 				must(t, err)
 			}
 			f.awaitApproved(t)
@@ -302,7 +302,7 @@ func TestHandInProductionSingleSelectedRepoKeepsOrdinaryPacket(t *testing.T) {
 				if packet.ProjectSpec != nil || packet.Workstream != f.stream1 || packet.Project != target || packet.Packet.Skipped != skip {
 					t.Fatalf("single selection changed packet: %+v", packet)
 				}
-				out, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+				out, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 				must(t, err)
 				if len(out.Members) != 0 || out.Sealing != "requested" {
 					t.Fatalf("single selection changed owner ratification: %+v", out)
@@ -379,7 +379,7 @@ func TestHandInProductionMultipleReposPreservesSkippedDebate(t *testing.T) {
 			t.Fatal("committee ran despite hand-in skip")
 		}
 	}
-	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	checkHandInRetry(t, f, req)
@@ -391,7 +391,7 @@ func TestHandInProductionSharedChiefResumesBothQuestionsAfterRestart(t *testing.
 	f := newHandInProductionFixture(t)
 	handInProduction(t, f, HandInRequest{})
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	f.engine.mu.Lock()
@@ -527,7 +527,7 @@ func TestHandInProductionPreservesSameRepoBaseOnSelectedMember(t *testing.T) {
 	})
 	req := handInProduction(t, f, HandInRequest{Base: parent})
 	packet := f.awaitPacket(t)
-	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.wait(t, "dependent group seals", func() bool {
 		for i, m := range []config.WorkstreamID{f.stream1, f.stream2} {

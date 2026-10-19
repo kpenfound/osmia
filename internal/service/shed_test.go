@@ -49,6 +49,26 @@ func newDebateFixture(t *testing.T, members, rounds int) *shedFixture {
 	return newDebateFixtureWith(t, members, rounds, "", nil)
 }
 
+// newSketchedDebateFixture leaves the committee out of the initial service so
+// setup can stop at sketched before planting an amendment. stopAtSketch
+// restores the runner for manual passes and subsequent service starts.
+func newSketchedDebateFixture(t *testing.T, members, rounds int) *shedFixture {
+	t.Helper()
+	var committee *Committee
+	f := newDebateFixtureWith(t, members, rounds, "", func(o *Options) {
+		committee, o.Committee = o.Committee, nil
+	})
+	f.opts.Committee = committee
+	return f
+}
+
+func (f *shedFixture) stopAtSketch(t *testing.T, stream config.WorkstreamID) {
+	t.Helper()
+	f.await(t, stream, sketched)
+	f.stop(t)
+	f.s.options.Committee = f.opts.Committee
+}
+
 // newDebateFixtureWith is newDebateFixture with extra configuration appended
 // and prepare, when given, adjusting the options before the service starts.
 func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepare func(*Options)) *shedFixture {

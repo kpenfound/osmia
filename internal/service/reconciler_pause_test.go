@@ -509,15 +509,14 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newDebateFixture(t, 1, 3)
+	f := newSketchedDebateFixture(t, 1, 3)
 	object := func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "fit", "part": "plan", "argument": "Checkpoint elsewhere.", "citations": []string{"spec#1"}})
 		return err
 	}
 	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, object)
 	stream := f.handIn(t, "amend-paused", handedDesign)
-	f.await(t, stream, sketched)
-	f.stop(t)
+	f.stopAtSketch(t, stream)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()

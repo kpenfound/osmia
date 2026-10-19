@@ -53,7 +53,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 	defer func() { release(); cleanup.release(); f.stop(t) }()
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
 	right, err := f.s.repository(f.project2)

@@ -446,10 +446,15 @@ func (c *Client) DecideAmendment(ctx context.Context, id config.WorkstreamID, am
 	return v, err
 }
 
-// Ratify ratifies the given revisions of a workstream's spec and plan.
-func (c *Client) Ratify(ctx context.Context, id config.WorkstreamID, spec, plan int) (RatifyResponse, error) {
+// Ratify ratifies the displayed revisions. Cross-repo groups also require
+// the project-spec revision served by Packet.
+func (c *Client) Ratify(ctx context.Context, id config.WorkstreamID, spec, plan int, projectSpecRevision ...int) (RatifyResponse, error) {
 	var v RatifyResponse
-	err := c.Do(ctx, "POST", Prefix+"/ratify/"+url.PathEscape(string(id)), RatifyRequest{Spec: spec, Plan: plan}, &v)
+	req := RatifyRequest{Spec: spec, Plan: plan}
+	if len(projectSpecRevision) > 0 {
+		req.ProjectSpecRevision = projectSpecRevision[0]
+	}
+	err := c.Do(ctx, "POST", Prefix+"/ratify/"+url.PathEscape(string(id)), req, &v)
 	return v, err
 }
 

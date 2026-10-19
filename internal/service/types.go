@@ -425,19 +425,21 @@ type ShedRedraftRequest struct {
 // whose project spec is already drafted: ratifying this packet then seals
 // that project spec and every member, not only this workstream.
 type PacketResponse struct {
-	Project     config.ProjectID    `json:"project"`
-	Workstream  config.WorkstreamID `json:"workstream"`
-	Packet      shed.Packet         `json:"packet"`
-	Revision    int                 `json:"revision"`
-	At          time.Time           `json:"at"`
-	ProjectSpec *trace.ProjectSpec  `json:"project_spec,omitempty"`
+	ProjectSpecRevision int                 `json:"project_spec_revision,omitempty"`
+	Project             config.ProjectID    `json:"project"`
+	Workstream          config.WorkstreamID `json:"workstream"`
+	Packet              shed.Packet         `json:"packet"`
+	Revision            int                 `json:"revision"`
+	At                  time.Time           `json:"at"`
+	ProjectSpec         *trace.ProjectSpec  `json:"project_spec,omitempty"`
 }
 
 // RatifyRequest ratifies the exact revisions of the spec and the plan the
 // owner read in the packet.
 type RatifyRequest struct {
-	Spec int `json:"spec"`
-	Plan int `json:"plan"`
+	ProjectSpecRevision int `json:"project_spec_revision,omitempty"`
+	Spec                int `json:"spec"`
+	Plan                int `json:"plan"`
 }
 
 // RatifyResponse reports a recorded ratification: the revisions it approves,

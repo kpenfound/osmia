@@ -37,12 +37,11 @@ type amendmentAskFixture struct {
 
 func newAmendmentAskFixture(t *testing.T, script func(f *shedFixture)) *amendmentAskFixture {
 	t.Helper()
-	f := newDebateFixture(t, 1, 1)
+	f := newSketchedDebateFixture(t, 1, 1)
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 	script(f)
 	stream := f.handIn(t, "amendment-ask", handedDesign)
-	f.await(t, stream, sketched)
-	f.stop(t)
+	f.stopAtSketch(t, stream)
 	a := &amendmentAskFixture{shedFixture: f, stream: stream}
 	a.reopen(t)
 	t.Cleanup(func() { a.repo.Close() })

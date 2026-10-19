@@ -29,7 +29,7 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 			f.start(t)
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
 			f.awaitApproved(t)
 			const answer = "Keep the acknowledged offset contract stable."

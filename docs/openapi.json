@@ -5543,6 +5543,9 @@
           "project_spec": {
             "$ref": "#/components/schemas/TraceProjectSpec"
           },
+          "project_spec_revision": {
+            "type": "integer"
+          },
           "revision": {
             "type": "integer"
           },
@@ -5782,6 +5785,9 @@
       "RatifyRequest": {
         "properties": {
           "plan": {
+            "type": "integer"
+          },
+          "project_spec_revision": {
             "type": "integer"
           },
           "spec": {
