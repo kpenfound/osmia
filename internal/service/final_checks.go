@@ -19,9 +19,11 @@ import (
 // project check on the commit final review k reads, with the command, its
 // exit status, diagnostic excerpt, captured output path and the check links
 // Dagger's report shows failed. An incomplete run reported no result, and
-// Error says why.
+// Error says why. Attempt links the result to its start evidence, and is zero
+// for older records and failures before the checks started.
 type FinalCheckRun struct {
 	Review         int       `json:"review"`
+	Attempt        int       `json:"attempt,omitempty"`
 	Operation      string    `json:"operation"`
 	Commit         string    `json:"commit"`
 	Status         string    `json:"status"`
@@ -41,6 +43,53 @@ func finalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k
 
 func finalChecksPath(k int) string { return fmt.Sprintf("final/checks-%d.json", k) }
 
+// FinalCheckAttempt records checks starting on the rebased, exported commit.
+// A result with the same review and attempt, in FinalCheckRun, completes it.
+type FinalCheckAttempt struct {
+	Review    int       `json:"review"`
+	Attempt   int       `json:"attempt"`
+	Operation string    `json:"operation"`
+	Commit    string    `json:"commit"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+func finalCheckAttemptDocument(review, attempt int) string {
+	return fmt.Sprintf("final-checks-%d-attempt-%d-started", review, attempt)
+}
+
+func finalCheckAttemptPath(review, attempt int) string {
+	return fmt.Sprintf("final/checks-%d-attempt-%d-started.json", review, attempt)
+}
+
+func (a *finalReviewer) startCheckAttempt(ctx context.Context, stream config.WorkstreamID, run *FinalCheckRun) error {
+	docs, err := trace.Read[trace.Document](a.repository, stream)
+	if err != nil {
+		return err
+	}
+	attempt := 1
+	for _, d := range docs {
+		if !strings.HasPrefix(d.Path, fmt.Sprintf("final/checks-%d-attempt-", run.Review)) || !strings.HasSuffix(d.Path, "-started.json") {
+			continue
+		}
+		var prior FinalCheckAttempt
+		if err := json.Unmarshal([]byte(d.Content), &prior); err != nil {
+			return fmt.Errorf("%s: %w", d.Path, err)
+		}
+		attempt = max(attempt, prior.Attempt+1)
+	}
+	evidence := FinalCheckAttempt{Review: run.Review, Attempt: attempt, Operation: run.Operation, Commit: run.Commit, StartedAt: a.s.now()}
+	data, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		return err
+	}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalCheckAttemptDocument(run.Review, attempt), Revision: 1, Project: a.repository.Project(), Workstream: stream, At: evidence.StartedAt, Actor: checksActor, Cause: run.Operation}, Path: finalCheckAttemptPath(run.Review, attempt), Content: string(data) + "\n"}
+	if err := a.repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
+		return err
+	}
+	run.Attempt, run.StartedAt = attempt, evidence.StartedAt
+	return nil
+}
+
 // finalCheckDelay is how long final review checks wait to run again after n
 // runs in a row did not complete: checkRetryDelay, doubling with each further
 // run, up to an hour.
@@ -59,7 +108,7 @@ func finalCheckDelay(n int) time.Duration {
 // returned with an error, so the review never reads a commit whose checks
 // show nothing: the review's operation retries, and the checks run again
 // once finalCheckDelay has passed since the last incomplete run. The service
-// stopping records nothing, so a retry runs them again.
+// stopping leaves its start evidence unfinished, so a retry runs them again.
 func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
 	incomplete, latest, err := a.incompleteChecks(stream, report.Review, report.Commit)
 	if err != nil {
@@ -124,7 +173,7 @@ func incompleteChecksError(latest FinalCheckRun, n int, next time.Time) error {
 }
 
 // runChecks runs every project check on a fresh export of commit, setting
-// the run's command once the export is ready.
+// the run's command and recording its attempt start once the export is ready.
 func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, commit string, run *FinalCheckRun) (CheckResult, error) {
 	checks := a.s.options.reviewChecks
 	if checks == nil {
@@ -143,11 +192,17 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 		return CheckResult{ExitCode: -1}, err
 	}
 	defer os.RemoveAll(dir)
+	if err := a.s.step("final-checks-exporting"); err != nil {
+		return CheckResult{ExitCode: -1}, err
+	}
 	if err := g.Export(ctx, commit, dir); err != nil {
 		return CheckResult{ExitCode: -1}, fmt.Errorf("commit export: %w", err)
 	}
 	run.Command = []string{"dagger", "check", "--progress=report", "--failfast"}
 	timeout := cfg.Project.CheckTimeout()
+	if err := a.startCheckAttempt(ctx, stream, run); err != nil {
+		return CheckResult{ExitCode: -1}, err
+	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	result, err := checks.Check(bounded, dir, nil)

@@ -303,6 +303,14 @@ At assembled, the foreman rebases the feature branch onto upstream main one last
 
 The final read is high level. Each unit was already reviewed in detail against its own task and acceptance, and the checks cover style, formatting and lint. The service gives the reader every criterion with the merged units that serve it; a criterion no merged unit serves is blocking. The reader follows how the units' work connects in the running product and checks the whole against the spec's intent and the charter. It records a summary and findings. A finding is blocking only when the feature as a whole fails the spec's intent, its units do not work together, or it breaks a charter rule; anything else is advisory, shown to you and building nothing. The branch the reader sees was rebased onto upstream. Changes a rebase or drift resolution needed so that both upstream's behaviour and the feature's stand belong to the branch whatever the sealed spec, plan or footprints name. Upstream's own changes are not the feature's. Neither is a finding on its own. A later final review starts from the previous one: it reads what changed since, says whether each earlier blocking finding is resolved, and raises a new blocking finding only where a change since then breaks the feature or a criterion plainly fails.
 
+Each final check attempt records its start in
+`final/checks-<review>-attempt-<attempt>-started.json` immediately before
+running every check on the rebased, exported commit. Rebase, export and retry
+delay have no start evidence. Each retry gets its own attempt number; the
+result in `final/checks-<review>.json` names that attempt. An interrupted
+attempt keeps its start without a result, so it remains unfinished through a
+restart. Only a completed check result can let the reader proceed.
+
 The final read never reads a commit whose checks did not complete. Such a run is recorded, and the checks run again after a wait that doubles with each further run, up to an hour. Once three runs in a row have not completed, the final review shows in the inbox with the last failure and when the checks run next. It takes no decision: the owner fixes the cause, and the entry closes once a run completes.
 
 You approve delivery with the findings in view. Approving a report with blocking findings accepts them as they are, and the approval records what it accepted; without that acceptance, a report with blocking findings authorises nothing.

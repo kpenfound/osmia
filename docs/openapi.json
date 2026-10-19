@@ -3697,6 +3697,12 @@
             },
             "type": "array"
           },
+          "listed": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "mode": {
             "type": "string"
           },
