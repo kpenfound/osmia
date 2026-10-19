@@ -429,7 +429,6 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	p.await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
 	p.typeInto("#workstream-action [name=note]", "Superseded by the upload design.")
 	p.click("#workstream-action [type=submit]")
-	p.awaitText("#workstream-action .result", "Workstream abandoned and archived.")
 	p.await("the next workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
 	p.await("quiet in the archived group", `document.querySelector('#archived-list `+row+`') !== null && document.querySelector('#workstream-list `+row+`') === null`)
 	p.awaitText("#archived-count", "1")
@@ -469,7 +468,7 @@ func TestBrowserArchiveWarnsBeforePermanentDeletion(t *testing.T) {
 	p.eval(`window.confirm = () => true`, nil)
 	p.click("#workstream-menu-button")
 	p.click(`[data-workstream-action="archive"]`)
-	p.awaitText("#inbox-result", "history will be permanently deleted")
+	p.await("archive selects the next workstream with its own outcome", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream))+` && document.getElementById('inbox-result').textContent === ''`)
 	p.await("archived title retained", `document.querySelector('#archived-list [data-select="`+string(quiet)+`"]') !== null`)
 }
 

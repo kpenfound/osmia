@@ -99,6 +99,12 @@ announced as the matching command's is. It fits phone and laptop widths and
 updates live from the service's event stream. The browser tab shows the bee
 emoji (🐝) as the page's favicon.
 
+Action outcomes and busy controls belong to the design session, exploratory
+session or workstream where the action was taken. Switching away and back
+shows that instance's latest outcome, including a response received while
+another instance was open. Create forms start with an empty outcome when
+opened or switched to another project.
+
 The project pane is the main entry point. It lists each project's repos and
 workgroups, their member workstreams and any named wait. **Create project**
 creates a one-repo project; **Add repo** extends it using a separate clone and

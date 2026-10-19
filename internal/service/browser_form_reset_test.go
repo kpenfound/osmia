@@ -104,8 +104,8 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 	p.await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
 	p.typeInto("#workstream-action [name=note]", "Superseded by the upload design.")
 	p.click("#workstream-action [type=submit]")
-	p.awaitText("#workstream-action .result", "Workstream abandoned and archived.")
 	p.await("the next workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
+	p.await("the next workstream has no abandonment outcome", `document.querySelector('#workstream-action .result').textContent === ''`)
 	if action, note, archive := fields(); action != "object" || note != "" || archive {
 		t.Fatalf("the debate-and-abandonment form after a successful action: action %q, note %q, archive %v", action, note, archive)
 	}
