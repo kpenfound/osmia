@@ -10,8 +10,8 @@ import (
 )
 
 // feedList reads a workstream's feed: its conversation with the chief of
-// staff, every status the chief of staff wrote, every agent turn that started
-// and every change of the workstream's and its units' states, oldest first.
+// staff, statuses, every claimed agent turn, every workflow transition,
+// unit checks and final reviews, oldest first.
 func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	_, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
@@ -31,7 +31,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 
 // feedEntries merges the workstream's records into one feed ordered by time.
 // Entries recorded at the same time keep the conversation first, then
-// statuses, transitions and sessions. chief is the repository the
+// statuses, transitions, sessions and check/review entries. chief is the repository the
 // workstream's chief-of-staff conversation is read from: repository itself,
 // unless stream belongs to a cross-repo workgroup, whose shared thread
 // lives only in that workgroup's own trace.
@@ -60,15 +60,7 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	for _, t := range transitions {
-		var unit string
-		switch {
-		case t.Subject == trace.FeatureSubject:
-		case t.Unit != "" && t.Subject == trace.UnitSubject(t.Unit):
-			unit = t.Unit
-		default:
-			continue
-		}
-		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Unit: unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason}})
+		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason}})
 	}
 	threads, err := repository.Threads(stream)
 	if err != nil {
@@ -76,14 +68,17 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 	}
 	for _, th := range threads {
 		for _, q := range th.Turns {
-			// A chief-of-staff turn answering an owner message is its
-			// message and response.
-			if q.Claim == nil || th.Identity.ID == trace.ChiefOfStaff && q.Request.Actor == ownerActor {
+			if q.Claim == nil {
 				continue
 			}
 			out = append(out, FeedEntry{Kind: "session", At: q.Claim.At, Session: feedSession(th, q)})
 		}
 	}
+	checks, err := feedChecks(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, checks...)
 	slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
 	return out, nil
 }

@@ -1243,7 +1243,8 @@
     },
     "/v1/feed/{workstream}": {
       "get": {
-        "summary": "List a workstream's conversation, statuses, sessions and state changes in time order",
+        "summary": "List a workstream's conversation, statuses, sessions, all state changes, check runs and final reviews in time order",
+        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's full check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. Captured check output remains in the trace.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
         "operationId": "getFeedByWorkstream",
         "parameters": [
           {
@@ -4954,11 +4955,47 @@
         },
         "type": "object"
       },
+      "FeedCheckSelection": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "judged": {
+            "type": "integer"
+          },
+          "listed": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "selected",
+              "full"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "FeedEntry": {
         "properties": {
           "at": {
             "format": "date-time",
             "type": "string"
+          },
+          "final_checks": {
+            "$ref": "#/components/schemas/FeedFinalChecks"
+          },
+          "final_review": {
+            "$ref": "#/components/schemas/FeedFinalReview"
           },
           "kind": {
             "type": "string"
@@ -4977,6 +5014,82 @@
           },
           "transition": {
             "$ref": "#/components/schemas/FeedTransition"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit_checks": {
+            "$ref": "#/components/schemas/FeedUnitChecks"
+          }
+        },
+        "type": "object"
+      },
+      "FeedFinalChecks": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "review": {
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "state": {
+            "enum": [
+              "running",
+              "passed",
+              "failed",
+              "incomplete"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedFinalReview": {
+        "properties": {
+          "blocking": {
+            "type": "integer"
+          },
+          "failure": {
+            "type": "string"
+          },
+          "gaps": {
+            "type": "integer"
+          },
+          "reader": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "reviewed",
+              "failed"
+            ],
+            "type": "string"
           },
           "turn": {
             "type": "string"
@@ -5052,7 +5165,57 @@
           "reason": {
             "type": "string"
           },
+          "subject": {
+            "description": "Recorded workflow subject, such as feature, unit-upload, unit-upload-checks, final-review or question_1.",
+            "type": "string"
+          },
           "to": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedUnitChecks": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "description": "Links of failed checks; captured output stays in the trace.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "run": {
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/FeedCheckSelection",
+            "description": "Absent for historical runs that did not record a selection."
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "passed",
+              "failed",
+              "incomplete",
+              "superseded"
+            ],
             "type": "string"
           },
           "unit": {

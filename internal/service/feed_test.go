@@ -13,11 +13,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The feed merges the conversation with the chief of staff, its statuses,
-// the sessions that started and the workstream's and units' state changes in
-// time order. A turn answering an owner message shows as that message, not
-// as a session; a queued turn that never started and a change of anything
-// but the workstream or a unit stay out.
+// The feed merges conversation, statuses, every claimed turn and every
+// workflow subject in time order. Queued turns have no session entry.
 func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -80,17 +77,40 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_owner", Profile: chiefProfile, Prompt: "How is it going?"})
 	must(t, err)
 
+	transition(checksSubject("upload"), "upload", "requested-1", 14)
+	selection := CheckSelection{Mode: selectionSelected, Links: []string{"dag://upload"}, Candidates: 113}
+	feedDocument(t, repo, stream, checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, at(15), UnitCheckSelection{Unit: "upload", Run: 1, Selection: selection, StartedAt: at(15)})
+	feedDocument(t, repo, stream, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, at(16), UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, Selection: &selection, StartedAt: at(15), FinishedAt: at(16)})
+	transition(finalReviewSubject, "", "requested-1", 17)
+	feedDocument(t, repo, stream, finalCheckAttemptDocument(1, 1), finalCheckAttemptPath(1, 1), 1, at(18), FinalCheckAttempt{Review: 1, Attempt: 1, StartedAt: at(18)})
+	feedDocument(t, repo, stream, finalChecksDocument(1), finalChecksPath(1), 1, at(19), FinalCheckRun{Review: 1, Attempt: 1, Status: ChecksPassed, StartedAt: at(18), FinishedAt: at(19)})
+	queueRoleTurn(t, repo, stream, "agent_final_reader", committeeRole, "", at(19))
+	reader, err := repo.ClaimTurn(ctx, stream, "agent_final_reader", "token_reader", filepath.Join(t.TempDir(), "reader"), at(20))
+	must(t, err)
+	finish("agent_final_reader", reader, coreadapter.SessionResult{FinalResponse: "Reviewed the assembled branch."}, 21)
+	feedDocument(t, repo, stream, finalReportDocument, finalReportPath, 1, at(22), FinalReport{Review: 1, Outcome: finalReviewed, Reader: "agent_final_reader", Turn: "agent_final_reader-turn"})
+	transition(finalReviewSubject, "", "reviewed-1", 22)
+
 	got, err := feedEntries(repo, repo, stream)
 	must(t, err)
-	chiefEnded, masonEnded := at(7), at(12)
+	chiefEnded, masonEnded, unitFinished, finalStarted, finalFinished, readerEnded := at(7), at(12), at(16), at(18), at(19), at(21)
 	want := []FeedEntry{
-		{Kind: "transition", At: at(1), Transition: &FeedTransition{From: "", To: BuildingState, Actor: "service:osmia", Reason: "because " + BuildingState}},
-		{Kind: "transition", At: at(2), Transition: &FeedTransition{Unit: "upload", From: "", To: UnitReady, Actor: "service:osmia", Reason: "because " + UnitReady}},
+		{Kind: "transition", At: at(1), Transition: &FeedTransition{Subject: trace.FeatureSubject, From: "", To: BuildingState, Actor: "service:osmia", Reason: "because " + BuildingState}},
+		{Kind: "transition", At: at(2), Transition: &FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: "", To: UnitReady, Actor: "service:osmia", Reason: "because " + UnitReady}},
+		{Kind: "transition", At: at(3), Transition: &FeedTransition{Subject: trace.QuestionSubject("q1"), From: "", To: "asked", Actor: "service:osmia", Reason: "because asked"}},
 		{Kind: "session", At: at(5), Session: &FeedSession{Agent: trace.ChiefOfStaff, Role: trace.ChiefOfStaff, Turn: "events", Profile: "chief", State: "done", StartedAt: at(5), EndedAt: &chiefEnded, Summary: "Status written."}},
 		{Kind: "status", At: at(6), Status: &StatusView{Goal: "Ship uploads.", Attention: "Rule on the API.", Note: "Upload is ready.", Agents: []string{"A mason builds upload."}, Revision: 1, UpdatedAt: at(6)}},
 		{Kind: "session", At: at(9), Session: &FeedSession{Agent: "agent_mason_upload", Role: masonRole, Unit: "upload", Turn: "agent_mason_upload-turn", Profile: "default", State: "done", StartedAt: at(9), EndedAt: &masonEnded, Summary: "Built upload."}},
-		{Kind: "transition", At: at(10), Transition: &FeedTransition{Unit: "upload", From: UnitReady, To: UnitImplementing, Actor: "service:osmia", Reason: "because " + UnitImplementing}},
+		{Kind: "transition", At: at(10), Transition: &FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: UnitReady, To: UnitImplementing, Actor: "service:osmia", Reason: "because " + UnitImplementing}},
 		{Kind: "message", At: at(13), Turn: "message_owner", Text: "How is it going?", State: TurnQueued},
+
+		{Kind: "transition", At: at(14), Transition: &FeedTransition{Subject: checksSubject("upload"), Unit: "upload", From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
+		{Kind: "unit_checks", At: at(15), UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: ChecksPassed, Selection: &FeedCheckSelection{Mode: selectionSelected, Selected: 1, Judged: 113}, StartedAt: at(15), FinishedAt: &unitFinished}},
+		{Kind: "transition", At: at(17), Transition: &FeedTransition{Subject: finalReviewSubject, From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
+		{Kind: "final_checks", At: at(18), FinalChecks: &FeedFinalChecks{Review: 1, Attempt: 1, State: ChecksPassed, StartedAt: &finalStarted, FinishedAt: &finalFinished}},
+		{Kind: "session", At: at(20), Session: &FeedSession{Agent: "agent_final_reader", Role: committeeRole, Turn: "agent_final_reader-turn", Profile: "default", State: "done", StartedAt: at(20), EndedAt: &readerEnded, Summary: "Reviewed the assembled branch."}},
+		{Kind: "transition", At: at(22), Transition: &FeedTransition{Subject: finalReviewSubject, From: "requested-1", To: "reviewed-1", Actor: "service:osmia", Reason: "because reviewed-1"}},
+		{Kind: "final_review", At: at(22), FinalReview: &FeedFinalReview{Review: 1, State: finalReviewed, Reader: "agent_final_reader", Turn: "agent_final_reader-turn"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("feed:\n%s\nwant:\n%s", describeFeed(got), describeFeed(want))
@@ -112,6 +132,12 @@ func describeFeed(entries []FeedEntry) string {
 			fmt.Fprintf(&out, " %+v", *e.Status)
 		case e.Transition != nil:
 			fmt.Fprintf(&out, " %+v", *e.Transition)
+		case e.UnitChecks != nil:
+			fmt.Fprintf(&out, " %+v", *e.UnitChecks)
+		case e.FinalChecks != nil:
+			fmt.Fprintf(&out, " %+v", *e.FinalChecks)
+		case e.FinalReview != nil:
+			fmt.Fprintf(&out, " %+v", *e.FinalReview)
 		}
 		out.WriteString("\n")
 	}

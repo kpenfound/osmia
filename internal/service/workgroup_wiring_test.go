@@ -669,6 +669,17 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
+	// Check and review activity belongs to the member trace even though its
+	// conversation lives in the shared workgroup trace.
+	for i, member := range []struct {
+		repo   *trace.Repository
+		stream config.WorkstreamID
+	}{{repo1, f.stream1}, {repo2, f.stream2}} {
+		unit := fmt.Sprintf("feed-member-%d", i)
+		feedDocument(t, member.repo, member.stream, checkSelectionDocument(unit, 1), checkSelectionPath(unit, 1), 1, demoStart, UnitCheckSelection{Unit: unit, Run: 1, StartedAt: demoStart, Selection: fullSelection("disabled", "boost off")})
+		feedDocument(t, member.repo, member.stream, finalReportDocument, finalReportPath, 1, demoStart, FinalReport{Review: i + 1, Outcome: finalFailed, Failure: unit})
+	}
+
 	// Each member's own conversation and feed resolve to the one shared
 	// thread: both see both messages, in order.
 	checkShared := func(t *testing.T) {
@@ -681,6 +692,31 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 			}
 			var feed FeedResponse
 			must(t, f.c.Do(ctx, "GET", Prefix+"/feed/"+string(m), nil, &feed))
+			unit := "feed-member-0"
+			review := 1
+			if m == f.stream2 {
+				unit = "feed-member-1"
+				review = 2
+			}
+			var checks, outcomes int
+			for _, entry := range feed.Entries {
+				if entry.UnitChecks != nil {
+					checks++
+					if entry.UnitChecks.Unit != unit {
+						t.Fatalf("member feed contains another member's checks: %+v", entry)
+					}
+				}
+				if entry.FinalReview != nil {
+					outcomes++
+					if entry.FinalReview.Review != review || entry.FinalReview.Failure != unit {
+						t.Fatalf("member feed contains another member's report: %+v", entry)
+					}
+				}
+			}
+			if checks != 1 || outcomes != 1 {
+				t.Fatalf("member activity missing: checks=%d outcomes=%d", checks, outcomes)
+			}
+
 			var sawFirst, sawSecond bool
 			for _, e := range feed.Entries {
 				sawFirst = sawFirst || e.Turn == sent1.Turn

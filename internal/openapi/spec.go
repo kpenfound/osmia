@@ -30,6 +30,30 @@ holding the event. The first event is resync, which asks the client to read
 every view again; it also replaces events a slow subscriber missed. A comment
 line keeps an idle stream open.`
 
+const feedDescription = `Oldest-first entries from the workstream trace and its chief-of-staff
+conversation. Kinds message, response, action, status and session retain their
+conversation, status and agent-turn payloads. Every claimed turn is a session,
+including final-review readers. Transition identifies every recorded workflow
+subject, its from/to states, actor and reason.
+
+unit_checks has one entry per unit and run. It is running once its selection is
+recorded, then shows only its recorded result: passed, failed, incomplete or
+superseded, with failed check links or an error. Selection gives selected and
+judged counts, the optional listed total, or a full-run reason and detail.
+Absent historical selections and totals remain absent.
+
+final_checks has one entry per started attempt of a review's full check run,
+joining its durable start with its recorded result. Requested reviews, preparation
+and retry delays do not imply running checks. Historical results without start
+evidence have no attempt or started_at; each result revision remains visible.
+final_review gives each review's outcome, reader and turn, blocking finding and
+uncovered criterion counts, or its failure reason. Reader turns also appear as
+sessions. Captured check output remains in the trace.
+
+A started entry keeps its original place when its result arrives. Unfinished
+starts survive restart without implying success or failure. Workstream events
+on /v1/events tell an open client to read this feed again.`
+
 // parameters describes each path parameter the routes use.
 var parameters = map[string]string{
 	"workstream": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
@@ -68,6 +92,9 @@ func Spec() ([]byte, error) {
 		}
 		oc.SetID(operationID(route))
 		oc.SetSummary(route.Summary)
+		if route.Path == service.Prefix+"/feed/{workstream}" {
+			oc.SetDescription(feedDescription)
+		}
 		if params := pathParameters(route.Path); params != nil {
 			oc.AddReqStructure(params)
 		}
