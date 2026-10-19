@@ -132,6 +132,221 @@
     return document.getElementById(id);
   }
 
+  // Markdown is built only from text nodes and known elements. Agent HTML
+  // never passes through an HTML parser, and links require an explicit scheme.
+  function markdownClosingMark(text, mark, start) {
+    let end = text.indexOf(mark, start);
+    while (end !== -1 && (text[end - 1] === mark[0] || text[end + mark.length] === mark[0])) {
+      end = text.indexOf(mark, end + mark.length);
+    }
+    return end;
+  }
+
+  function markdownInline(text, depth = 0) {
+    const out = document.createDocumentFragment();
+    if (depth > 24) {
+      out.append(text);
+      return out;
+    }
+    let literal = '';
+    const flush = () => { out.append(literal); literal = ''; };
+    for (let i = 0; i < text.length;) {
+      if (text[i] === '`') {
+        const mark = /^`+/.exec(text.slice(i))[0];
+        const end = markdownClosingMark(text, mark, i + mark.length);
+        if (end > i + mark.length) {
+          flush();
+          out.append(el('code', {}, text.slice(i + mark.length, end)));
+          i = end + mark.length;
+          continue;
+        }
+        literal += mark;
+        i += mark.length;
+        continue;
+      }
+      if (text[i] === '[' && text[i - 1] !== '!') {
+        const labelEnd = text.indexOf('](', i + 1);
+        if (labelEnd !== -1) {
+          let end = labelEnd + 2;
+          let nesting = 1;
+          for (; end < text.length; end++) {
+            if (text[end] === '(') nesting++;
+            if (text[end] === ')' && --nesting === 0) break;
+          }
+          if (nesting === 0) {
+            const target = text.slice(labelEnd + 2, end);
+            flush();
+            if (/^(https?:|mailto:)[^\s<>]+$/i.test(target)) {
+              out.append(el('a', { href: target }, markdownInline(text.slice(i + 1, labelEnd), depth + 1)));
+            } else {
+              out.append(text.slice(i, end + 1));
+            }
+            i = end + 1;
+            continue;
+          }
+          // An unfinished target stays literal, including any inline markers.
+          literal += text.slice(i);
+          break;
+        }
+      }
+      if (text[i] === '*' || text[i] === '_') {
+        const char = text[i];
+        const mark = new RegExp('^' + (char === '*' ? '\\*' : '_') + '+').exec(text.slice(i))[0];
+        const end = markdownClosingMark(text, mark, i + mark.length);
+        // Underscores within words and whitespace-only spans stay literal.
+        if (mark.length <= 3 && end > i + mark.length && !/\s/.test(text[i + mark.length]) &&
+            !/\s/.test(text[end - 1]) && !(char === '_' && /\w/.test(text[i - 1] || ''))) {
+          flush();
+          const body = markdownInline(text.slice(i + mark.length, end), depth + 1);
+          out.append(mark.length === 3 ? el('strong', {}, el('em', {}, body)) :
+            el(mark.length === 2 ? 'strong' : 'em', {}, body));
+          i = end + mark.length;
+          continue;
+        }
+        literal += mark;
+        i += mark.length;
+        continue;
+      }
+      literal += text[i++];
+    }
+    flush();
+    return out;
+  }
+
+  function markdownCells(line) {
+    let value = line.trim();
+    if (!value.includes('|')) return null;
+    if (value.startsWith('|')) value = value.slice(1);
+    if (value.endsWith('|') && !value.endsWith('\\|')) value = value.slice(0, -1);
+    // Pipes in code spans or escaped pipes belong to the cell's text.
+    const cells = [];
+    let cell = '';
+    let ticks = '';
+    for (let i = 0; i < value.length;) {
+      if (value[i] === '\\' && value[i + 1] === '|') {
+        cell += '|';
+        i += 2;
+      } else if (value[i] === '`') {
+        const mark = /^`+/.exec(value.slice(i))[0];
+        if (!ticks) ticks = mark;
+        else if (ticks === mark) ticks = '';
+        cell += mark;
+        i += mark.length;
+      } else if (value[i] === '|' && !ticks) {
+        cells.push(cell.trim());
+        cell = '';
+        i++;
+      } else {
+        cell += value[i++];
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
+  function renderMarkdown(text, depth = 0) {
+    const out = el('div', { class: 'markdown' });
+    const lines = text.split('\n');
+    const fence = (line) => /^ {0,3}(`{3,}|~{3,})([^`]*)$/.exec(line);
+    const list = (line) => /^( *)([-+*]|\d+[.)]) +(.*)$/.exec(line);
+    const heading = (line) => /^ {0,3}(#{1,6}) +(.+)$/.exec(line);
+    const quote = (line) => /^ {0,3}> ?(.*)$/.exec(line);
+    const table = (i) => {
+      const cells = markdownCells(lines[i] || '');
+      const rules = markdownCells(lines[i + 1] || '');
+      return cells && rules && cells.length === rules.length && rules.every((s) => /^:?-{3,}:?$/.test(s)) ? { cells, rules } : null;
+    };
+    if (depth > 24) {
+      out.append(el('p', {}, text));
+      return out;
+    }
+    for (let i = 0; i < lines.length;) {
+      if (!lines[i].trim()) {
+        out.append(lines[i]);
+        if (i < lines.length - 1) out.append('\n');
+        i++;
+        continue;
+      }
+      const f = fence(lines[i]);
+      const h = heading(lines[i]);
+      const q = quote(lines[i]);
+      const item = list(lines[i]);
+      const t = table(i);
+      if (f) {
+        let end = i + 1;
+        const closing = new RegExp('^ {0,3}' + f[1][0] + '{' + f[1].length + ',}\\s*$');
+        while (end < lines.length && !closing.test(lines[end])) end++;
+        if (end === lines.length) {
+          out.append(el('p', {}, lines.slice(i).join('\n')));
+          break;
+        }
+        out.append(el('pre', {}, el('code', {}, lines.slice(i + 1, end).join('\n'))));
+        i = end + 1;
+      } else if (h) {
+        out.append(el('h' + h[1].length, {}, markdownInline(h[2])));
+        i++;
+      } else if (q) {
+        const body = [];
+        while (i < lines.length && quote(lines[i])) body.push(quote(lines[i++])[1]);
+        out.append(el('blockquote', {}, renderMarkdown(body.join('\n'), depth + 1)));
+      } else if (item) {
+        const indent = item[1].length;
+        const ordered = /^\d/.test(item[2]);
+        const node = el(ordered ? 'ol' : 'ul', ordered ? { start: parseInt(item[2], 10) } : {});
+        while (i < lines.length) {
+          const next = list(lines[i]);
+          if (!next || next[1].length !== indent || /^\d/.test(next[2]) !== ordered) break;
+          const body = [next[3]];
+          const contentIndent = next[1].length + next[2].length + 1;
+          i++;
+          while (i < lines.length) {
+            if (!lines[i].trim()) {
+              let after = i + 1;
+              while (after < lines.length && !lines[after].trim()) after++;
+              if (after >= lines.length || lines[after].search(/\S/) <= indent) break;
+              body.push(lines[i++]);
+            } else if (lines[i].search(/\S/) > indent) {
+              body.push(lines[i].slice(Math.min(contentIndent, lines[i].search(/\S/))));
+              i++;
+            } else break;
+          }
+          node.append(el('li', {}, renderMarkdown(body.join('\n'), depth + 1)));
+        }
+        out.append(node);
+      } else if (t) {
+        let end = i + 2;
+        const rows = [];
+        let malformed = false;
+        while (end < lines.length && lines[end].includes('|') && lines[end].trim()) {
+          const cells = markdownCells(lines[end++]);
+          if (cells.length !== t.cells.length) malformed = true;
+          rows.push(cells);
+        }
+        if (malformed) {
+          out.append(el('p', {}, lines.slice(i, end).join('\n')));
+        } else {
+          const row = (cells, tag) => el('tr', {}, ...cells.map((cell, column) => {
+            const rule = t.rules[column];
+            const align = rule.endsWith(':') ? (rule.startsWith(':') ? 'center' : 'right') : 'left';
+            return el(tag, { class: 'align-' + align }, markdownInline(cell));
+          }));
+          out.append(el('div', { class: 'markdown-table', tabindex: '0', role: 'region', 'aria-label': 'Table' },
+            el('table', {}, el('thead', {}, row(t.cells, 'th')), el('tbody', {}, ...rows.map((cells) => row(cells, 'td'))))));
+        }
+        i = end;
+      } else {
+        const body = [lines[i++]];
+        while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !heading(lines[i]) &&
+            !quote(lines[i]) && !list(lines[i]) && !table(i)) body.push(lines[i++]);
+        out.append(el('p', {}, markdownInline(body.join('\n'))));
+      }
+      // Keep source line separators in textContent as well as the block
+      // layout, including blank lines in otherwise plain text.
+      if (i < lines.length) out.append('\n');
+    }
+    return out;
+  }
+
   // request calls the API and returns its answer, or throws an error with
   // the API's message when it refuses. The thrown error's code is the
   // API's error code, 'unavailable' for a command the backend cannot admit
@@ -1164,7 +1379,7 @@
         el('span', { 'data-ann': 'role' }, who), ' · ',
         el('span', { 'data-ann': 'when' }, when(e.at)), ' · ',
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state)),
-      el('div', { class: 'text', 'data-field': 'text' }, e.text));
+      el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
   }
 
   // renderStatus shows a status the chief of staff wrote. Only the latest
@@ -1177,9 +1392,9 @@
         el('span', { 'data-ann': 'action' }, 'status'), ' · ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card' },
-        s.attention ? el('p', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, s.attention) : null,
-        el('p', { class: 'text', 'data-field': 'note' }, s.note),
-        s.agents.length > 0 ? el('ul', { class: 'notes', 'data-field': 'status-agents' }, ...s.agents.map((a) => el('li', {}, a))) : null));
+        s.attention ? el('div', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, renderMarkdown(s.attention)) : null,
+        el('div', { class: 'text', 'data-field': 'note' }, renderMarkdown(s.note)),
+        s.agents.length > 0 ? el('ul', { class: 'notes', 'data-field': 'status-agents' }, ...s.agents.map((a) => el('li', {}, renderMarkdown(a)))) : null));
   }
 
   function renderSession(e, c) {
@@ -1196,7 +1411,7 @@
       return node;
     }
     const details = el('details', {}, el('summary', { class: 'event-line' }, ...head),
-      el('div', { class: 'text', 'data-field': s.failure ? 'failure' : 'summary' }, report));
+      el('div', { class: 'text', 'data-field': s.failure ? 'failure' : 'summary' }, renderMarkdown(report)));
     details.open = c.opened.has(s.agent + '/' + s.turn);
     details.addEventListener('toggle', () => {
       if (details.open) {
@@ -1718,26 +1933,38 @@
     if (designFeedShown === key) {
       return;
     }
-    designFeedShown = key;
     const box = byId('design-feed');
+    // Snapshot the current DOM so a newly arrived reply keeps disclosures
+    // open without depending on the asynchronous details toggle event.
+    const opened = new Set();
+    if (box.dataset.conversation === id) {
+      for (const details of box.querySelectorAll('details[open][data-assumption]')) {
+        opened.add(details.dataset.assumption);
+      }
+    }
+    box.dataset.conversation = id;
+    designFeedShown = key;
     if (entries.length === 0) {
       box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
     } else {
-      box.replaceChildren(el('ol', {}, ...entries.map((e) => {
+      box.replaceChildren(el('ol', {}, ...entries.map((e, index) => {
         const entry = renderConversationEntry(e, 'Design agent');
         if (e.kind === 'response') {
           const text = entry.querySelector('[data-field="text"]');
           const pattern = /<details>\s*<summary>Assumptions<\/summary>([\s\S]*?)<\/details>/gi;
           let start = 0;
+          let disclosure = 0;
           let match;
           text.replaceChildren();
           while ((match = pattern.exec(e.text)) !== null) {
-            text.append(document.createTextNode(e.text.slice(start, match.index)),
-              el('details', {}, el('summary', {}, 'Assumptions (reply to override)'),
-                el('div', { class: 'text' }, match[1].trim())));
+            const identity = index + '/' + disclosure++;
+            const details = el('details', { 'data-assumption': identity },
+              el('summary', {}, 'Assumptions (reply to override)'), renderMarkdown(match[1].trim()));
+            details.open = opened.has(identity);
+            text.append(renderMarkdown(e.text.slice(start, match.index)), details);
             start = pattern.lastIndex;
           }
-          text.append(document.createTextNode(e.text.slice(start)));
+          text.append(renderMarkdown(e.text.slice(start)));
         }
         return entry;
       })));
