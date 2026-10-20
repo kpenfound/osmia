@@ -177,6 +177,9 @@ type Service struct {
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
 	checkSlots    *checkSlotPool
+	// reviewSlots keeps each admitted review's committee reservation reachable
+	// while its workflow operation waits for check capacity.
+	reviewSlots sync.Map // operation ID -> *reviewReservation
 	// spends is the daily spend each project's daily budget pass publishes.
 	spends    daySpends
 	pending   error

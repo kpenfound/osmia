@@ -338,7 +338,23 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	finished := applyCheck(ctx, a, op)
+	// Each retry uses admission's committee reservation, including after
+	// reopening the trace with an existing judgment and unfinished attempt.
+	apply := func(ctx context.Context) <-chan error {
+		t.Helper()
+		release, admitted := f.s.modelOperationLimit(a.repository, nil)(op)
+		if !admitted {
+			t.Fatal("review did not acquire committee capacity")
+		}
+		finished := make(chan error, 1)
+		go func() {
+			_, err := a.Apply(ctx, op)
+			release()
+			finished <- err
+		}()
+		return finished
+	}
+	finished := apply(ctx)
 	for _, point := range []string{"final-rebase-replaying", "final-checks-exporting"} {
 		if got := awaitCheck(t, preparing); got != point {
 			t.Fatalf("preparation boundary %s, want %s", got, point)
@@ -377,14 +393,14 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	}
 	// Just before the original ten-minute delay ends, retry records no start.
 	clock.Advance(incomplete.FinishedAt.Add(finalCheckDelay(1) - time.Nanosecond).Sub(clock.Now()))
-	if err := awaitCheck(t, applyCheck(ctx, a, op)); err == nil {
+	if err := awaitCheck(t, apply(ctx)); err == nil {
 		t.Fatal("retry ran before its delay")
 	}
 	if got := finalCheckStarts(t, repo, stream); !reflect.DeepEqual(got, starts) {
 		t.Fatalf("retry waiting recorded a start: %+v", got)
 	}
 	clock.Advance(time.Nanosecond)
-	finished = applyCheck(ctx, a, op)
+	finished = apply(ctx)
 	if links := awaitCheck(t, checks.entered); !slices.Equal(links, checks.links) {
 		t.Fatalf("runner links %v, want %v", links, checks.links)
 	}
@@ -422,7 +438,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checks completed.", "findings": []any{}})
 		return err
 	})
-	finished = applyCheck(context.Background(), a, op)
+	finished = apply(context.Background())
 	if links := awaitCheck(t, checks.entered); !slices.Equal(links, checks.links) {
 		t.Fatalf("runner links %v, want %v", links, checks.links)
 	}

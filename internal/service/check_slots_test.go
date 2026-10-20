@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -561,6 +563,7 @@ func TestDeliveryReviewWaitRunsBesidePassAndStartsOnce(t *testing.T) {
 	ticks := make(chan time.Time, 1)
 	c, err := reconcile.New(p.repository, reconcile.Options{
 		Worker: "delivery-slot-test", Now: p.s.now, Ticks: ticks,
+		Class: operationClass, Limit: p.s.modelOperationLimit(p.repository, nil),
 		Concurrent: concurrentOperation,
 		Adapters:   map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: a},
 		Hold:       func(_ config.WorkstreamID, candidate coreadapter.Operation) bool { return candidate.ID != op.ID },
@@ -619,4 +622,384 @@ func TestDeliveryReviewWaitRunsBesidePassAndStartsOnce(t *testing.T) {
 		t.Fatalf("delivery reader started %d times", reads.Load())
 	}
 	awaitCheckSlots(t, p.s, 0, 0)
+}
+
+// queuedCommittee provides a real scheduler candidate on another workstream.
+// Its dispatched turn can hold committee capacity without a model provider.
+func queuedCommittee(t *testing.T, f *shedFixture, repo *trace.Repository) (config.WorkstreamID, *scheduler.Scheduler) {
+	t.Helper()
+	ctx := context.Background()
+	stream, err := config.NewWorkstreamID()
+	must(t, err)
+	must(t, repo.CreateWorkstream(ctx, stream, f.s.now(), ownerActor))
+	header := func(schema, id string) trace.Header {
+		return trace.Header{Schema: schema, Version: trace.Version, Revision: 1, ID: id, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: ownerActor, Cause: "committee-capacity"}
+	}
+	member := committeeAgent(1)
+	must(t, repo.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", member), Role: committeeRole, ThreadID: member}))
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: header("osmia.trace.turn-request", "committee-request"), AgentID: member, ThreadID: member, TurnID: roundTurnID(1, member, 1), Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Read the plan"})
+	must(t, err)
+	cfg := f.s.about(repo)
+	limits := cfg.Capacity
+	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
+	sched, err := scheduler.New(repo, scheduler.Options{Now: f.s.now, Capacity: &limits, Shared: f.s.pool, Holds: func(c scheduler.Candidate) (bool, error) { return c.Workstream != stream, nil }})
+	must(t, err)
+	return stream, sched
+}
+
+func assertReviewSlotsFree(t *testing.T, s *Service, repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) {
+	t.Helper()
+	awaitCheckSlots(t, s, 0, 0)
+	if used := s.pool.Slots(nil).Used[committeeRole]; used != 0 {
+		t.Fatalf("committee slots still held: %d", used)
+	}
+	if _, found := s.reviewSlots.Load(op.ID); found {
+		t.Fatal("finished operation retained its reservation handle")
+	}
+	// A following admission can reserve both slots, using the same pool and
+	// project limits that a review uses, then release them idempotently.
+	releaseCommittee, admitted := s.modelOperationLimit(repo, nil)(op)
+	if !admitted {
+		t.Fatal("following review cannot take committee capacity")
+	}
+	defer releaseCommittee()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	releaseChecks, err := s.acquireReviewCheckSlot(ctx, CheckSlotRun{Project: repo.Project(), Workstream: stream, Review: 2}, op.ID)
+	must(t, err)
+	releaseChecks()
+	releaseCommittee()
+	releaseCommittee()
+	awaitCheckSlots(t, s, 0, 0)
+	if got := s.pool.Slots(nil).Used[committeeRole]; got != 0 {
+		t.Fatalf("following review leaked committee slot: %d", got)
+	}
+}
+
+func TestReviewCheckSlotWaitYieldsCommittee(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"final", "delivery"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			var f *shedFixture
+			var repo *trace.Repository
+			var stream config.WorkstreamID
+			var a *finalReviewer
+			var op coreadapter.Operation
+			if kind == "delivery" {
+				p := maintenanceFixture(t)
+				f, repo, stream = p.shedFixture, p.repository, p.stream
+				a = &finalReviewer{s: f.s, repository: repo}
+				must(t, a.Pass(context.Background()))
+				op = actionOperation(t, repo, stream, deliveryReviewAction)
+			} else {
+				f, stream, repo, a = newFinalFixture(t, "committee-yield")
+				_, op = assembleBoth(t, f, repo, a, stream, map[string]string{"one.go": "package feature\n"}, map[string]string{"two.go": "package feature\n"})
+			}
+			defer repo.Close()
+			f.s.checkSlots.resize(1)
+			f.s.cfg.Project.ChecksTimeout = "1s"
+			if f.s.cfg.Capacity.Committee != 1 {
+				t.Fatal("fixture must have committee=1")
+			}
+			checks := newSlotChecks()
+			f.s.options.reviewChecks = checks
+			in, err := decodeFinalReview(op)
+			must(t, err)
+			startsBefore := len(finalCheckStarts(t, repo, stream))
+			var reads atomic.Int32
+			readerEntered, readerRelease := make(chan struct{}, 1), make(chan struct{})
+			f.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				reads.Add(1)
+				readerEntered <- struct{}{}
+				select {
+				case <-readerRelease:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready to deliver", "findings": []any{}})
+				return err
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			holder, err := f.s.checkSlots.acquire(ctx, CheckSlotRun{Workstream: sibling, Unit: "held"})
+			must(t, err)
+			defer holder()
+			c, err := reconcile.New(repo, reconcile.Options{Worker: "review-committee-yield", Now: f.s.now, Concurrent: concurrentOperation, Class: operationClass, Limit: f.s.modelOperationLimit(repo, nil), Hold: func(_ config.WorkstreamID, candidate coreadapter.Operation) bool { return candidate.ID != op.ID }, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: a}})
+			must(t, err)
+			defer func() { cancel(); c.Wait() }()
+			must(t, c.Pass(ctx))
+			awaitCheckSlots(t, f.s, 1, 1)
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 0 {
+				t.Fatalf("waiting review holds %d committee slots", got)
+			}
+			// Even with spare committee capacity, the admitted operation's
+			// identity remains exclusive while its capacity is yielded.
+			if r, admitted := f.s.modelOperationLimit(repo, nil)(op); admitted {
+				r()
+				t.Fatal("duplicate review admitted while committee capacity was free")
+			}
+			other, sched := queuedCommittee(t, f, repo)
+			must(t, sched.Pass(ctx))
+			ops, err := repo.Operations(other)
+			must(t, err)
+			if len(ops) != 1 {
+				t.Fatalf("committee turn was not dispatched: %+v", ops)
+			}
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
+				t.Fatalf("dispatched committee uses %d slots", got)
+			}
+			// Stay queued beyond the whole checks_timeout; neither evidence nor
+			// an incomplete result can be written before acquiring both slots.
+			time.Sleep(1200 * time.Millisecond)
+			assertWaiting := func() {
+				t.Helper()
+				for range 3 {
+					must(t, c.Pass(ctx))
+				}
+				assertSingleReviewEffect(t, repo, stream, op.Action)
+				if len(finalCheckStarts(t, repo, stream)) != startsBefore {
+					t.Fatal("waiting review started checks")
+				}
+				if len(streamDocuments(t, repo, stream, finalChecksDocument(in.Review))) != 0 {
+					t.Fatal("waiting review recorded a result")
+				}
+				if reads.Load() != 0 {
+					t.Fatal("waiting review started its reader")
+				}
+				// Admission identity survives yielding, including at spare committee
+				// capacity: a duplicate operation cannot replace the live handle.
+				if r, admitted := f.s.modelOperationLimit(repo, nil)(op); admitted {
+					r()
+					t.Fatal("duplicate review admitted")
+				}
+			}
+			assertWaiting()
+			holder()
+			// The committee turn is still in flight, so every attempted acquisition
+			// must return its check slot rather than blocking other check work.
+			awaitCheckSlots(t, f.s, 0, 0)
+			time.Sleep(1200 * time.Millisecond)
+			assertWaiting()
+			probe, err := f.s.checkSlots.acquire(ctx, CheckSlotRun{Workstream: other, Unit: "independent-check"})
+			must(t, err)
+			probe()
+			claimed, err := repo.ClaimTurn(ctx, other, committeeAgent(1), "committee-token", t.TempDir(), f.s.now())
+			must(t, err)
+			completeClaimedTurn(t, f, repo, other, committeeAgent(1), claimed, nil)
+			must(t, sched.Pass(ctx))
+			if remaining := awaitCheck(t, checks.entered); remaining < 500*time.Millisecond {
+				t.Fatalf("wait consumed timeout: %s", remaining)
+			}
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
+				t.Fatalf("checking review uses %d committee slots", got)
+			}
+			for range 3 {
+				must(t, c.Pass(ctx))
+			}
+			assertSingleReviewEffect(t, repo, stream, op.Action)
+			starts := finalCheckStarts(t, repo, stream)
+			if len(starts) != startsBefore+1 || starts[len(starts)-1].Operation != op.ID {
+				t.Fatalf("check identity changed or duplicated: %+v", starts)
+			}
+			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			awaitCheck(t, readerEntered)
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
+				t.Fatalf("reader uses %d committee slots", got)
+			}
+			// A committee turn cannot overlap the review's checks or reader.
+			_, admitted, err := f.s.pool.TryReserve(repo, other, committeeRole, committeeAgent(1), &f.s.cfg.Capacity)
+			must(t, err)
+			if admitted {
+				t.Fatal("committee bound exceeded during reader")
+			}
+			close(readerRelease)
+			must(t, c.Wait())
+			if reads.Load() != 1 {
+				t.Fatalf("reader ran %d times", reads.Load())
+			}
+			assertSingleReviewEffect(t, repo, stream, op.Action)
+			assertReviewSlotsFree(t, f.s, repo, stream, op)
+		})
+	}
+}
+
+func TestFinalReviewSlotsReleaseEveryOutcome(t *testing.T) {
+	t.Parallel()
+	for _, outcome := range []string{ChecksPassed, ChecksFailed, ChecksIncomplete, "timeout", "cancelled", "superseded"} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
+			f, stream, repo, a := newFinalFixture(t, "final-slots-"+outcome)
+			_, op := assembleBoth(t, f, repo, a, stream, map[string]string{"one.go": "package feature\n"}, map[string]string{"two.go": "package feature\n"})
+			checks := newSlotChecks()
+			f.s.options.reviewChecks = checks
+			f.s.checkSlots.resize(1)
+			if outcome == "timeout" {
+				f.s.cfg.Project.ChecksTimeout = "20ms"
+			}
+			var reads atomic.Int32
+			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				reads.Add(1)
+				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Read the checks", "findings": []any{}})
+				return err
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c, err := reconcile.New(repo, reconcile.Options{Worker: "final-slot-outcome", Now: f.s.now, Concurrent: concurrentOperation, Class: operationClass, Limit: f.s.modelOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: a}})
+			must(t, err)
+			defer func() { cancel(); c.Wait() }()
+			must(t, c.Pass(ctx))
+			awaitCheck(t, checks.entered)
+			// A deliberately short timeout may already have returned by the
+			// time admission is probed. Other outcomes remain held by the fake.
+			if outcome != "timeout" {
+				if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
+					t.Fatalf("checks hold %d committee slots", got)
+				}
+				// A second committee operation cannot overlap running review
+				// checks beyond committee=1.
+				other, err := config.NewWorkstreamID()
+				must(t, err)
+				must(t, repo.CreateWorkstream(ctx, other, f.s.now(), ownerActor))
+				r, admitted, err := f.s.pool.TryReserve(repo, other, committeeRole, committeeAgent(1), &f.s.cfg.Capacity)
+				must(t, err)
+				if admitted {
+					r()
+					t.Fatal("review checks exceeded committee capacity")
+				}
+			}
+			switch outcome {
+			case ChecksPassed:
+				checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			case ChecksFailed:
+				checks.release <- checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport("dag://test")}}
+			case ChecksIncomplete:
+				checks.release <- checkOutcome{result: CheckResult{ExitCode: -1}, err: errors.New("engine unavailable")}
+			case "cancelled":
+				cancel()
+			case "superseded":
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede-final", Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: ownerActor, Cause: "supersede-final"}
+				_, err := repo.SetFeatureState(ctx, h, AbandonedState, "Replaced by another workstream")
+				must(t, err)
+				checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			}
+			must(t, c.Wait())
+			if outcome == "cancelled" {
+				if len(streamDocuments(t, repo, stream, finalChecksDocument(1))) != 0 {
+					t.Fatal("cancelled checks recorded a result")
+				}
+			} else {
+				docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
+				if len(docs) != 1 {
+					t.Fatalf("check results: %+v", docs)
+				}
+				var run FinalCheckRun
+				must(t, json.Unmarshal([]byte(docs[0].Content), &run))
+				want := outcome
+				if outcome == "timeout" {
+					want = ChecksIncomplete
+				}
+				if outcome == "superseded" {
+					want = ChecksPassed
+				}
+				if run.Status != want {
+					t.Fatalf("checks %s, want %s", run.Status, want)
+				}
+			}
+			if (outcome == ChecksPassed || outcome == ChecksFailed) && reads.Load() != 1 {
+				t.Fatal("completed checks did not reach the reader")
+			}
+			if outcome == "superseded" && reads.Load() != 0 {
+				t.Fatal("superseded review ran a reader")
+			}
+			assertReviewSlotsFree(t, f.s, repo, stream, op)
+		})
+	}
+}
+
+func TestFinalReviewRestartDuringCapacityWaits(t *testing.T) {
+	t.Parallel()
+	for _, wait := range []string{"checks", "committee"} {
+		t.Run(wait, func(t *testing.T) {
+			t.Parallel()
+			f, stream, repo, a := newFinalFixture(t, "restart-wait-"+wait)
+			_, op := assembleBoth(t, f, repo, a, stream, map[string]string{"one.go": "package feature\n"}, map[string]string{"two.go": "package feature\n"})
+			checks := newSlotChecks()
+			f.s.options.reviewChecks, f.opts.reviewChecks = checks, checks
+			f.s.checkSlots.resize(1)
+			var reads atomic.Int32
+			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				reads.Add(1)
+				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumed review", "findings": []any{}})
+				return err
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			holder, err := f.s.checkSlots.acquire(ctx, CheckSlotRun{Workstream: sibling, Unit: "held"})
+			must(t, err)
+			defer holder()
+			c, err := reconcile.New(repo, reconcile.Options{Worker: "restart-wait", Now: f.s.now, Concurrent: concurrentOperation, Class: operationClass, Limit: f.s.modelOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: a}})
+			must(t, err)
+			defer func() { cancel(); c.Wait() }()
+			must(t, c.Pass(ctx))
+			awaitCheckSlots(t, f.s, 1, 1)
+			var releaseOther func()
+			if wait == "committee" {
+				other, err := config.NewWorkstreamID()
+				must(t, err)
+				must(t, repo.CreateWorkstream(ctx, other, f.s.now(), ownerActor))
+				var admitted bool
+				releaseOther, admitted, err = f.s.pool.TryReserve(repo, other, committeeRole, committeeAgent(1), &f.s.cfg.Capacity)
+				must(t, err)
+				if !admitted {
+					t.Fatal("waiting review did not yield committee")
+				}
+				defer releaseOther()
+				holder()
+				awaitCheckSlots(t, f.s, 0, 0)
+			}
+			for range 3 {
+				must(t, c.Pass(ctx))
+			}
+			assertSingleReviewEffect(t, repo, stream, FinalReviewAction)
+			if len(finalCheckStarts(t, repo, stream)) != 0 {
+				t.Fatal("waiting review recorded an attempt")
+			}
+			cancel()
+			must(t, c.Wait())
+			holder()
+			if releaseOther != nil {
+				releaseOther()
+			}
+			assertReviewSlotsFree(t, f.s, repo, stream, op)
+			must(t, repo.Close())
+			var resume atomic.Bool
+			ticks := make(chan time.Time, 1)
+			f.opts.Reconciliation.Ticks = ticks
+			f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, candidate coreadapter.Operation) bool {
+				return candidate.ID != op.ID || !resume.Load()
+			}
+			f.start(t)
+			defer f.stop(t)
+			repo, err = f.s.repository(f.project)
+			must(t, err)
+			assertReviewSlotsFree(t, f.s, repo, stream, op)
+			if len(finalCheckStarts(t, repo, stream)) != 0 {
+				t.Fatal("restart manufactured an attempt")
+			}
+			resume.Store(true)
+			ticks <- f.s.now()
+			awaitCheck(t, checks.entered)
+			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			records := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, repo, stream) })
+			if len(records) != 1 || records[0].Operation.ID != op.ID || records[0].Result == nil || records[0].Result.Outcome != "succeeded" {
+				t.Fatalf("restarted review identity/result: %+v", records)
+			}
+			if len(finalCheckStarts(t, repo, stream)) != 1 || reads.Load() != 1 {
+				t.Fatal("restart duplicated checks or reader")
+			}
+			soon(t, "restarted review releases committee", func() bool { return f.s.pool.Slots(nil).Used[committeeRole] == 0 })
+			assertReviewSlotsFree(t, f.s, repo, stream, op)
+		})
+	}
 }

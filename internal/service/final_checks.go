@@ -208,7 +208,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if err := g.Export(ctx, report.Commit, dir); err != nil {
 		return CheckResult{ExitCode: -1}, fmt.Errorf("commit export: %w", err)
 	}
-	release, err := a.s.checkSlots.acquire(ctx, CheckSlotRun{Project: a.repository.Project(), Workstream: stream, Review: report.Review})
+	release, err := a.s.acquireReviewCheckSlot(ctx, CheckSlotRun{Project: a.repository.Project(), Workstream: stream, Review: report.Review}, report.Operation)
 	if err != nil {
 		return CheckResult{ExitCode: -1}, err
 	}
