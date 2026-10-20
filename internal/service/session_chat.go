@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -203,6 +202,17 @@ func sessionPrompt(entries []SessionEntry, text string) string {
 // recording why, unless it is already there. A retry with the same id is
 // idempotent.
 func setSessionState(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time, id, cause, to string) error {
+	// Each effect belongs to one turn even if a later turn changed the state.
+	// A retry after its durable write must not change the later turn's state.
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	if err != nil {
+		return err
+	}
+	for _, tr := range transitions {
+		if tr.ID == id {
+			return nil
+		}
+	}
 	state, err := repository.Workflow(stream, trace.SessionSubject)
 	if err != nil {
 		return err
@@ -234,7 +244,7 @@ func sessionConversationEntry(q trace.QueuedTurn) ConversationEntry {
 		state = TurnDone
 	}
 	req := q.Request
-	return ConversationEntry{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state}
+	return ConversationEntry{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state, QueuedReason: queuedReason(trace.Thread{Turns: []trace.QueuedTurn{q}}, q)}
 }
 
 // sessionMessage records text as the next owner message on an idle
@@ -267,7 +277,7 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if !mu.TryLock() {
 		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
 	}
-	defer mu.Unlock()
+	defer func() { mu.Unlock(); s.conversationSignal.wake() }()
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
 		return ConversationEntry{}, api
 	}
@@ -282,7 +292,7 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
 	}
-	if unfinishedSessionTurn(th) {
+	if unfinishedSessionTurn(th) || view.State == trace.SessionWorking {
 		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
 	}
 	entries, err := sessionEntriesSince(repository, stream, lastSessionRequestAt(th))
@@ -313,35 +323,13 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	return sessionConversationEntry(q), nil
 }
 
-// dispatchSessionTurn publishes the durable intent to run a session's turn,
-// the same way scheduler.Scheduler publishes a chief-of-staff, mason or
-// reviewer turn's, so the project's reconciliation controller picks it up
-// and runs it through the shared thread dispatcher, without ever going
-// through scheduler.Scheduler itself: a session is excluded from every one
-// of its passes (isSession, chiefOfStaffSkip), so it takes no mason slot and
-// never competes with chief-of-staff dispatch for one. A retry that finds
-// the turn already dispatched does nothing more.
+// dispatchSessionTurn wakes reconciliation of the durable session queue. The
+// conversation path publishes and reconciles the turn's operation.
 func dispatchSessionTurn(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, turn string, at time.Time) error {
-	subject := scheduler.Subject(sessionAgentID)
-	state, err := repository.Workflow(stream, subject)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if state.Value == turn {
-		return nil
-	}
-	op, err := thread.TurnOperation(project, "session-dispatch-"+turn, thread.TurnInput{Workstream: stream, Agent: sessionAgentID, Turn: turn})
-	if err != nil {
-		return err
-	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "session-dispatch-" + turn, Revision: 1,
-		Project: project, Workstream: stream, At: at, Actor: sessionServiceActor, Cause: turn}
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: turn, Reason: "Session turn " + turn + " dispatched"},
-		Events:     []trace.Event{{ID: "session-dispatch-" + turn, Kind: "turn", Body: "Run session turn " + turn, Operation: &op}}}
-	if _, err := repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
-		return err
-	}
+	repository.WakeWorkflow()
 	return nil
 }
 

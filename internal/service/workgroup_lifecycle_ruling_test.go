@@ -88,7 +88,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				for _, e := range inbox.Entries {
 					if e.Question == "One contract decision for the original origins." {
 						original = e
-						return len(e.Asked) == 2 && e.Workstream == f.stream1
+						return len(e.Asked) == 2 && e.Workstream == f.stream1 && !slices.ContainsFunc(e.Asked, func(q InboxQuestion) bool { return q.ID == "" })
 					}
 				}
 				return false

@@ -29,7 +29,7 @@ import (
 // runs the production question tools over MCP against whichever repository
 // Options.Threads is called with: either project's own, for an ordinary
 // workstream's worker, or a cross-repo workgroup's own trace, for the
-// shared chief of staff that production's own workgroupChiefDispatchPass
+// shared chief of staff that production's conversation path
 // resolves to.
 type crossRepoWiringFixture struct {
 	opts               Options
@@ -206,7 +206,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 
 // repositories waits for both projects' own, now-live repository instances:
 // Options.Threads records every repository it is called with, including a
-// cross-repo workgroup's own trace on the calls workgroupChiefDispatchPass
+// cross-repo workgroup's own trace on the calls the conversation path
 // makes, so this polls for the two real projects' own entries by ID rather
 // than reading a fixed number of calls off a channel.
 func (f *crossRepoWiringFixture) repositories(t *testing.T, s *Service) (repo1, repo2 *trace.Repository) {
@@ -468,8 +468,7 @@ func (f *crossRepoWiringFixture) driveTicksUntil(t *testing.T, condition func() 
 }
 
 // TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRuns
-// covers the second acceptance item: while workgroupChiefDispatchPass's own
-// call to dispatchWorkgroupChiefTurn is inside a model turn on the shared
+// covers the second acceptance item: while the conversation path is inside a model turn on the shared
 // chief-of-staff thread, holding the workgroup's own trace open the whole
 // time, a second owner message to the other member and a conversation read
 // of the first still answer within the service's own read-latency bound.

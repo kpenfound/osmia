@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -65,6 +66,20 @@ func newCrossRepoRatifyFixture(t *testing.T, configure ...func(*Options)) *cross
 
 func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)) *crossRepoRatifyFixture {
 	t.Helper()
+	draftsReady := make(chan struct{})
+	configure = append(configure, func(opts *Options) {
+		hold := opts.Reconciliation.Hold
+		opts.Reconciliation.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+			if op.Action == DraftAction {
+				select {
+				case <-draftsReady:
+				default:
+					return true
+				}
+			}
+			return hold != nil && hold(stream, op)
+		}
+	})
 	f := newArchitectFixture(t, configure...)
 	home := filepath.Dir(f.clone)
 	clone2 := filepath.Join(home, "clone2")
@@ -87,6 +102,12 @@ func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)
 	cf.stream1 = handIn(cf.project, "upload-server")
 	cf.stream2 = handIn(cf.project2, "upload-client")
 	cf.scriptDrafts(t)
+	close(draftsReady)
+	for _, project := range []config.ProjectID{cf.project, cf.project2} {
+		repo, err := cf.s.repository(project)
+		must(t, err)
+		repo.WakeWorkflow()
+	}
 	return cf
 }
 

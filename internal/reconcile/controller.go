@@ -22,11 +22,15 @@ import (
 const turnAction = "thread-turn"
 
 type Options struct {
-	Worker   string
-	Adapters map[coreadapter.OperationBoundary]coreadapter.Reconciler
-	Now      func() time.Time
-	Ticks    <-chan time.Time
-	Interval time.Duration
+	// Workstreams supplies an explicit operation scope when the repository
+	// aggregate omits it, such as a shared chief's synthetic host.
+	// Nil scans Repository.Workstreams.
+	Workstreams func() ([]config.WorkstreamID, error)
+	Worker      string
+	Adapters    map[coreadapter.OperationBoundary]coreadapter.Reconciler
+	Now         func() time.Time
+	Ticks       <-chan time.Time
+	Interval    time.Duration
 	// RetryDelay is the wait after an operation's first failed attempt. Each
 	// further consecutive failure doubles it, up to MaxRetryDelay, which
 	// defaults to DefaultMaxRetryDelay or RetryDelay, whichever is longer.
@@ -366,7 +370,11 @@ func (c *Controller) Pass(ctx context.Context) error {
 	// Trace removal cannot invalidate the operation snapshot midway. The
 	// snapshot guard excludes neither operation claims nor result writes.
 	err := c.repository.WithWorkstreamSnapshot(func() error {
-		streams, err := c.repository.Workstreams()
+		workstreams := c.options.Workstreams
+		if workstreams == nil {
+			workstreams = c.repository.Workstreams
+		}
+		streams, err := workstreams()
 		if err != nil {
 			return err
 		}

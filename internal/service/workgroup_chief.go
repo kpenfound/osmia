@@ -64,6 +64,7 @@ func (s *Service) chiefRepository(ctx context.Context, repository *trace.Reposit
 		}
 		break
 	}
+	wt.Observe(s.observeSharedConversation)
 	host, err = wt.ChiefOfStaffHost(stream)
 	if err != nil {
 		wt.Close()

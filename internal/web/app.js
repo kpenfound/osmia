@@ -1478,7 +1478,8 @@
       el('div', { class: 'meta' },
         el('span', { 'data-ann': 'role' }, who), ' · ',
         el('span', { 'data-ann': 'when' }, when(e.at)), ' · ',
-        el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state)),
+        el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state),
+        e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, ' · ' + e.queued_reason) : null),
       el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
   }
 

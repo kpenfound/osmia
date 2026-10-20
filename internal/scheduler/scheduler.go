@@ -592,9 +592,15 @@ func Subject(agent string) string {
 }
 
 func (s *Scheduler) dispatch(ctx context.Context, c Candidate, at time.Time) error {
+	return Dispatch(ctx, s.repository, c, at)
+}
+
+// Dispatch publishes a durable turn intent without capacity admission. Callers
+// provide the thread's oldest eligible turn and serialize admission per thread.
+func Dispatch(ctx context.Context, repository *trace.Repository, c Candidate, at time.Time) error {
 	agent, req := c.Thread.Identity.ID, c.Turn.Request
 	subject := Subject(agent)
-	state, err := s.repository.Workflow(c.Workstream, subject)
+	state, err := repository.Workflow(c.Workstream, subject)
 	if err != nil {
 		return err
 	}
@@ -610,6 +616,6 @@ func (s *Scheduler) dispatch(ctx context.Context, c Candidate, at time.Time) err
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: req.TurnID,
 		Reason: fmt.Sprintf("Queued turn %s dispatched on thread %s", req.TurnID, req.ThreadID)},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Run turn " + req.TurnID, Operation: &op}}}
-	_, err = s.repository.Transact(ctx, tx)
+	_, err = repository.Transact(ctx, tx)
 	return err
 }

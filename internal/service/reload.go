@@ -35,6 +35,8 @@ type stages struct {
 // stages it started with.
 type pipeline struct {
 	current, next atomic.Pointer[stages]
+	// Conversations adopt reloads without waiting for a scheduling pass.
+	conversation atomic.Pointer[stages]
 }
 
 func (p *pipeline) schedule(ctx context.Context) error {
@@ -143,10 +145,12 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
+		p.pipeline.conversation.Store(stage)
 	}
 	for _, p := range removed {
 		s.log().Info("project draining", "project", string(p.id), "reason", "reload")
 		p.controller.Drain()
+		p.conversations.Drain()
 	}
 	for _, p := range added {
 		s.launch(p)

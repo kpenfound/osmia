@@ -21,6 +21,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -249,9 +250,45 @@ func (p *page) selectWorkstream(id config.WorkstreamID) {
 	if collapsed {
 		p.click("#picker-toggle")
 	}
-	p.click(row)
-	p.await("the workstream "+string(id)+" shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(id))+
-		` && document.body.dataset.picker === 'closed'`)
+	p.run(selectSidebarRow(row, `!document.querySelector('.view[data-view="workstream"]').hidden && document.getElementById('workstream-head').dataset.workstream === `+quote(string(id))+
+		` && document.body.dataset.picker === 'closed'`))
+}
+
+func (p *page) selectDesign(id config.WorkstreamID) {
+	p.t.Helper()
+	row := `[data-select="` + string(id) + `"]`
+	p.await("the design "+string(id)+" in the list", `document.querySelector(`+quote(row)+`) !== null`)
+	var collapsed bool
+	p.eval(`getComputedStyle(document.getElementById('sidebar')).display === 'none'`, &collapsed)
+	if collapsed {
+		p.click("#picker-toggle")
+	}
+	p.run(selectSidebarRow(row, `!document.querySelector('.view[data-view="design"]').hidden &&
+		document.getElementById('design-meta').textContent.includes(`+quote(string(id))+`)`))
+}
+
+// selectSidebarRow repeats this idempotent selection when a sidebar reorder
+// disconnects the focused button before the trusted key event reaches it.
+func selectSidebarRow(selector, shown string) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		for {
+			if err := chromedp.Evaluate(`document.querySelector(`+quote(selector)+`)?.focus()`, nil).Do(ctx); err != nil {
+				return err
+			}
+			if err := chromedp.KeyEvent(kb.Enter).Do(ctx); err != nil {
+				return err
+			}
+			var selected bool
+			if err := chromedp.Evaluate(shown, &selected).Do(ctx); err != nil || selected {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	})
 }
 
 // sidebarIDs reads the workstream IDs the sidebar's list of work shows, top

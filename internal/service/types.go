@@ -1007,11 +1007,12 @@ type ConversationResponse struct {
 // answers the message, and At is when the message was accepted, the response
 // captured or the action recorded.
 type ConversationEntry struct {
-	Turn  string    `json:"turn"`
-	Kind  string    `json:"kind"`
-	Text  string    `json:"text"`
-	At    time.Time `json:"at"`
-	State TurnState `json:"state"`
+	QueuedReason string    `json:"queued_reason,omitempty"`
+	Turn         string    `json:"turn"`
+	Kind         string    `json:"kind"`
+	Text         string    `json:"text"`
+	At           time.Time `json:"at"`
+	State        TurnState `json:"state"`
 }
 
 // FeedResponse lists a workstream's feed, oldest first.
@@ -1030,17 +1031,18 @@ type FeedResponse struct {
 // a final review outcome. At is when the entry first became observable;
 // sessions and final check attempts use their recorded start time.
 type FeedEntry struct {
-	Kind        string           `json:"kind"`
-	At          time.Time        `json:"at"`
-	Turn        string           `json:"turn,omitempty"`
-	Text        string           `json:"text,omitempty"`
-	State       TurnState        `json:"state,omitempty"`
-	Status      *StatusView      `json:"status,omitempty"`
-	Session     *FeedSession     `json:"session,omitempty"`
-	Transition  *FeedTransition  `json:"transition,omitempty"`
-	UnitChecks  *FeedUnitChecks  `json:"unit_checks,omitempty"`
-	FinalChecks *FeedFinalChecks `json:"final_checks,omitempty"`
-	FinalReview *FeedFinalReview `json:"final_review,omitempty"`
+	QueuedReason string           `json:"queued_reason,omitempty"`
+	Kind         string           `json:"kind"`
+	At           time.Time        `json:"at"`
+	Turn         string           `json:"turn,omitempty"`
+	Text         string           `json:"text,omitempty"`
+	State        TurnState        `json:"state,omitempty"`
+	Status       *StatusView      `json:"status,omitempty"`
+	Session      *FeedSession     `json:"session,omitempty"`
+	Transition   *FeedTransition  `json:"transition,omitempty"`
+	UnitChecks   *FeedUnitChecks  `json:"unit_checks,omitempty"`
+	FinalChecks  *FeedFinalChecks `json:"final_checks,omitempty"`
+	FinalReview  *FeedFinalReview `json:"final_review,omitempty"`
 }
 
 // FeedSession is one agent turn. State is running, done, waiting (the turn

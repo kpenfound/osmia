@@ -156,6 +156,11 @@ func TestFactoryActionLogRecordsCoreServiceAndFactoryEvents(t *testing.T) {
 	// A queued turn dispatched to the fake engine and finished.
 	queueTurn(t, repo, "build", clock.Now())
 	awaitPasses(2)
+	soon(t, "the queued turn to complete", func() bool {
+		th, err := repo.Thread(stream, demoAgent)
+		must(t, err)
+		return len(th.Turns) == 1 && !th.Turns[0].CompletedAt.IsZero()
+	})
 
 	must(t, s.Close())
 

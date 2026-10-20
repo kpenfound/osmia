@@ -979,35 +979,35 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &faults{}
-	// Thread turns run in the pass rather than beside it, so the pass that
-	// would deliver the answer starts only once the chief of staff's turn
-	// that recorded it has ended. Forcing that on every thread turn reaches
-	// as far as the chief of staff's own review of the question, which the
-	// repository's one operation lock then serializes with the round's own
-	// commit of its park: held back until the round has parked, the review
-	// cannot hold that lock first and starve the park of it.
+	// Keep the chief's review queued until the round's park is durable.
 	var chiefReviewHeld atomic.Bool
 	chiefReviewHeld.Store(true)
 	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
-		opts.Reconciliation.Concurrent = func(op coreadapter.Operation) bool {
-			return concurrentOperation(op) && op.Action != thread.TurnAction
-		}
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action == thread.TurnAction && chiefReviewHeld.Load()
 		}
 	})
 	defer f.stop(t)
+	// Conversation turns record answers independently of scheduling. Hold
+	// automatic delivery so abandonment happens after the answer is recorded
+	// and before the explicit delivery and debate passes below.
+	stage := *f.s.sole().pipeline.current.Load()
+	stage.hooks = slices.Clone(stage.hooks)
+	for i := range stage.hooks {
+		if stage.hooks[i].name == "answers" {
+			stage.hooks[i].pass = func(context.Context) error { return nil }
+		}
+	}
+	f.s.sole().pipeline.next.Store(&stage)
 	hold := c.hold("1")
 	member := committeeAgent(1)
 	f.member(1, 1, 1, asks(p, "1"))
 	answering := f.answer("1", silent)
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
-	// The round's park is committed: the chief of staff's review of the now
-	// open question can run without racing it for the operation lock.
+	// The chief can now answer the parked round's question.
 	chiefReviewHeld.Store(false)
-	// The answer is recorded while the chief of staff's turn is held open,
-	// so no pass delivers it before the abandonment.
+	// The chief stays in flight while the owner abandons the workstream.
 	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
 	if _, err := f.c.Abandon(ctx, stream, "Superseded."); err != nil {
 		t.Fatal(err)

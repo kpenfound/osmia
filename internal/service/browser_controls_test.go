@@ -80,6 +80,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	message := card + `[data-kind=message][data-turn="` + turn + `"] `
 	p.awaitText(message+"[data-field=text]", "Pick the uploads back up on Friday.")
 	p.awaitText(message+"[data-field=state]", "queued")
+	p.awaitText(message+"[data-field=queued-reason]", "starting")
 
 	// The chief of staff takes the message and answers it; the page follows
 	// each step without a reload.
@@ -498,4 +499,27 @@ func TestBrowserDeliveredWorkstreamCanCheckForDrift(t *testing.T) {
 	if state.Value != "requested-1" {
 		t.Fatalf("drift request: %+v", state)
 	}
+}
+
+func TestBrowserConversationShowsEarlierBackgroundTurn(t *testing.T) {
+	t.Parallel()
+	f := newPageFixture(t)
+	ctx := context.Background()
+	repo := f.s.sole().repository
+	profile, err := f.s.current().NamedProfile("default")
+	must(t, err)
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_browser_event", Project: repo.Project(), Workstream: quiet, At: time.Now().UTC(), Actor: serviceActor, Cause: "events"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_browser", Profile: profile, Prompt: "Background event"})
+	must(t, err)
+	sent, err := f.c.Send(ctx, quiet, "Owner message")
+	must(t, err)
+	p := openBrowser(t)
+	p.run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.selectWorkstream(quiet)
+	message := `[data-workstream="` + string(quiet) + `"] [data-kind=message][data-turn="` + sent.Turn + `"] `
+	p.awaitText(message+"[data-field=state]", "queued")
+	p.awaitText(message+"[data-field=queued-reason]", "waiting for an event turn on this thread")
+	q, err := repo.ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "browser-background", t.TempDir(), time.Now().UTC())
+	must(t, err)
+	f.answerChief(t, quiet, q.Request.TurnID, "Background handled")
+	p.awaitText(message+"[data-field=queued-reason]", "starting")
 }

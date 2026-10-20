@@ -150,7 +150,11 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	if err != nil {
 		return ConversationEntry{}, failed
 	}
-	return conversation(q)[0], nil
+	entry := conversation(q)[0]
+	if th, err := target.Thread(q.Request.Workstream, q.Request.AgentID); err == nil {
+		entry.QueuedReason = queuedReason(th, q)
+	}
+	return entry, nil
 }
 
 // conversationList reads the owner's messages to the workstream's chief of
@@ -189,6 +193,7 @@ func conversationEntries(repository *trace.Repository, stream config.WorkstreamI
 			continue
 		}
 		entries := conversation(q)
+		entries[0].QueuedReason = queuedReason(t, q)
 		// A claim an earlier service session left without a result never
 		// completes and is never retried.
 		if t.Status == "interrupted" && t.Active == q.Request.TurnID {
@@ -413,9 +418,44 @@ func conversation(q trace.QueuedTurn) []ConversationEntry {
 		state = TurnDone
 	}
 	req := q.Request
-	out := []ConversationEntry{{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state}}
+	out := []ConversationEntry{{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state, QueuedReason: queuedReason(trace.Thread{Turns: []trace.QueuedTurn{q}}, q)}}
 	if !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.FinalResponse != "" {
 		out = append(out, ConversationEntry{Turn: req.TurnID, Kind: "response", Text: q.Response.Result.FinalResponse, At: q.Response.At, State: state})
 	}
 	return out
+}
+
+// queuedReason describes the earlier work on this thread without changing the
+// turn's existing state. Durable sequence, rather than request time, orders it.
+func queuedReason(th trace.Thread, turn trace.QueuedTurn) string {
+	if turn.Claim != nil || !turn.CompletedAt.IsZero() {
+		return ""
+	}
+	for _, earlier := range th.Turns {
+		if earlier.Request.TurnID == turn.Request.TurnID {
+			break
+		}
+		if !earlier.CompletedAt.IsZero() {
+			continue
+		}
+		kind := "background"
+		switch {
+		case earlier.Request.Actor == ownerActor:
+			kind = "owner message"
+		case strings.Contains(earlier.Request.Cause, "event") || strings.HasPrefix(earlier.Request.TurnID, "event"):
+			kind = "event"
+		case strings.Contains(earlier.Request.Cause, "answer"):
+			kind = "answer"
+		case strings.Contains(earlier.Request.TurnID, "contest"):
+			kind = "contest decision"
+		case strings.Contains(earlier.Request.TurnID, "amend"):
+			kind = "amendment"
+		}
+		article := "a "
+		if kind == "event" || kind == "owner message" || kind == "answer" || kind == "amendment" {
+			article = "an "
+		}
+		return "waiting for " + article + kind + " turn on this thread"
+	}
+	return "starting"
 }

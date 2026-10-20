@@ -102,7 +102,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		{Kind: "status", At: at(6), Status: &StatusView{Goal: "Ship uploads.", Attention: "Rule on the API.", Note: "Upload is ready.", Agents: []string{"A mason builds upload."}, Revision: 1, UpdatedAt: at(6)}},
 		{Kind: "session", At: at(9), Session: &FeedSession{Agent: "agent_mason_upload", Role: masonRole, Unit: "upload", Turn: "agent_mason_upload-turn", Profile: "default", State: "done", StartedAt: at(9), EndedAt: &masonEnded, Summary: "Built upload."}},
 		{Kind: "transition", At: at(10), Transition: &FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: UnitReady, To: UnitImplementing, Actor: "service:osmia", Reason: "because " + UnitImplementing}},
-		{Kind: "message", At: at(13), Turn: "message_owner", Text: "How is it going?", State: TurnQueued},
+		{Kind: "message", At: at(13), Turn: "message_owner", Text: "How is it going?", State: TurnQueued, QueuedReason: "starting"},
 
 		{Kind: "transition", At: at(14), Transition: &FeedTransition{Subject: checksSubject("upload"), Unit: "upload", From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
 		{Kind: "unit_checks", At: at(15), UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: ChecksPassed, Selection: &FeedCheckSelection{Mode: selectionSelected, Selected: 1, Judged: 113}, StartedAt: at(15), FinishedAt: &unitFinished}},

@@ -277,12 +277,9 @@ func sessionProfile(repository *trace.Repository, stream config.WorkstreamID) (s
 	return "", fmt.Errorf("session %s not found", stream)
 }
 
-// recoverSession enqueues a session's continuation turn with the session's
-// fixed profile and publishes its dispatch, the same way sessionMessage
-// does for an owner's message: a session takes no part in the project's
-// chief-of-staff/mason/reviewer scheduler, so nothing else would ever
-// publish it, and recovery itself only enqueues and dispatches, leaving the
-// turn to run on the project's own reconciliation loop once it starts.
+// recoverSession enqueues a session's continuation with its fixed profile
+// and wakes the conversation path, as sessionMessage does for an owner's
+// message. The path publishes its durable dispatch and runs it once started.
 func (s *Service) recoverSession(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
 	profileName, err := sessionProfile(repository, stream)
 	if err != nil {

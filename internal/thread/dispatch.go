@@ -46,13 +46,11 @@ type TurnResult struct {
 type Dispatcher struct {
 	Runner  Runner
 	Prepare func(context.Context, TurnInput) (coreadapter.PreparedTurn, error)
-	// Relay, when set, runs every time Apply observes a turn with a
-	// captured response and a completion, given the thread's identity and
-	// the completed queued turn, so a caller can mirror the reply
-	// elsewhere without the dispatcher knowing why. It never starts a new
-	// turn. Apply reports its
-	// error like any other reconciliation failure, so Relay runs again on
-	// retry; it must not repeat a side effect it already completed.
+	// Relay runs whenever Apply or Inspect observes a completed captured
+	// turn, given its thread identity and queued turn. It never starts a
+	// new turn. Both methods report its errors as reconciliation failures,
+	// so Relay runs again on retry; it must not repeat a side effect it
+	// already completed.
 	Relay func(context.Context, trace.Thread, trace.QueuedTurn) error
 }
 
@@ -103,19 +101,24 @@ func turnResult(q trace.QueuedTurn) coreadapter.OperationResult {
 	return coreadapter.OperationResult{Outcome: q.Status(), Evidence: "owned response " + q.Response.ID, Data: data}
 }
 
-// Inspect reads only the durable queue. A reservation without a captured result
-// may still be running or was interrupted, so it is never reported absent.
-func (d Dispatcher) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
+// Inspect reconciles a completed turn's idempotent hook before reporting its
+// result. A reservation without a captured result is never reported absent.
+func (d Dispatcher) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := DecodeTurn(op)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	_, q, ready, err := d.find(in)
+	t, q, ready, err := d.find(in)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
 	switch {
 	case !q.CompletedAt.IsZero():
+		if d.Relay != nil {
+			if err := d.Relay(ctx, t, q); err != nil {
+				return coreadapter.Observation{}, err
+			}
+		}
 		result := turnResult(q)
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "turn completed", Result: &result}, nil
 	case q.Response != nil:

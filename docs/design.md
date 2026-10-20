@@ -550,6 +550,8 @@ The service runs one controller per role kind, each reconciling its own input st
 
 Controllers reconcile against the current state. Events only wake them early. A missed event costs latency and never correctness. Crash recovery is restart, re-read state, resume. A turn that was running when the service died is found by its session directory and its thread is given a turn saying so.
 
+Each project also runs a conversation path alongside reconciliation. It owns chief-of-staff turns, shared workgroup chiefs, design conversations and exploratory sessions, including background event, answer, contest and amendment turns. Enqueuing a turn wakes this path directly. It durably dispatches the oldest unfinished turn per thread, reconciles captured replies without another backend call, and settles completion hooks before admitting the next turn. Hooks can run again after errors or restart and deduplicate each durable effect. Conversations take no capacity slots or workstream workflow reservation; chief turns ignore owner pauses while abandonment, joining fences and provider limits remain in force. Queued conversation entries expose a reason naming an earlier turn or saying “starting”. Shutdown joins the conversation path before closing its traces.
+
 ### 8.3 Finish before start
 
 A freed slot is offered to review before implementation, implementation before debate, debate before drafting, so the factory finishes work rather than widening it. Within a stage, the slot goes to the highest-priority workstream with something ready, and round-robin breaks ties across workstreams and projects.

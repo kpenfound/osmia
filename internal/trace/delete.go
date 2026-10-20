@@ -22,6 +22,10 @@ import (
 // removed it, or because it never existed. Must be called on the project's
 // own instance, never a workstream's.
 func (r *Repository) MarkWorkstreamTraceForDeletion(stream config.WorkstreamID) (bool, error) {
+	return r.markWorkstreamTraceForDeletion(stream, nil)
+}
+
+func (r *Repository) markWorkstreamTraceForDeletion(stream config.WorkstreamID, beforeClose func()) (bool, error) {
 	if r.stream != "" {
 		return false, fmt.Errorf("a workstream trace instance marks no workstream trace of its own for deletion")
 	}
@@ -31,9 +35,14 @@ func (r *Repository) MarkWorkstreamTraceForDeletion(stream config.WorkstreamID) 
 	r.snapshotMu.Lock()
 	defer r.snapshotMu.Unlock()
 	r.workstreamsMu.Lock()
+	defer r.workstreamsMu.Unlock()
+	// Scoped opens must see either the cached live handle or the missing
+	// directory, never an evicted handle whose flock has not been released.
 	child := r.workstreams[stream]
 	delete(r.workstreams, stream)
-	r.workstreamsMu.Unlock()
+	if beforeClose != nil {
+		beforeClose()
+	}
 	if child != nil {
 		if err := child.closeFiles(); err != nil {
 			return false, err
