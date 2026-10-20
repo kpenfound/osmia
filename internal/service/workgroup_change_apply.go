@@ -28,6 +28,31 @@ func (s *Service) applyChange(ctx context.Context, wt *trace.Repository, g trace
 		return nil
 	}
 	defer lock.Unlock()
+	// Archive may finish after the observer's read but before this lock.
+	// Consume the current decision and retirement proof under the same guard
+	// that excludes archive from every journal write and member effect.
+	changes, err := readChanges(wt, c.Host)
+	if err != nil {
+		return err
+	}
+	index := slices.IndexFunc(changes, func(latest WorkgroupChange) bool { return latest.ID == c.ID })
+	if index < 0 {
+		return nil
+	}
+	*c = changes[index]
+	if c.State != "approved" && c.State != "applying" && c.State != "releasing" {
+		return nil
+	}
+	if changeSharedRepository(g, wt) {
+		retired, err := s.workgroupFullyRetired(ctx, g)
+		if err != nil {
+			return err
+		}
+		if retired {
+			s.log().Warn("workgroup changes remain held", "workgroup", g.ID, "error", "no live member remains to reconcile pending project decisions")
+			return nil
+		}
+	}
 	if c.Request.Kind == "amend" && c.Result == nil {
 		data, _ := json.Marshal(c.After)
 		var result trace.ProjectSpec

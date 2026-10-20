@@ -32,7 +32,21 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 	t.Cleanup(queued.release)
 	t.Cleanup(cleanup.release)
-	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
+	// Delta scheduling runs in a background observer. Keep the runner pending
+	// until inspection has observed the retired controller's unclaimed intent.
+	var allowDeltas atomic.Bool
+	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, options: func(opts *Options) {
+		limit := opts.Reconciliation.Limit
+		opts.Reconciliation.Limit = func(op coreadapter.Operation) (func(), bool) {
+			if op.Action == deltaTurnAction && !allowDeltas.Load() {
+				return nil, false
+			}
+			if limit != nil {
+				return limit(op)
+			}
+			return nil, true
+		}
+	}, checkpoint: func(ctx context.Context, step string) error {
 		if err := queued.checkpoint(ctx, step); err != nil {
 			return err
 		}
@@ -94,6 +108,8 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	if after := currentChange(t, f.s, survivor, c.ID); !equalJSONTest(before, after) {
 		t.Fatal("retirement inspection changed the authoritative journal")
 	}
+	allowDeltas.Store(true)
+	owner.WakeWorkflow()
 	queued.release()
 	cleanup.await(t)
 	ops, err := owner.Operations(address)

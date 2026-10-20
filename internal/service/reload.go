@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // scheduleHook is a named controller step. Stages separate scheduling hooks
@@ -36,6 +37,8 @@ type stages struct {
 // stages it started with.
 type pipeline struct {
 	current, next atomic.Pointer[stages]
+	slowThreshold time.Duration
+	before        func(string) error
 	// Conversations adopt reloads without waiting for a scheduling pass.
 	conversation atomic.Pointer[stages]
 }
@@ -46,7 +49,22 @@ func (p *pipeline) schedule(ctx context.Context) error {
 	}
 	current := p.current.Load()
 	for _, hook := range current.hooks {
-		if err := hook.pass(ctx); err != nil {
+		started := time.Now()
+		var err error
+		if p.before != nil {
+			err = p.before("schedule:" + hook.name)
+		}
+		if err == nil {
+			err = hook.pass(ctx)
+		}
+		threshold := p.slowThreshold
+		if threshold <= 0 {
+			threshold = trace.SlowThreshold
+		}
+		if duration := time.Since(started); duration >= threshold {
+			ghlog.Logger(ctx).Warn("scheduling step exceeded threshold", "project", string(current.cfg.Project.ID), "step", hook.name, "duration", duration.String())
+		}
+		if err != nil {
 			ghlog.Logger(ctx).Error("reconciliation pass hook failed", "project", string(current.cfg.Project.ID), "hook", hook.name, "error", err.Error())
 			return fmt.Errorf("%s pass: %w", hook.name, err)
 		}

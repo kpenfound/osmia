@@ -215,6 +215,9 @@ func (p *conversationPath) queue(ctx context.Context, repository *trace.Reposito
 			p.scanError(repository, stream, err)
 			continue
 		}
+		if err := p.s.step("conversation-queue-read:" + string(stream)); err != nil {
+			return err
+		}
 		records, err := repository.Operations(stream)
 		if err != nil {
 			p.scanError(repository, stream, err)
@@ -454,6 +457,19 @@ func (p *conversationPath) publish(ctx context.Context, repository *trace.Reposi
 		}
 		defer mu.Unlock()
 		q := c.Turn
+		// The queue's thread snapshot may precede completion and acknowledgment.
+		// Only first admission owns the working transition; a stale scan must
+		// never restore working after the completion hook has recorded idle.
+		records, err := repository.Operations(c.Workstream)
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			in, err := thread.DecodeTurn(record.Operation)
+			if err == nil && in.Agent == c.Thread.Identity.ID && in.Turn == q.Request.TurnID {
+				return nil
+			}
+		}
 		if err := setSessionState(ctx, repository, repository.Project(), c.Workstream, p.s.now(), "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
 			return err
 		}

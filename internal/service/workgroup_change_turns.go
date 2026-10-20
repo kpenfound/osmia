@@ -489,6 +489,9 @@ func (s *Service) advanceChanges(ctx context.Context, wt *trace.Repository, g tr
 				return err
 			}
 		case "approved", "applying", "releasing":
+			if err := s.step("change-before-application-lock"); err != nil {
+				return err
+			}
 			if err := s.applyChange(ctx, wt, g, &c); err != nil {
 				if !errors.Is(err, trace.ErrMemberRetired) {
 					return err

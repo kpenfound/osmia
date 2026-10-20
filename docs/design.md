@@ -552,6 +552,20 @@ Controllers reconcile against the current state. Events only wake them early. A 
 
 Each project also runs a conversation path alongside reconciliation. It owns chief-of-staff turns, shared workgroup chiefs, design conversations and exploratory sessions, including background event, answer, contest and amendment turns. Enqueuing a turn wakes this path directly. It durably dispatches the oldest unfinished turn per thread, reconciles captured replies without another backend call, and settles completion hooks before admitting the next turn. Hooks can run again after errors or restart and deduplicate each durable effect. Conversations take no capacity slots or workstream workflow reservation; chief turns ignore owner pauses while abandonment, joining fences and provider limits remain in force. Queued conversation entries expose a reason naming an earlier turn or saying “starting”. Shutdown joins the conversation path before closing its traces.
 
+Workflow operations run beside the reconciliation pass, one at a time in each workstream. This ordering covers architect drafts, shed replies and redrafts, amendment drafts and replies, librarian extraction and refresh, final reviews, seal, build, land, rebase, drift and publish. Different workstreams may run these operations concurrently. Mason, reviewer and committee turns and check runs retain their scheduler order and capacity; they do not reserve the workstream's workflow ordering. Conversations follow only thread order. When an operation's workstream is busy or its kind's capacity is full, admission leaves it pending and scans other eligible operations without waiting.
+
+| Lock | Covers |
+|---|---|
+| Thread | Turns in oldest-first order, including completion hooks |
+| Workstream | Workflow operations only |
+| Repository clone | Git worktree creation, removal and pruning, including scratch worktrees; local jj steps |
+| Shared documents | Existing short KB, charter, workgroup approval and change writes |
+| Project trace | Short bookkeeping writes; no model, Git or GitHub call |
+
+Each replay has its own scratch worktree. Git operations on different refs proceed independently; fetch retries shared-ref collisions. A jj local step opens and settles its checkpoint within one hold of the clone lock, so recovering an interrupted step preserves other completed operations. Fetch, push, GitHub and model calls run outside that lock and checkpoint.
+
+Landing is per workstream: it waits for that workstream's unit rebases and covering KB refresh, and advances its own feature branch. Independent landings may run concurrently. The factory never writes upstream. Repository operations and remote polls share the project's `capacity.git_operations` limit, default 4. Polls bypass workflow ordering; scheduling steps consume their recorded evidence. Scheduling steps, operations and lock waits exceeding the diagnostic threshold log their project, workstream where applicable, step or operation or lock, and duration. Shutdown drains all operations and observers before closing traces.
+
 ### 8.3 Finish before start
 
 A freed slot is offered to review before implementation, implementation before debate, debate before drafting, so the factory finishes work rather than widening it. Within a stage, the slot goes to the highest-priority workstream with something ready, and round-robin breaks ties across workstreams and projects.

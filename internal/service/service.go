@@ -1133,7 +1133,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		repository.Close()
 		return nil, nil, nil, err
 	}
-	p := &pipeline{}
+	p := &pipeline{slowThreshold: options.SlowThreshold, before: s.step}
 	p.current.Store(first)
 	p.conversation.Store(first)
 	options.Schedule = p.schedule

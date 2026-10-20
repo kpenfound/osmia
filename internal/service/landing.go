@@ -408,6 +408,9 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	if err := f.s.step("land-local-step:" + string(stream)); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	return checkpointed(ctx, string(stream)+"/"+op.ID, requested, []workspace.Provider{g}, func(ctx context.Context) (coreadapter.OperationResult, error) {
 		return f.land(ctx, op.ID, stream, in, g, requested)
 	})
