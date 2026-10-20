@@ -366,7 +366,7 @@ func (a *amendmentDrafter) enqueue(ctx context.Context, cfg *config.Config, stre
 		return err
 	}
 	turn := fmt.Sprintf("amend-%s-%d", id, attempt)
-	prompt := fmt.Sprintf("Draft amendment %s. Read request.json, draft/spec.md, draft/plan.json, charter.md and context.md. Deliver only the changed spec.md and/or plan.json with %s; unchanged documents will be carried forward. To decline, deliver decline.txt with your reason. For engineering revisions preserve spec.md byte-for-byte: update only the execution plan within approved intent. Keep assignments outcome-focused with explicit neighboring ownership. Constraints hold only the owner's hard limits; put file-level pointers in guidance. Footprints schedule work and need no revision for a mason to change code outside them. Incorporate necessary discoveries by assigning them to an existing unit or adding a coherent unit; preserve started identities and keep merged units identical. Do not edit code. Every dependency must name an existing unit, the graph must be acyclic, and every footprint must resolve against the entity map.", id, DraftTool) + answered("amendment", answers)
+	prompt := fmt.Sprintf("Draft amendment %s. Read request.json, draft/spec.md, draft/plan.json, charter.md and context.md. Deliver only the changed spec.md and/or plan.json with %s; unchanged documents will be carried forward. To decline, deliver decline.txt with your reason. For engineering revisions preserve spec.md byte-for-byte: update only the execution plan within approved intent. Keep assignments outcome-focused with explicit neighboring ownership. Constraints hold only the owner's hard limits; put file-level pointers in guidance. Footprints schedule work and need no revision for a mason to change code outside them. Incorporate necessary discoveries by assigning them to an existing unit or adding a coherent unit; preserve started identities and keep merged units identical. Do not edit code. Every dependency must name an existing unit, the graph must be acyclic, and every footprint must resolve against the entity map.", id, DraftTool) + acceptanceDraftInstructions + answered("amendment", answers)
 	system := fmt.Sprintf("You are the architect of the %s project (%s). Draft a revision to the sealed spec and plan for the amendment request. Read only your scoped files, deliver through %s, and do not edit implementation code or use version control.", cfg.Project.Name, cfg.Project.Upstream, DraftTool)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: draftingActor, Cause: operation, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: prompt}
 	_, err = a.repository.EnqueueTurn(ctx, req)
@@ -505,6 +505,7 @@ func (a *amendmentDrafter) revision(stream config.WorkstreamID, turn string) (am
 	if err != nil {
 		return amendmentRevision{}, err
 	}
+	problems = append(problems, plan.CheckAcceptanceProblems(spec, graph, oldSpec, oldPlan)...)
 	before, oldErr := plan.Parse([]byte(oldPlan))
 	after, newErr := plan.Parse([]byte(graph))
 	if oldErr != nil {

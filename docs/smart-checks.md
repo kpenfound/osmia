@@ -12,6 +12,15 @@ Smart checks pay off in a project whose Dagger checks are fine-grained, such
 as one using Dagger collections, where each Go package's tests are an item a
 check link can name.
 
+Acceptance states observable behaviours and may name tests a unit adds as
+evidence. It never requires a whole-suite pass or run and need not list existing
+tests to keep passing: the factory selects and runs checks and catches regressions.
+A passing service-owned check gate settles test passing for every acceptance
+item or criterion, including whole-suite, scoped and named tests. Reviewers do
+not raise a finding solely because a smart-check selection ran, a named test is
+not visible in that selection, or they cannot run tests. They still judge whether
+requested tests exist and exercise the behaviour.
+
 ## How a run selects its checks
 
 1. **Diff and export.** The check run diffs the candidate against the feature

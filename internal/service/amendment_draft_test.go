@@ -54,6 +54,8 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 		{"criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1)}, "proposed", false, []string{"spec#1"}, []string{"resume"}},
 		{"plan-only", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "proposed", false, []string{}, []string{"resume"}},
 		{"invalid", map[string]string{plan.PlanPath: cyclicPlan}, "invalid", false, nil, nil},
+		{"whole-suite-criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)}, "invalid", false, nil, nil},
+		{"whole-suite-unit", map[string]string{plan.PlanPath: acceptancePlan(t, validPlan, "dagger check passes")}, "invalid", false, nil, nil},
 		{"merged", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "invalid", true, nil, nil},
 		{"declined", map[string]string{"decline.txt": "The requested change contradicts the charter."}, "declined", false, nil, nil},
 	} {

@@ -548,7 +548,7 @@ func (s *Service) runChangeTurn(ctx context.Context, wt *trace.Repository, c Wor
 			return err
 		}
 		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
-		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.now(), Actor: amendmentActor, Cause: workgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve.", Prompt: prompt})
+		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.now(), Actor: amendmentActor, Cause: workgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve.", Prompt: prompt + acceptanceDraftInstructions})
 		if err != nil {
 			return err
 		}
@@ -730,6 +730,8 @@ func (s *Service) deltaTool(wt *trace.Repository, c WorkgroupChange, agent, name
 				if err != nil {
 					return nil, err
 				}
+				before, _ := trace.SliceFor(c.Before, sl.Workstream)
+				problems = append(problems, plan.CheckAcceptanceProblems(sl.Spec, sl.Plan, before.Spec, before.Plan)...)
 				if len(problems) > 0 {
 					return priorityRefusal(fmt.Sprint(problems))
 				}

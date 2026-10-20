@@ -114,6 +114,7 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 	if len(th.Turns) != 1 {
 		t.Fatalf("review turns: %+v", th.Turns)
 	}
+	assertCheckGateReviewInstructions(t, th.Turns[0].Request.SystemPrompt)
 	// The reviewer verifies the unit's task and acceptance; the review
 	// carries the unit's task alone, not the plan's other units.
 	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "unit resume:\n## Task\n") || !strings.Contains(prompt, "## Acceptance\n- ") || strings.Contains(prompt, "plan.json:") {

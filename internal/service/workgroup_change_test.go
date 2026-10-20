@@ -55,6 +55,7 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	f.engine.mu.Lock()
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
+		assertAcceptanceDraftInstructions(t, req.Prompt)
 		text, err := readTool(ctx, tools, "before.json")
 		if err != nil {
 			return nil, err

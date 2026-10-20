@@ -274,6 +274,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
+	assertCheckGateReviewInstructions(t, reader.Turns[len(reader.Turns)-1].Request.SystemPrompt)
 	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json; you do not run them. The run passed.") || !strings.Contains(prompt, "all proofs passed") ||
 		!strings.Contains(prompt, "- spec#1: served by merged units resume, each reviewed against its acceptance\n- spec#2: served by merged units dedupe") || strings.Contains(prompt, "change since") {
 		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
