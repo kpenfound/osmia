@@ -208,6 +208,11 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if err := g.Export(ctx, report.Commit, dir); err != nil {
 		return CheckResult{ExitCode: -1}, fmt.Errorf("commit export: %w", err)
 	}
+	release, err := a.s.checkSlots.acquire(ctx, CheckSlotRun{Project: a.repository.Project(), Workstream: stream, Review: report.Review})
+	if err != nil {
+		return CheckResult{ExitCode: -1}, err
+	}
+	defer release()
 	// Attempts share the judgment identity for this review and commit, even
 	// when a stopped service left only an unfinished start record.
 	cause := fmt.Sprintf("final-checks-%d-%s", report.Review, report.Commit)

@@ -176,6 +176,7 @@ type Service struct {
 	// pool is the role capacity the schedulers of every project draw on.
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
+	checkSlots    *checkSlotPool
 	// spends is the daily spend each project's daily budget pass publishes.
 	spends    daySpends
 	pending   error
@@ -283,6 +284,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.activity = newActivityRegistry(s.now)
 	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.publish(Event{Kind: EventCapacity}) }}
+	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.publish(Event{Kind: EventCapacity}) }}
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
@@ -1254,7 +1256,7 @@ func concurrentOperation(op coreadapter.Operation) bool {
 		return false
 	}
 	switch op.Action {
-	case thread.TurnAction, RoundAction, AmendmentRoundAction, CheckAction, deltaTurnAction:
+	case thread.TurnAction, RoundAction, AmendmentRoundAction, CheckAction, FinalReviewAction, deliveryReviewAction, deltaTurnAction:
 		return true
 	}
 	return false

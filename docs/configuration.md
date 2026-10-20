@@ -245,6 +245,7 @@ tailnet = ""
 masons = 4
 reviewers = 2
 committee = 3
+checks = 2
 per_workstream = 2
 
 [shed]
@@ -317,6 +318,15 @@ than `events.window`, and defaults to the longer of `15m` and `events.window`.
 While an event turn of a workstream is queued or running, its new events wait
 for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
+
+`capacity.checks` must be positive, defaults to 2 and limits service Dagger check
+runs across all projects and workstreams, including unit, final-review and session
+runs. A run waits cancellably for a free slot in arrival order before selecting
+and running checks. Waiting does not consume `checks_timeout` or count as an
+incomplete run.
+Check slots are independent of the model-role and per-workstream limits, so
+other work continues while checks wait. Reloading applies a changed limit to
+new starts immediately; executing runs finish even when the limit is lowered.
 
 `mason.max_clean_turns` also bounds the reminders a mason, or a drift mason,
 gets when it reports done with conflict markers left; past it the unit is

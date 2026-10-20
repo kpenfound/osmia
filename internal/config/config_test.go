@@ -65,7 +65,7 @@ func TestDefaults(t *testing.T) {
 	if c.Root != root || c.Listen.Socket != filepath.Join(root.String(), "osmia.sock") {
 		t.Fatalf("root/socket: %+v", c)
 	}
-	if c.Capacity != (Capacity{4, 2, 3, 2}) || c.Shed != (Shed{3, 3}) || c.Mason.MaxCleanTurns != 3 {
+	if c.Capacity != (Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}) || c.Shed != (Shed{3, 3}) || c.Mason.MaxCleanTurns != 3 {
 		t.Fatalf("numeric defaults: %+v", c)
 	}
 	if c.Project.ID != pid || c.Project.BaseBranch != "main" || c.Project.Landing != "commit-per-unit" || c.Project.Capacity.PerWorkstream != 2 {
@@ -158,6 +158,7 @@ model = "other-model"
 socket = "local.sock"
 [capacity]
 masons = 1
+checks = 7
 reviewers = 1
 committee = 1
 per_workstream = 5
@@ -183,7 +184,7 @@ per_workstream = 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Capacity != (Capacity{1, 1, 1, 5}) || c.Shed != (Shed{1, 2}) || c.Project.Capacity.PerWorkstream != 3 || c.Project.Landing != "squash" || c.Project.BaseBranch != "release/next" || c.Project.Name != "A display name" {
+	if c.Capacity != (Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5, Checks: 7}) || c.Shed != (Shed{1, 2}) || c.Project.Capacity.PerWorkstream != 3 || c.Project.Landing != "squash" || c.Project.BaseBranch != "release/next" || c.Project.Name != "A display name" {
 		t.Fatalf("overrides: %+v", c)
 	}
 	if c.EventWindow() != 250*time.Millisecond {
@@ -229,6 +230,8 @@ func TestInvalid(t *testing.T) {
 		{"traversal", strings.Replace(topConfig, pid, "../escape", 1), "", "active_projects[0]"},
 		{"zero capacity", topConfig + "[capacity]\nmasons = 0\n", "", "capacity.masons"},
 		{"negative reviews", topConfig + "[capacity]\nreviewers = -1\n", "", "capacity.reviewers"},
+		{"zero checks", topConfig + "[capacity]\nchecks = 0\n", "", "capacity.checks"},
+		{"negative checks", topConfig + "[capacity]\nchecks = -1\n", "", "capacity.checks"},
 		{"zero committee", topConfig + "[capacity]\ncommittee = 0\n", "", "capacity.committee"},
 		{"zero wip", topConfig + "[capacity]\nper_workstream = 0\n", "", "capacity.per_workstream"},
 		{"negative rounds", topConfig + "[shed]\nmax_rounds = -1\n", "", "shed.max_rounds"},

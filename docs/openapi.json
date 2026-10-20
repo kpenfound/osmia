@@ -4027,6 +4027,9 @@
       },
       "ConfigCapacity": {
         "properties": {
+          "checks": {
+            "type": "integer"
+          },
           "committee": {
             "type": "integer"
           },
