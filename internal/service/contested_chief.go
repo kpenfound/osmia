@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -39,7 +40,15 @@ type ChiefContestDecision struct {
 }
 
 func chiefContestPath(unit, contest string) string {
-	return fmt.Sprintf("units/%s/chief-%s.json", trace.UnitSubject(unit), contest)
+	return fmt.Sprintf("units/%s/chief-%s.json", trace.UnitSubject(unit), trace.EventID(contest, "chief"))
+}
+
+// chiefDecisionDocument uses a bounded stable key; the contest already names
+// the unit, so repeating the subject could exceed the trace's key limit.
+func chiefDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
+	data, _ := json.MarshalIndent(ChiefContestDecision{Contest: contest, Decision: decision, Note: note, Turn: turn}, "", "  ")
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.EventID(contest, "chief"), Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: chiefActor, Cause: contest}
+	return trace.Document{Header: h, Path: chiefContestPath(unit, contest), Content: string(data) + "\n"}
 }
 
 // contestGuidance tells the chief of staff how to handle contested units. It
@@ -168,6 +177,21 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 			if input.Decision == escalateContest {
 				return priorityRefusal("the owner rules review or revise")
 			}
+			if bounceContest(contest, input.Unit) {
+				decision := chiefDecisionDocument(repository, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.now())
+				// The owner may be answering this chief's escalation. Retain
+				// that decision's identity and append its ruling revision.
+				docs, prior, err := chiefDecisions(repository, stream, input.Unit)
+				if err != nil {
+					return nil, err
+				}
+				for i, p := range prior {
+					if p.Contest == contest.ID {
+						decision.ID, decision.Path, decision.Revision = docs[i].ID, docs[i].Path, docs[i].Revision+1
+					}
+				}
+				return rulingResult(s.recordContestedRuling(ctx, repository, stream, input.Unit, request, turn.Actor, decision))
+			}
 			return rulingResult(s.recordContestedRuling(ctx, repository, stream, input.Unit, request, turn.Actor))
 		}
 		if moveContest(contest, input.Unit) {
@@ -181,10 +205,13 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 			return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner rules on it", contest.ID, input.Unit))
 		}
 
+		decision := chiefDecisionDocument(repository, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.now())
 		record := func() error {
-			data, _ := json.MarshalIndent(ChiefContestDecision{Contest: contest.ID, Decision: input.Decision, Note: note, Turn: scope.Turn}, "", "  ")
-			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.UnitSubject(input.Unit) + "-chief-" + contest.ID, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: input.Unit, At: s.now(), Actor: chiefActor, Cause: contest.ID}
-			return repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: chiefContestPath(input.Unit, contest.ID), Content: string(data) + "\n"}})
+			if bounceContest(contest, input.Unit) {
+				_, err := repository.RecordDocumentsWith(ctx, []trace.Document{decision})
+				return err
+			}
+			return repository.RecordDocuments(ctx, []trace.Document{decision})
 		}
 		if input.Decision == escalateContest {
 			if err := record(); err != nil {
@@ -195,6 +222,9 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 				Unit     string `json:"unit"`
 				Detail   string `json:"detail"`
 			}{true, input.Unit, "the contest is in the owner's inbox with your note"})
+		}
+		if bounceContest(contest, input.Unit) {
+			return rulingResult(s.recordContestedRuling(ctx, repository, stream, input.Unit, request, chiefActor, decision))
 		}
 		out, api := s.recordContestedRuling(ctx, repository, stream, input.Unit, request, chiefActor)
 		if api == nil {

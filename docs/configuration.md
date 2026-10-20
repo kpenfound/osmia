@@ -559,7 +559,12 @@ Agents can read the captured text through `factory_context` with `start` and
 Passing checks send the unit to review, and its reviewer receives the
 result instead of running checks. Failing checks, which Dagger's report names,
 send it back to its mason with the failures and output; the send-back counts
-toward `shed.max_bounces`. A run that reports no result, because the engine is
+toward `shed.max_bounces`. At that limit, the unit stays contested until the
+owner or chief of staff rules review or revise. Recording the ruling also moves
+the unit: review sends the same candidate to reviewing with the ruling’s note;
+revise sends it to implementing with one mason turn carrying the failures and
+note. Recorded rulings and pending role turns are reconciled after restart.
+A run that reports no result, because the engine is
 unreachable, the run timed out or the project has no Dagger checks, leaves the
 unit checking, tells the chief of staff and runs again after ten minutes. After
 three such runs of one candidate in a row the unit is contested instead: a

@@ -173,7 +173,7 @@ func (r ContestedRuling) actor() trace.Actor {
 // recordContestedRuling rules on a contested unit as actor: the owner, or the
 // chief of staff on the owner's behalf. The rulings each contest takes, and
 // what they resume, do not depend on who gives them.
-func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor) (ContestedRulingResponse, *APIError) {
+func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor, decisions ...trace.Document) (ContestedRulingResponse, *APIError) {
 	if req.Decision != "review" && req.Decision != "revise" || strings.TrimSpace(req.Note) == "" {
 		return ContestedRulingResponse{}, &APIError{Validation, "a contested ruling requires review or revise and a note"}
 	}
@@ -255,16 +255,31 @@ func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Reposit
 	if err != nil || !ok || result.Verdict.Decision != "material_findings" {
 		return ContestedRulingResponse{}, &APIError{Internal, "contested unit has no material review result"}
 	}
-	if _, found, err := latestContestedRuling(repo, stream, unit, result.Bounces); err != nil {
+	ruling, found, err := latestContestedRuling(repo, stream, unit, result.Bounces)
+	if err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read contested ruling"}
-	} else if found {
-		return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
 	}
-	ruling := ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), By: by, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
-	data, _ := json.MarshalIndent(ruling, "", "  ")
-	id := fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: reviewDocument(unit)}, Path: contestedRulingPath(unit, result.Bounces), Content: string(data) + "\n"}
-	if err := repo.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
+	docs := slices.Clone(decisions)
+	if found {
+		// A saved ruling is authoritative. A chief retry records the
+		// decision being applied, including its original direction and note.
+		for i := range docs {
+			var decision ChiefContestDecision
+			if err := json.Unmarshal([]byte(docs[i].Content), &decision); err != nil {
+				return ContestedRulingResponse{}, &APIError{Internal, "cannot read chief decision"}
+			}
+			decision.Decision, decision.Note = ruling.Decision, ruling.Note
+			data, _ := json.MarshalIndent(decision, "", "  ")
+			docs[i].Content = string(data) + "\n"
+		}
+	}
+	if !found {
+		ruling = ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), By: by, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
+		data, _ := json.MarshalIndent(ruling, "", "  ")
+		id := fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: reviewDocument(unit)}, Path: contestedRulingPath(unit, result.Bounces), Content: string(data) + "\n"})
+	}
+	if err := r.applyBounceRuling(ctx, stream, unit, state, result, ruling, docs); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
 		}
@@ -273,10 +288,20 @@ func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Reposit
 	return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
 }
 
-func (r *reviewers) resumeContested(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) error {
+func (r *reviewers) resumeContested(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, contests ...trace.Transition) error {
 	// Only a contest raised by send-backs is resumed by a bounce ruling.
-	if contest, _, err := masonContest(r.repository, stream, unit); err != nil || !bounceContest(contest, unit) {
-		return err
+	var contest trace.Transition
+	if len(contests) > 0 {
+		contest = contests[0]
+	} else {
+		var err error
+		contest, _, err = masonContest(r.repository, stream, unit)
+		if err != nil {
+			return err
+		}
+	}
+	if !bounceContest(contest, unit) {
+		return nil
 	}
 	result, ok, err := r.storedResult(stream, unit, state)
 	if err != nil || !ok {
@@ -286,6 +311,17 @@ func (r *reviewers) resumeContested(ctx context.Context, stream config.Workstrea
 	if err != nil || !found {
 		return err
 	}
+	// A ruling for different evidence cannot resume this contest. Keep it in
+	// the trace without stopping recovery of the stream's other units.
+	if ruling.Candidate != result.Identity.Candidate.Revision || ruling.Bounces != result.Bounces {
+		return nil
+	}
+	return r.applyBounceRuling(ctx, stream, unit, state, result, ruling, nil)
+}
+
+// applyBounceRuling commits the ruling and its move together. The result and
+// transition retain everything needed to queue findings after interruption.
+func (r *reviewers) applyBounceRuling(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult, ruling ContestedRuling, docs []trace.Document) error {
 	if ruling.Candidate != result.Identity.Candidate.Revision || ruling.Bounces != result.Bounces {
 		return errors.New("contested ruling does not match candidate and bounce count")
 	}
@@ -298,15 +334,68 @@ func (r *reviewers) resumeContested(ctx context.Context, stream config.Workstrea
 	id := fmt.Sprintf("%s-%s-ruling-%d", trace.UnitSubject(unit), to, result.Bounces)
 	reason := fmt.Sprintf("%s ruled %s on contested candidate %s after %d send-backs: %s", ruling.ruler(), ruling.Decision, ruling.Candidate, ruling.Bounces, ruling.Note)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: ruling.actor(), Cause: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)}
-	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
-	if err != nil {
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
+	if err := r.s.step("bounce-ruling-recording:" + string(stream) + ":" + unit); err != nil {
 		return err
 	}
-	if to == UnitImplementing {
-		return r.enqueueFindings(ctx, stream, unit, result)
+	var err error
+	if len(docs) == 0 {
+		_, err = r.repository.Transact(ctx, tx)
+	} else {
+		_, err = r.repository.RecordDocumentsWith(ctx, docs, tx)
 	}
+	if err != nil {
+		// Publication can return an error after committing, and a controller
+		// may have read contested before another ruler committed the move.
+		// Reconcile its identity and decision before reporting failure.
+		transitions, readErr := trace.Read[trace.Transition](r.repository, stream)
+		if readErr != nil || !slices.ContainsFunc(transitions, func(t trace.Transition) bool {
+			// The controller's attempt can have a later timestamp than the
+			// committed move it is reconciling.
+			t.At = tx.Transition.At
+			return t == tx.Transition
+		}) {
+			return err
+		}
+		stored, readErr := trace.Read[trace.Document](r.repository, stream)
+		if readErr != nil || slices.ContainsFunc(docs, func(d trace.Document) bool {
+			return !slices.ContainsFunc(stored, func(s trace.Document) bool {
+				at := s.At
+				s.At = d.At
+				return at.Equal(s.At) && s == d
+			})
+		}) {
+			return err
+		}
+	}
+	// The commit is authoritative even when interruption prevents the next
+	// controller pass. Its findings are reconciled from the recorded result.
+	_ = r.s.step("bounce-ruling-committed:" + string(stream) + ":" + unit)
 	return nil
+}
+
+// bounceRevisionTransition identifies the move caused by a revise ruling.
+func bounceRevisionTransition(t trace.Transition) bool {
+	return t.From == UnitContested && t.To == UnitImplementing && strings.HasPrefix(t.Cause, t.Subject+"-ruling-")
+}
+
+// resumeBounceRevision closes the interval between a ruling's move and its
+// findings turn. Both controllers call it: a ruling may arrive after the
+// review pass but before the mason pass. The old done turn must not be used
+// to send the candidate to checking again before the revision is queued.
+func (m *masons) resumeBounceRevision(ctx context.Context, stream config.WorkstreamID, unit string, t trace.Transition) error {
+	// The pass already read transitions for its building snapshot. Units
+	// without a bounce ruling need no additional trace read.
+	if !bounceRevisionTransition(t) {
+		return nil
+	}
+	r := &reviewers{masons: m}
+	result, ok, err := r.storedResult(stream, unit, trace.WorkflowState{})
+	if err != nil || !ok {
+		return err
+	}
+	if t.Cause != fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces) {
+		return nil
+	}
+	return r.enqueueFindings(ctx, stream, unit, result)
 }

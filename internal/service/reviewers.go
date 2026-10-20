@@ -157,18 +157,20 @@ func (r *reviewers) Pass(ctx context.Context) error {
 			unit := u.ID
 			st := b.states[trace.UnitSubject(unit)]
 			if st.Value == UnitContested {
-				if err := r.resumeContested(ctx, stream, unit, st); err != nil {
-					return err
+				if contest, ok := b.reviewTransitions[trace.UnitSubject(unit)]; ok {
+					if err := r.resumeContested(ctx, stream, unit, st, contest); err != nil {
+						return err
+					}
 				}
 				continue
 			}
 			if st.Value == UnitImplementing {
-				if result, ok, err := r.storedResult(stream, unit, st); err != nil {
-					return err
-				} else if ok && result.Verdict.Decision == "material_findings" {
-					if err := r.enqueueFindings(ctx, stream, unit, result); err != nil {
+				if t := b.reviewTransitions[trace.UnitSubject(unit)]; bounceRevisionTransition(t) {
+					if err := r.resumeBounceRevision(ctx, stream, unit, t); err != nil {
 						return err
 					}
+				} else if err := r.resumeFindings(ctx, stream, unit, st); err != nil {
+					return err
 				}
 				continue
 			}
@@ -417,7 +419,15 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. You decide one thing: whether this candidate does its unit's task and meets every acceptance item. The approved spec defines intent; the plan records current assignments. Judge observable acceptance, not conformity to implementation guidance. Accept equivalent or stronger evidence with a reason, including applicable evidence from earlier reports. Do not weaken requirements. Use factory_context to retrieve assignments and evidence. Distinguish defects, missing evidence, faulty assignments and infrastructure failures. Record newly discovered necessary work with record_discovery and ask for coordination when ownership changes. The service ran the project's checks on this exact candidate, and your prompt carries their result; cite it as evidence rather than re-deriving what the checks prove. Code style, formatting and lint belong to the checks, not to your review. A finding is material only when the task or an acceptance item does not hold, or the change reaches beyond what the task needs. When the candidate was rebased onto a feature branch that moved, the changes the rebase needs so that both the feature branch's work and the unit's task stand are in scope, whatever the task or the footprint names; a resolved path outside the task is not, on its own, a finding. Your read-only view holds the candidate's exact files; call workstream_diff to read its diff, whole or by file and line range. Call ask when a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict." + checkGateReviewInstructions, Prompt: prompt}
+	if r.s.boundary != nil {
+		if err := r.s.step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {
+			return err
+		}
+	}
 	_, err = r.repository.EnqueueTurn(ctx, request)
+	if err == nil && r.s.boundary != nil {
+		err = r.s.step("unit-role-queued:" + string(stream) + ":" + unit)
+	}
 	return err
 }
 
@@ -867,6 +877,23 @@ func (r *reviewers) recheck(ctx context.Context, stream config.WorkstreamID, uni
 	return err
 }
 
+// ordinarySendBack identifies a reviewer or failed-check move back to the mason.
+func ordinarySendBack(t trace.Transition) bool {
+	return t.To == UnitImplementing && t.Cause == reviewDocument(t.Unit) &&
+		(t.From == UnitReviewing && t.Actor == reviewerActor || t.From == UnitChecking && t.Actor == checksActor)
+}
+
+func (r *reviewers) resumeFindings(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) error {
+	result, ok, err := r.storedResult(stream, unit, state)
+	if err != nil {
+		return err
+	}
+	if ok && result.Verdict.Decision == "material_findings" {
+		return r.enqueueFindings(ctx, stream, unit, result)
+	}
+	return nil
+}
+
 func (r *reviewers) enqueueFindings(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
 	th, err := r.repository.Thread(stream, masonAgent(unit))
 	if err != nil {
@@ -903,6 +930,14 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 	if found && ruling.Decision == "revise" && ruling.Candidate == result.Identity.Candidate.Revision {
 		request.Prompt += "\n\nThe " + ruling.ruler() + " ruled that this candidate needs revision: " + ruling.Note
 	}
+	if r.s.boundary != nil {
+		if err := r.s.step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {
+			return err
+		}
+	}
 	_, err = r.repository.EnqueueTurn(ctx, request)
+	if err == nil && r.s.boundary != nil {
+		err = r.s.step("unit-role-queued:" + string(stream) + ":" + unit)
+	}
 	return err
 }
