@@ -17,6 +17,7 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
+	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -174,6 +175,33 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	accepted, written, contest, amendment := decisionCard(escalations[0]), decisionCard(escalations[1]), decisionCard(contests[0]), decisionCard(amendments[0])
 
 	link := newLinkProxy(t, f.s.WebAddr())
+	// Hold inbox responses, including reads already in flight, while the
+	// server advances the packet. Submit releases them after the handler
+	// has copied the displayed revision into its request.
+	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`(() => {
+			const gate = window.inboxGate = { closed: false, waiting: [] };
+			const original = window.fetch;
+			window.fetch = async (...args) => {
+				const response = await original(...args);
+				if (String(args[0]).endsWith('/inbox')) {
+					const json = response.json.bind(response);
+					response.json = async () => {
+						const body = await json();
+						if (gate.closed) await new Promise(resolve => gate.waiting.push(resolve));
+						return body;
+					};
+				}
+				return response;
+			};
+			document.addEventListener('submit', event => {
+				if (!gate.closed || !event.target.closest('[data-kind="amendment"]')) return;
+				gate.closed = false;
+				gate.waiting.splice(0).forEach(resolve => resolve());
+			});
+		})()`).Do(ctx)
+		return err
+	}))
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.listener.Addr().String()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.eval(`window.notReloaded = true`, nil)
@@ -281,6 +309,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	// so the page still shows the first revision when the owner decides.
 	gate := p.gate("*" + Prefix + "/events")
 	gate.set(true)
+	p.eval(`window.inboxGate.closed = true`, nil)
 	link.cut()
 	p.await("the lost connection", `document.body.dataset.connection === 'lost'`)
 	link.restore()

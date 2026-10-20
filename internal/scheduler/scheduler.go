@@ -65,10 +65,10 @@ type Options struct {
 // PerWorkstream and the one turn per workstream of the other roles stay per
 // workstream.
 //
-// A project's turns enter flight only in its own passes, so its published
-// count is never below its turns in flight. A turn that completes holds its
-// slot for the other projects until its own project's next pass, which its
-// completion wakes.
+// Workflow operations reserve capacity at admission through TryReserve;
+// their runner turns use that reservation. Other turns enter flight in their
+// project's passes. A scheduled turn that completes holds its slot for other
+// projects until its own project's next pass, which its completion wakes.
 type Shared struct {
 	mu sync.Mutex
 	// usageMu guards usage alone and is never held while taking another
@@ -76,8 +76,11 @@ type Shared struct {
 	usageMu sync.Mutex
 	// usage is what each project in the pool last published.
 	usage map[config.ProjectID]published
-	// Changed, when set, runs once a project's published turns in flight or
-	// waiting turns change, or the project leaves the pool. It must not call
+	// reservations count workflow operations from admission through result
+	// recording, including the time before their runner claims a turn.
+	reservations map[reservationKey]int
+	// Changed, when set, runs when published turns, waiting turns or workflow
+	// reservations change, or the project leaves the pool. It must not call
 	// back into the pool.
 	Changed func()
 }
@@ -161,6 +164,11 @@ func (p *Shared) others(project config.ProjectID) map[string]int {
 			out[role] += n
 		}
 	}
+	for key, n := range p.reservations {
+		if key.project != project {
+			out[key.role] += n
+		}
+	}
 	return out
 }
 
@@ -179,6 +187,9 @@ func (p *Shared) Slots(projects []config.ProjectID) Slots {
 		for role, n := range u.roles {
 			out.Used[role] += n
 		}
+	}
+	for key, n := range p.reservations {
+		out.Used[key.role] += n
 	}
 	for _, id := range projects {
 		out.Waiting = append(out.Waiting, p.usage[id].waiting...)
@@ -342,10 +353,11 @@ func (s *Scheduler) read() (reading, error) {
 		return reading{}, err
 	}
 	own := newUsage()
-	l.count(own)
+	s.options.Shared.count(l, own)
 	used := newUsage()
 	used.merge(own)
 	if s.options.Shared != nil {
+		used.merge(s.options.Shared.reserved(project))
 		for role, n := range s.options.Shared.others(project) {
 			used.roles[role] += n
 		}
@@ -537,6 +549,16 @@ func (s *Scheduler) refusal(used usage, c Candidate) string {
 	}
 	if used.streams[streamKey{c.Project, c.Workstream}] >= limits.PerWorkstream {
 		return WaitWorkstreamCap
+	}
+	return s.roleRefusal(used, c)
+}
+
+// roleRefusal applies role limits independently of the worker allowance of
+// a workstream. Workflow operations reserve roles through this same gate.
+func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
+	limits, role := s.options.Capacity, c.Thread.Identity.Role
+	if limits == nil || role == trace.ChiefOfStaff {
+		return ""
 	}
 	fits := used.local[localKey{c.Project, c.Workstream, role}] < 1
 	switch role {

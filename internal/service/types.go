@@ -617,17 +617,17 @@ type DailyBudgetStatus struct {
 	LowerBound   bool   `json:"lower_bound"`
 }
 
-// CapacityStatus is the scheduler's slot accounting for the role kinds whose
-// turns share slots across workstreams, mason, reviewer and committee in that
-// order, and the per-workstream limit in force.
+// CapacityStatus is the shared pool's role slot accounting and the
+// per-workstream limit in force.
 type CapacityStatus struct {
 	PerWorkstream int            `json:"per_workstream"`
 	Roles         []RoleCapacity `json:"roles"`
 }
 
-// RoleCapacity is one role kind's slots: Used counts its turns in flight and
-// Limit is its configured capacity. Waiting lists the work waiting for a slot
-// and never paused work.
+// RoleCapacity is one role kind's slots: Used includes workflow reservations
+// and Limit is its configured global capacity. A zero Limit means no global
+// limit; architect and librarian each run at most once per workstream.
+// Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
 	Role    string     `json:"role"`
 	Used    int        `json:"used"`

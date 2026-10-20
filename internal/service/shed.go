@@ -218,6 +218,9 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	if err != nil {
 		return err
 	}
+	if err := d.s.step("shed-draft-read"); err != nil {
+		return err
+	}
 	// A skipped debate runs no committee turn, so the workstream needs
 	// neither a committee nor a round; it waits in the shed for the owner to
 	// ratify both documents, with the packet that asks them to.
@@ -251,7 +254,7 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 			return err
 		}
 	}
-	if err := d.step(ctx, stream, pin); err != nil {
+	if err := d.step(ctx, stream); err != nil {
 		return err
 	}
 	// The packet is presented once the step of this pass concluded the
@@ -309,8 +312,16 @@ func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, f
 // waits for a service that can run the committee and a reply or redraft for
 // one that can run the architect; concluding runs no turn and waits for
 // neither.
-func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest shed.Pin) error {
+func (d *debate) step(ctx context.Context, stream config.WorkstreamID) error {
 	state, err := d.repository.Workflow(stream, shedSubject)
+	if err != nil {
+		return err
+	}
+	// A reply commits its redraft before moving the shed to replied. Read
+	// the revision after the state so a completed reply's redraft is visible
+	// when deciding whether another round is needed. A later shed transition
+	// conflicts with this state's version instead of using a stale decision.
+	latest, err := d.draftPin(stream)
 	if err != nil {
 		return err
 	}

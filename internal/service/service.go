@@ -1088,8 +1088,8 @@ func (s *Service) migrationLog(format string, args ...any) {
 // without it, the configured Schedule hook runs instead. The hooks and
 // adapters come from the pipeline, which a reload may restage for the next pass.
 // The loop holds the pending operations of the architect and committee
-// reconcilers while a pause covers their workstream, and runs thread turns
-// and committee rounds beside its other operations.
+// reconcilers while a pause covers their workstream, and runs model workflows,
+// thread turns and committee rounds beside the pass under their own ordering.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -1159,6 +1159,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Class == nil {
 		options.Class = operationClass
 	}
+	options.Limit = s.modelOperationLimit(repository, options.Limit)
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
@@ -1222,12 +1223,12 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
-// concurrentOperation reports whether op delivers a thread turn, runs a
-// committee round or runs a unit's checks. The reconciler runs those beside
-// its other operations, so every turn the scheduler dispatched within
-// capacity, the rounds of different workstreams and their check runs are in
-// flight at once.
+// concurrentOperation runs model workflows and scheduler-admitted workers
+// beside the pass. operationClass supplies their independent ordering.
 func concurrentOperation(op coreadapter.Operation) bool {
+	if modelOperationRole(op) != "" {
+		return true
+	}
 	if op.Boundary != coreadapter.RunnerBoundary {
 		return false
 	}

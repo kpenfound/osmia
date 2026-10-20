@@ -139,7 +139,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
 	none := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
-	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}}}
+	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}, {Role: "architect", Waiting: []service.SlotWait{}}, {Role: "librarian", Waiting: []service.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}

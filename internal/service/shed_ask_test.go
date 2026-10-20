@@ -372,17 +372,6 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		}
 		return concedes(p, first, second)(ctx, req, nil, tools)
 	})
-	var viewTurns sync.Map
-	f.engine.mu.Lock()
-	for name, run := range f.engine.turns {
-		f.engine.turns[name] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			if req.Grants != nil && len(req.Grants.Mounts) > 0 {
-				viewTurns.Store(filepath.Base(req.Grants.Mounts[0].Path), req.Name)
-			}
-			return run(ctx, req, verified, tools)
-		}
-	}
-	f.engine.mu.Unlock()
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	p.check(t)
@@ -510,24 +499,6 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		t.Fatal("the answer turn's staged workspace is retained")
 	}
 	if entries, err := os.ReadDir(filepath.Join(root, "views")); err != nil || len(entries) != 0 {
-		threads, readErr := f.repository().Threads(stream)
-		t.Logf("view owner threads: %v", readErr)
-		for _, entry := range entries[:min(len(entries), 8)] {
-			owner, known := viewTurns.Load(entry.Name())
-			t.Logf("view=%s owner=%v known=%v", entry.Name(), owner, known)
-			for _, th := range threads[:min(len(threads), 8)] {
-				for _, q := range th.Turns {
-					if q.Request.TurnID != owner {
-						continue
-					}
-					var started time.Time
-					if q.Claim != nil {
-						started = q.Claim.At
-					}
-					t.Logf("view=%s thread=%s turn=%s status=%s queued=%s started=%s completed=%s", entry.Name(), th.Identity.ThreadID, q.Request.TurnID, q.Status(), q.Request.At, started, q.CompletedAt)
-				}
-			}
-		}
 		t.Fatalf("views leaked: %v %v", entries, err)
 	}
 }

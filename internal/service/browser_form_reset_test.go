@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -190,6 +191,35 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	contested := decisionCard(firstOf(InboxContested))
 	amendment := decisionCard(firstOf(InboxAmendment))
 
+	// Observe the page consuming an inbox that no longer lists this contest.
+	// pruneInbox maps the entries during render; the microtask runs after
+	// that synchronous render has cleared the card's dismissal.
+	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`(() => {
+			window.ruledContestRead = false;
+			const send = window.fetch;
+			window.fetch = async (...args) => {
+				const response = await send(...args);
+				if (String(args[0]).endsWith('/inbox') && response.ok) {
+					const json = response.json.bind(response);
+					response.json = async () => {
+						const body = await json();
+						if (!body.entries.some(e => e.kind === 'contested' && e.workstream === ` + quote(string(stream)) + ` && e.unit === 'index')) {
+							const map = body.entries.map.bind(body.entries);
+							body.entries.map = (...args) => {
+								const result = map(...args);
+								queueMicrotask(() => { window.ruledContestRead = true; });
+								return result;
+							};
+						}
+						return body;
+					};
+				}
+				return response;
+			};
+		})()`).Do(ctx)
+		return err
+	}))
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.selectWorkstream(stream)
@@ -214,6 +244,18 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	p.awaitCleared(decisionField)
 	p.awaitCleared(noteField)
 	p.awaitGone("the ruled unit", contested)
+	// Optimistic removal alone does not clear the dismissal. The server
+	// must resolve this contest and the page must read that resolved inbox
+	// before another contest can reuse the same card identity.
+	soon(t, "the ruled contest to leave the inbox API", func() bool {
+		for _, entry := range entriesOf(t, f.c, InboxContested) {
+			if entry.Workstream == stream && entry.Unit == "index" {
+				return false
+			}
+		}
+		return true
+	})
+	p.await("the page to process the ruled contest's removal", `window.ruledContestRead === true`)
 	move(trace.UnitSubject("index"), "index-contested-2", UnitContested, reviewerActor)
 	raiseFixtureContest(t, live, stream, "index")
 	p.awaitText(contested+"[data-field=kind]", "Contested unit")

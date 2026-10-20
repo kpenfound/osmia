@@ -706,17 +706,25 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		commit, conflicts, err := g.ReplayFrom(ctx, currentBase.Commit, in.Commit, fetched, requested)
+		var conflicts []string
+		err = workspace.LocalStep(ctx, string(stream)+"/"+op.ID+"/replay", requested, []workspace.Provider{g}, func(local context.Context) error {
+			commit, paths, err := g.ReplayFrom(local, currentBase.Commit, in.Commit, fetched, requested)
+			if err != nil {
+				return err
+			}
+			conflicts = paths
+			if len(conflicts) > 0 {
+				return nil
+			}
+			rebase = FinalRebase{Review: in.Review, Operation: op.ID, Branch: report.Branch, Upstream: upstream, Before: in.Commit, Commit: commit}
+			return a.recordRebase(local, stream, rebase)
+		})
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		if len(conflicts) > 0 {
 			report.Upstream, report.Conflicts = &upstream, conflicts
 			return fail(fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch is left at %s", report.Branch, upstream.Remote, upstream.Branch, fetched, strings.Join(conflicts, ", "), in.Commit))
-		}
-		rebase = FinalRebase{Review: in.Review, Operation: op.ID, Branch: report.Branch, Upstream: upstream, Before: in.Commit, Commit: commit}
-		if err := a.recordRebase(ctx, stream, rebase); err != nil {
-			return coreadapter.OperationResult{}, err
 		}
 		if err := a.s.step("final-rebase-recorded"); err != nil {
 			return coreadapter.OperationResult{}, err
@@ -726,11 +734,14 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if now.Commit != rebase.Before && now.Commit != rebase.Commit {
 		return fail(fmt.Sprintf("feature branch %s moved to %s during the review", report.Branch, now.Commit))
 	}
-	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: report.Branch})
+	err = workspace.LocalStep(ctx, string(stream)+"/"+op.ID+"/move", a.s.now(), []workspace.Provider{g}, func(local context.Context) error {
+		acquired, err := g.Acquire(local, vcs.Request{Name: string(stream), Branch: report.Branch})
+		if err != nil {
+			return fmt.Errorf("feature branch %s: %w", report.Branch, err)
+		}
+		return g.Move(local, acquired.(workspace.Worktree), rebase.Before, rebase.Commit)
+	})
 	if err != nil {
-		return coreadapter.OperationResult{}, fmt.Errorf("feature branch %s: %w", report.Branch, err)
-	}
-	if err := g.Move(ctx, acquired.(workspace.Worktree), rebase.Before, rebase.Commit); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if err := a.s.step("final-rebase-moved"); err != nil {

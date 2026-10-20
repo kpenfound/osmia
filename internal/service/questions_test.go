@@ -177,8 +177,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
 	})
 	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
-	// Keep operations in the pass so a held fake turn establishes the
-	// answered-but-undelivered checkpoint before the service restarts.
+	// Keep worker operations in the pass so settle waits for the askers.
 	opts.Reconciliation.Concurrent = func(coreadapter.Operation) bool { return false }
 	settle := func(s *Service) { t.Helper(); f.settle(t, s) }
 	mu, results, problem, use, result := &f.mu, f.results, f.problem, f.use, questionResult
@@ -284,7 +283,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 				}
 			}
 			mu.Unlock()
-			// The service stops before any pass can deliver the answer.
+			// The second lifetime holds answer delivery while this turn
+			// remains in flight, preserving the restart checkpoint.
 			close(answered)
 			<-ctx.Done()
 			return nil, ctx.Err()
@@ -388,9 +388,22 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "build2": 1, "review": 1}) {
 		t.Fatalf("restart with open questions ran: %v", got)
 	}
+	// The chief answers beside the pass. Hold the delivery stage for this
+	// lifetime so the durable answer stays undelivered until restart.
+	stage := *s.sole().pipeline.current.Load()
+	stage.hooks = slices.Clone(stage.hooks)
+	for i := range stage.hooks {
+		if stage.hooks[i].name == "answers" {
+			stage.hooks[i].pass = func(context.Context) error { return nil }
+		}
+	}
+	s.sole().pipeline.next.Store(&stage)
+	// Adopt the delivery hold before closing the event window. Until then
+	// no chief turn can record an answer through the previous stages.
+	settle(s)
 	clock.Advance(time.Minute)
-	// The pass that sees the closed window blocks inside the chief-of-staff
-	// turn, so it may never take another tick.
+	// Passes can keep running while the chief records the answer and waits
+	// for shutdown on the conversation path.
 	for waiting := true; waiting; {
 		select {
 		case ticks <- clock.Now():
