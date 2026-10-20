@@ -93,7 +93,12 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			lifecycleAwait(t, f, "original read batch", func() bool {
 				entries, err := target.Inbox()
 				must(t, err)
-				if len(entries) == 1 && len(entries[0].Questions) == 2 && entries[0].Workstream == f.stream1 {
+				if len(entries) == 1 && len(entries[0].Questions) == 2 && entries[0].Workstream == f.stream1 && entries[0].Hold == "" {
+					for _, q := range entries[0].Questions {
+						if q.Asked.ID == "" {
+							return false
+						}
+					}
 					original = entries[0]
 					return true
 				}

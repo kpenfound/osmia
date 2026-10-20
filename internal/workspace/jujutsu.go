@@ -258,6 +258,8 @@ func (j *Jujutsu) forget(ctx context.Context, name string) error {
 // whose directory is gone, or whose making stopped before its branch was
 // recorded, is forgotten first, so it can be made again.
 func (j *Jujutsu) Workspace(ctx context.Context, name string) (Worktree, bool, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if exists, err := j.initialized(); err != nil || !exists {
 		return Worktree{}, false, err
 	}
@@ -284,6 +286,8 @@ func (j *Jujutsu) Workspace(ctx context.Context, name string) (Worktree, bool, e
 // removed and made again. The request needs a branch; a directory in the way
 // that is no workspace of the repository is left alone and reported.
 func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if req.Name == "" || req.Branch == "" {
 		return nil, errors.New("a workspace request needs a name and a branch")
 	}
@@ -376,6 +380,8 @@ func sameFile(a, b string) bool {
 
 // Release removes the workspace, whatever it holds; the branch stays.
 func (j *Jujutsu) Release(ctx context.Context, w vcs.Workspace) error {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if w == nil || w.Directory() == "" {
 		return errors.New("no workspace to release")
 	}
@@ -397,6 +403,8 @@ func (j *Jujutsu) Release(ctx context.Context, w vcs.Workspace) error {
 // Prune forgets the workspaces whose directories are gone. The repository
 // is the provider's own, so every workspace it has is.
 func (j *Jujutsu) Prune(ctx context.Context) error {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if exists, err := j.initialized(); err != nil || !exists {
 		return err
 	}
@@ -465,6 +473,8 @@ func (j *Jujutsu) head(ctx context.Context, w Worktree) (string, error) {
 // an interruption kept its branch from moving is completed, with what the
 // workspace gained since.
 func (j *Jujutsu) Snapshot(ctx context.Context, w Worktree, base string) (string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if w.Path == "" {
 		return "", errors.New("no workspace to snapshot")
 	}
@@ -543,6 +553,8 @@ func (j *Jujutsu) checkout(ctx context.Context, w Worktree, commit string) error
 // between the two; one at any other commit is refused. Files the repository
 // ignores stay unless to tracks them.
 func (j *Jujutsu) Move(ctx context.Context, w Worktree, from, to string) error {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	head, err := j.head(ctx, w)
 	if err != nil {
 		return err
@@ -566,6 +578,8 @@ func (j *Jujutsu) Move(ctx context.Context, w Worktree, from, to string) error {
 // files brought onto to, which completes an advance interrupted between the
 // two; one at any other commit is refused.
 func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) error {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	head, err := j.head(ctx, w)
 	if err != nil {
 		return err
@@ -621,6 +635,8 @@ func (j *Jujutsu) ReplayIn(ctx context.Context, w Worktree, onto string, at time
 
 // ReplayInFrom excludes the dependency history preceding base from replay.
 func (j *Jujutsu) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, at time.Time) (string, []string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	meta, err := readMetadata(w.Path)
 	if err != nil {
 		return "", nil, err
@@ -809,6 +825,8 @@ func (j *Jujutsu) proceed(ctx context.Context, w Worktree, meta metadata, at tim
 // stays conflicted. A replay step whose resolution leaves its commit's change
 // empty drops the commit.
 func (j *Jujutsu) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	meta, err := readMetadata(w.Path)
 	if err != nil {
 		return "", nil, err
@@ -829,6 +847,8 @@ func (j *Jujutsu) ContinueReplay(ctx context.Context, w Worktree, at time.Time) 
 // whether a replay is in progress there. A replay in progress that recorded
 // no stop returns the first copy in conflict, or "" when none is.
 func (j *Jujutsu) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	meta, err := readMetadata(w.Path)
 	if err != nil || meta.Replay == nil {
 		return "", nil, false, err
@@ -927,6 +947,8 @@ func (j *Jujutsu) Rebase(ctx context.Context, onto, head, message string, at tim
 // file holds no lines. It returns the paths Jujutsu holds conflicted, sorted.
 // Each such rebase makes a commit of its own, even from the same arguments.
 func (j *Jujutsu) RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	g := j.git()
 	stored, err := j.StoredConflicts(ctx, head)
 	if err != nil {
@@ -987,6 +1009,8 @@ func (j *Jujutsu) create(ctx context.Context, parent, message string, at time.Ti
 // sorted. The repository reads the commits it made and those on the branches
 // it imported; any other commit reads as holding none.
 func (j *Jujutsu) StoredConflicts(ctx context.Context, commit string) ([]string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if exists, err := j.initialized(); err != nil || !exists {
 		return nil, err
 	}
@@ -1015,6 +1039,8 @@ var commitIDPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 // or one on a branch it imported. A commit it does not know returns "". A
 // commit that is not a full commit ID is refused.
 func (j *Jujutsu) ChangeOf(ctx context.Context, commit string) (string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if !commitIDPattern.MatchString(commit) {
 		return "", fmt.Errorf("%q is not a full commit ID", commit)
 	}
@@ -1060,11 +1086,39 @@ func (j *Jujutsu) Carry(ctx context.Context, commit, change string) (string, err
 // every jj command run in the workspace does, and returns that commit. Its
 // branch and the commits before it stay as they are.
 func (j *Jujutsu) Record(ctx context.Context, w Worktree) (string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if w.Path == "" {
 		return "", errors.New("no workspace to record")
 	}
-	current, err := j.describe(ctx, w.Path, true, "@")
-	return current.commit, err
+	for attempt := 0; ; attempt++ {
+		current, err := j.describe(ctx, w.Path, true, "@")
+		if attempt >= 2 || !snapshotCollision(err) {
+			return current.commit, err
+		}
+		// Recover snapshots files before restoring them. Recopying those
+		// files in the same second can create the same Git commit with a
+		// different jj identity when change-id headers are disabled. Retry
+		// once Git's committer timestamp can distinguish the snapshot.
+		next := time.Now().Truncate(time.Second).Add(time.Second)
+		timer := time.NewTimer(time.Until(next) + time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func snapshotCollision(err error) bool {
+	var failure *JJError
+	if !errors.As(err, &failure) {
+		return false
+	}
+	_, suffix, found := strings.Cut(failure.Stderr, "Newly-created commit ")
+	commit, rest, separated := strings.Cut(suffix, " ")
+	return found && separated && commitIDPattern.MatchString(commit) && strings.TrimSpace(rest) == "already exists"
 }
 
 // Changed snapshots the workspace's files as Record does and returns the
@@ -1073,6 +1127,8 @@ func (j *Jujutsu) Record(ctx context.Context, w Worktree) (string, error) {
 // workspace hides since, which the repository still reads. A since that is
 // not a full commit ID is refused.
 func (j *Jujutsu) Changed(ctx context.Context, w Worktree, since string) ([]string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if w.Path == "" {
 		return nil, errors.New("no workspace to compare")
 	}
@@ -1165,6 +1221,8 @@ func (j *Jujutsu) run(ctx context.Context, dir string, settings []string, args .
 }
 
 func (j *Jujutsu) runOutput(ctx context.Context, dir string, settings []string, args ...string) (string, string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	executable := j.JJ
 	if executable == "" {
 		executable = "jj"

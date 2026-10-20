@@ -226,9 +226,8 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	}
 }
 
-// A reload while a turn runs leaves that turn on the configuration it started
-// with; the project's next pass rebuilds dispatch from the reloaded
-// configuration, so the next turn runs on it with the reloaded role binding.
+// A reload leaves a running turn on its original binding. Conversations adopt
+// the new binding directly, and scheduling adopts it on its next pass.
 func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -271,6 +270,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	awaitConversation(t, c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 4 && l.Entries[3].State == TurnDone
 	})
+	conversationAwait(t, func() bool { return s.sole().pipeline.current.Load().cfg == s.current() })
 
 	mu.Lock()
 	defer mu.Unlock()

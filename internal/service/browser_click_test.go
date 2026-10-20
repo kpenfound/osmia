@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -12,6 +13,54 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
+
+func TestBrowserClickReselectsPauseReplacedDuringMouseDispatch(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/v1/runtime/pause" {
+			requests.Add(1)
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<div id="pause-list"></div><div id="result"></div><script>
+		window.presses = 0; window.clicks = 0; window.trusted = false;
+		function render() {
+		  const button = document.createElement('button');
+		  button.dataset.field = 'resume'; button.textContent = 'Resume';
+		  button.addEventListener('click', async e => {
+		    window.clicks++; window.trusted = e.isTrusted;
+		    document.getElementById('pause-list').replaceChildren();
+		    await fetch('/v1/runtime/pause', {method: 'DELETE'});
+		    document.getElementById('result').textContent = 'resumed';
+		  });
+		  document.getElementById('pause-list').replaceChildren(button);
+		}
+		render();
+		document.addEventListener('mousedown', () => {
+		  window.presses++;
+		  if (window.presses === 1) render();
+		}, true);
+		</script>`))
+	}))
+	t.Cleanup(server.Close)
+	p := openBrowser(t)
+	p.run(chromedp.Navigate(server.URL))
+	p.click("[data-field=resume]")
+	var got struct {
+		Presses, Clicks int
+		Trusted         bool
+	}
+	p.eval(`({presses: window.presses, clicks: window.clicks, trusted: window.trusted})`, &got)
+	if got.Presses != 2 || got.Clicks != 1 || !got.Trusted {
+		t.Fatalf("pause replacement during mouse dispatch: %+v; DELETE requests = %d", got, requests.Load())
+	}
+	p.awaitText("#result", "resumed")
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("DELETE requests = %d, want exactly one", got)
+	}
+}
 
 func TestBrowserClickReselectsReplacedNodeBeforeMouseDispatch(t *testing.T) {
 	t.Parallel()

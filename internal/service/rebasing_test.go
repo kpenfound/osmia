@@ -550,3 +550,67 @@ func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 		t.Fatalf("the contest %+v", contest)
 	}
 }
+
+// A rebase can finish between the foreman's hook and the mason's hook. The
+// completed turn before that rebase has not attempted its conflict resolution.
+func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newRebaseFixture(t, "resolution-before-reminder")
+	defer func() { repository.Close() }()
+	ctx := context.Background()
+	m := newMasonController(f.s, repository)
+	lands := &foreman{masons: m}
+	w, _, found, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
+	must(t, err)
+	if !found {
+		t.Fatal("dedupe has no workspace")
+	}
+	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// dedupe\n"), 0600))
+	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
+	must(t, lands.Pass(ctx))
+	ops := rebaseOperations(t, repository, stream, "dedupe")
+	if len(ops) != 1 {
+		t.Fatalf("rebases: %+v", ops)
+	}
+	result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation)
+	must(t, err)
+	if result.Outcome != "succeeded" {
+		t.Fatalf("rebase: %+v", result)
+	}
+	// The scheduling pass has already passed the foreman. It reaches the
+	// mason before the next foreman hook can queue the resolution turn.
+	must(t, m.Pass(ctx))
+	th, err := repository.Thread(stream, masonAgent("dedupe"))
+	must(t, err)
+	if len(th.Turns) != 1 {
+		t.Fatalf("the pre-rebase done turn received a reminder: %+v", th.Turns)
+	}
+	// Restart between observing the deferred done and queuing its resolver.
+	must(t, repository.Close())
+	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	m = newMasonController(f.s, repository)
+	lands = &foreman{masons: m}
+	must(t, m.Pass(ctx))
+	must(t, lands.Pass(ctx))
+	th, err = repository.Thread(stream, masonAgent("dedupe"))
+	must(t, err)
+	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != resolveTurnID("dedupe", 1) {
+		t.Fatalf("conflict resolution: %+v", th.Turns)
+	}
+	// A queued resolver still owns the next attempt; the older done cannot
+	// produce a reminder while the resolver waits to run.
+	must(t, m.Pass(ctx))
+	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); len(ids) != 2 {
+		t.Fatalf("a queued resolution received a premature reminder: %v", ids)
+	}
+	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
+	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	must(t, m.Pass(ctx))
+	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
+	must(t, err)
+	if state.Value != UnitChecking {
+		t.Fatalf("the resolved unit did not finish after restart: %+v", state)
+	}
+}

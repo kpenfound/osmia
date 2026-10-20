@@ -159,6 +159,25 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 // request, so nothing is pushed or asked of GitHub.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		if role := modelOperationRole(op); role != "" && !s.admitRole(role) {
+			return true
+		}
+		if gitOperation(op) {
+			switch op.Action {
+			case LandAction, RebaseAction, PublishAction, publishUpstreamAction:
+				if errors.Is(s.held(repository, stream), errPaused) {
+					return true
+				}
+			}
+			if joining, err := s.gitWorkgroupJoining(repository, stream); err != nil || joining {
+				return true
+			}
+			if op.Action != SealAction && op.Action != BuildAction {
+				if waiting, err := edgeWaiting(repository, stream); err != nil || waiting {
+					return true
+				}
+			}
+		}
 		if op.Action == deltaTurnAction {
 			return errors.Is(s.held(repository, stream), errPaused)
 		}

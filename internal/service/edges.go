@@ -429,85 +429,94 @@ func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) 
 	if err != nil {
 		return err
 	}
-	for _, stream := range streams {
-		if err := ctx.Err(); err != nil {
+	for _, stream := range pollOrder(ctx, edgePoll, streams, func(stream config.WorkstreamID) config.WorkstreamID { return stream }) {
+		if err := s.pollTask(ctx, repo, edgePoll, stream, func(ctx context.Context) error {
+			return s.resolveEdges(ctx, repo, stream)
+		}); err != nil {
 			return err
 		}
-		if _, archived := s.archivedWorkstream(string(stream)); archived {
-			continue
-		}
-		if session, err := isSession(repo, stream); err != nil {
-			return err
-		} else if session {
-			continue
-		}
-		edges, err := incomingMergeEdges(repo, stream)
-		if err != nil {
-			return err
-		}
-		if len(edges) == 0 {
-			continue
-		}
-		observed, revision, at, err := edgeObservationAt(repo, stream)
-		if err != nil {
-			return err
-		}
-		commitsKnown := !slices.ContainsFunc(observed.Edges, func(edge edgeMergeStatus) bool {
-			return edge.Type == trace.EdgeMergeOrder && edge.Merged && edge.Commit == ""
-		})
-		if revision > 0 && allEdgesResolved(observed, edges) && commitsKnown {
-			if err := s.edgeUpdatePass(ctx, repo, stream); err != nil {
-				return err
-			}
-			continue
-		}
-		request, pending, err := edgePollRequest(repo, stream)
-		if err != nil {
-			return err
-		}
-		attempt, attempted := s.polls.last(repo.Project(), stream, edgePoll)
-		if attempted && attempt.at.After(at) {
-			at = attempt.at
-		}
-		requested := pending && (!attempted || attempt.request != request)
-		now := s.now()
-		if !requested && !at.IsZero() && now.Sub(at) < s.about(repo).Project.PullRequestPollInterval() {
-			continue
-		}
-		// Attempt timing supplies no merge evidence, even if the lookup fails.
-		s.polls.record(repo.Project(), stream, edgePoll, pullRequestAttempt{at: now, request: request})
-		var next edgeObservation
-		for _, e := range edges {
-			prior := slices.IndexFunc(observed.Edges, func(status edgeMergeStatus) bool { return status.Upstream == e.From && status.Type == e.Type })
-			if prior >= 0 && observed.Edges[prior].Merged && (e.Type != trace.EdgeMergeOrder || observed.Edges[prior].Commit != "") {
-				next.Edges = append(next.Edges, observed.Edges[prior])
-				continue
-			}
-			status, err := s.upstreamMergeStatus(ctx, repo, e)
-			if err != nil {
-				return err
-			}
-			if status.Merged {
-				if err := s.step("edge-merge-observed"); err != nil {
-					return err
-				}
-			}
-			if prior >= 0 {
-				status.Merged = status.Merged || observed.Edges[prior].Merged
-			}
-			next.Edges = append(next.Edges, status)
-		}
-		data, err := json.Marshal(next)
-		if err != nil {
-			return err
-		}
-		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: edgeObservationDocument, Revision: revision + 1, Project: repo.Project(), Workstream: stream, At: s.now(), Actor: foremanActor, Cause: "edge-refresh"}
-		if err := repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: edgeObservationPath, Content: string(data)}}); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+func (s *Service) resolveEdges(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, archived := s.archivedWorkstream(string(stream)); archived {
+		return nil
+	}
+	if session, err := isSession(repo, stream); err != nil {
+		return err
+	} else if session {
+		return nil
+	}
+	edges, err := incomingMergeEdges(repo, stream)
+	if err != nil {
+		return err
+	}
+	if len(edges) == 0 {
+		return nil
+	}
+	observed, revision, at, err := edgeObservationAt(repo, stream)
+	if err != nil {
+		return err
+	}
+	commitsKnown := !slices.ContainsFunc(observed.Edges, func(edge edgeMergeStatus) bool {
+		return edge.Type == trace.EdgeMergeOrder && edge.Merged && edge.Commit == ""
+	})
+	if revision > 0 && allEdgesResolved(observed, edges) && commitsKnown {
 		if err := s.edgeUpdatePass(ctx, repo, stream); err != nil {
 			return err
 		}
+		return nil
+	}
+	request, pending, err := edgePollRequest(repo, stream)
+	if err != nil {
+		return err
+	}
+	attempt, attempted := s.polls.last(repo.Project(), stream, edgePoll)
+	if attempted && attempt.at.After(at) {
+		at = attempt.at
+	}
+	requested := pending && (!attempted || attempt.request != request)
+	now := s.now()
+	if !requested && !at.IsZero() && now.Sub(at) < s.about(repo).Project.PullRequestPollInterval() {
+		return nil
+	}
+	// Attempt timing supplies no merge evidence, even if the lookup fails.
+	s.polls.record(repo.Project(), stream, edgePoll, pullRequestAttempt{at: now, request: request})
+	var next edgeObservation
+	for _, e := range edges {
+		prior := slices.IndexFunc(observed.Edges, func(status edgeMergeStatus) bool { return status.Upstream == e.From && status.Type == e.Type })
+		if prior >= 0 && observed.Edges[prior].Merged && (e.Type != trace.EdgeMergeOrder || observed.Edges[prior].Commit != "") {
+			next.Edges = append(next.Edges, observed.Edges[prior])
+			continue
+		}
+		status, err := s.upstreamMergeStatus(ctx, repo, e)
+		if err != nil {
+			return err
+		}
+		if status.Merged {
+			if err := s.step("edge-merge-observed"); err != nil {
+				return err
+			}
+		}
+		if prior >= 0 {
+			status.Merged = status.Merged || observed.Edges[prior].Merged
+		}
+		next.Edges = append(next.Edges, status)
+	}
+	data, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: edgeObservationDocument, Revision: revision + 1, Project: repo.Project(), Workstream: stream, At: s.now(), Actor: foremanActor, Cause: "edge-refresh"}
+	if err := repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: edgeObservationPath, Content: string(data)}}); err != nil {
+		return err
+	}
+	if err := s.edgeUpdatePass(ctx, repo, stream); err != nil {
+		return err
 	}
 	return nil
 }

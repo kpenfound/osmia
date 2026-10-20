@@ -16,30 +16,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// blockedFactoryOperation is a fake RepositoryBoundary reconciler whose Apply
-// blocks until release closes. A RepositoryBoundary operation is never in
-// concurrentOperation (service.go, concurrentOperation), so the reconcile
-// controller runs it the same way it runs a real rebase, merge, build, seal
-// or publish: synchronously inside trace.Repository.WithOperation, which
-// holds the repository's operationMu for the whole call rather than running
-// it through trace.OperationAttempt.Unlocked (internal/reconcile/
-// controller.go, Controller.reconcile; internal/trace/operations.go,
-// WithOperation). This fake stands in for any of those without needing a
-// real workspace or build. operationMu by itself does not block the reads
-// this test checks: WithOperation releases r.mu before calling fn
-// (internal/trace/operations.go, WithOperation), and the read endpoints
-// (Workstreams, Operations, Read, Threads, Statuses) never acquire
-// operationMu. What this test guards against is the repository's other
-// lock, r.mu, which every read and every write shares: before this unit's
-// fix, every call that needed it, including the handful of bookkeeping
-// writes WithOperation itself makes around a blocked effect (claim,
-// observe, effect-start), re-walked and re-validated the whole committed
-// trace against Git while holding it (internal/trace/git.go, checkHistory;
-// internal/trace/repository.go, scanTrace), so reads queued behind whatever
-// write currently held it, worse the larger the trace. Repository.Generation
-// and the generation-cached scan and history (internal/trace/repository.go)
-// let a read reuse the last scan when nothing has changed instead of paying
-// that cost again.
+// blockedFactoryOperation holds a repository effect until release closes.
+// Its unreserved action runs inline so read endpoints can be exercised while
+// the scheduling pass is occupied. Reads use the trace's short bookkeeping
+// lock and generation cache; they must not wait for the effect to finish.
 type blockedFactoryOperation struct {
 	started chan struct{}
 	release chan struct{}
@@ -520,29 +500,13 @@ const secondStream = config.WorkstreamID("w_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1")
 // workstream is accepted or refused without waiting for factory work in
 // progress on a different workstream of the same project, even when that
 // work is a RepositoryBoundary operation such as a rebase, merge, build,
-// seal or publish, which concurrentOperation (service.go) does not mark
-// concurrent and which the reconcile controller therefore runs synchronously
-// inside trace.Repository.WithOperation rather than through
-// trace.OperationAttempt.Unlocked (internal/reconcile/controller.go,
-// Controller.reconcile).
+// seal or publish. Repository workflow effects run beside the scheduling
+// pass under their own workstream's ordering.
 //
-// trace.Repository.operationMu, the lock WithOperation holds for the whole
-// call, is already scoped to this isolation: WithOperation and the
-// bookkeeping writes attempt.Record makes around the blocked effect (claim,
-// observe, effect-start) take r.mu only briefly and release it before
-// Apply runs (internal/trace/operations.go, WithOperation and Record), so
-// Apply holds operationMu but never r.mu. An owner action's write - here
-// Abandon, through SetFeatureStateUnless and CancelTurns - takes only r.mu
-// (internal/trace/notice.go, internal/trace/threads.go) and never calls
-// WithOperation or Serialize itself, so it never contends for operationMu.
-// The only thing that does take operationMu beside WithOperation is
-// Serialize, which the controller uses to run the scheduling hooks of every
-// workstream at the start of a pass, before any operation's effect runs; it
-// is not held during Apply. So the read fix of plan#api-busy-reads, which
-// made reads (and, by the same mechanism, writes) stop paying for a full
-// re-scan while r.mu is briefly held, already gives this isolation: no lock
-// was narrowed or scoped further for this unit. This test is the evidence,
-// not a change to production code.
+// The workflow attempt reserves its own workstream, and its claim and result
+// writes take only the brief trace bookkeeping lock. An owner action on
+// another workstream takes that workstream's bookkeeping lock and never waits
+// for this workflow effect.
 func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testing.T) {
 	t.Parallel()
 	blocking := newBlockedFactoryOperation()

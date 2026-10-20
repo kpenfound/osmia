@@ -737,11 +737,11 @@ func TestRebaseReportsConflictsAndMarkersFindsThem(t *testing.T) {
 // replayLeftovers fails the test when Replay left its temporary worktree.
 func (f fixture) replayLeftovers(t *testing.T) {
 	t.Helper()
-	if list := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Contains(list, replayName) {
+	if list := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Contains(list, ".replay-") {
 		t.Fatalf("the replay worktree is still listed:\n%s", list)
 	}
-	if _, err := os.Lstat(filepath.Join(f.provider.Directory, replayName)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the replay worktree's directory: %v", err)
+	if paths, err := filepath.Glob(filepath.Join(f.provider.Directory, ".replay*")); err != nil || len(paths) != 0 {
+		t.Fatalf("the replay left scratch directories %v: %v", paths, err)
 	}
 }
 

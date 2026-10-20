@@ -58,7 +58,7 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	p.awaitText("#design-feed details", assumption)
 	p.click("#design-feed summary")
 	p.eval(`window.designEntry = document.querySelector('#design-feed > ol > li')`, nil)
-	p.click(`[data-select="` + string(id) + `"]`)
+	p.selectDesign(id)
 	p.await("the unchanged feed keeps its nodes and expanded assumptions", `document.querySelector('#design-feed > ol > li') === window.designEntry && document.querySelector('#design-feed details').open`)
 
 	other, err := c.OpenDesign(ctx, project)
@@ -78,7 +78,7 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 		case "session":
 			p.selectSession(session.Session.Workstream)
 		case "design":
-			p.click(`[data-select="` + string(other.Design.Workstream) + `"]`)
+			p.selectDesign(other.Design.Workstream)
 			p.awaitText("#design-feed", otherMessage)
 			assertFeedExcludes(t, p, "#design-feed", message)
 		case "project":
@@ -95,7 +95,7 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 		if target == "project" {
 			p.click(`[data-drilldown="` + string(id) + `"]`)
 		} else {
-			p.click(`[data-select="` + string(id) + `"]`)
+			p.selectDesign(id)
 		}
 		p.await("the design view on return", `!document.querySelector('[data-view="design"]').hidden`)
 		p.awaitText("#design-feed", message)
@@ -116,7 +116,7 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	conversation := awaitDesignConversation(t, c, id, func(r ConversationResponse) bool {
 		return len(r.Entries) == 4 && r.Entries[3].State == TurnDone
 	})
-	p.click(`[data-select="` + string(id) + `"]`)
+	p.selectDesign(id)
 	p.await("the design view on return", `!document.querySelector('[data-view="design"]').hidden`)
 	p.awaitText("#design-feed", message)
 	p.awaitText("#design-feed", whileAway)

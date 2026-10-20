@@ -374,6 +374,10 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 			})
 			stream := f.seedBuilding(t, "review-question", independentPlan)
 			f.awaitUnit(t, stream, "resume", UnitWaiting)
+			// Waiting records the question before the asking turn finishes.
+			// This restart keeps a parked thread whose turn has settled.
+			asking := f.thread(t, stream, reviewerAgent("resume")).Turns[0]
+			f.awaitCompleted(t, stream, reviewerAgent("resume"), asking.Request.TurnID)
 			docs, err := trace.Read[trace.Document](f.repository(), stream)
 			must(t, err)
 			var before UnitReviewIdentity

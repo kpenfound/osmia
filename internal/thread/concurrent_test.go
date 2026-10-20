@@ -239,10 +239,9 @@ func TestInterruptedConcurrentTurnsCompleteOnce(t *testing.T) {
 	}
 }
 
-// A turn's result is captured and completed serialized with reconciliation:
-// a schedule hook that runs as the session ends sees the turn unfinished
-// throughout, and the turn completes once the hook returns.
-func TestTurnCompletesBetweenSchedules(t *testing.T) {
+// A turn captures and completes its result, and its operation records and
+// acknowledges that result, while a scheduling hook remains held.
+func TestTurnCompletesWhileScheduleHeld(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
 	dispatch(t, repo, map[string]string{"agent": "first"})
@@ -255,39 +254,46 @@ func TestTurnCompletesBetweenSchedules(t *testing.T) {
 		}
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "s"}, FinalResponse: "done"}, nil
 	})
-	completed := func() bool {
-		th, err := repo.Thread(stream, "agent")
-		if err != nil {
-			t.Fatal(err)
-		}
-		return !th.Turns[0].CompletedAt.IsZero()
-	}
 	var armed atomic.Bool
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseSchedule := sync.OnceFunc(func() { close(release) })
+	defer releaseSchedule()
 	c := controllerWith(t, repo, &testClock{at: timestamp.Add(time.Second)}, turns, func(context.Context) error {
-		if !armed.Load() {
-			return nil
-		}
-		close(finish)
-		for deadline := time.Now().Add(500 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			if completed() {
-				return errors.New("the turn completed while a schedule hook ran")
-			}
+		if armed.Load() {
+			close(entered)
+			<-release
 		}
 		return nil
 	})
-	ctx := context.Background()
-	if err := c.Pass(ctx); err != nil {
+	if err := c.Pass(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	armed.Store(true)
-	if err := c.Pass(ctx); err != nil {
-		t.Fatal(err)
+	passed := make(chan error, 1)
+	go func() { passed <- c.Pass(context.Background()) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("schedule never started")
 	}
-	armed.Store(false)
+	close(finish)
+	deadline := time.After(10 * time.Second)
+	for acknowledged(t, repo)["agent"] != "idle" {
+		select {
+		case <-deadline:
+			t.Fatal("turn did not record its result while schedule was held")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	if err := c.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if !completed() {
-		t.Fatal("the turn never completed")
+	th, err := repo.Thread(stream, "agent")
+	if err != nil || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Response == nil {
+		t.Fatalf("turn did not complete: %+v %v", th, err)
+	}
+	releaseSchedule()
+	if err := <-passed; err != nil {
+		t.Fatal(err)
 	}
 }

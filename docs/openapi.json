@@ -4291,6 +4291,9 @@
       },
       "ConfigProjectCapacity": {
         "properties": {
+          "git_operations": {
+            "type": "integer"
+          },
           "per_workstream": {
             "type": "integer"
           }
@@ -4442,6 +4445,9 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "queued_reason": {
             "type": "string"
           },
           "state": {
@@ -5081,6 +5087,9 @@
             "$ref": "#/components/schemas/FeedFinalReview"
           },
           "kind": {
+            "type": "string"
+          },
+          "queued_reason": {
             "type": "string"
           },
           "session": {

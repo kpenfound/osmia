@@ -357,13 +357,28 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 		}
 		return false, true, m.block(ctx, b.stream, unit, turn.Response.ID, fmt.Sprintf("unit %s stays implementing: its mason reported done, and its candidate cannot be made: %v", unit, err))
 	}
-	conflicted, _, err := m.conflicts(b.stream, unit)
+	conflicted, rebase, err := m.conflicts(b.stream, unit)
 	if err != nil {
 		return false, false, err
 	}
 	g, err := units.of(b.stream)
 	if err != nil {
 		return false, false, err
+	}
+	if len(conflicted) != 0 {
+		th, err := m.repository.Thread(b.stream, masonAgent(unit))
+		if err != nil {
+			return false, false, err
+		}
+		resolution := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool {
+			return q.Request.TurnID == resolveTurnID(unit, rebase.Rebase)
+		})
+		// A rebase may finish between scheduling hooks. Its conflicts are
+		// new work, so a done response from before the resolution was queued
+		// cannot count as an attempt to resolve them.
+		if resolution < 0 || turn.Sequence < th.Turns[resolution].Sequence {
+			return false, false, nil
+		}
 	}
 	stored, err := g.StoredConflicts(ctx, candidate)
 	if err != nil {

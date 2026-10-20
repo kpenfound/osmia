@@ -444,7 +444,7 @@ func TestConversationListsInterruptedTurnAsFailed(t *testing.T) {
 	must(t, err)
 	want := []ConversationEntry{
 		{Turn: sent.Turn, Kind: "message", Text: "Plan the upload work", At: sent.At, State: TurnFailed},
-		{Turn: queued.Turn, Kind: "message", Text: "And the docs", At: queued.At, State: TurnQueued},
+		{Turn: queued.Turn, Kind: "message", Text: "And the docs", At: queued.At, State: TurnQueued, QueuedReason: "starting"},
 	}
 	if !reflect.DeepEqual(list.Entries, want) {
 		t.Fatalf("listing after restart:\n%+v\nwant:\n%+v", list.Entries, want)

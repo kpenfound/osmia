@@ -59,9 +59,8 @@ func (p *page) selectSession(id config.WorkstreamID) {
 	if collapsed {
 		p.click("#picker-toggle")
 	}
-	p.click(row)
-	p.await("the session "+string(id)+" shown", `!document.querySelector('.view[data-view="session"]').hidden &&
-		document.getElementById('session-meta').textContent.includes(`+quote(string(id))+`)`)
+	p.run(selectSidebarRow(row, `!document.querySelector('.view[data-view="session"]').hidden &&
+		document.getElementById('session-meta').textContent.includes(`+quote(string(id))+`)`))
 }
 
 // The "New session" form opens a session on a chosen project and profile; it

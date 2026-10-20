@@ -42,14 +42,11 @@ var ErrLocked = errors.New("trace repository already open")
 // only ever on the project's own brief bookkeeping and that workstream's own.
 type Repository struct {
 	mu sync.Mutex
-	// operationMu is shared by the project instance and every workstream
-	// instance it opens, so Serialize and Close on the project instance
-	// exclude every workstream's WithOperation callback (and vice versa),
-	// matching base's single-Repository-per-project semantics now that a
-	// workstream's operations live in its own instance.
-	operationMu *sync.Mutex
-	// attempts holds the operations an open WithOperation attempt claimed, by event.
+	// Active attempts are admitted under mu and joined before files close.
 	attempts map[string]bool
+	active   sync.WaitGroup
+	closing  bool
+	workflow bool
 	// members retains fixed member identities and references to project-owned
 	// handles. Lifecycle evidence is checked before resolving a member, so an
 	// open shared handle never pins a deleted workstream handle as live.
@@ -108,6 +105,9 @@ type Repository struct {
 	// Close has begun. Unused on a workstream instance.
 	workstreamsMu sync.Mutex
 	workstreams   map[config.WorkstreamID]*Repository
+	// snapshotMu excludes trace deletion while a short discovery snapshot is
+	// assembled. Scheduling, operation admission and results never take it.
+	snapshotMu sync.RWMutex
 	// closed is set under workstreamsMu once Close has begun, so a scoped
 	// call racing it never opens a child Close could miss.
 	closed bool
@@ -171,7 +171,7 @@ func openStoreDirectory(root config.Root, project config.ProjectID, stream confi
 	if !info.IsDir() {
 		return nil, fmt.Errorf("%s: trace must be a directory", directory)
 	}
-	return &Repository{root: root, project: project, stream: stream, directory: directory, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}, nil
+	return &Repository{root: root, project: project, stream: stream, directory: directory, session: rand.Text(), wake: coreadapter.NewWakeups()}, nil
 }
 
 // scoped returns the Repository instance that owns the files of the given
@@ -187,10 +187,7 @@ func openStoreDirectory(root config.Root, project config.ProjectID, stream confi
 // later use of the same id reuses the open instance without taking r's lock
 // again. It refuses once r's Close has begun, so it never opens a child that
 // Close could miss and leave with its flock held past this process's
-// lifetime, and its own failure path never takes operationMu, so a
-// first-time open that fails while this goroutine already holds it, for
-// example inside Serialize's schedule hook or another workstream's
-// WithOperation callback, returns an error instead of deadlocking.
+// lifetime.
 //
 // On a cross-repo workgroup's own trace instance, id naming one of its
 // real members (a key of r.members) returns that member's own, already
@@ -244,16 +241,10 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	// not only the project's own.
 	s.wake = r.wake
 	s.parent = r
-	// Share the project instance's operation lock: Serialize and Close on the
-	// project instance must exclude this workstream's WithOperation callback
-	// just as they did when every workstream shared one Repository.
-	s.operationMu = r.operationMu
 	ok := false
 	defer func() {
 		if !ok {
-			// closeFiles alone: s was never added to r.workstreams, so Close
-			// has nothing of its own to join, and taking operationMu here
-			// could deadlock against a caller that already holds it.
+			// The instance was never published and has no attempts to join.
 			s.closeFiles()
 		}
 	}()
@@ -467,18 +458,16 @@ func (r *Repository) Close() error {
 	for _, s := range children {
 		errs = append(errs, s.Close())
 	}
-	r.operationMu.Lock()
-	defer r.operationMu.Unlock()
+	r.mu.Lock()
+	r.closing = true
+	r.mu.Unlock()
+	r.active.Wait()
 	errs = append(errs, r.closeFiles())
 	return errors.Join(errs...)
 }
 
-// closeFiles releases this instance's own flock and database,
-// without operationMu: scoped's failure path uses it to release a
-// workstream instance it opened but could not finish opening, which may run
-// inside a callback that already holds operationMu, such as Serialize's
-// schedule hook or another workstream's WithOperation callback, where
-// taking it again would deadlock.
+// closeFiles releases this instance's flock and database after attempts join,
+// or on the failure path of an instance that has not been published.
 func (r *Repository) closeFiles() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1011,6 +1000,16 @@ func (r *Repository) CreateSessionWorkstream(ctx context.Context, id config.Work
 // the project's trace, which is authoritative for their existence.
 func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
 	return r.diskStreams()
+}
+
+// WithWorkstreamSnapshot protects a short scan of workstreams and their trace
+// records against trace deletion. The callback only reads bookkeeping state;
+// it must not delete traces or run scheduling, model, Git or network work.
+// Operation claims and result writes proceed independently of this guard.
+func (r *Repository) WithWorkstreamSnapshot(fn func() error) error {
+	r.snapshotMu.RLock()
+	defer r.snapshotMu.RUnlock()
+	return fn()
 }
 
 // Generation reports how many commits landed in the trace through this

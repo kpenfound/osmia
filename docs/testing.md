@@ -44,6 +44,20 @@ allowed; they do not execute tests.
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
 
+`internal/service/scheduling_path_test.go` starts the service with real
+controllers over seeded approved units and local repositories. Gates hold a
+landing and a scheduling step while all three conversation APIs complete,
+hold a landing and a draft while another workstream merges, and establish
+simultaneous landings and simultaneous masons within one workstream. Restart
+cases pin seal, build, landing, rebase, drift and publication effects, including
+completed work on a shared jj clone surviving another operation's interruption.
+The jj fixture kills a child service while its clone checkpoint is open, then
+restarts through `Start` and verifies the completed operation was not replayed.
+`conversation_path_test.go` covers captured replies and completion-hook effects;
+`model_operations_test.go` and `architect_test.go` cover model workflow recovery;
+`network_polls_test.go` covers interrupted polling and exactly one durable
+observation. These gates establish the interleavings without sleep-based timing.
+
 Code that asks Jev judgments tests with
 agentcore's `jev/jevtest.Provider`, which returns scripted answers
 or `systemone` errors and can block until a request is cancelled. Cover the

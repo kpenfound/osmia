@@ -16,8 +16,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// capacityStatus reports the slots of the mason, reviewer and committee role
-// kinds as the projects' schedulers last published them to the shared pool,
+// capacityStatus reports role slots from published scheduler counts and
+// workflow reservations in the shared pool,
 // with the queued turns their last passes found no free slot for, and, for
 // masons, the ready units of list whose latest mason controller decision is
 // to wait for a slot. It reads no trace. The role slots are shared by every
@@ -36,6 +36,8 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		{Role: masonRole, Limit: limits.Masons, Waiting: []SlotWait{}},
 		{Role: reviewerRole, Limit: limits.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: limits.Committee, Waiting: []SlotWait{}},
+		{Role: architectRole, Waiting: []SlotWait{}},
+		{Role: librarianRole, Waiting: []SlotWait{}},
 	}}
 	slots := s.pool.Slots(cfg.ProjectIDs())
 	state, _ := s.effective()

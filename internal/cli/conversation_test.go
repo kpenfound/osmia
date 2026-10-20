@@ -82,12 +82,14 @@ func TestSendAndConversation(t *testing.T) {
 	var list service.ConversationResponse
 	deadline := time.Now().Add(5 * time.Minute)
 	for {
-		must(t, json.Unmarshal([]byte(successful(t, root, "conversation", stream, "--json")), &list))
-		if len(list.Entries) == 2 {
+		var current service.ConversationResponse
+		must(t, json.Unmarshal([]byte(successful(t, root, "conversation", stream, "--json")), &current))
+		if len(current.Entries) == 2 {
+			list = current
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no response: %+v", list)
+			t.Fatalf("no response: %+v", current)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

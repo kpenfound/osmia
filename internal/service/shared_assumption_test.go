@@ -30,7 +30,9 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 	f.engine.mu.Lock()
 	fallback := f.engine.turns["*"]
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.Prompt, marker) {
+		// Background turns replay history containing the owner's marker.
+		// Only the requested owner turn makes these new judgment calls.
+		if !strings.HasPrefix(req.Name, "message_") || !strings.HasSuffix(strings.TrimSpace(req.Prompt), marker) {
 			return fallback(ctx, req, verified, tools)
 		}
 		// Multiple judgments in the same real shared chief turn must each survive,

@@ -45,7 +45,8 @@ func sessionThreadBusy(repository *trace.Repository, stream config.WorkstreamID)
 	if err != nil {
 		return false, err
 	}
-	return unfinishedSessionTurn(th), nil
+	state, err := repository.Workflow(stream, trace.SessionSubject)
+	return unfinishedSessionTurn(th) || state.Value == trace.SessionWorking, err
 }
 
 // sessionChanges reads a session's uncommitted worktree changes relative to

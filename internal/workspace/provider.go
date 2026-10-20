@@ -70,6 +70,9 @@ type Provider interface {
 	Push(ctx context.Context, remote, commit, branch, expected string) error
 
 	// Restoring the backend's own state after an interrupted operation.
+	// Jujutsu Checkpoint requires the ownership context supplied by LocalStep;
+	// callers use LocalStep to keep checkpoint, commands and settlement in one
+	// clone lock hold. Recover runs at startup before operations are dispatched.
 	Checkpoint(ctx context.Context, operation string, at time.Time) error
 	Settle(ctx context.Context, operation string) error
 	Recover(ctx context.Context) ([]string, error)

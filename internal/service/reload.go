@@ -11,20 +11,22 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// scheduleHook is one step of the schedule a pass runs before it reconciles
-// operations.
+// scheduleHook is a named controller step. Stages separate scheduling hooks
+// from the observers that run beside the reconciliation pass.
 type scheduleHook struct {
 	name string
 	pass func(context.Context) error
 }
 
-// stages is the reconciliation built from one loaded configuration: the
-// schedule hooks every pass runs and the adapters that reconcile operations.
+// stages holds one loaded configuration's scheduling hooks, background
+// observers and operation adapters.
 type stages struct {
 	cfg        *config.Config
 	hooks      []scheduleHook
+	polls      []scheduleHook
 	runner     runnerAdapter
 	repository repositoryAdapter
 }
@@ -35,6 +37,10 @@ type stages struct {
 // stages it started with.
 type pipeline struct {
 	current, next atomic.Pointer[stages]
+	slowThreshold time.Duration
+	before        func(string) error
+	// Conversations adopt reloads without waiting for a scheduling pass.
+	conversation atomic.Pointer[stages]
 }
 
 func (p *pipeline) schedule(ctx context.Context) error {
@@ -43,7 +49,22 @@ func (p *pipeline) schedule(ctx context.Context) error {
 	}
 	current := p.current.Load()
 	for _, hook := range current.hooks {
-		if err := hook.pass(ctx); err != nil {
+		started := time.Now()
+		var err error
+		if p.before != nil {
+			err = p.before("schedule:" + hook.name)
+		}
+		if err == nil {
+			err = hook.pass(ctx)
+		}
+		threshold := p.slowThreshold
+		if threshold <= 0 {
+			threshold = trace.SlowThreshold
+		}
+		if duration := time.Since(started); duration >= threshold {
+			ghlog.Logger(ctx).Warn("scheduling step exceeded threshold", "project", string(current.cfg.Project.ID), "step", hook.name, "duration", duration.String())
+		}
+		if err != nil {
 			ghlog.Logger(ctx).Error("reconciliation pass hook failed", "project", string(current.cfg.Project.ID), "hook", hook.name, "error", err.Error())
 			return fmt.Errorf("%s pass: %w", hook.name, err)
 		}
@@ -143,10 +164,15 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
+		p.pipeline.conversation.Store(stage)
 	}
 	for _, p := range removed {
 		s.log().Info("project draining", "project", string(p.id), "reason", "reload")
 		p.controller.Drain()
+		p.conversations.Drain()
+		if p.pollCancel != nil {
+			p.pollCancel()
+		}
 	}
 	for _, p := range added {
 		s.launch(p)

@@ -166,7 +166,7 @@ func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 	if next := p.next.Swap(nil); next != nil {
 		p.current.Store(next)
 	}
-	for _, hook := range p.current.Load().hooks {
+	for _, hook := range p.current.Load().polls {
 		if hook.name == "base-refresh" || hook.name == "edge-refresh" {
 			must(t, hook.pass(context.Background()))
 		}
@@ -412,7 +412,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 				if next := pipeline.next.Swap(nil); next != nil {
 					pipeline.current.Store(next)
 				}
-				for _, hook := range pipeline.current.Load().hooks {
+				for _, hook := range pipeline.current.Load().polls {
 					if hook.name == "edge-refresh" {
 						err := hook.pass(ctx)
 						if wantError {

@@ -137,6 +137,22 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
+			t.Logf("workstream %s question records: %+v", asking, asked)
+			chief, chiefErr := f.repository().ChiefOfStaffThread(asking)
+			t.Logf("chief_of_staff thread: %+v (error: %v)", chief, chiefErr)
+			for _, turn := range chief.Turns {
+				state := turn.Status()
+				if turn.Claim == nil && turn.Response == nil && turn.CompletedAt.IsZero() {
+					state = "queued"
+				}
+				t.Logf("chief_of_staff turn %s state=%s: %+v", turn.Request.TurnID, state, turn)
+			}
+			outbox, outboxErr := f.repository().Outbox(asking)
+			pending := slices.DeleteFunc(outbox, func(e trace.OutboxEntry) bool { return e.Acknowledged })
+			t.Logf("workstream %s pending notices and events: %+v (error: %v)", asking, pending, outboxErr)
+			p.mu.Lock()
+			t.Logf("fake faults: %v", p.errs)
+			p.mu.Unlock()
 			t.Fatalf("question 1 was never escalated: %+v", asked)
 		}
 		time.Sleep(50 * time.Millisecond)

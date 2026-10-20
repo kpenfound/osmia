@@ -400,8 +400,7 @@ func (s *Service) advanceChanges(ctx context.Context, wt *trace.Repository, g tr
 		return nil
 	}
 	lock := s.groupApprovalLock(g.ID)
-	// Schedule hooks already hold the operation lock; never wait for an
-	// owner action while acquiring group coordination.
+	// A busy group remains pending without waiting for an owner action.
 	if !lock.TryLock() {
 		return nil
 	}
@@ -490,6 +489,9 @@ func (s *Service) advanceChanges(ctx context.Context, wt *trace.Repository, g tr
 				return err
 			}
 		case "approved", "applying", "releasing":
+			if err := s.step("change-before-application-lock"); err != nil {
+				return err
+			}
 			if err := s.applyChange(ctx, wt, g, &c); err != nil {
 				if !errors.Is(err, trace.ErrMemberRetired) {
 					return err

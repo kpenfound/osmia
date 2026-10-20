@@ -40,7 +40,7 @@ const (
 // against whatever repository Options.Threads is called with: either
 // project's own, for an unrelated workstream's ordinary chief, or the
 // cross-repo workgroup's own trace, for the shared chief
-// workgroupChiefDispatchPass resolves to.
+// the conversation path resolves to.
 type crossRepoInboxFixture struct {
 	cfg                Options
 	clock              *fixedClock

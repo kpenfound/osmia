@@ -119,6 +119,9 @@ func (c *chief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 	for _, m := range ownerRuled.FindAllStringSubmatch(req.Prompt, -1) {
 		c.choose(ctx, tools, questions.RelayRulingTool, map[string]any{"question": strings.Split(m[1], ", ")[0], "text": relayedRuling, "scope": "local"})
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return questionResult(req, "session-chief", "Chosen"), nil
 }
 
@@ -372,17 +375,6 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		}
 		return concedes(p, first, second)(ctx, req, nil, tools)
 	})
-	var viewTurns sync.Map
-	f.engine.mu.Lock()
-	for name, run := range f.engine.turns {
-		f.engine.turns[name] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			if req.Grants != nil && len(req.Grants.Mounts) > 0 {
-				viewTurns.Store(filepath.Base(req.Grants.Mounts[0].Path), req.Name)
-			}
-			return run(ctx, req, verified, tools)
-		}
-	}
-	f.engine.mu.Unlock()
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	p.check(t)
@@ -510,24 +502,6 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		t.Fatal("the answer turn's staged workspace is retained")
 	}
 	if entries, err := os.ReadDir(filepath.Join(root, "views")); err != nil || len(entries) != 0 {
-		threads, readErr := f.repository().Threads(stream)
-		t.Logf("view owner threads: %v", readErr)
-		for _, entry := range entries[:min(len(entries), 8)] {
-			owner, known := viewTurns.Load(entry.Name())
-			t.Logf("view=%s owner=%v known=%v", entry.Name(), owner, known)
-			for _, th := range threads[:min(len(threads), 8)] {
-				for _, q := range th.Turns {
-					if q.Request.TurnID != owner {
-						continue
-					}
-					var started time.Time
-					if q.Claim != nil {
-						started = q.Claim.At
-					}
-					t.Logf("view=%s thread=%s turn=%s status=%s queued=%s started=%s completed=%s", entry.Name(), th.Identity.ThreadID, q.Request.TurnID, q.Status(), q.Request.At, started, q.CompletedAt)
-				}
-			}
-		}
 		t.Fatalf("views leaked: %v %v", entries, err)
 	}
 }
@@ -979,35 +953,35 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &faults{}
-	// Thread turns run in the pass rather than beside it, so the pass that
-	// would deliver the answer starts only once the chief of staff's turn
-	// that recorded it has ended. Forcing that on every thread turn reaches
-	// as far as the chief of staff's own review of the question, which the
-	// repository's one operation lock then serializes with the round's own
-	// commit of its park: held back until the round has parked, the review
-	// cannot hold that lock first and starve the park of it.
+	// Keep the chief's review queued until the round's park is durable.
 	var chiefReviewHeld atomic.Bool
 	chiefReviewHeld.Store(true)
 	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
-		opts.Reconciliation.Concurrent = func(op coreadapter.Operation) bool {
-			return concurrentOperation(op) && op.Action != thread.TurnAction
-		}
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action == thread.TurnAction && chiefReviewHeld.Load()
 		}
 	})
 	defer f.stop(t)
+	// Conversation turns record answers independently of scheduling. Hold
+	// automatic delivery so abandonment happens after the answer is recorded
+	// and before the explicit delivery and debate passes below.
+	stage := *f.s.sole().pipeline.current.Load()
+	stage.hooks = slices.Clone(stage.hooks)
+	for i := range stage.hooks {
+		if stage.hooks[i].name == "answers" {
+			stage.hooks[i].pass = func(context.Context) error { return nil }
+		}
+	}
+	f.s.sole().pipeline.next.Store(&stage)
 	hold := c.hold("1")
 	member := committeeAgent(1)
 	f.member(1, 1, 1, asks(p, "1"))
 	answering := f.answer("1", silent)
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
-	// The round's park is committed: the chief of staff's review of the now
-	// open question can run without racing it for the operation lock.
+	// The chief can now answer the parked round's question.
 	chiefReviewHeld.Store(false)
-	// The answer is recorded while the chief of staff's turn is held open,
-	// so no pass delivers it before the abandonment.
+	// The chief stays in flight while the owner abandons the workstream.
 	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
 	if _, err := f.c.Abandon(ctx, stream, "Superseded."); err != nil {
 		t.Fatal(err)

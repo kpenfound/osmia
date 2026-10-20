@@ -43,33 +43,29 @@ func (w streamWorkspaces) of(stream config.WorkstreamID) (workspace.Provider, er
 	return workspaces(w.cfg, w.directory, backend), nil
 }
 
-// checkpointed runs one attempt of a multi-step version control operation
-// between a checkpoint of each provider's state, taken before the attempt
-// changes anything and stamped at, and its settling once the attempt
-// returns. An attempt cut short by the service stopping, whose context is
-// done, leaves its checkpoints: the next service restores each as it starts,
-// and the operation's retry reconciles what the attempt did to the clone.
-func checkpointed(ctx context.Context, operation string, at time.Time, providers []workspace.Provider, attempt func() (coreadapter.OperationResult, error)) (coreadapter.OperationResult, error) {
-	settle := func(providers []workspace.Provider) error {
-		var err error
-		for _, g := range providers {
-			err = errors.Join(err, g.Settle(ctx, operation))
-		}
-		return err
-	}
-	for i, g := range providers {
-		if err := g.Checkpoint(ctx, operation, at); err != nil {
-			return coreadapter.OperationResult{}, errors.Join(err, settle(providers[:i]))
-		}
-	}
-	result, err := attempt()
-	if ctx.Err() != nil {
-		return result, err
-	}
-	if settleErr := settle(providers); settleErr != nil {
-		return coreadapter.OperationResult{}, errors.Join(err, settleErr)
-	}
+// checkpointed runs one local step and its durable progress write. External
+// calls belong before or after this span, using the original context. The
+// callback uses the supplied context to share the clone lock with workspace
+// methods. An interrupted step is recovered before another step can run.
+func checkpointed(ctx context.Context, operation string, at time.Time, providers []workspace.Provider, step func(context.Context) (coreadapter.OperationResult, error)) (result coreadapter.OperationResult, err error) {
+	err = workspace.LocalStep(ctx, operation, at, providers, func(local context.Context) error {
+		var stepErr error
+		result, stepErr = step(local)
+		return stepErr
+	})
 	return result, err
+}
+
+// captureFiles copies a durable view back and snapshots its files under the
+// same local lock. An interrupted copy is retried from that surviving view.
+func captureFiles(ctx context.Context, g workspace.Provider, source, path string) error {
+	return workspace.LocalStep(ctx, "capture/"+source, time.Now().UTC(), []workspace.Provider{g}, func(local context.Context) error {
+		if err := mirror(source, path); err != nil {
+			return err
+		}
+		_, err := g.Record(local, workspace.Worktree{Path: path})
+		return err
+	})
 }
 
 // jjCheck is a check of the installed jj: the version found, and an error

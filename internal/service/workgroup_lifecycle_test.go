@@ -48,12 +48,31 @@ func (g *lifecycleCleanupGate) release() {
 	g.releaseOnce.Do(func() { close(g.released) })
 }
 
-func (g *lifecycleCleanupGate) await(t *testing.T) {
+func (g *lifecycleCleanupGate) await(t *testing.T, fixtures ...*productionDesignFixture) {
 	t.Helper()
-	select {
-	case <-g.reached:
-	case <-time.After(demoTimeout):
-		t.Fatal("live controller did not reach eligible archive cleanup")
+	if len(fixtures) == 0 {
+		select {
+		case <-g.reached:
+		case <-time.After(demoTimeout):
+			t.Fatal("live controller did not reach eligible archive cleanup")
+		}
+		return
+	}
+	f := fixtures[0]
+	changes, closeChanges := serviceChanges(t, f.s)
+	defer closeChanges()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		select {
+		case <-g.reached:
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("live controller did not reach eligible archive cleanup")
+		}
+		lifecycleAdvanceScheduled(t, f)
+		changes()
 	}
 }
 
@@ -382,7 +401,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			must(t, err)
 			_, err = f.c.Archive(ctx, retired)
 			must(t, err)
-			cleanupGate.await(t)
+			cleanupGate.await(t, f)
 			resumed := func(repo *trace.Repository, q trace.QuestionState) bool {
 				worker, err := repo.Thread(survivor, q.Asked.AskedBy.ID)
 				must(t, err)
@@ -877,7 +896,7 @@ func TestDesignProductionLifecycleRecoversLegacyArchiveEvidence(t *testing.T) {
 	must(t, err)
 	_, err = f.c.Archive(ctx, f.stream1)
 	must(t, err)
-	cleanupGate.await(t)
+	cleanupGate.await(t, f)
 	root := f.s.current().Root
 	f.stop(t)
 	// A prior-version archive keeps owner authorization, but has no verified

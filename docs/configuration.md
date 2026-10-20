@@ -820,6 +820,7 @@ classifier = "default"              # optional; omitted by default
 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
+git_operations = 4                  # concurrent Git/GitHub operations in this project
 ```
 
 Repository references contain two nonempty owner/repository components using
@@ -829,6 +830,14 @@ Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
 published with each unit's commit or as one commit. Repo `capacity.per_workstream` is a positive integer overriding the
 global default.
+
+Repo `capacity.git_operations` is a positive integer, default 4. Seal, build,
+land, rebase, drift and publish share this per-project limit with remote polls.
+An operation waiting for capacity stays pending while the pass admits other
+eligible work. Each workstream's workflow operations run in order; different
+workstreams can land concurrently onto their own feature branches. A landing
+waits only for its own workstream's rebases and pending knowledge refresh.
+Reload applies a new limit to admission; operations already running finish.
 
 Publication requires the service host's Git `user.name`, `user.email` and
 `user.signingkey`, with repository-local overrides respected. Git's `gpg.format`

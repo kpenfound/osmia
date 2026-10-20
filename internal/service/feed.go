@@ -42,7 +42,7 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 	}
 	out := []FeedEntry{}
 	for _, e := range conversation {
-		out = append(out, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State})
+		out = append(out, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State, QueuedReason: e.QueuedReason})
 	}
 	host, err := chief.ChiefOfStaffHost(stream)
 	if err != nil {

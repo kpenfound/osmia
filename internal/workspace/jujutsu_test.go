@@ -866,8 +866,8 @@ func TestJujutsuReadsItsCommitsAsGitDoes(t *testing.T) {
 	if byGit, _, err := f.provider.Replay(ctx, commit, upstream, at); err != nil || byGit != replayed {
 		t.Fatalf("Git's replay made %s, %v; want %s", byGit, err, replayed)
 	}
-	if _, err := os.Stat(filepath.Join(j.Directory, replayName)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the replay left its worktree: %v", err)
+	if paths, err := filepath.Glob(filepath.Join(j.Directory, ".replay*")); err != nil || len(paths) != 0 {
+		t.Fatalf("the replay left scratch worktrees %v: %v", paths, err)
 	}
 	if tip, _, err := j.Branch(ctx, "osmia/w1"); err != nil || tip != commit {
 		t.Fatalf("the replay moved the feature branch to %s, %v", tip, err)

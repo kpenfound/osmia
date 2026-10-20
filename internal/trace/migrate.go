@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -427,7 +426,7 @@ func (m migration) importHead(ctx context.Context, path string, p importPlan) (*
 	if err != nil {
 		return nil, err
 	}
-	r := &Repository{project: m.project, stream: m.stream, directory: m.directory, db: write, reads: read, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}
+	r := &Repository{project: m.project, stream: m.stream, directory: m.directory, db: write, reads: read, session: rand.Text(), wake: coreadapter.NewWakeups()}
 	if err := initialize(ctx, write); err != nil {
 		r.closeDatabases()
 		return nil, err

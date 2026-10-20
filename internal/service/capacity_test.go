@@ -87,6 +87,8 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 			{Workstream: stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
 		{Role: reviewerRole, Used: 1, Limit: 1, Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: 3, Waiting: []SlotWait{}},
+		{Role: architectRole, Waiting: []SlotWait{}},
+		{Role: librarianRole, Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
@@ -160,6 +162,8 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 		{Role: masonRole, Limit: s.cfg.Capacity.Masons, Waiting: []SlotWait{}},
 		{Role: reviewerRole, Limit: s.cfg.Capacity.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: s.cfg.Capacity.Committee, Waiting: []SlotWait{}},
+		{Role: architectRole, Waiting: []SlotWait{}},
+		{Role: librarianRole, Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity without a project %+v, want %+v", got.Capacity, want)

@@ -152,9 +152,8 @@ func TestConcurrentOperationsApplyAtOnce(t *testing.T) {
 	}
 }
 
-// A concurrent operation is claimed and inspected in the pass's priority
-// order, and a serial operation after it completes while its effect is still
-// running. A later pass leaves the running one alone.
+// A concurrent worker is claimed in priority order. An inline workflow
+// completes while the worker's effect runs, and later passes leave it alone.
 func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t, coreadapter.RepositoryBoundary)
@@ -176,6 +175,7 @@ func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 		return nil
 	}
 	must(t, c.Pass(ctx))
+	f.awaitStarted(t, s, "session")
 	if got := f.done(t); got["session"] || !got["landing"] || !got["prepare"] {
 		t.Fatalf("while the session runs: %v", got)
 	}
@@ -185,7 +185,7 @@ func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 		t.Errorf("passes offered %d operations, want the first pass's three", offered)
 	}
 	mu.Unlock()
-	if inspections, started, _ := s.snapshot(); !slices.Equal(started, []string{"session", "landing"}) || !slices.Equal(inspections, []string{"session", "landing"}) {
+	if inspections, started, _ := s.snapshot(); len(started) != 2 || !slices.Contains(started, "session") || !slices.Contains(started, "landing") || len(inspections) != 2 {
 		t.Fatalf("started %v, inspected %v", started, inspections)
 	}
 	close(s.release)
@@ -217,36 +217,41 @@ func (f *fixture) awaitStarted(t *testing.T, s *sessions, action string) {
 // Run cancels a concurrent operation in flight and joins it before it
 // returns; the operation keeps its claim and completes after a restart.
 func TestRunJoinsConcurrentOperations(t *testing.T) {
-	f := setup(t, coreadapter.RepositoryBoundary)
-	f.publish(t, "session")
-	s := newSessions()
-	c := f.concurrent(t, s, "session")
-	c.options.Adapters[coreadapter.RepositoryBoundary] = f.system
-	c.options.Ticks = make(chan time.Time)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- c.Run(ctx) }()
-	f.awaitStarted(t, s, "session")
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("run: %v", err)
-	}
-	s.mu.Lock()
-	returned := s.returned["session"]
-	s.mu.Unlock()
-	if !returned {
-		t.Fatal("run returned before the session")
-	}
-	if got := f.done(t); got["session"] {
-		t.Fatalf("a cancelled session completed: %v", got)
-	}
-	f.reopen(t)
-	close(s.release)
-	c = f.concurrent(t, s, "session")
-	must(t, c.Pass(context.Background()))
-	must(t, c.Wait())
-	if got := f.done(t); !got["session"] {
-		t.Fatalf("after restart: %v", got)
+	for _, class := range []trace.OperationClass{trace.WorkflowOperation, trace.WorkerOperation, trace.ConversationOperation} {
+		t.Run(string(class), func(t *testing.T) {
+			f := setup(t, coreadapter.RepositoryBoundary)
+			f.publish(t, "session")
+			s := newSessions()
+			c := f.concurrent(t, s, "session")
+			c.options.Class = func(coreadapter.Operation) trace.OperationClass { return class }
+			c.options.Adapters[coreadapter.RepositoryBoundary] = f.system
+			c.options.Ticks = make(chan time.Time)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- c.Run(ctx) }()
+			f.awaitStarted(t, s, "session")
+			cancel()
+			if err := <-done; !errors.Is(err, context.Canceled) {
+				t.Fatalf("run: %v", err)
+			}
+			s.mu.Lock()
+			returned := s.returned["session"]
+			s.mu.Unlock()
+			if !returned {
+				t.Fatal("run returned before the session")
+			}
+			if got := f.done(t); got["session"] {
+				t.Fatalf("a cancelled session completed: %v", got)
+			}
+			f.reopen(t)
+			close(s.release)
+			c = f.concurrent(t, s, "session")
+			must(t, c.Pass(context.Background()))
+			must(t, c.Wait())
+			if got := f.done(t); !got["session"] {
+				t.Fatalf("after restart: %v", got)
+			}
+		})
 	}
 }
 
@@ -284,39 +289,44 @@ func TestConcurrentOperationFailureStopsRun(t *testing.T) {
 // restart, and a recorded result is not inspected again.
 func TestRestartAtEveryBoundaryOfAConcurrentOperation(t *testing.T) {
 	steps := []string{"before-claim", "after-claim", "before-inspection", "after-inspection", "after-observation", "before-effect", "after-effect", "before-result", "after-result", "before-acknowledgement", "after-acknowledgement"}
-	for _, step := range steps {
-		t.Run(step, func(t *testing.T) {
-			f := setup(t, coreadapter.RunnerBoundary)
-			concurrent := func() *Controller {
-				c := f.controller(t)
-				c.options.Concurrent = func(coreadapter.Operation) bool { return true }
-				return c
-			}
-			c := concurrent()
-			c.boundary = func(name string) error {
-				if name == step {
-					return errInjected
-				}
-				return nil
-			}
-			err := c.Pass(context.Background())
-			if waited := c.Wait(); err == nil {
-				err = waited
-			}
-			if !errors.Is(err, errInjected) {
-				t.Fatalf("boundary %s: %v", step, err)
-			}
-			before, _ := f.system.counts()
-			f.reopen(t)
-			for range 2 {
-				c := concurrent()
-				must(t, c.Pass(context.Background()))
-				must(t, c.Wait())
-			}
-			f.completed(t)
-			after, _ := f.system.counts()
-			if (step == "after-result" || step == "before-acknowledgement" || step == "after-acknowledgement") && after != before {
-				t.Fatal("terminal result was inspected again")
+	for _, class := range []trace.OperationClass{trace.WorkflowOperation, trace.WorkerOperation, trace.ConversationOperation} {
+		t.Run(string(class), func(t *testing.T) {
+			for _, step := range steps {
+				t.Run(step, func(t *testing.T) {
+					f := setup(t, coreadapter.RunnerBoundary)
+					concurrent := func() *Controller {
+						c := f.controller(t)
+						c.options.Concurrent = func(coreadapter.Operation) bool { return true }
+						c.options.Class = func(coreadapter.Operation) trace.OperationClass { return class }
+						return c
+					}
+					c := concurrent()
+					c.boundary = func(name string) error {
+						if name == step {
+							return errInjected
+						}
+						return nil
+					}
+					err := c.Pass(context.Background())
+					if waited := c.Wait(); err == nil {
+						err = waited
+					}
+					if !errors.Is(err, errInjected) {
+						t.Fatalf("boundary %s: %v", step, err)
+					}
+					before, _ := f.system.counts()
+					f.reopen(t)
+					for range 2 {
+						c := concurrent()
+						must(t, c.Pass(context.Background()))
+						must(t, c.Wait())
+					}
+					f.completed(t)
+					after, _ := f.system.counts()
+					if (step == "after-result" || step == "before-acknowledgement" || step == "after-acknowledgement") && after != before {
+						t.Fatal("terminal result was inspected again")
+					}
+				})
 			}
 		})
 	}

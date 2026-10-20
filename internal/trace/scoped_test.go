@@ -11,12 +11,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// TestScopedFirstOpenFailureInsideSerializeReturnsAnError exercises scoped's
-// failure path with the project's own operationMu already held, the way a
-// reconciliation pass's schedule hook holds it through Serialize. Before
-// scoped released a half-opened instance through the ordinary Close, which
-// takes the shared operationMu, this deadlocked; it must now return the
-// open's error within a bounded wait instead.
+// A first-time open of a broken workstream must return its error without
+// leaking ownership or preventing another workstream's bookkeeping.
 func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 	r, _, _ := create(t)
 	other := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -46,8 +42,7 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 		t.Fatal("a failed first-time open inside Serialize did not return within the bound; it deadlocked")
 	}
 
-	// The project instance is still usable: the failed attempt released its
-	// own lock without ever taking the shared one a second time.
+	// The project instance remains usable after the failed open.
 	if err := r.Serialize(func() error { return nil }); err != nil {
 		t.Fatalf("Serialize after the failed open: %v", err)
 	}

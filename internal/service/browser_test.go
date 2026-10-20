@@ -21,6 +21,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -203,19 +204,46 @@ func (p *page) click(selector string) {
 	p.run(clickCurrent(selector))
 }
 
-// clickCurrent reselects an element replaced during the node lookup and
-// geometry reads. These node errors precede mouse dispatch; other errors
-// return immediately so an owner action is never submitted twice.
+// clickCurrent reselects an element replaced during lookup or mouse
+// dispatch. A capture listener confirms delivery before the page's handler
+// can replace the element, so an accepted action is never submitted twice.
 func clickCurrent(selector string, opts ...chromedp.QueryOption) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		for {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := chromedp.Evaluate(`document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'})`, nil).Do(ctx); err != nil {
+			if err := chromedp.Evaluate(`(() => {
+				const probe = window.__osmiaTestClick = { received: false };
+				probe.listen = e => {
+					if (e.composedPath().some(n => n instanceof Element && n.matches(`+quote(selector)+`))) probe.received = true;
+				};
+				document.addEventListener('click', probe.listen, true);
+				document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'});
+			})()`, nil).Do(ctx); err != nil {
 				return err
 			}
 			err := chromedp.Click(selector, append([]chromedp.QueryOption{chromedp.ByQuery}, opts...)...).Do(ctx)
+			var received bool
+			cleanup := chromedp.Evaluate(`(() => {
+				const probe = window.__osmiaTestClick;
+				document.removeEventListener('click', probe.listen, true);
+				delete window.__osmiaTestClick;
+				return probe.received;
+			})()`, &received).Do(ctx)
+			if err == nil {
+				if cleanup != nil || received {
+					return cleanup
+				}
+				// Replacing a pressed node can deliver the click to its
+				// ancestor instead. No handler on the target ran.
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(100 * time.Millisecond):
+				}
+				continue
+			}
 			var protocol *cdproto.Error
 			if !errors.As(err, &protocol) || protocol.Code != -32000 ||
 				(protocol.Message != "Could not find node with given id" && protocol.Message != "No node with given id found") {
@@ -249,9 +277,45 @@ func (p *page) selectWorkstream(id config.WorkstreamID) {
 	if collapsed {
 		p.click("#picker-toggle")
 	}
-	p.click(row)
-	p.await("the workstream "+string(id)+" shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(id))+
-		` && document.body.dataset.picker === 'closed'`)
+	p.run(selectSidebarRow(row, `!document.querySelector('.view[data-view="workstream"]').hidden && document.getElementById('workstream-head').dataset.workstream === `+quote(string(id))+
+		` && document.body.dataset.picker === 'closed'`))
+}
+
+func (p *page) selectDesign(id config.WorkstreamID) {
+	p.t.Helper()
+	row := `[data-select="` + string(id) + `"]`
+	p.await("the design "+string(id)+" in the list", `document.querySelector(`+quote(row)+`) !== null`)
+	var collapsed bool
+	p.eval(`getComputedStyle(document.getElementById('sidebar')).display === 'none'`, &collapsed)
+	if collapsed {
+		p.click("#picker-toggle")
+	}
+	p.run(selectSidebarRow(row, `!document.querySelector('.view[data-view="design"]').hidden &&
+		document.getElementById('design-meta').textContent.includes(`+quote(string(id))+`)`))
+}
+
+// selectSidebarRow repeats this idempotent selection when a sidebar reorder
+// disconnects the focused button before the trusted key event reaches it.
+func selectSidebarRow(selector, shown string) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		for {
+			if err := chromedp.Evaluate(`document.querySelector(`+quote(selector)+`)?.focus()`, nil).Do(ctx); err != nil {
+				return err
+			}
+			if err := chromedp.KeyEvent(kb.Enter).Do(ctx); err != nil {
+				return err
+			}
+			var selected bool
+			if err := chromedp.Evaluate(shown, &selected).Do(ctx); err != nil || selected {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	})
 }
 
 // sidebarIDs reads the workstream IDs the sidebar's list of work shows, top
@@ -522,11 +586,13 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 		`#capacity [data-role=mason] [data-field=slots]`:                   "1 / 1 slots",
 		`#capacity [data-role=mason] [data-field=waiting]`:                 string(stream) + " unit audit: every slot is taken",
 		`#capacity [data-role=reviewer]`:                                   "Nothing waits.",
-		`#meter-total`:                                                     "/",
-		pause + "[data-field=scope]":                                       "Workstream " + string(quiet),
-		pause + "[data-field=reason]":                                      "The owner is travelling",
-		pause + "[data-field=source]":                                      "the owner",
-		`#pause-count`:                                                     "1",
+		`#capacity [data-role=architect] [data-field=slots]`:               "0 active (1 per workstream)",
+		`#capacity [data-role=librarian] [data-field=slots]`:               "0 active (1 per workstream)",
+		`#meter-total`:                "/",
+		pause + "[data-field=scope]":  "Workstream " + string(quiet),
+		pause + "[data-field=reason]": "The owner is travelling",
+		pause + "[data-field=source]": "the owner",
+		`#pause-count`:                "1",
 	} {
 		p.awaitText(selector, want)
 	}

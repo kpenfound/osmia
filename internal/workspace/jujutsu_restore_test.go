@@ -54,7 +54,7 @@ func TestJujutsuRecoverRestoresTheCheckpointAnInterruptedAttemptLeft(t *testing.
 	writeFiles(t, unit.Path, map[string]string{"unit.go": "unit\n", "README": "widgets by the unit\n"})
 	writeFiles(t, idle.Path, map[string]string{"idle.go": "captured, never snapshotted\n"})
 	before := visibleHeads(t, j)
-	if err := j.Checkpoint(ctx, "operation-1", at); err != nil {
+	if err := crashCheckpoint(ctx, j, "operation-1", at); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +142,7 @@ func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 		t.Fatalf("the replay stopped with %v: %v", conflicts, err)
 	}
 	writeFiles(t, resolution.Path, map[string]string{"README": "upstream and feature\n"})
-	if err := j.Checkpoint(ctx, "operation-2", at); err != nil {
+	if err := crashCheckpoint(ctx, j, "operation-2", at); err != nil {
 		t.Fatal(err)
 	}
 	if stop, unmerged, replaying, err := j.Replaying(ctx, resolution); err != nil || !replaying || stop != first || !slices.Equal(unmerged, []string{"README"}) {
@@ -181,7 +181,7 @@ func TestJujutsuSettledCheckpointRestoresNothing(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	ctx := context.Background()
 	at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	if err := j.Checkpoint(ctx, "operation-0", at); err != nil {
+	if err := crashCheckpoint(ctx, j, "operation-0", at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(j.repository()); !errors.Is(err, os.ErrNotExist) {
@@ -190,7 +190,7 @@ func TestJujutsuSettledCheckpointRestoresNothing(t *testing.T) {
 	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
 	git(t, "-C", f.clone, "branch", "osmia/w1", base)
 	feature := acquireJJ(t, j, vcs.Request{Name: "w1", Branch: "osmia/w1"})
-	if err := j.Checkpoint(ctx, "operation-1", at); err != nil {
+	if err := crashCheckpoint(ctx, j, "operation-1", at); err != nil {
 		t.Fatal(err)
 	}
 	landed := snapshotJJ(t, j, feature, base, map[string]string{"landed.go": "landed\n"})
@@ -223,4 +223,15 @@ func TestGitCheckpointsRecordNothing(t *testing.T) {
 	if err := f.provider.Settle(ctx, "operation-1"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// crashCheckpoint leaves the checkpoint a process killed inside LocalStep
+// would leave, so these fixtures can exercise Recover's clone-wide semantics.
+func crashCheckpoint(ctx context.Context, j *Jujutsu, operation string, at time.Time) error {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
+	scope := &stepScope{operation: operation}
+	scope.active.Store(true)
+	defer scope.active.Store(false)
+	return j.Checkpoint(context.WithValue(ctx, stepKey{}, scope), operation, at)
 }

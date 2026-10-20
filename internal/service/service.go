@@ -138,6 +138,9 @@ type Options struct {
 	// sessions' Docker Sandboxes with, for tests. It defaults to
 	// agent.SandboxCLI.
 	sbxBin string
+	// conversationTicks replaces retry and gate polling in conversation-path
+	// fixtures. Enqueues and completions still wake the path directly.
+	conversationTicks <-chan time.Time
 	// schedulePassed is called, if set, once every time a reconciliation
 	// pass's schedule stage completes without error - the stage that runs
 	// the scheduler's dispatch pass among its hooks. Nil runs no hook. Tests
@@ -147,18 +150,21 @@ type Options struct {
 }
 
 // activeProject is the runtime state of one active project: its open trace
-// and the reconciliation loop running against it.
+// and its reconciliation and conversation paths.
 type activeProject struct {
-	id         config.ProjectID
-	repository *trace.Repository
-	controller *reconcile.Controller
-	pipeline   *pipeline
-	cancel     context.CancelFunc
-	done       chan error
+	id            config.ProjectID
+	repository    *trace.Repository
+	controller    *reconcile.Controller
+	conversations *conversationPath
+	pipeline      *pipeline
+	cancel        context.CancelFunc
+	pollCancel    context.CancelFunc
+	done          chan error
 }
 
 type Service struct {
-	memory hearsay.Health
+	conversationSignal conversationSignal
+	memory             hearsay.Health
 	// jev answers the Jev judgments of every project's turns under the
 	// current configuration.
 	jev *jev.Judge
@@ -168,7 +174,8 @@ type Service struct {
 	// active_projects order.
 	projects []*activeProject
 	// pool is the role capacity the schedulers of every project draw on.
-	pool *scheduler.Shared
+	pool          *scheduler.Shared
+	gitOperations gitOperationPool
 	// spends is the daily spend each project's daily budget pass publishes.
 	spends    daySpends
 	pending   error
@@ -808,7 +815,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
-	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
+	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, conversations: &conversationPath{s: s, repository: repository, pipeline: p, drain: make(chan struct{})}, pipeline: p, done: make(chan error, 1)}, nil
 }
 
 // dispatcher is the scheduler of the project cfg is about, drawing on the
@@ -825,6 +832,9 @@ func (s *Service) dispatchHolds(cfg *config.Config, repository *trace.Repository
 	project := cfg.Project.ID
 	librarian := librarianWorkstream(project)
 	return func(c scheduler.Candidate) (bool, error) {
+		if conversationRole(c.Thread.Identity.Role) {
+			return true, nil
+		}
 		return s.holds(project, librarian, repository, c)
 	}
 }
@@ -969,6 +979,8 @@ func (s *Service) launch(active *activeProject) {
 	s.log().Info("project started", "project", string(active.id))
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
+	pollCtx, stopPolls := context.WithCancel(ctx)
+	active.pollCancel = stopPolls
 	go func() {
 		watchDone := make(chan error, 1)
 		go func() {
@@ -978,7 +990,29 @@ func (s *Service) launch(active *activeProject) {
 			}
 			watchDone <- err
 		}()
+		conversationDone := make(chan error, 1)
+		go func() {
+			err := active.conversations.run(ctx)
+			if err != nil && ctx.Err() == nil {
+				cancel()
+			}
+			conversationDone <- err
+		}()
+		pollDone := make(chan struct{})
+		go func() {
+			s.runNetworkPolls(pollCtx, active.repository, active.pipeline)
+			close(pollDone)
+		}()
 		err := active.controller.Run(ctx)
+		stopPolls()
+		<-pollDone
+		active.conversations.Drain()
+		if err != nil {
+			cancel()
+		}
+		if conversationErr := <-conversationDone; conversationErr != nil && !errors.Is(conversationErr, context.Canceled) {
+			err = conversationErr
+		}
 		cancel()
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
@@ -1059,12 +1093,14 @@ func (s *Service) migrationLog(format string, args ...any) {
 // landing, assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
-// mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
+// mason controller parks, resumes and starts units, and the scheduler admits
+// worker turns within capacity and its runtime and workspace gates. Conversation
+// queues are reconciled independently by conversationPath;
 // without it, the configured Schedule hook runs instead. The hooks and
 // adapters come from the pipeline, which a reload may restage for the next pass.
 // The loop holds the pending operations of the architect and committee
-// reconcilers while a pause covers their workstream, and runs thread turns
-// and committee rounds beside its other operations.
+// reconcilers while a pause covers their workstream, and runs model workflows,
+// thread turns and committee rounds beside the pass under their own ordering.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -1087,7 +1123,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return nil, nil, nil, err
 	}
 	repository.SetCharterResolver(s.charterRepository)
-	repository.Observe(s.hub.traceEvents(cfg.Project.ID))
+	observe := s.hub.traceEvents(cfg.Project.ID)
+	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
@@ -1096,8 +1133,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		repository.Close()
 		return nil, nil, nil, err
 	}
-	p := &pipeline{}
+	p := &pipeline{slowThreshold: options.SlowThreshold, before: s.step}
 	p.current.Store(first)
+	p.conversation.Store(first)
 	options.Schedule = p.schedule
 	if hook := s.options.schedulePassed; hook != nil {
 		schedule := options.Schedule
@@ -1122,9 +1160,18 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Hold == nil {
 		options.Hold = s.holding(repository)
 	}
+	hold := options.Hold
+	options.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		return conversationOperation(op) || hold(stream, op)
+	}
 	if options.Concurrent == nil {
 		options.Concurrent = concurrentOperation
 	}
+	if options.Class == nil {
+		options.Class = operationClass
+	}
+	options.Limit = s.modelOperationLimit(repository, options.Limit)
+	options.Limit = s.gitOperationLimit(repository, options.Limit)
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
@@ -1182,18 +1229,27 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
 		reviews := &reviewers{masons: units}
-		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass}, scheduleHook{"workgroup-chief-dispatch", func(ctx context.Context) error { return s.workgroupChiefDispatchPass(ctx, repository) }})
+		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}
-	return &stages{cfg: cfg, hooks: hooks, runner: runner,
+	var polls, schedule []scheduleHook
+	for _, hook := range hooks {
+		switch hook.name {
+		case "base-refresh", "edge-refresh", "workgroup-change", "drift":
+			polls = append(polls, hook)
+		default:
+			schedule = append(schedule, hook)
+		}
+	}
+	return &stages{cfg: cfg, hooks: schedule, polls: polls, runner: runner,
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
-// concurrentOperation reports whether op delivers a thread turn, runs a
-// committee round or runs a unit's checks. The reconciler runs those beside
-// its other operations, so every turn the scheduler dispatched within
-// capacity, the rounds of different workstreams and their check runs are in
-// flight at once.
+// concurrentOperation selects operations whose inspection and effects run
+// beside the scheduling pass under their operation class's ordering.
 func concurrentOperation(op coreadapter.Operation) bool {
+	if gitOperation(op) || networkOperation(op) || modelOperationRole(op) != "" {
+		return true
+	}
 	if op.Boundary != coreadapter.RunnerBoundary {
 		return false
 	}
@@ -1202,6 +1258,28 @@ func concurrentOperation(op coreadapter.Operation) bool {
 		return true
 	}
 	return false
+}
+
+// operationClass keeps execution order independent of which operations run
+// beside the pass. Scheduler-admitted workers share no workflow reservation;
+// owner conversations rely on their durable thread order.
+func operationClass(op coreadapter.Operation) trace.OperationClass {
+	if networkOperation(op) {
+		return trace.WorkerOperation
+	}
+	if op.Boundary == coreadapter.RunnerBoundary {
+		switch op.Action {
+		case thread.TurnAction:
+			in, err := thread.DecodeTurn(op)
+			if err == nil && (in.Agent == trace.ChiefOfStaff || in.Agent == sessionAgentID) {
+				return trace.ConversationOperation
+			}
+			return trace.WorkerOperation
+		case RoundAction, AmendmentRoundAction, CheckAction, deltaTurnAction:
+			return trace.WorkerOperation
+		}
+	}
+	return trace.WorkflowOperation
 }
 
 // stagePriority orders the operations of a pass so that the factory finishes
