@@ -363,7 +363,9 @@ func TestRunScansOnStartupTicksAndDuplicateWakeups(t *testing.T) {
 		_, err := f.repository.Transact(ctx, tx)
 		must(t, err)
 	}
-	// A pass joins the in-flight operation and confirms duplicate wake safety.
+	// Admission never joins an active attempt. Wait for the recorded result
+	// before cancellation, then confirm that duplicate hints apply nothing.
+	awaitAcknowledged(t, f, streamID, "prepare")
 	must(t, f.controller(t).Pass(ctx))
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
@@ -452,7 +454,26 @@ func TestScheduleRunsBeforeOperationsAreRead(t *testing.T) {
 	}
 }
 
-func TestSchedulingAndOperationDiscoveryExcludeTraceRemoval(t *testing.T) {
+func TestScheduleCanRemoveTraceBeforeOperationDiscovery(t *testing.T) {
+	t.Parallel()
+	f := setup(t, coreadapter.RepositoryBoundary)
+	c := f.controller(t)
+	scheduled := 0
+	c.options.Schedule = func(context.Context) error {
+		scheduled++
+		_, err := f.repository.MarkWorkstreamTraceForDeletion(streamID)
+		return err
+	}
+	passPromptly(t, c)
+	if scheduled != 1 {
+		t.Fatalf("scheduled %d times", scheduled)
+	}
+	if inspections, applies := f.system.counts(); inspections != 0 || applies != 0 {
+		t.Fatalf("removed trace operations touched: %d inspections, %d applications", inspections, applies)
+	}
+}
+
+func TestOperationDiscoveryExcludesTraceRemoval(t *testing.T) {
 	t.Parallel()
 	f := setup(t, coreadapter.RepositoryBoundary)
 	c := f.controller(t)
@@ -475,10 +496,8 @@ func TestSchedulingAndOperationDiscoveryExcludeTraceRemoval(t *testing.T) {
 	removing, removed := make(chan struct{}), make(chan error, 1)
 	go func() {
 		close(removing)
-		removed <- f.repository.Serialize(func() error {
-			_, err := f.repository.MarkWorkstreamTraceForDeletion(streamID)
-			return err
-		})
+		_, err := f.repository.MarkWorkstreamTraceForDeletion(streamID)
+		removed <- err
 	}()
 	<-removing
 	select {

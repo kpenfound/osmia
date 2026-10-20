@@ -1125,6 +1125,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Concurrent == nil {
 		options.Concurrent = concurrentOperation
 	}
+	if options.Class == nil {
+		options.Class = operationClass
+	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
@@ -1202,6 +1205,25 @@ func concurrentOperation(op coreadapter.Operation) bool {
 		return true
 	}
 	return false
+}
+
+// operationClass keeps execution order independent of which operations run
+// beside the pass. Scheduler-admitted workers share no workflow reservation;
+// owner conversations rely on their durable thread order.
+func operationClass(op coreadapter.Operation) trace.OperationClass {
+	if op.Boundary == coreadapter.RunnerBoundary {
+		switch op.Action {
+		case thread.TurnAction:
+			in, err := thread.DecodeTurn(op)
+			if err == nil && (in.Agent == trace.ChiefOfStaff || in.Agent == sessionAgentID) {
+				return trace.ConversationOperation
+			}
+			return trace.WorkerOperation
+		case RoundAction, AmendmentRoundAction, CheckAction, deltaTurnAction:
+			return trace.WorkerOperation
+		}
+	}
+	return trace.WorkflowOperation
 }
 
 // stagePriority orders the operations of a pass so that the factory finishes

@@ -28,6 +28,8 @@ func (r *Repository) MarkWorkstreamTraceForDeletion(stream config.WorkstreamID) 
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
 		return false, err
 	}
+	r.snapshotMu.Lock()
+	defer r.snapshotMu.Unlock()
 	r.workstreamsMu.Lock()
 	child := r.workstreams[stream]
 	delete(r.workstreams, stream)

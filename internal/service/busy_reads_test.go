@@ -526,23 +526,10 @@ const secondStream = config.WorkstreamID("w_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1")
 // trace.OperationAttempt.Unlocked (internal/reconcile/controller.go,
 // Controller.reconcile).
 //
-// trace.Repository.operationMu, the lock WithOperation holds for the whole
-// call, is already scoped to this isolation: WithOperation and the
-// bookkeeping writes attempt.Record makes around the blocked effect (claim,
-// observe, effect-start) take r.mu only briefly and release it before
-// Apply runs (internal/trace/operations.go, WithOperation and Record), so
-// Apply holds operationMu but never r.mu. An owner action's write - here
-// Abandon, through SetFeatureStateUnless and CancelTurns - takes only r.mu
-// (internal/trace/notice.go, internal/trace/threads.go) and never calls
-// WithOperation or Serialize itself, so it never contends for operationMu.
-// The only thing that does take operationMu beside WithOperation is
-// Serialize, which the controller uses to run the scheduling hooks of every
-// workstream at the start of a pass, before any operation's effect runs; it
-// is not held during Apply. So the read fix of plan#api-busy-reads, which
-// made reads (and, by the same mechanism, writes) stop paying for a full
-// re-scan while r.mu is briefly held, already gives this isolation: no lock
-// was narrowed or scoped further for this unit. This test is the evidence,
-// not a change to production code.
+// The workflow attempt reserves its own workstream, and its claim and result
+// writes take only the brief trace bookkeeping lock. An owner action on
+// another workstream takes that workstream's bookkeeping lock and never waits
+// for this workflow effect.
 func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testing.T) {
 	t.Parallel()
 	blocking := newBlockedFactoryOperation()

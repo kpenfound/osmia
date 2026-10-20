@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
@@ -82,5 +85,93 @@ func TestControllerLogsFailedOperationAtErrorLevel(t *testing.T) {
 	if failed == nil || failed["level"] != "ERROR" || failed["error"] == nil ||
 		failed["project"] != string(projectID) || failed["workstream"] != string(streamID) {
 		t.Fatalf("operation failed record: %+v (all: %+v)", failed, records)
+	}
+}
+
+func TestControllerLogsOperationsOverThreshold(t *testing.T) {
+	f := setup(t, coreadapter.RepositoryBoundary)
+	var buf bytes.Buffer
+	ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+	c := f.controller(t)
+	c.options.SlowThreshold = time.Nanosecond
+	must(t, c.Pass(ctx))
+	record := findLog(decodeLog(t, buf.String()), "operation exceeded threshold")
+	if record == nil || record["project"] != string(projectID) || record["workstream"] != string(streamID) || record["operation"] != f.event.Operation.ID || record["duration"] == nil || record["level"] != "WARN" {
+		t.Fatalf("slow operation log: %+v", record)
+	}
+}
+
+func TestRunRetriesSchedulingFailuresWithoutStoppingAdmittedWork(t *testing.T) {
+	for _, atStartup := range []bool{true, false} {
+		name := "while-running"
+		if atStartup {
+			name = "at-startup"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setup(t, coreadapter.RepositoryBoundary)
+			f.publish(t, "session")
+			s := newSessions()
+			c := f.concurrent(t, s, "session")
+			c.options.Adapters[coreadapter.RepositoryBoundary] = f.system
+			ticks := make(chan time.Time)
+			c.options.Ticks = ticks
+			var failing atomic.Bool
+			failing.Store(atStartup)
+			failed := make(chan struct{}, 1)
+			c.options.Schedule = func(context.Context) error {
+				if failing.Load() {
+					select {
+					case failed <- struct{}{}:
+					default:
+					}
+					return errInjected
+				}
+				return nil
+			}
+			var buf bytes.Buffer
+			ctx, cancel := context.WithCancel(ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil))))
+			done := make(chan error, 1)
+			go func() { done <- c.Run(ctx) }()
+			defer func() {
+				cancel()
+				select {
+				case err := <-done:
+					if !errors.Is(err, context.Canceled) {
+						t.Errorf("run: %v", err)
+					}
+				case <-time.After(overlapTimeout):
+					t.Error("run did not join its operations")
+				}
+			}()
+			if !atStartup {
+				f.awaitStarted(t, s, "session")
+				failing.Store(true)
+				f.repository.WakeWorkflow()
+			}
+			// Repeated failed schedules must leave the loop and its work alive.
+			for range 2 {
+				await(t, failed)
+				select {
+				case ticks <- epoch:
+				case <-time.After(overlapTimeout):
+					t.Fatal("failed schedule stopped waiting for ticks")
+				}
+			}
+			failing.Store(false)
+			f.repository.WakeWorkflow()
+			if atStartup {
+				f.awaitStarted(t, s, "session")
+			}
+			close(s.release)
+			awaitAcknowledged(t, f, streamID, "session")
+			cancel()
+			// The deferred join runs before the log is inspected.
+			t.Cleanup(func() {
+				record := findLog(decodeLog(t, buf.String()), "reconciliation schedule failed; will retry")
+				if record == nil || record["project"] != string(projectID) || record["error"] != errInjected.Error() {
+					t.Errorf("schedule failure log: %+v", record)
+				}
+			})
+		})
 	}
 }

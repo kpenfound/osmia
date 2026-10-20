@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -286,8 +288,8 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 	}
 }
 
-// TestServiceReportsScheduleFailure shows a failed pass stopping the service
-// with the failure, named once with its project.
+// TestServiceReportsScheduleFailure shows a failed hook being reported with
+// its project and retried while the service keeps answering requests.
 func TestServiceReportsScheduleFailure(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -297,20 +299,53 @@ func TestServiceReportsScheduleFailure(t *testing.T) {
 	must(t, err)
 	must(t, repository.Close())
 	failure := errors.New("injected schedule failure")
-	opts.Reconciliation.Schedule = func(context.Context) error { return failure }
+	var failing atomic.Bool
+	failing.Store(true)
+	failed, recovered := make(chan struct{}, 1), make(chan struct{}, 1)
+	opts.Reconciliation.Schedule = func(context.Context) error {
+		if failing.Load() {
+			select {
+			case failed <- struct{}{}:
+			default:
+			}
+			return failure
+		}
+		select {
+		case recovered <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	ticks := make(chan time.Time)
+	opts.Reconciliation.Ticks = ticks
+	var logs bytes.Buffer
+	opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	s, err := Start(context.Background(), opts)
 	must(t, err)
 	defer s.Close()
+	for range 2 {
+		select {
+		case <-failed:
+		case <-time.After(demoTimeout):
+			t.Fatal("failed hook did not run")
+		}
+		select {
+		case ticks <- time.Now():
+		case <-time.After(demoTimeout):
+			t.Fatal("failed hook stopped the project loop")
+		}
+	}
+	failing.Store(false)
+	s.sole().repository.WakeWorkflow()
 	select {
-	case <-s.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("service did not stop after schedule failure")
+	case <-recovered:
+	case <-time.After(demoTimeout):
+		t.Fatal("hook did not recover")
 	}
-	err = s.Wait()
-	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "configured pass:") || !strings.HasPrefix(err.Error(), "project "+string(cfg.Project.ID)+": ") {
-		t.Fatalf("service error = %v, want the project, the named pass and the originating error", err)
+	c := NewClient(cfg.Listen.Socket)
+	if _, err := c.Configuration(context.Background()); err != nil {
+		t.Fatalf("service did not stay available: %v", err)
 	}
-	if n := strings.Count(err.Error(), failure.Error()); n != 1 {
-		t.Fatalf("service error = %v, reports the failure %d times", err, n)
-	}
+	must(t, s.Close())
+	requireFactoryLog(t, decodeFactoryLog(t, logs.String()), "reconciliation pass hook failed", map[string]any{"project": string(cfg.Project.ID), "hook": "configured", "error": failure.Error()})
 }

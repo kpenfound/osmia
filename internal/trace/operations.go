@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // OperationID binds external identity to exactly one project, stream and intent.
@@ -176,118 +176,158 @@ func (r *Repository) Operations(stream config.WorkstreamID) ([]OperationRecord, 
 	return records, nil
 }
 
-// OperationAttempt is valid only during WithOperation's synchronous callback.
-// Its writes are fenced by the current session and attempt token.
+// OperationClass determines execution ordering, independently of whether the
+// controller runs an operation inline or beside its pass.
+type OperationClass string
+
+const (
+	WorkflowOperation     OperationClass = "workflow"
+	WorkerOperation       OperationClass = "worker"
+	ConversationOperation OperationClass = "conversation"
+)
+
+// SlowThreshold is the default duration after which operations and bookkeeping
+// lock waits are logged.
+const SlowThreshold = time.Second
+
+type slowThresholdKey struct{}
+
+// WithSlowThreshold sets the threshold for operation and lock-wait diagnostics.
+func WithSlowThreshold(ctx context.Context, threshold time.Duration) context.Context {
+	return context.WithValue(ctx, slowThresholdKey{}, threshold)
+}
+
+func slowThreshold(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(slowThresholdKey{}).(time.Duration); ok && d > 0 {
+		return d
+	}
+	return SlowThreshold
+}
+
+func (r *Repository) operationLock(ctx context.Context, stream config.WorkstreamID, operation string) func() {
+	start := time.Now()
+	r.mu.Lock()
+	duration := time.Since(start)
+	return func() {
+		r.mu.Unlock()
+		if duration >= slowThreshold(ctx) {
+			ghlog.Logger(ctx).Warn("lock wait exceeded threshold", "project", string(r.project), "workstream", string(stream), "operation", operation, "lock", "trace bookkeeping", "duration", duration.String())
+		}
+	}
+}
+
+// OperationAttempt owns an admitted operation until Close. Its writes are fenced
+// by the current session and attempt token. The owner must join all its work
+// before closing it; Repository.Close joins admitted attempts before closing files.
 type OperationAttempt struct {
 	repository *Repository
 	stream     config.WorkstreamID
 	claim      OperationAction
+	class      OperationClass
 	closed     bool
 }
 
-// WithOperation serializes reconciliation and Close for this repository,
-// except for the work a callback runs through Unlocked. The exclusive
-// repository process lock rules out other owners. Claims do not expire while
-// an external call is in flight; a returned callback or process exit ends
-// execution ownership. New attempts always inspect before applying an effect.
-// The callback must join its work before returning and must not close the store
-// or recursively call WithOperation. Acknowledged/not-yet-due work, and work an
-// open attempt of this handle holds, is a no-op.
-func (r *Repository) WithOperation(ctx context.Context, stream config.WorkstreamID, event string, actor Actor, now func() time.Time, fn func(*OperationAttempt, OperationRecord) error) error {
+// BeginOperation tries to claim due work. A nil attempt means it is already
+// acknowledged, not due, active, or excluded by its workstream's workflow
+// operation. It never waits for another operation's inspection or effect.
+// Worker and conversation operations rely on their scheduler and thread order;
+// neither reserves the workstream. Every admitted attempt must be closed.
+func (r *Repository) BeginOperation(ctx context.Context, stream config.WorkstreamID, event string, class OperationClass, actor Actor, now func() time.Time) (*OperationAttempt, OperationRecord, error) {
+	var empty OperationRecord
+	if class != WorkflowOperation && class != WorkerOperation && class != ConversationOperation {
+		return nil, empty, fmt.Errorf("invalid operation class %q", class)
+	}
 	r, err := r.scoped(stream)
 	if err != nil {
-		return err
+		return nil, empty, err
 	}
-	r.operationMu.Lock()
-	defer r.operationMu.Unlock()
+	unlock := r.operationLock(ctx, stream, event)
+	defer unlock()
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, empty, err
 	}
-	r.mu.Lock()
-	if r.lock == nil {
-		r.mu.Unlock()
-		return ErrClaim
+	if r.lock == nil || r.closing {
+		return nil, empty, ErrClaim
 	}
 	_, v, err := r.loadWorkflow(stream)
 	if err != nil {
-		r.mu.Unlock()
-		return err
+		return nil, empty, err
 	}
 	o := v.operations[event]
 	if o == nil {
-		r.mu.Unlock()
-		return ErrClaim
+		return nil, empty, ErrClaim
 	}
 	at := now()
 	key := string(stream) + "/" + event
-	if o.Acknowledged || at.Before(o.RetryAt) || r.attempts[key] {
-		r.mu.Unlock()
-		return nil
+	if o.Acknowledged || at.Before(o.RetryAt) || r.attempts[key] || (class == WorkflowOperation && r.workflow) {
+		return nil, empty, nil
+	}
+	a := &OperationAttempt{repository: r, stream: stream, class: class, claim: OperationAction{EventID: event, Token: rand.Text(), Session: r.session, Kind: "claim", At: at, Actor: actor, Cause: o.Operation.ID, Depth: o.Transition.Depth}}
+	// loadWorkflow returns a private view, so this snapshot stays immutable
+	// while later bookkeeping publishes new views.
+	record := *o
+	if err := a.record(ctx, a.claim); err != nil {
+		return nil, empty, err
 	}
 	if r.attempts == nil {
 		r.attempts = map[string]bool{}
 	}
 	r.attempts[key] = true
-	r.mu.Unlock()
-	a := &OperationAttempt{repository: r, stream: stream, claim: OperationAction{EventID: event, Token: rand.Text(), Session: r.session, Kind: "claim", At: at, Actor: actor, Cause: o.Operation.ID, Depth: o.Transition.Depth}}
-	defer func() { r.mu.Lock(); a.closed = true; delete(r.attempts, key); r.mu.Unlock() }()
-	if err := a.Record(ctx, a.claim); err != nil {
+	if class == WorkflowOperation {
+		r.workflow = true
+	}
+	r.active.Add(1)
+	return a, record, nil
+}
+
+// Close releases this attempt's execution ownership after all its work returns.
+// It is idempotent and leaves durable records intact; an interrupted attempt
+// remains available for restart inspection.
+func (a *OperationAttempt) Close() {
+	r := a.repository
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a.closed {
+		return
+	}
+	a.closed = true
+	delete(r.attempts, string(a.stream)+"/"+a.claim.EventID)
+	if a.class == WorkflowOperation {
+		r.workflow = false
+	}
+	r.active.Done()
+	// Wake after releasing admission, so a scan cannot consume the result's
+	// hint while the workstream is still reserved and strand the next intent.
+	_ = r.wake.Notify(context.Background())
+}
+
+// WithOperation reconciles a workflow operation under its workstream's ordering.
+// Worker and conversation callers use BeginOperation with their explicit class.
+// The callback must join its work before returning and must not close the store.
+func (r *Repository) WithOperation(ctx context.Context, stream config.WorkstreamID, event string, actor Actor, now func() time.Time, fn func(*OperationAttempt, OperationRecord) error) error {
+	a, record, err := r.BeginOperation(ctx, stream, event, WorkflowOperation, actor, now)
+	if err != nil || a == nil {
 		return err
 	}
-	return fn(a, *o)
+	defer a.Close()
+	return fn(a, record)
 }
 
-// unlockedKey marks the context Unlocked passes to its work.
-type unlockedKey struct{}
+// Unlocked runs work within this attempt's lifetime. No bookkeeping lock is
+// held by an attempt's callback, inspection, or effect.
+func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) { fn(ctx) }
 
-// unlocked is the lock work run through Unlocked takes back once.
-type unlocked struct {
-	r    *Repository
-	back sync.Once
-}
+// Relock runs bookkeeping work. Each repository write takes its own short lock;
+// this callback never acquires a project-wide reconciliation lock.
+func Relock(ctx context.Context, fn func() error) error { return fn() }
 
-func (u *unlocked) relock() { u.back.Do(u.r.operationMu.Lock) }
+// Beside returns the context for work joined by the attempt's owner.
+func Beside(ctx context.Context) context.Context { return ctx }
 
-// Unlocked runs fn without the lock WithOperation holds, so other operations
-// are reconciled, and Close may run, while fn is in flight; the lock is taken
-// back before it returns. fn receives ctx, with which Relock takes the lock
-// back early. The attempt keeps its claim throughout, and fn must not use the
-// attempt. A caller that closes the repository joins fn first.
-func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) {
-	u := &unlocked{r: a.repository}
-	u.r.operationMu.Unlock()
-	defer u.relock()
-	fn(context.WithValue(ctx, unlockedKey{}, u))
-}
-
-// Relock runs fn after taking back the lock Unlocked released, when ctx comes
-// from Unlocked: the rest of that work, and the callback after it, run
-// serialized with reconciliation. Otherwise, in a callback that holds the
-// lock or outside any operation, or with a context from Beside, it runs fn
-// as it is.
-func Relock(ctx context.Context, fn func() error) error {
-	if u, ok := ctx.Value(unlockedKey{}).(*unlocked); ok && u != nil {
-		u.relock()
-	}
-	return fn()
-}
-
-// Beside returns ctx for one of several pieces of work that run at the same
-// time within one Unlocked call: Relock given it runs fn as it is, so one
-// piece ending does not take the lock back while the others are in flight.
-// Their writes land without the lock; the caller relocks with the context
-// Unlocked passed once they have all returned.
-func Beside(ctx context.Context) context.Context {
-	return context.WithValue(ctx, unlockedKey{}, (*unlocked)(nil))
-}
-
-// Serialize runs fn serialized with reconciliation and Close. fn must not call
-// WithOperation, Serialize or Close.
-func (r *Repository) Serialize(fn func() error) error {
-	r.operationMu.Lock()
-	defer r.operationMu.Unlock()
-	return fn()
-}
+// Serialize runs a callback without a project-wide lock. Repository writes
+// provide their own bookkeeping exclusion. Callers must join before Close.
+// Deprecated: invoke the callback directly.
+func (r *Repository) Serialize(fn func() error) error { return fn() }
 
 // Action supplies the immutable provenance of this attempt for a boundary write.
 func (a *OperationAttempt) Action(kind string, at time.Time) OperationAction {
@@ -297,8 +337,14 @@ func (a *OperationAttempt) Action(kind string, at time.Time) OperationAction {
 }
 func (a *OperationAttempt) Record(ctx context.Context, action OperationAction) error {
 	r := a.repository
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	unlock := r.operationLock(ctx, a.stream, a.claim.Cause)
+	defer unlock()
+	return a.record(ctx, action)
+}
+
+// record is called with the repository bookkeeping lock held.
+func (a *OperationAttempt) record(ctx context.Context, action OperationAction) error {
+	r := a.repository
 	if err := ctx.Err(); err != nil {
 		return err
 	}

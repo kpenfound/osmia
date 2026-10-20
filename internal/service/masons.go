@@ -93,9 +93,7 @@ func (m *masons) Pass(ctx context.Context) error {
 		return err
 	}
 	librarian := librarianWorkstream(m.repository.Project())
-	state, _ := m.s.effective()
-	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
-	implementing := 0
+	slots := map[config.WorkstreamID]int{}
 	var read, candidates []building
 	held := map[config.WorkstreamID]string{}
 	for _, stream := range streams {
@@ -171,9 +169,7 @@ func (m *masons) Pass(ctx context.Context) error {
 			} else if queued {
 				b.inFlight = append(b.inFlight, u.ID)
 				b.implementing++
-				if !paused(stream) {
-					implementing++
-				}
+				slots[stream]++
 				continue
 			}
 			if err := m.resumeBounceRevision(ctx, stream, u.ID, b.reviewTransitions[trace.UnitSubject(u.ID)]); err != nil {
@@ -216,13 +212,13 @@ func (m *masons) Pass(ctx context.Context) error {
 				if blocked == "" {
 					blocked = u.ID
 				}
-			} else if !paused(stream) {
-				implementing++
+			} else {
+				slots[stream]++
 			}
 		}
 		if blocked != "" {
 			held[stream] = blocked
-		} else if !paused(stream) {
+		} else {
 			candidates = append(candidates, b)
 			continue
 		}
@@ -235,6 +231,28 @@ func (m *masons) Pass(ctx context.Context) error {
 	if pending {
 		return nil
 	}
+	// A turn can complete while this pass follows existing units. Refresh
+	// its recorded spend before reusing the slot that completion freed.
+	if err := (dailyBudget{s: m.s, repository: m.repository}).Pass(ctx); err != nil {
+		return err
+	}
+	state, _ := m.s.effective()
+	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
+	// Slot counts, candidates and deferrals all use this same pause snapshot.
+	// Pausing an implementing workstream frees its slots for this admission.
+	implementing := 0
+	for stream, count := range slots {
+		if !paused(stream) {
+			implementing += count
+		}
+	}
+	candidates = slices.DeleteFunc(candidates, func(b building) bool {
+		if paused(b.stream) {
+			read = append(read, b)
+			return true
+		}
+		return false
+	})
 	var entities kb.Map
 	if len(candidates) > 0 {
 		if entities, err = kb.Load(m.repository); err != nil {

@@ -374,8 +374,15 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") })
 		return i >= 0 && strings.Contains(th.Turns[i].Request.Prompt, text)
 	}
+	// The answer tools must return to the scripted chief before restart
+	// cancels its turn, even when their durable effects are already visible.
+	answersReturned := func() bool {
+		flagMu.Lock()
+		defer flagMu.Unlock()
+		return answered1 && answered2
+	}
 	deadline = time.Now().Add(demoTimeout)
-	for !(resumedWith(repo1, f.stream1, demoAgent, answer1) && resumedWith(repo2, f.stream2, "agent_mason2", answer2)) {
+	for !(resumedWith(repo1, f.stream1, demoAgent, answer1) && resumedWith(repo2, f.stream2, "agent_mason2", answer2) && answersReturned()) {
 		select {
 		case f.ticks <- clock.Now():
 		case <-time.After(20 * time.Millisecond):

@@ -701,3 +701,7 @@ func (r *Repository) saveDelivery(ctx context.Context, stream config.WorkstreamI
 func (r *Repository) WaitWorkflow(ctx context.Context, ticks <-chan time.Time) error {
 	return r.wake.Wait(ctx, ticks)
 }
+
+// WakeWorkflow hints that execution capacity changed without a durable write.
+// As with commit hints, callers must discover eligible work from durable state.
+func (r *Repository) WakeWorkflow() { _ = r.wake.Notify(context.Background()) }

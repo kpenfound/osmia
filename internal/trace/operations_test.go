@@ -1,14 +1,18 @@
 package trace
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 func operationTransaction() Transaction {
@@ -151,12 +155,8 @@ func TestOperationPublicationRecovery(t *testing.T) {
 	}
 }
 
-// Work an attempt runs through Unlocked leaves the other operations free to
-// be claimed, while the attempt keeps its own: its operation is left alone
-// until the attempt returns, and the attempt still records afterwards. Relock
-// holds other operations off again for the rest of the work and the callback;
-// it runs as it is under a callback that holds the lock, and once the lock is
-// back.
+// Worker attempts keep their operation claim while Unlocked and Relock allow
+// independent operations of the same workstream to keep making progress.
 func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -171,14 +171,14 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	now := func() time.Time { return at }
 	claim := func(event string) (bool, error) {
 		claimed := false
-		err := r.WithOperation(ctx, streamID, event, actor, now, func(*OperationAttempt, OperationRecord) error {
+		err := withWorkerOperation(r, ctx, event, actor, now, func(*OperationAttempt, OperationRecord) error {
 			claimed = true
 			return nil
 		})
 		return claimed, err
 	}
 	claimed := make(chan struct{})
-	err := r.WithOperation(ctx, streamID, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
+	err := withWorkerOperation(r, ctx, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
 		if err := Relock(ctx, func() error { return nil }); err != nil {
 			return err
 		}
@@ -216,8 +216,8 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 			}
 			select {
 			case <-claimed:
-				t.Error("an operation was claimed while Relock held the lock")
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(10 * time.Second):
+				t.Error("Relock blocked an independent worker claim")
 			}
 		})
 		action := a.Action("observe", at)
@@ -254,9 +254,7 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	}
 }
 
-// Relock given a context from Beside runs its work without taking the lock
-// back, so other operations are still claimed while the rest of the Unlocked
-// work runs; Relock with the context Unlocked passed takes it back.
+// Relock and Beside both leave independent claims free to proceed.
 func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -273,7 +271,7 @@ func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
 		out := make(chan bool, 1)
 		go func() {
 			claimed := false
-			err := r.WithOperation(ctx, streamID, event, actor, now, func(*OperationAttempt, OperationRecord) error {
+			err := withWorkerOperation(r, ctx, event, actor, now, func(*OperationAttempt, OperationRecord) error {
 				claimed = true
 				return nil
 			})
@@ -284,7 +282,7 @@ func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
 		}()
 		return out
 	}
-	err := r.WithOperation(ctx, streamID, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
+	err := withWorkerOperation(r, ctx, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
 		a.Unlocked(ctx, func(ctx context.Context) {
 			if err := Relock(Beside(ctx), func() error { return nil }); err != nil {
 				t.Error(err)
@@ -303,19 +301,141 @@ func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
 			}
 			held := claim(third)
 			select {
-			case <-held:
-				t.Error("an operation was claimed while Relock held the lock")
-			case <-time.After(200 * time.Millisecond):
-			}
-			t.Cleanup(func() {
-				if !<-held {
-					t.Error("an operation was not claimed after the attempt")
+			case claimed := <-held:
+				if !claimed {
+					t.Error("independent worker was not claimed")
 				}
-			})
+			case <-time.After(10 * time.Second):
+				t.Error("Relock blocked an independent worker claim")
+			}
 		})
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func withWorkerOperation(r *Repository, ctx context.Context, event string, actor Actor, now func() time.Time, fn func(*OperationAttempt, OperationRecord) error) error {
+	a, record, err := r.BeginOperation(ctx, streamID, event, WorkerOperation, actor, now)
+	if err != nil || a == nil {
+		return err
+	}
+	defer a.Close()
+	return fn(a, record)
+}
+
+func TestOperationBookkeepingLogsLockWaits(t *testing.T) {
+	for _, phase := range []string{"claim", "record"} {
+		t.Run(phase, func(t *testing.T) {
+			r, _, _ := create(t)
+			tx := operationTransaction()
+			transact(t, r, tx)
+			var logs bytes.Buffer
+			ctx := WithSlowThreshold(ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&logs, nil))), time.Millisecond)
+			now := func() time.Time { return at }
+			var a *OperationAttempt
+			if phase == "record" {
+				var err error
+				a, _, err = r.BeginOperation(ctx, streamID, tx.Events[0].ID, WorkflowOperation, Actor{Kind: "service", ID: "test"}, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := mustScoped(t, r, streamID)
+			s.mu.Lock()
+			entered := make(chan struct{})
+			finished := make(chan error, 1)
+			go func() {
+				close(entered)
+				if phase == "claim" {
+					var err error
+					a, _, err = r.BeginOperation(ctx, streamID, tx.Events[0].ID, WorkflowOperation, Actor{Kind: "service", ID: "test"}, now)
+					finished <- err
+				} else {
+					action := a.Action("observe", at)
+					action.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "absent"}
+					finished <- a.Record(ctx, action)
+				}
+			}()
+			<-entered
+			select {
+			case err := <-finished:
+				s.mu.Unlock()
+				t.Fatalf("bookkeeping did not wait for lock: %v", err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			s.mu.Unlock()
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			a.Close()
+			found := false
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var record map[string]any
+				if err := json.Unmarshal([]byte(line), &record); err != nil {
+					t.Fatal(err)
+				}
+				if record["msg"] != "lock wait exceeded threshold" {
+					continue
+				}
+				duration, err := time.ParseDuration(record["duration"].(string))
+				if err != nil || duration < time.Millisecond || record["project"] != string(projectID) || record["workstream"] != string(streamID) || record["operation"] == "" || record["lock"] != "trace bookkeeping" {
+					t.Fatalf("lock wait log: %+v", record)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatalf("no slow lock log: %s", logs.String())
+			}
+		})
+	}
+}
+
+func TestCloseJoinsEveryOperationClassBeforeClosingFiles(t *testing.T) {
+	r, _, _ := create(t)
+	tx := transaction("active", 0, "", "pending", 3)
+	for i := range tx.Events {
+		e := &tx.Events[i]
+		e.Operation = &coreadapter.Operation{ID: OperationID(projectID, streamID, e.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	}
+	transact(t, r, tx)
+	var attempts []*OperationAttempt
+	for i, class := range []OperationClass{WorkflowOperation, WorkerOperation, ConversationOperation} {
+		a, _, err := r.BeginOperation(context.Background(), streamID, tx.Events[i].ID, class, Actor{Kind: "service", ID: "test"}, func() time.Time { return at })
+		if err != nil || a == nil {
+			t.Fatalf("admission %s: %v %v", class, a, err)
+		}
+		attempts = append(attempts, a)
+		defer a.Close()
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- r.Close() }()
+	// Each class pins the repository until its own attempt finishes.
+	for _, a := range attempts {
+		select {
+		case err := <-closed:
+			t.Fatalf("trace closed before attempt returned: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		action := a.Action("observe", at)
+		action.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "effect not applied"}
+		if err := a.Record(context.Background(), action); err != nil {
+			t.Fatalf("record before close joined: %v", err)
+		}
+		a.Close()
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("close did not join attempts")
+	}
+	for _, a := range attempts {
+		if err := a.Record(context.Background(), a.Action("effect", at)); !errors.Is(err, ErrClaim) {
+			t.Fatalf("write on closed trace: %v", err)
+		}
 	}
 }

@@ -32,11 +32,11 @@ type Options struct {
 	// defaults to DefaultMaxRetryDelay or RetryDelay, whichever is longer.
 	RetryDelay    time.Duration
 	MaxRetryDelay time.Duration
-	// Schedule runs at the start of every pass, before operations are read, so
-	// the intent it publishes is reconciled in the same pass. It runs
-	// serialized with reconciliation, so it sees the work a concurrent
-	// operation relocks for either wholly or not at all. Its failure stops the
-	// loop.
+	// Schedule runs at the start of every pass before operations are read.
+	// Repository writes take their own short bookkeeping locks. Scheduling
+	// never excludes operation claims or result writes. Failures are reported
+	// and retried on the next wakeup or tick without admitting more operations
+	// from that pass.
 	Schedule func(context.Context) error
 	// Priority orders the pending operations of a pass across workstreams: every
 	// operation of a lower value is reconciled before any of a higher one.
@@ -46,14 +46,23 @@ type Options struct {
 	// operation is neither claimed nor recorded in the pass, and is reconciled
 	// by the first pass that no longer holds it.
 	Hold func(config.WorkstreamID, coreadapter.Operation) bool
-	// Concurrent reports whether a due operation is reconciled beside the
-	// pass: the pass claims and inspects it in its priority order, and goes on
-	// once its effect has started, which runs through
-	// trace.OperationAttempt.Unlocked, so the pass's other operations and
-	// later passes proceed while it is in flight. A later pass leaves an operation in flight alone.
-	// Its failure stops the loop, as a store failure of the pass does. Without
-	// it every operation is reconciled in the pass.
+	// Concurrent runs an operation beside the pass, including inspection and
+	// result recording. Admission claims in priority order without waiting for
+	// inspection, an effect, a workstream reservation, or a limit permit.
 	Concurrent func(coreadapter.Operation) bool
+	// Class sets ordering independently of Concurrent. When absent, Concurrent
+	// operations are workers and inline operations are workflows. Conversation
+	// operations rely only on their thread's ordering.
+	Class func(coreadapter.Operation) trace.OperationClass
+	// Limit tries to acquire capacity for an operation's kind. It must return
+	// immediately. False leaves the operation pending; true supplies an optional
+	// release called after the attempt finishes (also on skipped admission).
+	// Several kinds can share a pool, including with callers outside this loop.
+	// External pool users call Repository.WakeWorkflow when returning capacity.
+	Limit func(coreadapter.Operation) (release func(), admitted bool)
+	// SlowThreshold sets operation and bookkeeping lock-wait diagnostics.
+	// Zero uses trace.SlowThreshold.
+	SlowThreshold time.Duration
 }
 
 // DefaultMaxRetryDelay is the longest wait between attempts of a failing
@@ -86,8 +95,8 @@ type Controller struct {
 	// event; group joins them.
 	running map[string]bool
 	group   sync.WaitGroup
-	// failure is the first error a concurrent operation returned, and abort
-	// cancels the context Run passes to them.
+	// failure is the first terminal operation store error. abort cancels
+	// the context Run passes to operations beside the pass.
 	failure   error
 	abort     context.CancelCauseFunc
 	drain     chan struct{}
@@ -95,8 +104,11 @@ type Controller struct {
 }
 
 func New(repository *trace.Repository, options Options) (*Controller, error) {
-	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 || options.MaxRetryDelay < 0 {
+	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 || options.MaxRetryDelay < 0 || options.SlowThreshold < 0 {
 		return nil, fmt.Errorf("invalid reconciliation options")
+	}
+	if options.SlowThreshold == 0 {
+		options.SlowThreshold = trace.SlowThreshold
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -120,7 +132,11 @@ func New(repository *trace.Repository, options Options) (*Controller, error) {
 
 // Drain stops admitting operations and lets operations already in flight
 // finish. Cancellation of Run still interrupts those operations.
-func (c *Controller) Drain() { c.drainOnce.Do(func() { close(c.drain) }) }
+func (c *Controller) Drain() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.drainOnce.Do(func() { close(c.drain) })
+}
 
 func (c *Controller) draining() bool {
 	select {
@@ -132,7 +148,8 @@ func (c *Controller) draining() bool {
 }
 
 // Run scans before waiting, then after every coalesced hint or periodic tick.
-// Store failures stop the loop; adapter failures are durably scheduled for retry.
+// Operation store failures stop the loop; scheduling failures are reported and
+// retried, and adapter failures are durably scheduled for retry.
 // Run cancels the concurrent operations in flight and joins them before it
 // returns.
 func (c *Controller) Run(ctx context.Context) error {
@@ -147,6 +164,15 @@ func (c *Controller) Run(ctx context.Context) error {
 	c.abort = cancel
 	c.mu.Unlock()
 	err := c.loop(ctx, ticks)
+	if err != nil && ctx.Err() == nil {
+		c.mu.Lock()
+		if c.failure == nil {
+			c.failure = err
+		}
+		c.mu.Unlock()
+	}
+	// Fence admission before joining, including passes racing Run's exit.
+	c.Drain()
 	if err != nil {
 		cancel(err)
 	}
@@ -163,7 +189,14 @@ func (c *Controller) loop(ctx context.Context, ticks <-chan time.Time) error {
 			return nil
 		}
 		if err := c.Pass(ctx); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			var schedule *scheduleError
+			if !errors.As(err, &schedule) {
+				return err
+			}
+			ghlog.Logger(ctx).Error("reconciliation schedule failed; will retry", "project", string(c.repository.Project()), "error", err.Error())
 		}
 		// A drain wakes a controller even when no workflow event or tick arrives.
 		waitCtx, stop := context.WithCancel(ctx)
@@ -206,37 +239,82 @@ func (c *Controller) inFlight(stream config.WorkstreamID, event string) bool {
 	return c.running[string(stream)+"/"+event]
 }
 
-// start reconciles the operation in a goroutine of its own, its effect
-// outside the repository's operation lock. It returns once the effect has
-// started or the attempt has ended, with the failure that stops the loop, if
-// any.
-func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, event string) error {
-	key := string(stream) + "/" + event
+// start reserves admission and durably claims in pass order. It never waits
+// for workflow ownership or limit capacity. Only short bookkeeping precedes
+// launching the reconciler; Inspect and Apply both run outside all trace locks.
+func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, record trace.OperationRecord, beside bool) (bool, error) {
+	key := string(stream) + "/" + record.EventID
 	c.mu.Lock()
+	if c.draining() || c.running[key] {
+		c.mu.Unlock()
+		return false, nil
+	}
 	c.running[key] = true
-	c.mu.Unlock()
 	c.group.Add(1)
-	launched := make(chan struct{})
-	launch := sync.OnceFunc(func() { close(launched) })
-	go func() {
-		defer c.group.Done()
-		err := c.repository.WithOperation(ctx, stream, event, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-			return c.reconcile(ctx, stream, attempt, current, launch)
-		})
+	c.mu.Unlock()
+	var release func()
+	admittedAttempt := false
+	finish := func() {
+		if release != nil {
+			release()
+		}
 		c.mu.Lock()
 		delete(c.running, key)
-		// An operation cut short by cancellation is reconciled after restart.
+		c.mu.Unlock()
+		if admittedAttempt {
+			c.repository.WakeWorkflow()
+		}
+		c.group.Done()
+	}
+	if c.options.Limit != nil {
+		var admitted bool
+		release, admitted = c.options.Limit(record.Operation)
+		if !admitted {
+			release = nil
+			finish()
+			return false, nil
+		}
+	}
+	class := c.class(record.Operation, beside)
+	ctx = trace.WithSlowThreshold(ctx, c.options.SlowThreshold)
+	attempt, current, err := c.repository.BeginOperation(ctx, stream, record.EventID, class, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now)
+	if err != nil || attempt == nil {
+		finish()
+		return false, err
+	}
+	admittedAttempt = true
+	run := func() error {
+		defer attempt.Close()
+		return c.reconcile(ctx, stream, attempt, current)
+	}
+	if !beside {
+		defer finish()
+		return true, run()
+	}
+	go func() {
+		defer finish()
+		err := run()
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		// Cancellation leaves the durable claim for restart reconciliation.
 		if err != nil && ctx.Err() == nil && c.failure == nil {
 			c.failure = err
 			if c.abort != nil {
 				c.abort(err)
 			}
 		}
-		c.mu.Unlock()
-		launch()
 	}()
-	<-launched
-	return c.failed()
+	return true, c.failed()
+}
+
+func (c *Controller) class(op coreadapter.Operation, beside bool) trace.OperationClass {
+	if c.options.Class != nil {
+		return c.options.Class(op)
+	}
+	if beside {
+		return trace.WorkerOperation
+	}
+	return trace.WorkflowOperation
 }
 
 // retryDelay is the wait before the next attempt of an operation that
@@ -259,6 +337,10 @@ func (c *Controller) step(ctx context.Context, name string) error {
 	return nil
 }
 
+type scheduleError struct{ error }
+
+func (e *scheduleError) Unwrap() error { return e.error }
+
 // Pass discovers work from manifests and durable intent; no wakeup payload is used.
 func (c *Controller) Pass(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -270,20 +352,20 @@ func (c *Controller) Pass(ctx context.Context) error {
 	if c.draining() {
 		return nil
 	}
+	if c.options.Schedule != nil {
+		if err := c.options.Schedule(ctx); err != nil {
+			return &scheduleError{err}
+		}
+	}
 	type pending struct {
 		stream config.WorkstreamID
 		record trace.OperationRecord
 	}
 	var due []pending
 
-	// Scheduling and its operation discovery share a critical section, so
-	// removal cannot invalidate the manifest snapshot midway.
-	discover := func() error {
-		if c.options.Schedule != nil {
-			if err := c.options.Schedule(ctx); err != nil {
-				return err
-			}
-		}
+	// Trace removal cannot invalidate the operation snapshot midway. The
+	// snapshot guard excludes neither operation claims nor result writes.
+	err := c.repository.WithWorkstreamSnapshot(func() error {
 		streams, err := c.repository.Workstreams()
 		if err != nil {
 			return err
@@ -300,13 +382,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 			}
 		}
 		return nil
-	}
-	var err error
-	if c.options.Schedule != nil {
-		err = c.repository.Serialize(discover)
-	} else {
-		err = discover()
-	}
+	})
 	if err != nil {
 		return err
 	}
@@ -316,6 +392,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 			return c.options.Priority(a.record.Operation) - c.options.Priority(b.record.Operation)
 		})
 	}
+	blocked := map[config.WorkstreamID]bool{}
 	for _, p := range due {
 		if c.draining() {
 			return nil
@@ -323,26 +400,31 @@ func (c *Controller) Pass(ctx context.Context) error {
 		if err := c.step(ctx, "before-claim"); err != nil {
 			return err
 		}
-		if c.options.Concurrent != nil && c.options.Concurrent(p.record.Operation) {
-			if err := c.start(ctx, p.stream, p.record.EventID); err != nil {
-				return err
-			}
+		beside := c.options.Concurrent != nil && c.options.Concurrent(p.record.Operation)
+		workflow := c.class(p.record.Operation, beside) == trace.WorkflowOperation
+		if workflow && blocked[p.stream] {
 			continue
 		}
-		err := c.repository.WithOperation(ctx, p.stream, p.record.EventID, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-			return c.reconcile(ctx, p.stream, attempt, current, nil)
-		})
+		admitted, err := c.start(ctx, p.stream, p.record, beside)
 		if err != nil {
 			return err
+		}
+		if workflow && !admitted {
+			blocked[p.stream] = true
 		}
 	}
 	return nil
 }
 
-// reconcile claims, inspects and completes one operation. A concurrent
-// operation, one with launch, applies its effect outside the repository's
-// operation lock and calls launch once the lock is released.
-func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, attempt *trace.OperationAttempt, record trace.OperationRecord, launch func()) error {
+// reconcile inspects and completes one admitted operation under its class's
+// ordering, without holding a trace lock across an adapter call.
+func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, attempt *trace.OperationAttempt, record trace.OperationRecord) error {
+	started := time.Now()
+	defer func() {
+		if duration := time.Since(started); duration >= c.options.SlowThreshold {
+			ghlog.Logger(ctx).Warn("operation exceeded threshold", "project", string(c.repository.Project()), "workstream", string(stream), "operation", record.Operation.ID, "action", record.Operation.Action, "duration", duration.String())
+		}
+	}()
 	if err := c.step(ctx, "after-claim"); err != nil {
 		return err
 	}
@@ -399,14 +481,7 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 				logger.Info("operation started", logAttrs...)
 			}
 			start := c.options.Now()
-			if launch != nil {
-				attempt.Unlocked(ctx, func(ctx context.Context) {
-					launch()
-					result, err = adapter.Apply(ctx, record.Operation)
-				})
-			} else {
-				result, err = adapter.Apply(ctx, record.Operation)
-			}
+			result, err = adapter.Apply(ctx, record.Operation)
 			if e := c.step(ctx, "after-effect"); e != nil {
 				return e
 			}
