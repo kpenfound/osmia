@@ -335,6 +335,13 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 // implementing, and its mason gets a turn that names those files. A unit whose state moved since it was read is left to the
 // next pass.
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
+	// Queue an ordinary send-back before looking at the last done turn. The
+	// move may have committed after the review pass or before a restart.
+	if ordinarySendBack(b.reviewTransitions[trace.UnitSubject(unit)]) {
+		if err := (&reviewers{masons: m}).resumeFindings(ctx, b.stream, unit, b.states[trace.UnitSubject(unit)]); err != nil {
+			return false, false, err
+		}
+	}
 	report, turn, found, err := m.reported(b.stream, unit)
 	if err != nil || !found {
 		return false, false, err

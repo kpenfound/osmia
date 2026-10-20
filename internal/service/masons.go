@@ -59,7 +59,9 @@ type masons struct {
 type building struct {
 	stream config.WorkstreamID
 	states map[string]trace.WorkflowState
-	plan   plan.Plan
+	// reviewTransitions holds latest send-backs, their contests and revise rulings.
+	reviewTransitions map[string]trace.Transition
+	plan              plan.Plan
 	// started is when the workstream last started a unit, zero when never.
 	started time.Time
 	// inFlight names the workstream's implementing and waiting units.
@@ -173,6 +175,9 @@ func (m *masons) Pass(ctx context.Context) error {
 					implementing++
 				}
 				continue
+			}
+			if err := m.resumeBounceRevision(ctx, stream, u.ID, b.reviewTransitions[trace.UnitSubject(u.ID)]); err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			moved, stuck, err := m.finish(ctx, b, u.ID)
 			if err != nil {
@@ -659,6 +664,14 @@ func (m *masons) readSealed(stream config.WorkstreamID) (building, bool, error) 
 	}
 	b := building{stream: stream, states: states, plan: p}
 	for _, t := range transitions {
+		if bounceContest(t, t.Unit) || bounceRevisionTransition(t) || ordinarySendBack(t) {
+			if b.reviewTransitions == nil {
+				b.reviewTransitions = make(map[string]trace.Transition)
+			}
+			b.reviewTransitions[t.Subject] = t
+		} else {
+			delete(b.reviewTransitions, t.Subject)
+		}
 		if t.Actor == masonActor && t.From == UnitReady && t.To == UnitImplementing && t.At.After(b.started) {
 			b.started = t.At
 		}

@@ -322,3 +322,25 @@ func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
 		t.Fatalf("an older escalation raised a new contest: %v", got)
 	}
 }
+
+func TestOwnerGateRecognizesChiefDecisions(t *testing.T) {
+	for _, unit := range []string{"acceptance-without-full-checks", strings.Repeat("u", 64), strings.Repeat("u", 128)} {
+		t.Run(unit, func(t *testing.T) {
+			subject := UnitSubject(unit)
+			contest := Transition{Header: Header{Workstream: streamID, Unit: unit, ID: subject + "-contested-checks-7-12"}, Subject: subject, From: "checking", To: "contested"}
+			view := &workflowView{states: map[string]WorkflowState{subject: {Value: "contested"}}}
+			for _, key := range []string{contest.ID, EventID(contest.ID, "chief")} {
+				path := "units/" + subject + "/chief-" + key + ".json"
+				decision := Document{Header: Header{Workstream: streamID}, Path: path, Content: `{"contest":"` + contest.ID + `","decision":"escalate"}`}
+				got := ownerGates([]Record{contest, decision}, streamID, view)
+				if len(got) != 1 || got[0].Reference != unit {
+					t.Fatalf("%s escalation gate: %+v", path, got)
+				}
+				decision.Content = `{"contest":"another-contest","decision":"escalate"}`
+				if got := ownerGates([]Record{contest, decision}, streamID, view); len(got) != 0 {
+					t.Fatalf("%s unrelated decision raised contest: %+v", path, got)
+				}
+			}
+		})
+	}
+}
