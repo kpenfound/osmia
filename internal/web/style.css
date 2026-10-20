@@ -1207,6 +1207,26 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.composer button.send-icon {
+  border-radius: 50%;
+}
+
+.composer button.send-icon:hover {
+  background: var(--muted);
+}
+
+/* Conversations use the desktop pane, with a gutter at either edge. */
+@media (min-width: 761px) {
+  .view:is([data-view="workstream"], [data-view="session"], [data-view="design"]) {
+    max-width: 120rem;
+  }
+
+  .entry[data-kind="message"] .text,
+  .entry[data-kind="owner"] .text {
+    max-width: 90%;
+  }
+}
+
 /* Phone widths hide the workstream list behind a button; opened, it
    covers the page until a workstream is picked or it is closed. */
 @media (max-width: 760px) {

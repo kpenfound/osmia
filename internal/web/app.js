@@ -1395,6 +1395,16 @@
     });
   }
 
+  function sendButton() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', 'M12 19V5m-7 7 7-7 7 7');
+    svg.append(path);
+    return el('button', { type: 'submit', class: 'primary icon send-icon', 'aria-label': 'Send' }, svg);
+  }
+
   function card(id) {
     let c = cards.get(id);
     if (c) {
@@ -1405,7 +1415,7 @@
       heading: el('h3', { class: 'needs-title' }, 'Waiting for you'),
       decisions: el('div', { class: 'decisions', 'data-field': 'decisions' }),
       text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the chief of staff', placeholder: 'Message the chief of staff' }),
-      button: el('button', { type: 'submit', class: 'primary' }, 'Send'),
+      button: sendButton(),
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
       // opened holds the sessions whose report the owner expanded, so a
