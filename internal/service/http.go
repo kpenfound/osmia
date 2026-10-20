@@ -300,6 +300,9 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if id, ok := strings.CutSuffix(r.URL.Path, "/conversation"); ok {
 			if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
 				if out, api := s.conversationList(id); api != nil {
+					if _, err := config.ParseWorkstreamID(id); err == nil && api.Code == Validation {
+						api = &APIError{NotFound, "design session not found"}
+					}
 					failWith(w, api)
 				} else {
 					respond(w, 200, out)
@@ -377,6 +380,22 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 				respond(w, 200, SessionResponse{Session: out})
 			}
 			return
+		}
+	}
+
+	if id, ok := strings.CutSuffix(r.URL.Path, "/destroy"); ok && r.Method == http.MethodPost {
+		for _, route := range []struct {
+			prefix string
+			design bool
+		}{{Prefix + "/sessions/", false}, {Prefix + "/design/", true}} {
+			if raw, ok := strings.CutPrefix(id, route.prefix); ok {
+				if out, api := s.destroySession(r.Context(), raw, route.design); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			}
 		}
 	}
 	if id, ok := strings.CutSuffix(r.URL.Path, "/commit"); ok && r.Method == http.MethodPost {

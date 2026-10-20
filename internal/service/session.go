@@ -97,10 +97,9 @@ func (s *Service) readPendingSession() (*pendingSession, error) {
 	return &p, nil
 }
 
-// errSessionDiscarded reports that a pending session open could not be
-// finished because its project is no longer active, and was discarded
-// instead: its worktree, if any, was released and the journal removed.
-var errSessionDiscarded = errors.New("the session open was discarded because its project is no longer active")
+// errSessionDiscarded reports that an open's journal was discarded, so its
+// replay must not create a worktree or trace.
+var errSessionDiscarded = errors.New("the session open was discarded")
 
 func sessionIncomplete(id config.WorkstreamID, err error) *APIError {
 	reason := "storage failure"
@@ -203,6 +202,23 @@ func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (Se
 	repository, err := s.repository(p.Project)
 	if err != nil {
 		return SessionView{}, s.discardPendingSession(ctx, p)
+	}
+	gate := sessionLock(repository, p.Workstream)
+	gate.Lock()
+	defer gate.Unlock()
+	// A destroy can remove the journal after this replay first read it.
+	// Revalidate under the same admission guard before acquiring a worktree.
+	pending, err := s.readPendingSession()
+	if err != nil {
+		return SessionView{}, err
+	}
+	if pending == nil || pending.Project != p.Project || pending.Workstream != p.Workstream {
+		return SessionView{}, errSessionDiscarded
+	}
+	if destroying, err := trace.SessionDestroyPending(cfg.Root, p.Project, p.Workstream); err != nil {
+		return SessionView{}, err
+	} else if destroying {
+		return SessionView{}, errSessionDiscarded
 	}
 	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
 	if _, err := g.Acquire(ctx, vcs.Request{Name: string(p.Workstream), Ref: p.Base, Branch: p.Branch}); err != nil {

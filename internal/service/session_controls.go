@@ -148,6 +148,9 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	if api != nil {
 		return SessionCommitResponse{}, api
 	}
+	if err := s.step("session-commit-looked-up"); err != nil {
+		return SessionCommitResponse{}, &APIError{Internal, err.Error()}
+	}
 	message := strings.TrimSpace(req.Message)
 	if message == "" {
 		return SessionCommitResponse{}, &APIError{Validation, "message must not be empty"}
@@ -155,11 +158,6 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	key := strings.TrimSpace(req.RequestKey)
 	if key == "" {
 		return SessionCommitResponse{}, &APIError{Validation, "request_key must not be empty"}
-	}
-	if ended, err := sessionEnded(repository, stream); err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
-	} else if ended {
-		return SessionCommitResponse{}, &APIError{Conflict, "the session has ended"}
 	}
 	// sessionMessage and sessionEnd hold this same lock, from their own busy
 	// check through recording what they do, so a commit cannot observe
@@ -171,11 +169,10 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 		return SessionCommitResponse{}, &APIError{Conflict, "a message is being started for this session; try again once it finishes"}
 	}
 	defer lock.Unlock()
-	// The lock closes the window between this function's own earlier,
-	// unlocked ended check and taking the lock: without this recheck, a
-	// session that finished ending in that window (its worktree already
-	// released) could still take a commit that recreates files on top of a
-	// torn-down worktree.
+	if _, _, _, api := s.sessionTrace(raw); api != nil {
+		return SessionCommitResponse{}, api
+	}
+	// State and existence are checked under the same guard as end and destroy.
 	if ended, err := sessionEnded(repository, stream); err != nil {
 		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {
@@ -339,27 +336,26 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if api != nil {
 		return SessionCheckRun{}, api
 	}
-	if ended, err := sessionEnded(repository, stream); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
-	} else if ended {
-		return SessionCheckRun{}, &APIError{Conflict, "the session has ended"}
+	if err := s.step("session-check-looked-up"); err != nil {
+		return SessionCheckRun{}, &APIError{Internal, err.Error()}
 	}
 	mu := sessionCheckLock(repository, stream)
 	if !mu.TryLock() {
 		return SessionCheckRun{}, &APIError{Conflict, "a check is already running for this session; try again once it finishes"}
 	}
 	defer mu.Unlock()
-	// sessionEnd holds sessionLock across its whole transition plus the
-	// worktree and model-session releases that follow it. Taking the same
-	// lock here, just long enough to recheck ended, closes the window
-	// between this function's own earlier, unlocked ended check and
-	// reaching this point: without it, a check could start once a
-	// concurrent end has moved the session to ended but has not finished,
-	// or has already finished, releasing what it holds.
+	// Register the control under the admission lock and retain its lease
+	// through the external checker and the final trace writes.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionCheckRun{}, &APIError{Conflict, "the session is ending; try again once it finishes"}
 	}
+	if _, _, _, api := s.sessionTrace(raw); api != nil {
+		lock.Unlock()
+		return SessionCheckRun{}, api
+	}
+	lock.controls.Add(1)
+	defer lock.controls.Add(-1)
 	ended, err := sessionEnded(repository, stream)
 	lock.Unlock()
 	if err != nil {
@@ -449,20 +445,20 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	if api != nil {
 		return SessionPushResponse{}, api
 	}
-	if ended, err := sessionEnded(repository, stream); err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
-	} else if ended {
-		return SessionPushResponse{}, &APIError{Conflict, "the session has ended"}
+	if err := s.step("session-push-looked-up"); err != nil {
+		return SessionPushResponse{}, &APIError{Internal, err.Error()}
 	}
-	// The same recheck sessionCheck takes, under sessionLock, closes the
-	// window between the unlocked check above and here: without it, a push
-	// started just as a concurrent end begins could still reach the remote
-	// after the session is ended, which spec#19 forbids even though push
-	// itself only reads the branch, not the worktree end releases.
+	// The lease covers every remote phase after admission.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionPushResponse{}, &APIError{Conflict, "the session is ending; try again once it finishes"}
 	}
+	if _, _, _, api := s.sessionTrace(raw); api != nil {
+		lock.Unlock()
+		return SessionPushResponse{}, api
+	}
+	lock.controls.Add(1)
+	defer lock.controls.Add(-1)
 	ended, err := sessionEnded(repository, stream)
 	lock.Unlock()
 	if err != nil {
@@ -470,6 +466,9 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	}
 	if ended {
 		return SessionPushResponse{}, &APIError{Conflict, "the session has ended"}
+	}
+	if err := s.step("session-push-admitted"); err != nil {
+		return SessionPushResponse{}, &APIError{Internal, err.Error()}
 	}
 	cfg := s.current().For(project)
 	g := sessionGit(cfg)
@@ -538,11 +537,17 @@ func (s *Service) sessionEnd(ctx context.Context, raw string) (SessionView, *API
 	if api != nil {
 		return SessionView{}, api
 	}
+	if err := s.step("session-end-looked-up"); err != nil {
+		return SessionView{}, &APIError{Internal, err.Error()}
+	}
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionView{}, &APIError{Conflict, "a message is being started for this session; try again once it finishes"}
 	}
 	defer lock.Unlock()
+	if _, _, _, api := s.sessionTrace(raw); api != nil {
+		return SessionView{}, api
+	}
 	ended, err := sessionEnded(repository, stream)
 	if err != nil {
 		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}

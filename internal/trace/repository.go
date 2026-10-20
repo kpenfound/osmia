@@ -353,7 +353,13 @@ func (r *Repository) diskStreams() ([]config.WorkstreamID, error) {
 		if err != nil || !entry.IsDir() {
 			return nil, fmt.Errorf("%s: not a workstream trace directory", entry.Name())
 		}
-		ids = append(ids, id)
+		pending, err := SessionDestroyPending(r.root, r.project, id)
+		if err != nil {
+			return nil, err
+		}
+		if !pending {
+			ids = append(ids, id)
+		}
 	}
 	return ids, nil
 }
@@ -909,6 +915,12 @@ func createWorkstreamTrace(ctx context.Context, root config.Root, project config
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
 	}
+	if pending, err := SessionDestroyPending(root, project, id); err != nil {
+		return err
+	} else if pending {
+		return fmt.Errorf("%w: session is being destroyed", os.ErrNotExist)
+	}
+
 	if !validWorkspaces(m.Workspaces) {
 		return fmt.Errorf("unknown workspace backend %q", m.Workspaces)
 	}

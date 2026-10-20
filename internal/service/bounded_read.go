@@ -21,9 +21,10 @@ const StaleHeader = "X-Osmia-Stale"
 // cannot refresh within its bound can still answer with it. The zero value
 // has nothing cached.
 type viewCache[T any] struct {
-	mu    sync.Mutex
-	value T
-	has   bool
+	mu         sync.Mutex
+	value      T
+	has        bool
+	generation uint64
 }
 
 func (c *viewCache[T]) get() (T, bool) {
@@ -41,19 +42,26 @@ func (c *viewCache[T]) set(v T) {
 // false, if fn finishes before bound elapses or ctx ends. Otherwise it
 // returns cache's last value, with stale true. Either way fn keeps running
 // in the background and its eventual result replaces cache for the next
-// read: boundedView never cancels fn itself, only its own wait for fn, so a
-// read that is merely slow still refreshes the cache once it finishes. fn
-// must not depend on ctx for anything beyond what it is safe to keep doing
+// read unless the cache was invalidated. boundedView never cancels fn itself,
+// only its own wait for fn, so a read that is merely slow still refreshes the
+// cache once it finishes. fn must not depend on ctx beyond what it can keep doing
 // after this call returns; pass it a context detached from the request's
 // own, such as context.Background, when fn needs one. If cache holds
 // nothing yet, boundedView waits for fn regardless of bound, so the very
 // first read never answers with a zero value falsely marked as a snapshot;
 // it still returns as soon as ctx ends.
 func boundedView[T any](ctx context.Context, cache *viewCache[T], bound time.Duration, fn func() T) (value T, stale bool) {
+	cache.mu.Lock()
+	generation := cache.generation
+	cache.mu.Unlock()
 	done := make(chan T, 1)
 	go func() {
 		v := fn()
-		cache.set(v)
+		cache.mu.Lock()
+		if generation == cache.generation {
+			cache.value, cache.has = v, true
+		}
+		cache.mu.Unlock()
 		done <- v
 	}()
 	timer := time.NewTimer(bound)
