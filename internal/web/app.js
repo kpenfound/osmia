@@ -580,10 +580,88 @@
     }
   }
 
+  // Shared result elements retain a separate outcome for each instance.
+  // An action captures its entry before awaiting the API, so a later
+  // selection can only paint the entry belonging to the displayed instance.
+  const outcomeScopes = new Map();
+  const buttonScopes = new Map();
+
+  function scopeOutcome(result, instance, buttons) {
+    const scope = { result, instance, entries: new Map() };
+    outcomeScopes.set(result, scope);
+    for (const button of buttons) scopeButton(button, instance);
+    return scope;
+  }
+
+  function scopeButton(button, instance) {
+    const scope = { instance, pending: new Map() };
+    buttonScopes.set(button, scope);
+    return scope;
+  }
+
+  function captureOutcome(result) {
+    const scope = outcomeScopes.get(result);
+    return scope ? { scope, key: scope.instance() } : result;
+  }
+
+  function paintOutcome(scope) {
+    const entry = scope.entries.get(scope.instance());
+    scope.result.dataset.outcome = entry ? entry.outcome : '';
+    scope.result.textContent = entry ? entry.text : '';
+  }
+
+  function paintBusy(button, scope) {
+    if (scope.pending.has(scope.instance())) button.dataset.busy = 'true';
+    else delete button.dataset.busy;
+    button.disabled = button.dataset.blocked === 'true' || button.dataset.busy === 'true';
+  }
+
+  function renderOutcomes() {
+    for (const scope of outcomeScopes.values()) paintOutcome(scope);
+    for (const [button, scope] of buttonScopes) paintBusy(button, scope);
+  }
+
   // show writes an action's outcome: pending, ok, unavailable or error.
   function show(result, outcome, text) {
-    result.dataset.outcome = outcome;
-    result.textContent = text;
+    const target = result.scope ? result : captureOutcome(result);
+    if (target.scope) {
+      target.scope.entries.set(target.key, { outcome, text });
+      paintOutcome(target.scope);
+    } else {
+      result.dataset.outcome = outcome;
+      result.textContent = text;
+    }
+  }
+
+  function setupOutcomeScopes() {
+    const selected = () => ui.selected;
+    for (const [result, buttons] of [
+      ['#design-result', '#design-form button'],
+      ['#design-start-result', '#design-start'],
+      ['#session-result', '#session-form button'],
+      ['#session-control-result', '#session-stop, #session-check, #session-push, #session-end'],
+      ['#session-commit-form .result', '#session-commit-form [type=submit]'],
+    ]) {
+      scopeOutcome(document.querySelector(result), selected, document.querySelectorAll(buttons));
+    }
+    // Archived or missing selections display a different live workstream.
+    const displayedWorkstream = () => shown()?.workstream || null;
+    for (const [result, buttons] of [
+      ['#inbox-result', '[data-workstream-action]'],
+      ...workstreamForms.map(id => ['#' + id + ' .result', '#' + id + ' button']),
+    ]) {
+      scopeOutcome(document.querySelector(result), displayedWorkstream, document.querySelectorAll(buttons));
+    }
+    for (const id of ['handin-form', 'design-add-form', 'session-add-form', 'repo-add']) {
+      const form = byId(id);
+      let opening = 0;
+      const scope = scopeOutcome(form.querySelector('.result'), () => opening, form.querySelectorAll('button'));
+      form.elements.project.addEventListener('change', () => {
+        opening++;
+        scope.entries.clear();
+        renderOutcomes();
+      });
+    }
   }
 
   // act runs one owner action with its button disabled and shows what the
@@ -592,9 +670,13 @@
   // operation when the command is temporarily unavailable
   // ('unavailable'), or the refusal's reason when it is rejected
   // ('error'); refused runs after either kind of refusal, when given. Once
-  // the action ends, the button is enabled again unless a render has
-  // blocked it meanwhile.
+  // the action ends, the displayed instance's pending actions and render's
+  // blocked flag determine whether the button is enabled.
   async function act(result, button, call, done, refused) {
+    result = captureOutcome(result);
+    const scope = buttonScopes.get(button) || (result.scope && scopeButton(button, result.scope.instance));
+    const key = scope ? scope.instance() : null;
+    if (scope) scope.pending.set(key, (scope.pending.get(key) || 0) + 1);
     button.dataset.busy = 'true';
     button.disabled = true;
     show(result, 'pending', 'Sending…');
@@ -606,8 +688,15 @@
         refused(err);
       }
     } finally {
-      delete button.dataset.busy;
-      button.disabled = button.dataset.blocked === 'true';
+      if (scope) {
+        const remaining = scope.pending.get(key) - 1;
+        if (remaining) scope.pending.set(key, remaining);
+        else scope.pending.delete(key);
+        paintBusy(button, scope);
+      } else {
+        delete button.dataset.busy;
+        button.disabled = button.dataset.blocked === 'true';
+      }
     }
   }
 
@@ -1734,10 +1823,10 @@
       return;
     }
     act(result, form.querySelector('button'), () => request('POST', '/sessions/' + id + '/message', { text }), (entry) => {
-      form.elements.text.value = '';
+      if (ui.selected === id) form.elements.text.value = '';
       sessionEchoesFor(id).set(entry.turn, entry);
       mark(['status', 'feed/' + id]);
-      renderSessionFeed(id);
+      if (ui.selected === id) renderSessionFeed(id);
       return 'Sent; the agent answers in its next turn (' + entry.state + ').';
     });
   }
@@ -1765,7 +1854,7 @@
   function checkSession(id) {
     act(byId('session-control-result'), byId('session-check'), () => request('POST', '/sessions/' + id + '/check'), (run) => {
       sessionCheckResults.set(id, run);
-      renderSessionCheckResult(id);
+      if (ui.selected === id) renderSessionCheckResult(id);
       return 'Check run ' + run.run + ' (' + run.kind + '): ' + run.status + '.';
     });
   }
@@ -1807,7 +1896,7 @@
     }
     act(result, form.querySelector('[type=submit]'), () => request('POST', '/sessions/' + id + '/commit', { message, request_key: retry.key }), (out) => {
       sessionCommitRetries.delete(id);
-      form.reset();
+      if (ui.selected === id) form.reset();
       mark(['sessions/' + id + '/changes']);
       return 'Committed ' + out.commit.slice(0, 10) + '.';
     });
@@ -1983,7 +2072,7 @@
       return;
     }
     act(result, form.querySelector('button'), () => request('POST', '/design/' + id + '/message', { text }), (entry) => {
-      form.elements.text.value = '';
+      if (ui.selected === id) form.elements.text.value = '';
       mark(['design/' + id + '/conversation']);
       return 'Sent; the design agent answers in its next turn (' + entry.state + ').';
     });
@@ -3068,10 +3157,11 @@
   // keeps current, such as a hidden workstream field; a failed submission
   // leaves the form exactly as the owner left it.
   function formAction(form, button, operation, done, opts) {
+    const origin = captureOutcome(form.querySelector('.result'));
     return act(form.querySelector('.result'), button, operation, (out) => {
       mark(['status', 'config', 'inbox', 'charter']);
       const text = done(out);
-      if (opts && opts.reset) {
+      if (opts && opts.reset && (!origin.scope || workstreamForms.includes(form.id) || origin.key === origin.scope.instance())) {
         form.reset();
         renderOwnerForms();
       }
@@ -3092,10 +3182,7 @@
     documents.elements.plan.value = '';
     byId('document-revisions').textContent = '';
     byId('trace-content').replaceChildren();
-    for (const id of workstreamForms) {
-      show(byId(id).querySelector('.result'), '', '');
-    }
-    show(inboxResult, '', '');
+    renderOutcomes();
   }
 
   function renderOwnerForms() {
@@ -3288,9 +3375,10 @@
       const kind = trace.elements.kind.value;
       const selector = trace.elements.selector.value.trim();
       if (kind && !selector) { show(trace.querySelector('.result'), 'error', 'Name the unit, criterion, or commit.'); return; }
-      const path = '/trace/' + trace.elements.workstream.value + (kind ? '/' + kind + '/' + encodeURIComponent(selector) : '');
+      const workstream = trace.elements.workstream.value;
+      const path = '/trace/' + workstream + (kind ? '/' + kind + '/' + encodeURIComponent(selector) : '');
       formAction(trace, event.submitter, () => request('GET', path), out => {
-        byId('trace-content').replaceChildren(traceTree(out));
+        if (trace.elements.workstream.value === workstream) byId('trace-content').replaceChildren(traceTree(out));
         return 'Trace loaded.';
       });
     });
@@ -3410,6 +3498,7 @@
   }
 
   function render() {
+    renderOutcomes();
     forget();
     pruneInbox();
     markSeen();
@@ -3434,6 +3523,7 @@
     renderConfig();
   }
 
+  setupOutcomeScopes();
   setupLayout();
   setupOwnerForms();
   setupSessionForms();
