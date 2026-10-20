@@ -638,8 +638,9 @@
     for (const [result, buttons] of [
       ['#design-result', '#design-form button'],
       ['#design-start-result', '#design-start'],
+      ['#design-destroy-result', '#design-destroy'],
       ['#session-result', '#session-form button'],
-      ['#session-control-result', '#session-stop, #session-check, #session-push, #session-end'],
+      ['#session-control-result', '#session-stop, #session-check, #session-push, #session-end, #session-destroy'],
       ['#session-commit-form .result', '#session-commit-form [type=submit]'],
     ]) {
       scopeOutcome(document.querySelector(result), selected, document.querySelectorAll(buttons));
@@ -1881,6 +1882,34 @@
     });
   }
 
+  function destroyConversation(id, design) {
+    if (!window.confirm('Permanently destroy this ' + (design ? 'design session' : 'session') + '? The session, its local branch (including unpushed commits) and all its history will be removed permanently. This cannot be undone. Pushed branches stay on the remote.')) return;
+    const button = byId(design ? 'design-destroy' : 'session-destroy');
+    const result = byId(design ? 'design-destroy-result' : 'session-control-result');
+    act(result, button, () => request('POST', '/' + (design ? 'design' : 'sessions') + '/' + id + '/destroy'), () => {
+      designIds.delete(id);
+      sessionIds.delete(id);
+      sessionEchoes.delete(id);
+      sessionCheckResults.delete(id);
+      sessionCommitRetries.delete(id);
+      for (const name of ['feed/' + id, 'design/' + id + '/conversation', 'sessions/' + id + '/changes']) {
+        delete views[name];
+        delete failures[name];
+        dirty.delete(name);
+      }
+      if (views.status) views.status.workstreams = streams().filter(w => w.workstream !== id);
+      if (ui.selected === id) {
+        ui.selected = null;
+        store('selected', null);
+        history.replaceState(null, '', location.pathname + location.search);
+        if (ui.view === 'design' || ui.view === 'session') openView('project-pane');
+      }
+      render();
+      mark(['status']);
+      return 'Session destroyed permanently.';
+    });
+  }
+
   // sessionCommitRetries keeps each session's last attempted commit message
   // with the request key it was sent under, the way handinRetry does for
   // hand-in, so retrying the same message after a failure or a restart
@@ -1926,7 +1955,7 @@
 
   // renderSessionView shows the session the owner selected: its profile with
   // no control to change it, its chat, a stop control, its changes, a commit
-  // form, a check button with its latest result, push and end. It shows no
+  // form, a check button with its latest result, push, end and destroy. It shows no
   // spec, plan, unit, review or delivery panel; sessions have none of those.
   function renderSessionView() {
     const w = shownSession();
@@ -1935,6 +1964,7 @@
       byId('session-meta').replaceChildren();
       byId('session-feed').replaceChildren(el('p', { class: 'meta' }, 'No session selected.'));
       sessionFeedShown = null;
+      block(byId('session-destroy'), true);
       byId('session-diff').textContent = '';
       byId('session-commits').replaceChildren();
       return;
@@ -1948,6 +1978,7 @@
     renderSessionChanges(w.workstream);
     renderSessionCheckResult(w.workstream);
     const ended = w.state === 'ended';
+    block(byId('session-destroy'), false);
     const form = byId('session-form');
     form.elements.text.disabled = ended;
     block(form.querySelector('button'), ended);
@@ -2109,9 +2140,11 @@
       byId('design-meta').replaceChildren();
       byId('design-feed').replaceChildren(el('p', { class: 'meta' }, 'No design session selected.'));
       designFeedShown = null;
+      block(byId('design-destroy'), true);
       return;
     }
     byId('design-title').textContent = w.workstream;
+    block(byId('design-destroy'), false);
     byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream);
     renderDesignFeed(w.workstream);
   }
@@ -3453,6 +3486,10 @@
         endSession(w.workstream);
       }
     });
+    byId('session-destroy').addEventListener('click', () => {
+      const w = shownSession();
+      if (w) destroyConversation(w.workstream, false);
+    });
     byId('session-commit-form').addEventListener('submit', (event) => {
       event.preventDefault();
       const w = shownSession();
@@ -3462,8 +3499,7 @@
     });
   }
 
-  // setupDesignForms wires the "Open a design session" form, the design view's
-  // chat and the one owner action that starts a workgroup from its brief.
+  // setupDesignForms wires design creation, chat, workgroup start and destroy.
   function setupDesignForms() {
     const add = byId('design-add-form');
     add.addEventListener('submit', (event) => {
@@ -3493,6 +3529,10 @@
       if (w) {
         startDesign(w.workstream);
       }
+    });
+    byId('design-destroy').addEventListener('click', () => {
+      const w = shownDesign();
+      if (w) destroyConversation(w.workstream, true);
     });
   }
 
