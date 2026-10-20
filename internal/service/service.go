@@ -320,6 +320,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			st.Close()
 		}
 	}()
+	if err = s.reconcileSessionDestroys(ctx, cfg, projects, st); err != nil {
+		return nil, err
+	}
 	state, _ := st.Snapshot()
 	if err = s.ensureWorkgroups(ctx, cfg, projects, state.Archived); err != nil {
 		return nil, err

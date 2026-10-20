@@ -350,3 +350,18 @@ func activityOf(op coreadapter.Operation) (ActivityKind, config.WorkstreamID, st
 	}
 	return ActivityGit, "", op.Action
 }
+
+// forgetSession removes completed activity failures for a destroyed session.
+func (r *activityRegistry) forgetSession(project config.ProjectID, stream config.WorkstreamID) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	for key, entry := range r.entries {
+		if entry.Project == project && entry.Workstream == stream {
+			delete(r.entries, key)
+		}
+	}
+	r.mu.Unlock()
+	r.changed()
+}

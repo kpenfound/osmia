@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -72,11 +73,16 @@ type sessionLockKey struct {
 // message queue, so a message that cannot take its session's lock
 // immediately is refused as busy rather than waiting for the turn in
 // flight to finish.
-var sessionLocks sync.Map // sessionLockKey -> *sync.Mutex
+type sessionGate struct {
+	sync.Mutex
+	controls atomic.Int64
+}
 
-func sessionLock(repository *trace.Repository, stream config.WorkstreamID) *sync.Mutex {
-	v, _ := sessionLocks.LoadOrStore(sessionLockKey{repository, stream}, &sync.Mutex{})
-	return v.(*sync.Mutex)
+var sessionLocks sync.Map // sessionLockKey -> *sessionGate
+
+func sessionLock(repository *trace.Repository, stream config.WorkstreamID) *sessionGate {
+	v, _ := sessionLocks.LoadOrStore(sessionLockKey{repository, stream}, &sessionGate{})
+	return v.(*sessionGate)
 }
 
 // unfinishedSessionTurn reports whether the thread holds a turn with no
@@ -241,10 +247,8 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if api != nil {
 		return ConversationEntry{}, api
 	}
-	if ended, err := sessionEnded(repository, stream); err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
-	} else if ended {
-		return ConversationEntry{}, &APIError{Conflict, "the session has ended"}
+	if err := s.step("session-message-looked-up"); err != nil {
+		return ConversationEntry{}, &APIError{Internal, err.Error()}
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
@@ -264,11 +268,10 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
 	}
 	defer mu.Unlock()
-	// sessionEnd holds this same lock across its own busy check and the
-	// transition to ended, so re-checking here, now that the lock is held,
-	// closes the window between this function's own earlier, unlocked
-	// ended check and taking the lock: without it, a session that ended in
-	// that window could still have a turn started on it.
+	if _, _, _, api := s.sessionTrace(raw); api != nil {
+		return ConversationEntry{}, api
+	}
+	// End and destroy share this admission guard.
 	if ended, err := sessionEnded(repository, stream); err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {

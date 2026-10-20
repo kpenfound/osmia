@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"time"
 
@@ -94,6 +95,18 @@ func (r *Repository) boundary(name string) error {
 // commits leaves the trace unchanged; after it commits, cancellation cannot
 // undo it.
 func (r *Repository) publish(ctx context.Context, c change) error {
+	stream := r.stream
+	if stream == "" {
+		stream = c.stream
+	}
+	if stream != "" {
+		if pending, err := SessionDestroyPending(r.root, r.project, stream); err != nil {
+			return err
+		} else if pending {
+			return fmt.Errorf("%w: session is being destroyed", os.ErrNotExist)
+		}
+	}
+
 	if r.db == nil {
 		return fmt.Errorf("%w: trace repository is closed", ErrLocked)
 	}

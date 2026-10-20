@@ -270,31 +270,47 @@ func (c *Controller) Pass(ctx context.Context) error {
 	if c.draining() {
 		return nil
 	}
-	if c.options.Schedule != nil {
-		if err := c.repository.Serialize(func() error { return c.options.Schedule(ctx) }); err != nil {
-			return err
-		}
-	}
-	streams, err := c.repository.Workstreams()
-	if err != nil {
-		return err
-	}
 	type pending struct {
 		stream config.WorkstreamID
 		record trace.OperationRecord
 	}
 	var due []pending
-	for _, stream := range streams {
-		records, err := c.repository.Operations(stream)
+
+	// Scheduling and its operation discovery share a critical section, so
+	// removal cannot invalidate the manifest snapshot midway.
+	discover := func() error {
+		if c.options.Schedule != nil {
+			if err := c.options.Schedule(ctx); err != nil {
+				return err
+			}
+		}
+		streams, err := c.repository.Workstreams()
 		if err != nil {
 			return err
 		}
-		for _, record := range records {
-			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) && !c.inFlight(stream, record.EventID) && (c.options.Hold == nil || !c.options.Hold(stream, record.Operation)) {
-				due = append(due, pending{stream, record})
+		for _, stream := range streams {
+			records, err := c.repository.Operations(stream)
+			if err != nil {
+				return err
+			}
+			for _, record := range records {
+				if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) && !c.inFlight(stream, record.EventID) && (c.options.Hold == nil || !c.options.Hold(stream, record.Operation)) {
+					due = append(due, pending{stream, record})
+				}
 			}
 		}
+		return nil
 	}
+	var err error
+	if c.options.Schedule != nil {
+		err = c.repository.Serialize(discover)
+	} else {
+		err = discover()
+	}
+	if err != nil {
+		return err
+	}
+
 	if c.options.Priority != nil {
 		slices.SortStableFunc(due, func(a, b pending) int {
 			return c.options.Priority(a.record.Operation) - c.options.Priority(b.record.Operation)

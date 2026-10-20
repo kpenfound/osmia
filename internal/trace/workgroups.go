@@ -77,6 +77,11 @@ func EnsureWorkgroups(ctx context.Context, r *Repository, missing []config.Works
 	next := existing
 	changed := false
 	for _, stream := range missing {
+		if pending, err := SessionDestroyPending(r.root, r.project, stream); err != nil {
+			return nil, err
+		} else if pending {
+			continue
+		}
 		if _, ok := WorkgroupOf(existing, stream); ok {
 			continue
 		}

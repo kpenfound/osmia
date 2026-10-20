@@ -101,6 +101,22 @@ The web page's **Open a design session** and **Start workgroup from brief** offe
 the same flow, using `POST /v1/design` and `POST /v1/design/{workstream}/start`.
 All design commands support `--json`.
 
+`osmia design destroy <design-id> [--json]` permanently removes an open design
+session before a workgroup has been started from it. It removes its trace,
+conversation, documents, any worktree, stored model-session and turn state, and
+its one-workstream workgroup entry. This cannot be undone and keeps no archive
+record or retained title. A running or starting turn, a workgroup start in
+progress, or an already started design is refused with `conflict` (exit 5).
+Unknown or already destroyed sessions return `not_found` (exit 4).
+See [destroying sessions](running.md#destroying-sessions) for removal and
+recovery details.
+
+The owner API uses `POST /v1/design/{workstream}/destroy` and
+`POST /v1/sessions/{workstream}/destroy`, with no request body. Both return
+`{"project":"p_…","workstream":"w_…","destroyed":true}` on success and
+the usual API error response on refusal. These controls are unavailable to
+runtime agents. The [OpenAPI reference](openapi.json) describes both routes.
+
 ## Dependencies, delivery and retention
 
 The architect's workgroup graph must be acyclic. A **contract** edge (the
@@ -788,9 +804,23 @@ a crash and repeated starts neither lose nor duplicate records. See
   `ended`; its branch, commits, chat and trace stay readable, and every
   later message, commit, check and push against it fails with `conflict`
   (exit 5).
+- `session destroy <session-id> [--json]` permanently removes an exploratory
+  session, open or ended, without needing to end it first. It removes the
+  trace (chat, thread, documents and check records), any worktree, stored
+  model-session and turn state, and the local `osmia/session/<id>` branch,
+  including unpushed commits. It cannot be undone and keeps no archive record
+  or retained title. Pushed branches stay on the remote; destroy never pushes
+  or changes remote branches, pull requests or issues. A running or starting
+  turn or a commit, check, push or end still in progress is refused with
+  `conflict` (exit 5), changing nothing. Ordinary workstreams, workgroups,
+  the librarian workstream and started designs cannot be destroyed. Unknown
+  or already destroyed sessions return `not_found` (exit 4). Both destroy
+  commands print a short confirmation, or with `--json` the API response:
+  `project`, `workstream` and `destroyed: true`.
 - A session ID is the workstream ID `session open` returned; a session ID
   not held by any registered project, or the workstream it names is not a
-  session, fails with `not_found` (exit 4).
+  session, fails with `not_found` (exit 4). Destroy refuses an existing
+  non-session target with `conflict` (exit 5).
 
 Every command accepts `--root PATH`, defaulting to `~/.local/share/osmia` with
 its top-level file at `~/.config/osmia/config.toml` (see

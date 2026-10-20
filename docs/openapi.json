@@ -1030,6 +1030,46 @@
         }
       }
     },
+    "/v1/design/{workstream}/destroy": {
+      "post": {
+        "summary": "Permanently destroy an open design session; refused while busy or already started",
+        "operationId": "postDesignByWorkstreamDestroy",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDestroyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/design/{workstream}/message": {
       "post": {
         "summary": "Send a message to a design session's agent; refused as busy while a turn is running",
@@ -2505,6 +2545,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionCommitResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{workstream}/destroy": {
+      "post": {
+        "summary": "Permanently destroy an exploratory session and its local branch; refused while busy",
+        "operationId": "postSessionsByWorkstreamDestroy",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDestroyResponse"
                 }
               }
             }
@@ -6510,6 +6590,20 @@
             "type": "string"
           },
           "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SessionDestroyResponse": {
+        "properties": {
+          "destroyed": {
+            "type": "boolean"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },

@@ -195,8 +195,8 @@ func TestBrowserSessionSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.
 // which work end to end against a real local worktree and remote, with no
 // spec, plan, unit, review or delivery panel. Covers plan#sess-web
 // acceptance item 3 and spec#22's control list.
+// serial: native confirmation dialogs use the shared browser window.
 func TestBrowserSessionViewShowsControlsAndNoWorkstreamPanels(t *testing.T) {
-	t.Parallel()
 	s, c, projectID, _, clone := sessionWebFixture(t)
 	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: projectID, Profile: "default"})
 	must(t, err)
@@ -267,7 +267,7 @@ func TestBrowserSessionViewShowsControlsAndNoWorkstreamPanels(t *testing.T) {
 	}
 
 	// End releases the worktree and marks the session ended; its controls
-	// then block.
+	// then block. Destroy remains available for the ended session.
 	p.click("#session-end")
 	p.awaitText("#session-control-result", "ended")
 	p.awaitText("#session-meta", "ended")
@@ -277,5 +277,11 @@ func TestBrowserSessionViewShowsControlsAndNoWorkstreamPanels(t *testing.T) {
 		if !disabled {
 			t.Fatalf("%s is enabled after the session ended", selector)
 		}
+	}
+	confirmDestroy(p, "#session-destroy", true)
+	assertBrowserDestroyed(p, s, c, projectID, id, "sessions")
+	assertDestroyRequests(p, "sessions", id, 1)
+	if got := strings.TrimSpace(demoGit(t, home, "-C", bare, "rev-parse", sessionBranch(id))); got == "" {
+		t.Fatal("destroy removed the pushed branch from the test remote")
 	}
 }

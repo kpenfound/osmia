@@ -23,9 +23,12 @@ import (
 // options the service started with, so a test can close and restart the
 // service on the same root and clone, and the project ID, for building
 // paths under the root.
-func newSessionControlsFixture(t *testing.T) (*Service, *Client, Options, config.ProjectID, config.WorkstreamID, *sessionEngine, string) {
+func newSessionControlsFixture(t *testing.T, configure ...func(*Options)) (*Service, *Client, Options, config.ProjectID, config.WorkstreamID, *sessionEngine, string) {
 	t.Helper()
 	opts, clone := projectFixture(t)
+	for _, apply := range configure {
+		apply(&opts)
+	}
 	home := filepath.Dir(clone)
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "README.md")

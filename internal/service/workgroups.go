@@ -146,6 +146,10 @@ func (w *workgroupResolver) Pass(ctx context.Context) error {
 			present[stream] = true
 		}
 		_, err = trace.MarkWorkgroupsResolved(ctx, w.repository, groups, func(stream config.WorkstreamID) (bool, error) {
+			if pending, err := trace.SessionDestroyPending(w.s.current().Root, w.repository.Project(), stream); err != nil || pending {
+				return false, err
+			}
+
 			for _, a := range w.s.memberArchives() {
 				if present[stream] && a.Project == w.repository.Project() && a.Workstream == stream && archiveResolved(a) {
 					return true, nil
@@ -156,6 +160,13 @@ func (w *workgroupResolver) Pass(ctx context.Context) error {
 					if a.Project == w.repository.Project() && a.Workstream == stream && (!a.CleanupStartedAt.IsZero() || !a.CleanedAt.IsZero()) {
 						return archiveResolved(a), nil
 					}
+				}
+				current, _, err := trace.Workgroups(w.repository)
+				if err != nil {
+					return false, err
+				}
+				if _, present := trace.WorkgroupOf(current, stream); !present {
+					return false, nil
 				}
 				return false, fmt.Errorf("member %s is missing without verified resolution and cleanup evidence", stream)
 			}

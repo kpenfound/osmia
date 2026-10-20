@@ -103,3 +103,13 @@ func (g *Git) Log(ctx context.Context, base, head string) ([]DeliveryMessage, er
 	}
 	return messages, nil
 }
+
+// DeleteLocalBranch removes only the local branch, including unmerged commits.
+// An already absent branch needs no further effect during recovery.
+func (g *Git) DeleteLocalBranch(ctx context.Context, branch string) error {
+	if _, exists, err := g.Branch(ctx, branch); err != nil || !exists {
+		return err
+	}
+	_, err := g.run(ctx, "branch", "-D", "--", branch)
+	return err
+}

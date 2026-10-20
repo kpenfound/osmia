@@ -452,6 +452,56 @@ func TestScheduleRunsBeforeOperationsAreRead(t *testing.T) {
 	}
 }
 
+func TestSchedulingAndOperationDiscoveryExcludeTraceRemoval(t *testing.T) {
+	t.Parallel()
+	f := setup(t, coreadapter.RepositoryBoundary)
+	c := f.controller(t)
+	c.options.Schedule = func(context.Context) error { return nil }
+	discovering, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.options.Hold = func(config.WorkstreamID, coreadapter.Operation) bool {
+		close(discovering)
+		<-release
+		return true
+	}
+	passed := make(chan error, 1)
+	go func() { passed <- c.Pass(context.Background()) }()
+	select {
+	case <-discovering:
+	case <-time.After(overlapTimeout):
+		t.Fatal("operation discovery did not start")
+	}
+	removing, removed := make(chan struct{}), make(chan error, 1)
+	go func() {
+		close(removing)
+		removed <- f.repository.Serialize(func() error {
+			_, err := f.repository.MarkWorkstreamTraceForDeletion(streamID)
+			return err
+		})
+	}()
+	<-removing
+	select {
+	case err := <-removed:
+		t.Fatalf("trace removal ran during operation discovery: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unblock()
+	select {
+	case err := <-passed:
+		must(t, err)
+	case <-time.After(overlapTimeout):
+		t.Fatal("discovery did not finish")
+	}
+	select {
+	case err := <-removed:
+		must(t, err)
+	case <-time.After(overlapTimeout):
+		t.Fatal("trace removal did not finish")
+	}
+	must(t, c.Pass(context.Background()))
+}
+
 // Priority orders a pass across workstreams; equal priorities keep the order
 // the workstreams hold them in, and without it a pass goes workstream by
 // workstream.

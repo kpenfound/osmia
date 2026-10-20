@@ -62,6 +62,9 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/push", Summary: "Push the session branch to the project's remote; refused when the remote branch has commits not on it", Response: SessionPushResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/end", Summary: "End a session, releasing its worktree and stored model-session state", Response: SessionResponse{}},
 
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/destroy", Summary: "Permanently destroy an exploratory session and its local branch; refused while busy", Response: SessionDestroyResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/design/{workstream}/destroy", Summary: "Permanently destroy an open design session; refused while busy or already started", Response: SessionDestroyResponse{}},
+
 	{Method: http.MethodPost, Path: Prefix + "/design", Summary: "Open a design session in a project", Request: DesignOpenRequest{}, Response: DesignResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/design", Summary: "List design sessions, optionally filtered by project", Response: DesignsResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/design/{workstream}", Summary: "Show one design session", Response: DesignResponse{}},

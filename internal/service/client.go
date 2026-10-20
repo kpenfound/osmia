@@ -651,3 +651,17 @@ func (c *Client) RuleContested(ctx context.Context, stream config.WorkstreamID, 
 	err := c.Do(ctx, "POST", Prefix+"/contested/"+string(stream)+"/"+unit, ContestedRulingRequest{Decision: decision, Note: note}, &v)
 	return v, err
 }
+
+// DestroySession permanently removes an exploratory session and its local branch.
+func (c *Client) DestroySession(ctx context.Context, id config.WorkstreamID) (SessionDestroyResponse, error) {
+	var v SessionDestroyResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/destroy", nil, &v)
+	return v, err
+}
+
+// DestroyDesign permanently removes an open design session.
+func (c *Client) DestroyDesign(ctx context.Context, id config.WorkstreamID) (SessionDestroyResponse, error) {
+	var v SessionDestroyResponse
+	err := c.Do(ctx, "POST", Prefix+"/design/"+url.PathEscape(string(id))+"/destroy", nil, &v)
+	return v, err
+}
