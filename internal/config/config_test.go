@@ -306,6 +306,13 @@ func TestInvalid(t *testing.T) {
 		{"negative upstream rebase", "", projectConfig + "upstream_rebase = '-6h'\n", "upstream_rebase:"},
 		{"short upstream rebase", "", projectConfig + "upstream_rebase = '59s'\n", "upstream_rebase:"},
 		{"integer upstream rebase", "", projectConfig + "upstream_rebase = 0\n", "upstream_rebase"},
+		{"malformed pull request poll", "", projectConfig + "pull_request_poll = 'often'\n", "pull_request_poll"},
+		{"empty pull request poll", "", projectConfig + "pull_request_poll = ''\n", "pull_request_poll"},
+		{"zero pull request poll", "", projectConfig + "pull_request_poll = '0'\n", "pull_request_poll"},
+		{"negative pull request poll", "", projectConfig + "pull_request_poll = '-10m'\n", "pull_request_poll"},
+		{"short pull request poll", "", projectConfig + "pull_request_poll = '4m59.999999999s'\n", "pull_request_poll"},
+		{"integer pull request poll", "", projectConfig + "pull_request_poll = 600\n", "pull_request_poll"},
+		{"float pull request poll", "", projectConfig + "pull_request_poll = 600.0\n", "pull_request_poll"},
 		{"malformed checks timeout", "", projectConfig + "checks_timeout = 'long'\n", "checks_timeout:"},
 		{"zero checks timeout", "", projectConfig + "checks_timeout = '0'\n", "checks_timeout:"},
 		{"short checks timeout", "", projectConfig + "checks_timeout = '59s'\n", "checks_timeout:"},
@@ -726,5 +733,28 @@ func TestCommitteeAssignments(t *testing.T) {
 	}
 	if strings.Join(c.Committee.Perspectives, ",") != "scope,correctness" || strings.Join(c.Committee.Profiles, ",") != "default,second" {
 		t.Fatalf("committee: %+v", c.Committee)
+	}
+}
+
+func TestPullRequestPollInterval(t *testing.T) {
+	for _, value := range []string{"", "5m", "10m", "20m", "1h30m"} {
+		t.Run(value, func(t *testing.T) {
+			text := projectConfig
+			want := 10 * time.Minute
+			if value != "" {
+				text += "pull_request_poll = '" + value + "'\n"
+				want, _ = time.ParseDuration(value)
+			}
+			c, err := Load(fixture(t, topConfig, text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Project.PullRequestPollInterval() != want {
+				t.Fatalf("poll interval = %v; want %v", c.Project.PullRequestPollInterval(), want)
+			}
+			if value == "" && c.Project.PullRequestPoll != "10m" {
+				t.Fatalf("default = %q", c.Project.PullRequestPoll)
+			}
+		})
 	}
 }

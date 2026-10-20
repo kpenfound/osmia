@@ -54,7 +54,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	recordUpstreamOwnPullRequest(t, f.s, upstreamRepo, upstream, publication)
 	pull.prs = append(pull.prs, pulls.PullRequest{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, Base: "main"})
 	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(2 * time.Minute)
+	f.clock.now = f.clock.now.Add(11 * time.Minute)
 	f.clock.mu.Unlock()
 	must(t, f.s.edgeResolverPass(ctx, repository))
 	assertBuildReference(publication.Fork+"@"+publication.Commit, "owner/other#77")

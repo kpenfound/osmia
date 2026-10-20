@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
@@ -24,17 +22,14 @@ func (b *baseRefresher) observeArchivedPullRequests(ctx context.Context) error {
 			continue
 		}
 		if a.State != DeliveredState || archiveResolved(a) || a.Publication.PullRequest <= 0 {
-			delete(b.archiveChecks, a.Workstream)
+			b.s.polls.forget(b.repository.Project(), a.Workstream, archivePoll)
 			continue
 		}
 		now := b.s.now()
-		if at, checked := b.archiveChecks[a.Workstream]; checked && now.Sub(at) < time.Minute {
+		if attempt, checked := b.s.polls.last(b.repository.Project(), a.Workstream, archivePoll); checked && now.Sub(attempt.at) < b.s.about(b.repository).Project.PullRequestPollInterval() {
 			continue
 		}
-		if b.archiveChecks == nil {
-			b.archiveChecks = make(map[config.WorkstreamID]time.Time)
-		}
-		b.archiveChecks[a.Workstream] = now
+		b.s.polls.record(b.repository.Project(), a.Workstream, archivePoll, pullRequestAttempt{at: now})
 		p := a.Publication
 		scope := ghlog.WithScope(ctx, ghlog.Scope{Project: string(a.Project), Workstream: string(a.Workstream)})
 		found, err := client.Find(scope, p.Upstream, p.Fork, p.Branch)
@@ -55,7 +50,7 @@ func (b *baseRefresher) observeArchivedPullRequests(ctx context.Context) error {
 			if err := b.s.store.RecordArchivePullRequestMerge(a.Project, a.Workstream, p, pr.MergeCommit); err != nil {
 				return err
 			}
-			delete(b.archiveChecks, a.Workstream)
+			b.s.polls.forget(b.repository.Project(), a.Workstream, archivePoll)
 			break
 		}
 	}

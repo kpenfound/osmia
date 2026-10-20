@@ -809,6 +809,7 @@ clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
+pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
 classifier = "default"              # optional; omitted by default
 
@@ -845,6 +846,26 @@ verdict, is held: the workstream takes no scheduled drift rebase until
 then. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.
+
+`pull_request_poll` is a Go duration string of at least `5m`, defaulting to
+`"10m"`. It governs base refreshes (delivered workstreams' own pull requests
+and dependency integration), delivered unresolved archives' pinned pull requests,
+and incoming hard-block and merge-order edges. Failed lookups also wait for the
+interval; they supply no merge or close evidence. Zero, negative and shorter
+durations, invalid duration strings and TOML numbers are rejected; polling
+cannot be disabled.
+
+`osmia rebase` and `osmia project rebase` (and their web controls) make each
+covered workstream's next base refresh and incoming-edge check due immediately
+once the owner's drift request is recorded. Subsequent checks wait for the
+interval again, and the requested drift rebase proceeds as usual. Recorded
+merged or closed own-PR outcomes, resolved archives and fully merged incoming
+edges still stop their respective polling.
+
+Reload applies the new interval to each item's last attempt, retaining its
+cooldown even when the interval is unchanged. Reload alone never triggers an
+early check. Archive and failed-edge attempt timing is kept in memory and may
+reset on a process restart; durable observations and outcomes remain intact.
 
 `checks_timeout` is a Go duration string from `1m` to `24h`: how long one run
 of a unit candidate's checks, or of a final review's checks, may
@@ -1070,7 +1091,8 @@ Closed but unmerged PRs, outcomes for earlier PRs and delivery without evidence
 remain unresolved. One-member workgroups use the same rule; their existing
 delivery cleanup remains separate from group resolution.
 
-Every delivered member's current PR is observed at most once per minute,
+Every delivered member's current PR is observed at most once per configured
+`pull_request_poll` interval,
 with or without a same-repo base or downstream edges. Observation stops on a
 matching merged or closed outcome. Failed lookups record nothing and retry
 on the next cadence; a closed-without-merge outcome remains unresolved.

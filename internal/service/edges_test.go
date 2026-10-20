@@ -56,13 +56,13 @@ func newEdgeGraphFixture(t *testing.T, edgeType string) *edgeGraphFixture {
 // resolvePasses runs both edge passes once, the way the reconcile controller
 // would on its own schedule: edgeResolverPass refreshes the observation of
 // every incoming edge, and edgeWaitPass keeps edgeWaitSubject current from
-// it. It advances the fixture's clock well past edgeResolverPass's one-poll-
-// per-minute throttle first, so each call sees the latest recorded state
+// it. It advances the fixture's clock well past edgeResolverPass's configured polling
+// interval first, so each call sees the latest recorded state
 // rather than skipping it as a too-recent repeat.
 func (f *edgeGraphFixture) resolvePasses(t *testing.T) {
 	t.Helper()
 	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(2 * time.Minute)
+	f.clock.now = f.clock.now.Add(11 * time.Minute)
 	f.clock.mu.Unlock()
 	must(t, f.s.edgeResolverPass(context.Background(), f.repository))
 	must(t, f.s.edgeWaitPass(context.Background(), f.repository))

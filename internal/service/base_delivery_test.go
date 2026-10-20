@@ -199,7 +199,7 @@ func TestBaseRefreshRetryDoesNotDuplicateObservationAndPassStopsScheduling(t *te
 	if rev != 1 {
 		t.Fatalf("retry revision %d", rev)
 	}
-	jump(p.clock, p.s.now().Add(2*time.Minute))
+	jump(p.clock, p.s.now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, p.repository, p.stream, baseRefreshAction)
 	if next.ID != op.ID {

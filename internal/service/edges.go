@@ -420,7 +420,8 @@ func (s *Service) pollEdgeMerge(ctx context.Context, out edgeMergeStatus, public
 // edgeResolverPass refreshes, for every workstream of repository with an
 // incoming hard_block or merge_order edge, the latest known merge
 // resolution of each: it polls, through upstreamMergeStatus, no more often
-// than once a minute, and never again once every one of a workstream's
+// than the repo's pull request polling interval, and never again once every
+// one of a workstream's
 // incoming edges is recorded merged, since merge is a one-way signal that
 // never needs to be observed again (owner ruling 3).
 func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) error {
@@ -460,9 +461,21 @@ func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) 
 			}
 			continue
 		}
-		if revision > 0 && s.now().Sub(at) < time.Minute {
+		request, pending, err := edgePollRequest(repo, stream)
+		if err != nil {
+			return err
+		}
+		attempt, attempted := s.polls.last(repo.Project(), stream, edgePoll)
+		if attempted && attempt.at.After(at) {
+			at = attempt.at
+		}
+		requested := pending && (!attempted || attempt.request != request)
+		now := s.now()
+		if !requested && !at.IsZero() && now.Sub(at) < s.about(repo).Project.PullRequestPollInterval() {
 			continue
 		}
+		// Attempt timing supplies no merge evidence, even if the lookup fails.
+		s.polls.record(repo.Project(), stream, edgePoll, pullRequestAttempt{at: now, request: request})
 		var next edgeObservation
 		for _, e := range edges {
 			prior := slices.IndexFunc(observed.Edges, func(status edgeMergeStatus) bool { return status.Upstream == e.From && status.Type == e.Type })

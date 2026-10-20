@@ -116,7 +116,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					if ready() {
 						return true
 					}
-					f.clock.Advance(time.Minute)
+					f.clock.Advance(10 * time.Minute)
 					return false
 				})
 			}
@@ -148,7 +148,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				host.mu.Lock()
 				host.answers[p.Branch] = pulls.PullRequest{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: fmt.Sprintf("merged-%d", i), Head: p.Branch, HeadRepository: p.Fork}
 				host.mu.Unlock()
-				f.clock.Advance(time.Minute)
+				f.clock.Advance(10 * time.Minute)
 			}
 			archived := members
 			if graph == trace.EdgeHardBlock {

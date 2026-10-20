@@ -4194,6 +4194,9 @@
           "name": {
             "type": "string"
           },
+          "pull_request_poll": {
+            "type": "string"
+          },
           "upstream": {
             "type": "string"
           },

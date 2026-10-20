@@ -64,8 +64,9 @@ or merged outcome matching the current publication's PR. Archive records pin
 `resolution_evidence`; missing merge or cancel evidence holds the group
 unresolved even after cleanup. One-member groups use the same predicate,
 separately from their existing delivery cleanup. Every delivered member's
-current PR is observed at most once per minute until a matching merged or
-closed outcome is recorded, including members without same-repo bases.
+current PR is observed at most once per configured `pull_request_poll` interval
+until a matching merged or closed outcome is recorded, including members
+without same-repo bases.
 Merge-only dependency handling is a Go controller: contract edges resolve on
 the ratified contract, and hard-block and merge-order edges on the recorded
 upstream PR merge. Expected waits have no inbox or notification side effect.

@@ -60,12 +60,12 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 			if _, revision, err := ownPullRequestOutcomeAt(repo, stream); err != nil || revision != 0 {
 				t.Fatalf("failed lookup recorded an outcome: revision=%d err=%v", revision, err)
 			}
-			clock.Advance(time.Minute - time.Nanosecond)
+			clock.Advance(10*time.Minute - time.Nanosecond)
 			must(t, refresh.Pass(ctx))
 			state, err := repo.Workflow(stream, baseRefreshAction)
 			must(t, err)
 			if state.Version != 2 || state.Value != "checked" {
-				t.Fatal("own lookup retried before the minute cadence")
+				t.Fatal("own lookup retried before the polling interval")
 			}
 			clock.Advance(time.Nanosecond)
 			host.findErr = nil
@@ -79,7 +79,7 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 			if host.finds != 2 || revision != 1 || outcome.Outcome != ownPullRequestOutcomeClosed {
 				t.Fatalf("next cadence did not observe closure: finds=%d outcome=%+v revision=%d", host.finds, outcome, revision)
 			}
-			clock.Advance(time.Minute)
+			clock.Advance(10 * time.Minute)
 			must(t, refresh.Pass(ctx))
 			state, err = repo.Workflow(stream, baseRefreshAction)
 			must(t, err)

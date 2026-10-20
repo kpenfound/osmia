@@ -125,20 +125,12 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		// Two subsequent receipts also exclude a lookup already in flight
 		// when the provider response changed. Only the live controller polls.
 		lifecycleAwait(t, f, "non-merge provider observation", func() bool {
-			observed, next, at, err := edgeObservationAt(down, f.stream2)
+			observed, next, _, err := edgeObservationAt(down, f.stream2)
 			must(t, err)
 			if slices.ContainsFunc(observed.Edges, func(e edgeMergeStatus) bool { return e.Merged }) {
 				t.Fatalf("non-merge candidate released edge: %+v", observed)
 			}
-			if next >= revision+2 {
-				return true
-			}
-			// Advance the fixture clock to the recorded receipt's next poll
-			// deadline; the production cadence and pass driver stay intact.
-			if deadline := at.Add(time.Minute); deadline.After(f.clock.Now()) {
-				f.clock.Advance(deadline.Sub(f.clock.Now()))
-			}
-			return false
+			return next >= revision+2
 		})
 		check(false, false)
 		f.stop(t)
@@ -148,7 +140,7 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 	host.mu.Lock()
 	host.prs = []pulls.PullRequest{{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: "upstream-merge", Head: p.Branch, HeadRepository: p.Fork}}
 	host.mu.Unlock()
-	f.clock.Advance(time.Minute)
+	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "pane archived member merged", func() bool {
 		a, ok := archiveRecord(t, f.s.store, f.stream1)
 		return ok && archiveResolved(a)
@@ -165,7 +157,7 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 	host.mu.Lock()
 	host.prs = append(host.prs, pulls.PullRequest{Number: sink.PullRequest, State: "closed", Merged: true, MergeCommit: "sink-merge", Head: sink.Branch, HeadRepository: sink.Fork})
 	host.mu.Unlock()
-	f.clock.Advance(time.Minute)
+	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "last pane member merged and group resolved", func() bool {
 		_, revision, _ := groupResolution()
 		return revision == 1

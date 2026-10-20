@@ -62,7 +62,7 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 				defer host.mu.Unlock()
 				p := publications[i]
 				host.prs = append(host.prs, pulls.PullRequest{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: fmt.Sprintf("merged-%d", i), Head: p.Branch, HeadRepository: p.Fork})
-				f.clock.Advance(time.Minute)
+				f.clock.Advance(10 * time.Minute)
 			}
 			awaitFirstMerge := func() {
 				lifecycleAwait(t, f, "first member merge observed", func() bool {
@@ -207,7 +207,7 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 		if archiveResolved(got) != (scenario == "merged") || host.finds != i+1 {
 			t.Fatalf("%s: archive=%+v finds=%d", scenario, got, host.finds)
 		}
-		clock.Advance(time.Minute - time.Nanosecond)
+		clock.Advance(10*time.Minute - time.Nanosecond)
 		must(t, refresh.Pass(ctx))
 		if host.finds != i+1 {
 			t.Fatalf("%s retried before cadence", scenario)
@@ -259,7 +259,7 @@ func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) 
 			if time.Now().After(deadline) {
 				t.Fatalf("timed out waiting for %s", phase)
 			}
-			clock.Advance(time.Minute)
+			clock.Advance(10 * time.Minute)
 			changes()
 		}
 	}

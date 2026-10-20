@@ -261,11 +261,11 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	pull.prs[0].Merged = true
 	pull.prs[0].MergeCommit = "aabbccddeeff0011223344556677889900aabbccdd"
 	pull.mu.Unlock()
-	// edgeResolverPass polls no more often than once a minute; advancing
+	// edgeResolverPass polls no more often than once per configured interval; advancing
 	// the fixture's clock well past that keeps this second call from being
 	// skipped as a too-recent repeat of the first.
 	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(2 * time.Minute)
+	f.clock.now = f.clock.now.Add(11 * time.Minute)
 	f.clock.mu.Unlock()
 	must(t, f.s.edgeResolverPass(ctx, repository))
 	if pending, err := upstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || !pending {
@@ -474,7 +474,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 	must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: mergeDocument, Revision: 1, Project: repo.Project(), Workstream: parent, At: p.s.now(), Actor: ownerActor, Cause: "fixture"}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: mergePath, Content: string(data)}}))
-	jump(p.clock, p.s.now().Add(2*time.Minute))
+	jump(p.clock, p.s.now().Add(11*time.Minute))
 	refresh := &baseRefresher{s: p.s, repository: repo}
 	must(t, refresh.Pass(ctx))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
