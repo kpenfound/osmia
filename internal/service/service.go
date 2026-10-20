@@ -158,6 +158,7 @@ type activeProject struct {
 	conversations *conversationPath
 	pipeline      *pipeline
 	cancel        context.CancelFunc
+	pollCancel    context.CancelFunc
 	done          chan error
 }
 
@@ -978,6 +979,8 @@ func (s *Service) launch(active *activeProject) {
 	s.log().Info("project started", "project", string(active.id))
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
+	pollCtx, stopPolls := context.WithCancel(ctx)
+	active.pollCancel = stopPolls
 	go func() {
 		watchDone := make(chan error, 1)
 		go func() {
@@ -995,7 +998,14 @@ func (s *Service) launch(active *activeProject) {
 			}
 			conversationDone <- err
 		}()
+		pollDone := make(chan struct{})
+		go func() {
+			s.runNetworkPolls(pollCtx, active.repository, active.pipeline)
+			close(pollDone)
+		}()
 		err := active.controller.Run(ctx)
+		stopPolls()
+		<-pollDone
 		active.conversations.Drain()
 		if err != nil {
 			cancel()
@@ -1221,14 +1231,23 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		reviews := &reviewers{masons: units}
 		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}
-	return &stages{cfg: cfg, hooks: hooks, runner: runner,
+	var polls, schedule []scheduleHook
+	for _, hook := range hooks {
+		switch hook.name {
+		case "base-refresh", "edge-refresh", "workgroup-change", "drift":
+			polls = append(polls, hook)
+		default:
+			schedule = append(schedule, hook)
+		}
+	}
+	return &stages{cfg: cfg, hooks: schedule, polls: polls, runner: runner,
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
 // concurrentOperation selects operations whose inspection and effects run
 // beside the scheduling pass under their operation class's ordering.
 func concurrentOperation(op coreadapter.Operation) bool {
-	if gitOperation(op) || modelOperationRole(op) != "" {
+	if gitOperation(op) || networkOperation(op) || modelOperationRole(op) != "" {
 		return true
 	}
 	if op.Boundary != coreadapter.RunnerBoundary {
@@ -1245,6 +1264,9 @@ func concurrentOperation(op coreadapter.Operation) bool {
 // beside the pass. Scheduler-admitted workers share no workflow reservation;
 // owner conversations rely on their durable thread order.
 func operationClass(op coreadapter.Operation) trace.OperationClass {
+	if networkOperation(op) {
+		return trace.WorkerOperation
+	}
 	if op.Boundary == coreadapter.RunnerBoundary {
 		switch op.Action {
 		case thread.TurnAction:

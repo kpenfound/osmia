@@ -13,18 +13,19 @@ import (
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
-// scheduleHook is one step of the schedule a pass runs before it reconciles
-// operations.
+// scheduleHook is a named controller step. Stages separate scheduling hooks
+// from the observers that run beside the reconciliation pass.
 type scheduleHook struct {
 	name string
 	pass func(context.Context) error
 }
 
-// stages is the reconciliation built from one loaded configuration: the
-// schedule hooks every pass runs and the adapters that reconcile operations.
+// stages holds one loaded configuration's scheduling hooks, background
+// observers and operation adapters.
 type stages struct {
 	cfg        *config.Config
 	hooks      []scheduleHook
+	polls      []scheduleHook
 	runner     runnerAdapter
 	repository repositoryAdapter
 }
@@ -151,6 +152,9 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.log().Info("project draining", "project", string(p.id), "reason", "reload")
 		p.controller.Drain()
 		p.conversations.Drain()
+		if p.pollCancel != nil {
+			p.pollCancel()
+		}
 	}
 	for _, p := range added {
 		s.launch(p)

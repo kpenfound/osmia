@@ -628,6 +628,9 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		s.log().Info("project draining", "project", string(active.id), "reason", "removed")
 		active.controller.Drain()
 		active.conversations.Drain()
+		if active.pollCancel != nil {
+			active.pollCancel()
+		}
 		closed = s.finishDraining(active)
 		if closed != nil {
 			s.log().Error("project stopped", "project", string(active.id), "reason", "removed", "error", closed.Error())

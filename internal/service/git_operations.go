@@ -38,6 +38,10 @@ func gitOperation(op coreadapter.Operation) bool {
 	return false
 }
 
+func networkOperation(op coreadapter.Operation) bool {
+	return op.Boundary == coreadapter.RepositoryBoundary && op.Action == baseRefreshAction
+}
+
 // gitOperationPool shares permits between workflow effects and remote polls.
 // Counts survive stage reloads; a lower limit waits for existing work to drain.
 type gitOperationPool struct {
@@ -90,7 +94,7 @@ func (s *Service) gitOperationLimit(repository *trace.Repository, other func(cor
 				return nil, false
 			}
 		}
-		if !gitOperation(op) {
+		if !gitOperation(op) && !networkOperation(op) {
 			return releaseOther, true
 		}
 		// The controller wakes admission when an admitted attempt finishes.
