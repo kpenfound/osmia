@@ -1,7 +1,7 @@
 # Smart checks
 
-Before a unit is reviewed, the service runs the project's Dagger checks on the
-unit's candidate. With the [Jev boost](configuration.md#optional-jev-boost)
+Before a unit or assembled feature is reviewed, the service runs the project's
+Dagger checks on the commit to be read. With the [Jev boost](configuration.md#optional-jev-boost)
 on, smart checks run only the checks the change can affect: Jev judges, for
 each check, how likely the change is to alter its result, and `dagger check`
 runs the likely ones. Whenever that judgment cannot be used, every check runs,
@@ -58,8 +58,12 @@ requested tests exist and exercise the behaviour.
 8. **Run.** `dagger check --progress=report` runs with the selected links, or
    with none to run every check, bounded by the project's `checks_timeout`.
 
-Only the unit check run selects. The check run before a final review runs
-every check on the rebased feature branch.
+Unit, final-review and session check runs all use this selection. Before a
+final review, the service judges the rebased feature branch commit against
+the upstream base it sits on. Accepted judgments pass only their selected
+links to Dagger; every fallback runs all checks with the same reason a unit
+run records. An owner's explicit full session run remains a full run.
+If the run cannot read the change's diff, it stops before executing checks.
 
 ## What a run records
 
@@ -69,7 +73,12 @@ This immutable start evidence holds the unit, run, operation, candidate, base,
 report revision, diff digest, start time and selection. It has no result, so
 an interrupted run remains started and unfinished. The finished run's record,
 `units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
-exit status and output:
+exit status and output. Final-review attempts record their selection in
+`final/checks-<review>-attempt-<attempt>-started.json` immediately before
+execution, and in `final/checks-<review>.json` beside the command and result.
+Older final records without a selection remain readable.
+
+The selection has this shape:
 
 ```json
 "selection": {
@@ -120,7 +129,9 @@ The selection is also summarized in one sentence, such as "Jev selected 2 of
 check ran: Jev did not select them (declined: no check reached probability
 0.50)". That sentence appears in the unit's transition to reviewing and its
 notice, in the reviewer's prompt with the check evidence, and in the verdict a
-mason receives when checks fail.
+mason receives when checks fail. The final reader's prompt and the feed's
+final-review check entry also describe the selection and its reason. Running
+final attempts show their selection as soon as start evidence is recorded.
 
 The selected and candidate counts describe the saving as "checking 2 of 37".
 When narrowing reduced the list, `listed` also explains that those 37 were
@@ -137,12 +148,18 @@ uses the complete output, independently of the excerpt limit.
 
 ## Restarts and new runs
 
-A judgment is identified by the check run that asked, the task, its version
-and the exact request. A run retried after a restart reads back its selection
-record, including a full run's fallback, instead of listing or asking again. Recording the same
-run again keeps one selection record. A new run, for a revised or rebased
+A unit judgment is identified by the check run that asked, the task, its
+version and the exact request. A unit run retried after a restart reads back
+its selection record, including a full run's fallback, instead of listing or
+asking again. Recording the same run again keeps one selection record. A new run, for a revised or rebased
 candidate, asks afresh. A judgment interrupted twice falls back as
 `interrupted`.
+
+Final-review judgments are keyed by the review number and rebased commit,
+not the attempt number. An incomplete run's retry or an attempt resumed after
+a service restart lists the checks again and reuses the recorded judgment
+for the same request. A new review, commit or changed judgment input asks
+afresh. Each attempt keeps its own start and result evidence.
 
 ## What Jev sees
 
@@ -165,7 +182,7 @@ collections runs more than it would with each link judged.
 | Part | Code |
 | --- | --- |
 | Questions, state, narrowing, threshold and version | [checkselect](../internal/checkselect) |
-| The check run, its record and the selection's fallbacks | [service](../internal/service): `unit_checks.go`, `smart_checks.go`, `review_checks.go` |
+| The check run, its record and the selection's fallbacks | [service](../internal/service): `unit_checks.go`, `final_checks.go`, `session_controls.go`, `smart_checks.go`, `review_checks.go` |
 | Recording and reuse shared by every judgment | [jev](../internal/jev) |
 | The System One API client, retries and cool-down | agentcore `jev` and `jev/systemone` |
 | Changed files from a diff | [gitdiff](../internal/gitdiff) |

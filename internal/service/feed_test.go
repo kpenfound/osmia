@@ -105,7 +105,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		{Kind: "message", At: at(13), Turn: "message_owner", Text: "How is it going?", State: TurnQueued, QueuedReason: "starting"},
 
 		{Kind: "transition", At: at(14), Transition: &FeedTransition{Subject: checksSubject("upload"), Unit: "upload", From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
-		{Kind: "unit_checks", At: at(15), UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: ChecksPassed, Selection: &FeedCheckSelection{Mode: selectionSelected, Selected: 1, Judged: 113}, StartedAt: at(15), FinishedAt: &unitFinished}},
+		{Kind: "unit_checks", At: at(15), UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: ChecksPassed, Selection: &FeedCheckSelection{Mode: selectionSelected, Selected: 1, Judged: 113, Description: selection.describe()}, StartedAt: at(15), FinishedAt: &unitFinished}},
 		{Kind: "transition", At: at(17), Transition: &FeedTransition{Subject: finalReviewSubject, From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
 		{Kind: "final_checks", At: at(18), FinalChecks: &FeedFinalChecks{Review: 1, Attempt: 1, State: ChecksPassed, StartedAt: &finalStarted, FinishedAt: &finalFinished}},
 		{Kind: "session", At: at(20), Session: &FeedSession{Agent: "agent_final_reader", Role: committeeRole, Turn: "agent_final_reader-turn", Profile: "default", State: "done", StartedAt: at(20), EndedAt: &readerEnded, Summary: "Reviewed the assembled branch."}},

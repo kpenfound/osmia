@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -844,5 +847,136 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 				t.Fatalf("final review operations %+v", ops)
 			}
 		})
+	}
+}
+
+func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"selected", "disabled", "declined", "unavailable", "unlisted", "no_checks"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			f, stream, repo, a := newFinalFixture(t, "final-selection")
+			before, op := assembleBoth(t, f, repo, a, stream,
+				map[string]string{"internal/trace/resume.go": "package trace\n"},
+				map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream only\n"})
+			links := []string{"dag+check://go/test", "dag+check://release/version"}
+			checks := &fakeChecks{links: links, outcomes: passing()}
+			f.s.options.reviewChecks = checks
+			probability := 0.9
+			if mode == "declined" {
+				probability = 0.1
+			}
+			response := jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
+				"check-0": jevtest.Noul(probability), "check-1": jevtest.Noul(0.1),
+			}}}
+			if mode == "unavailable" {
+				response = jevtest.Result{Err: &systemone.Error{Kind: systemone.KindUnavailable, Message: "offline"}}
+			}
+			provider := &jevtest.Provider{Results: []jevtest.Result{response}}
+			if mode != "disabled" {
+				boostJev(f.s, provider)
+			}
+			if mode == "unlisted" {
+				checks.listErr = errors.New("listing unavailable")
+			}
+			if mode == "no_checks" {
+				checks.links = nil
+			}
+			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checked branch.", "findings": []any{}})
+				return err
+			})
+			_, err := a.Apply(context.Background(), op)
+			must(t, err)
+			docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
+			if len(docs) != 1 {
+				t.Fatalf("check records: %+v", docs)
+			}
+			var run FinalCheckRun
+			must(t, json.Unmarshal([]byte(docs[0].Content), &run))
+			if run.Selection == nil || run.Status != ChecksPassed || run.Commit == before {
+				t.Fatalf("final check run: %+v", run)
+			}
+			selection := run.Selection
+			var selected []string
+			if mode == "selected" {
+				selected = links[:1]
+				if selection.Mode != selectionSelected || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 || selection.Judgment == "" {
+					t.Fatalf("selected evidence: %+v", selection)
+				}
+			} else if selection.Mode != selectionFull || selection.Reason != mode || len(selection.Links) != 0 {
+				t.Fatalf("full evidence: %+v, want %s", selection, mode)
+			}
+			if runs := checks.runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
+				t.Fatalf("runner links %v, command %v", runs, run.Command)
+			}
+			starts := finalCheckStarts(t, repo, stream)
+			if len(starts) != 1 || !reflect.DeepEqual(starts[0].Selection, selection) {
+				t.Fatalf("start evidence: %+v", starts)
+			}
+			if mode == "disabled" || mode == "unlisted" || mode == "no_checks" {
+				if len(provider.Requests()) != 0 {
+					t.Fatal("preflight fallback asked Jev")
+				}
+			} else {
+				if selection.Judgment == "" || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 {
+					t.Fatalf("judgment evidence: %+v", selection)
+				}
+				requests := provider.Requests()
+				if len(requests) == 0 {
+					t.Fatal("Jev was not asked")
+				}
+				state, _ := requests[0].State.(map[string]any)
+				g, err := featureWorkspaces(f.s.cfg, repo).of(stream)
+				must(t, err)
+				diff, err := g.Diff(context.Background(), upstream, run.Commit)
+				must(t, err)
+				if state["diff"] != diff || strings.Contains(diff, "UPSTREAM.md") {
+					t.Fatalf("judged change: %+v, want %s", state, diff)
+				}
+				judgmentDocs := streamDocuments(t, repo, stream, selection.Judgment)
+				var judgment jev.Record
+				must(t, json.Unmarshal([]byte(judgmentDocs[len(judgmentDocs)-1].Content), &judgment))
+				if judgment.Scope.Project != string(repo.Project()) || judgment.Scope.Workstream != string(stream) || judgment.Scope.Thread != finalReviewSubject || !strings.Contains(judgment.Scope.Turn, run.Commit) {
+					t.Fatalf("judgment scope: %+v", judgment.Scope)
+				}
+			}
+			reader, err := repo.Thread(stream, committeeAgent(1))
+			must(t, err)
+			request := reader.Turns[len(reader.Turns)-1].Request
+			if !strings.Contains(request.Prompt, selection.describe()) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
+				t.Fatalf("reader lacks selection: %s\n%s", request.SystemPrompt, request.Prompt)
+			}
+			entries, err := feedChecks(repo, stream)
+			must(t, err)
+			i := slices.IndexFunc(entries, func(e FeedEntry) bool { return e.FinalChecks != nil })
+			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != selection.describe() {
+				t.Fatalf("feed selection: %+v", entries)
+			}
+		})
+	}
+}
+
+func TestLegacyFinalChecksKeepRetryCountingAndDelay(t *testing.T) {
+	t.Parallel()
+	f, stream, repo, a := newFinalFixture(t, "legacy-final-checks")
+	at := f.clock.Now()
+	// Literal records model a trace with no selection or attempt fields.
+	for revision := 1; revision <= 2; revision++ {
+		content := fmt.Sprintf(`{"review":1,"operation":"review","commit":"candidate","status":"incomplete","exit_code":-1,"error":"offline","finished_at":%q}`, at.Format(time.RFC3339Nano))
+		must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalChecksDocument(1), Revision: revision, Project: repo.Project(), Workstream: stream, At: at, Actor: checksActor, Cause: "legacy"}, Path: finalChecksPath(1), Content: content}}))
+	}
+	n, latest, err := a.incompleteChecks(stream, 1, "candidate")
+	must(t, err)
+	if n != 2 || latest.Selection != nil || latest.Attempt != 0 || finalCheckDelay(n) != 2*checkRetryDelay {
+		t.Fatalf("legacy count %d: %+v", n, latest)
+	}
+	run, err := a.finalChecks(context.Background(), f.s.cfg, stream, FinalReport{Review: 1, Commit: "candidate"})
+	if err == nil || !strings.Contains(err.Error(), at.Add(2*checkRetryDelay).UTC().Format(time.RFC3339)) || !reflect.DeepEqual(run, latest) {
+		t.Fatalf("legacy retry: %+v %v", run, err)
+	}
+	if starts := finalCheckStarts(t, repo, stream); len(starts) != 0 {
+		t.Fatalf("waiting legacy run started: %+v", starts)
 	}
 }

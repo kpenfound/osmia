@@ -571,16 +571,18 @@ three such runs of one candidate in a row the unit is contested instead: a
 ruling of review runs its checks again, and revise returns it to its mason. One
 run at a time per workstream; a pause holds runs not yet started.
 
-Before the final read, the service runs every check the same way on the
-rebased feature branch commit, within `checks_timeout`, and records the run as
-`final/checks-<k>.json` for final review `k`, with the commit, command, exit
-status, failed checks and the diagnostic excerpt. The complete captured output
+Before the final read, the service uses the same [smart-check selection](smart-checks.md)
+on the rebased feature branch commit against its upstream base and runs the
+selected checks, or every check on a fallback, within `checks_timeout`. It
+records the run as `final/checks-<k>.json` for final review `k`, with the commit,
+selection, command, exit status, failed checks and the diagnostic excerpt. The complete captured output
 is recorded with it as `final/checks-<k>-output.txt`, accessible the same way.
-The final reader's prompt
-carries the result; neither it nor a unit reviewer runs checks. A final run
-that reports no result is recorded as incomplete, and the reader is told the
-checks show nothing about the commit. A retry of the review reads the recorded
-run back instead of running the checks again. The check client inherits only
+The final reader's prompt carries the selection and result; neither it nor a
+unit reviewer runs checks. A final run that reports no result is recorded as
+incomplete, and the read waits for checks to complete. Retries wait longer
+after each incomplete run, up to an hour, and reuse the recorded judgment for
+the same review, commit and selection inputs, including after a restart. A
+completed run is read back instead of running the checks again. The check client inherits only
 PATH and service engine selection, not provider, GitHub or SSH credentials.
 There is no command fallback.
 

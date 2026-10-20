@@ -1078,12 +1078,13 @@ type FeedTransition struct {
 // Selected is the count of chosen links; Judged is the post-narrowing count
 // Jev was asked about. Listed is omitted when the trace has no listed total.
 type FeedCheckSelection struct {
-	Mode     string `json:"mode" enum:"selected,full"`
-	Selected int    `json:"selected"`
-	Judged   int    `json:"judged"`
-	Listed   *int   `json:"listed,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	Detail   string `json:"detail,omitempty"`
+	Description string `json:"description" description:"Sentence describing which checks ran and why."`
+	Mode        string `json:"mode" enum:"selected,full"`
+	Selected    int    `json:"selected"`
+	Judged      int    `json:"judged"`
+	Listed      *int   `json:"listed,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // FeedUnitChecks is one run, observable once its selection is recorded.
@@ -1099,17 +1100,18 @@ type FeedUnitChecks struct {
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
 }
 
-// FeedFinalChecks is one attempt to run every check for a final review.
+// FeedFinalChecks is one check attempt for a final review.
 // Attempt and StartedAt are absent without durable attempt start evidence;
 // such entries describe recorded results only, never running checks.
 type FeedFinalChecks struct {
-	Review     int        `json:"review"`
-	Attempt    int        `json:"attempt,omitempty"`
-	State      string     `json:"state" enum:"running,passed,failed,incomplete"`
-	Failed     []string   `json:"failed,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
+	Review     int                 `json:"review"`
+	Attempt    int                 `json:"attempt,omitempty"`
+	State      string              `json:"state" enum:"running,passed,failed,incomplete"`
+	Failed     []string            `json:"failed,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	StartedAt  *time.Time          `json:"started_at,omitempty"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty"`
 }
 
 // FeedFinalReview is a recorded review outcome. Reader and Turn identify its

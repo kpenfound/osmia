@@ -14,11 +14,10 @@ import (
 // The reasons a selection runs every check without a Jev decision. A Jev
 // fallback records the judgment's own reason.
 const (
-	selectionUnlisted   = "unlisted"
-	selectionNoChecks   = "no_checks"
-	selectionTooMany    = "too_many_checks"
-	selectionTooLarge   = "change_too_large"
-	selectionUnreadable = "diff_unreadable"
+	selectionUnlisted = "unlisted"
+	selectionNoChecks = "no_checks"
+	selectionTooMany  = "too_many_checks"
+	selectionTooLarge = "change_too_large"
 )
 
 // The modes of a check selection.
@@ -74,8 +73,8 @@ func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff st
 // at dir, can affect, scoped to scope and keyed by cause for reuse across a
 // retry. Every outcome but an accepted judgment runs every check. Listing
 // waits for the project's modules to load, so it is skipped while the boost
-// is off. The unit check run and the session check control both ask through
-// this one function, so either reuses exactly the same selection.
+// is off. Unit, final-review and session check runs all ask through this
+// function and use its selection and fallback rules.
 func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, checks ReviewChecks) (selection CheckSelection) {
 	if j.Status().Mode == jev.ModeDisabled {
 		return fullSelection(string(jev.ReasonDisabled), "")

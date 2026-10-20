@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -194,7 +195,8 @@ func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {
 	}
 	awaitFeedEvent(p, stream)
 	p.await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-	p.awaitText(entry+` [data-field=selection]`, "checking every check on the rebased branch")
+	p.awaitText(entry+` [data-field=selection]`, "checking every check: the Jev boost is off")
+	p.awaitText(entry+` [data-field=selection-description]`, "every check ran: the Jev boost is off")
 	p.await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
 	assertFeedAnnotations(t, p, entry, 1)
 	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
@@ -263,7 +265,24 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 	p.awaitText(`[data-kind=final_checks][data-attempt=""] [data-field=error]`, "engine unavailable")
 	p.awaitText(`[data-kind=final_checks][data-attempt="2"] [data-field=state]`, "running")
 	p.awaitText(`[data-kind=final_review] [data-field=failure]`, "reader did not produce a report")
-	assertFeedAnnotations(t, p, `[data-kind=unit_checks], [data-kind=final_checks], [data-kind=final_review]`, 6)
+	listed := 214
+	selected := &CheckSelection{Mode: selectionSelected, Links: []string{"dag://go/check"}, Candidates: 37, Listed: &listed, Judgment: "judgment_final"}
+	feedDocument(t, repo, stream, finalCheckAttemptDocument(2, 1), finalCheckAttemptPath(2, 1), 1, at,
+		FinalCheckAttempt{Review: 2, Attempt: 1, Selection: selected, StartedAt: at})
+	const finalEntry = `[data-kind=final_checks][data-review="2"][data-attempt="1"]`
+	p.awaitText(finalEntry+` [data-field=selection]`, "checking 1 of 37")
+	p.awaitText(finalEntry+` [data-field=listed]`, "narrowed from 214 listed")
+	p.awaitText(finalEntry+` [data-field=selection-description]`, selected.describe())
+	feedDocument(t, repo, stream, finalChecksDocument(2), finalChecksPath(2), 1, at,
+		FinalCheckRun{Review: 2, Attempt: 1, Selection: selected, Status: ChecksPassed, StartedAt: at, FinishedAt: at})
+	p.awaitText(finalEntry+` [data-field=state]`, "passed")
+	p.awaitText(finalEntry+` [data-field=selection-description]`, selected.describe())
+	var selectedText string
+	p.eval(`document.querySelector(`+quote(finalEntry)+`).textContent`, &selectedText)
+	if strings.Contains(selectedText, "every check") {
+		t.Fatalf("selected final entry claims full run: %s", selectedText)
+	}
+	assertFeedAnnotations(t, p, `[data-kind=unit_checks], [data-kind=final_checks], [data-kind=final_review]`, 7)
 }
 
 func checkStateLabel(state string) string {

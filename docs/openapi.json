@@ -5046,6 +5046,10 @@
       },
       "FeedCheckSelection": {
         "properties": {
+          "description": {
+            "description": "Sentence describing which checks ran and why.",
+            "type": "string"
+          },
           "detail": {
             "type": "string"
           },
@@ -5139,6 +5143,10 @@
           },
           "review": {
             "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/FeedCheckSelection",
+            "description": "Absent for historical runs and failures before selection."
           },
           "started_at": {
             "format": "date-time",

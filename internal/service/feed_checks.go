@@ -58,7 +58,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &start); err != nil {
 				return nil, err
 			}
-			put(finalCheckAttemptDocument(start.Review, start.Attempt), FeedEntry{Kind: "final_checks", At: start.StartedAt, FinalChecks: &FeedFinalChecks{Review: start.Review, Attempt: start.Attempt, State: "running", StartedAt: &start.StartedAt}})
+			put(finalCheckAttemptDocument(start.Review, start.Attempt), FeedEntry{Kind: "final_checks", At: start.StartedAt, FinalChecks: &FeedFinalChecks{Review: start.Review, Attempt: start.Attempt, State: "running", Selection: feedSelection(start.Selection), StartedAt: &start.StartedAt}})
 		}
 	}
 	for _, d := range docs {
@@ -84,11 +84,14 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			// Results without start evidence (including preparation failures and
 			// legacy attempts) remain distinct by document revision.
 			key := finalCheckAttemptDocument(run.Review, run.Attempt)
-			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{Review: run.Review, State: run.Status, Failed: run.Failed, Error: run.Error, FinishedAt: &run.FinishedAt}}
+			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{Review: run.Review, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[key]; ok && run.Attempt > 0 {
 				entry.At = out[i].At
 				entry.FinalChecks.Attempt = run.Attempt
 				entry.FinalChecks.StartedAt = out[i].FinalChecks.StartedAt
+				if selection := out[i].FinalChecks.Selection; selection != nil {
+					entry.FinalChecks.Selection = selection
+				}
 			} else {
 				key = fmt.Sprintf("%s-result-%d", d.ID, d.Revision)
 			}
@@ -114,5 +117,5 @@ func feedSelection(selection *CheckSelection) *FeedCheckSelection {
 	if selection == nil {
 		return nil
 	}
-	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail}
+	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail, Description: selection.describe()}
 }
