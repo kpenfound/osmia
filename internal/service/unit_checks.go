@@ -574,6 +574,19 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if err := g.Export(ctx, in.Candidate, dir); err != nil {
 		return incomplete(fmt.Errorf("candidate export: %w", err))
 	}
+	release, err := c.s.checkSlots.acquire(ctx, CheckSlotRun{Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit})
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	defer release()
+	// The candidate may have changed while this run waited for capacity.
+	if reason, err := c.superseded(in); err != nil {
+		return coreadapter.OperationResult{}, err
+	} else if reason != "" {
+		run.Status, run.Error = ChecksSuperseded, reason
+		return c.record(ctx, in, run, captured)
+	}
+	run.StartedAt = c.s.now()
 	selection, err := c.selection(ctx, in, &run, dir, diff, checks)
 	if err != nil {
 		return coreadapter.OperationResult{}, err

@@ -395,6 +395,11 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if err := g.Export(ctx, head, dir); err != nil {
 		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot export the session's head: %v", err)}
 	}
+	release, err := s.checkSlots.acquire(ctx, CheckSlotRun{Project: project, Workstream: stream, Session: true})
+	if err != nil {
+		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+	}
+	defer release()
 	run, err := nextSessionCheckRun(repository, stream)
 	if err != nil {
 		return SessionCheckRun{}, &APIError{Internal, err.Error()}

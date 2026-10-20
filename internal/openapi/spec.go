@@ -42,7 +42,7 @@ superseded, with failed check links or an error. Selection gives selected and
 judged counts, the optional listed total, or a full-run reason and detail.
 Absent historical selections and totals remain absent.
 
-final_checks has one entry per started attempt of a review's full check run,
+final_checks has one entry per started attempt of a review's check run,
 joining its durable start with its recorded result. Requested reviews, preparation
 and retry delays do not imply running checks. Historical results without start
 evidence have no attempt or started_at; each result revision remains visible.

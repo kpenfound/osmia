@@ -104,7 +104,7 @@ func ownPRFixture(t *testing.T) (*config.Config, *trace.Repository, *fakePulls, 
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	host := &fakePulls{}
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{PullRequests: host}}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}, options: Options{PullRequests: host}}
 	return cfg, repo, host, &baseRefresher{s: s, repository: repo}
 }
 

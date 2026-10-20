@@ -30,6 +30,7 @@ func dailyBudgetService(t *testing.T, n int, backend coreadapter.Turns) (*Servic
 	cfg, repo, clock := hardPauseRepository(t, n)
 	must(t, repo.CreateWorkstream(context.Background(), sibling, clock.Now(), trace.Actor{Kind: "owner", ID: "local"}))
 	s, a := hardPauseService(t, cfg, repo, clock, backend)
+	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks}
 	budget := *cfg
 	budget.Budget.PerDay = "1.00"
 	s.cfg = &budget

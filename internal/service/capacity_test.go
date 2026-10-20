@@ -89,6 +89,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 		{Role: committeeRole, Used: 0, Limit: 3, Waiting: []SlotWait{}},
 		{Role: architectRole, Waiting: []SlotWait{}},
 		{Role: librarianRole, Waiting: []SlotWait{}},
+		{Role: checksRole, Limit: s.CheckSlots().Limit, Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
@@ -164,6 +165,7 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 		{Role: committeeRole, Limit: s.cfg.Capacity.Committee, Waiting: []SlotWait{}},
 		{Role: architectRole, Waiting: []SlotWait{}},
 		{Role: librarianRole, Waiting: []SlotWait{}},
+		{Role: checksRole, Limit: s.cfg.Capacity.Checks, Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity without a project %+v, want %+v", got.Capacity, want)

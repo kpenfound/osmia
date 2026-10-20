@@ -604,10 +604,10 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // The foreman then fetches the configured upstream base branch and replays
 // the feature branch onto it; final/rebase.json records the result before
 // the branch moves, so a retry moves it to the same commit. A replay that
-// conflicts leaves the branch where it was. The service then runs every
-// project check on the rebased commit and records the run in
-// final/checks-<k>.json, which a retry reads back. The first committee member
-// then reads the rebased branch, the check run, the sealed spec and plan and
+// conflicts leaves the branch where it was. The service then runs the selected
+// checks on the rebased commit, using the full suite on selection fallback,
+// and records the run in final/checks-<k>.json, which a retry reads back.
+// The first committee member then reads the rebased branch, the check run, the sealed spec and plan and
 // the charter in a read-only view and records evidence or a gap for every
 // sealed criterion.
 // One commit records final/report.json with the review's move to reviewed or
@@ -1698,7 +1698,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func finalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and the service ran every project check on the exact commit you read. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + checkGateReviewInstructions
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and the service ran checks on the exact commit you read, with their selection and result in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + checkGateReviewInstructions
 }
 
 func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {

@@ -400,6 +400,37 @@ func TestSessionCheckRunsSmartSelectionUnderJEV(t *testing.T) {
 	}
 }
 
+func TestSessionCheckRequiresReadableDiff(t *testing.T) {
+	t.Parallel()
+	s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
+	home := filepath.Dir(clone)
+	baseTree := strings.TrimSpace(demoGit(t, home, "-C", clone, "rev-parse", "HEAD^{tree}"))
+	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("new tree\n"), 0600))
+	commit, err := c.SessionCommit(context.Background(), stream, "add a note", "diff-check")
+	must(t, err)
+	// The head still exports, but its base tree is unavailable for selection.
+	must(t, os.Remove(filepath.Join(clone, ".git", "objects", baseTree[:2], baseTree[2:])))
+	must(t, sessionGit(s.current().For(project)).Export(context.Background(), commit.Commit, t.TempDir()))
+	checks := &fakeChecks{links: []string{"dag+check://go/test"}, outcomes: passing()}
+	s.options.reviewChecks = checks
+	provider := &jevtest.Provider{}
+	boostJev(s, provider)
+	_, err = c.SessionCheck(context.Background(), stream)
+	assertCode(t, err, Internal)
+	if !strings.Contains(err.Error(), "cannot diff the session's base and head") {
+		t.Fatalf("diff failure: %v", err)
+	}
+	if len(checks.runs()) != 0 || len(provider.Requests()) != 0 {
+		t.Fatal("unreadable change reached selection or the check runner")
+	}
+	runs, err := sessionCheckRuns(s.sole().repository, stream)
+	must(t, err)
+	if len(runs) != 0 {
+		t.Fatalf("unreadable change recorded a check run: %+v", runs)
+	}
+}
+
 // TestSessionCheckExcludesUncommittedChanges covers spec#17's "uncommitted
 // changes are not part of the checked commit": a file only in the worktree,
 // never committed, is absent from the export the check runs on.

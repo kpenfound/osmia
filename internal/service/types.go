@@ -617,32 +617,35 @@ type DailyBudgetStatus struct {
 	LowerBound   bool   `json:"lower_bound"`
 }
 
-// CapacityStatus is the shared pool's role slot accounting and the
-// per-workstream limit in force.
+// CapacityStatus reports shared role and check slot accounting and the
+// per-workstream worker-turn limit in force.
 type CapacityStatus struct {
-	PerWorkstream int            `json:"per_workstream"`
-	Roles         []RoleCapacity `json:"roles"`
+	PerWorkstream int            `json:"per_workstream" description:"Maximum concurrent worker turns per workstream; check slots are independent."`
+	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, librarian and checks slot pools, in that order."`
 }
 
-// RoleCapacity is one role kind's slots: Used includes workflow reservations
-// and Limit is its configured global capacity. A zero Limit means no global
-// limit; architect and librarian each run at most once per workstream.
+// RoleCapacity is one pool's slots: Used includes turns, workflow reservations
+// or check runs, and Limit is its configured global capacity. A zero Limit means
+// no global limit; architect and librarian each run at most once per workstream.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role    string     `json:"role"`
-	Used    int        `json:"used"`
-	Limit   int        `json:"limit"`
-	Waiting []SlotWait `json:"waiting"`
+	Role    string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams."`
+	Used    int        `json:"used" description:"Number of slots currently in use."`
+	Limit   int        `json:"limit" description:"Configured slot limit."`
+	Waiting []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session."`
 }
 
-// SlotWait is work waiting for a slot: a queued turn, with its Agent and
-// Turn, or a ready unit the mason controller deferred, with Unit alone.
-// Reason is capacity when every slot of the role kind is taken, priority
-// when higher-priority workstreams start a unit first, and workstream-cap
-// when the workstream holds capacity.per_workstream.
+// SlotWait identifies a queued turn, a deferred ready unit, or a check run.
+// For check runs, exactly one of Unit, Review or Session identifies the kind.
+// Reason is capacity when every slot of the pool is taken, priority when
+// higher-priority workstreams start a unit first, and workstream-cap when the
+// workstream holds capacity.per_workstream agent turns.
 type SlotWait struct {
+	Project    config.ProjectID    `json:"project,omitempty" description:"Project of a waiting check run."`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Unit       string              `json:"unit,omitempty"`
+	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
+	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
 	Reason     string              `json:"reason"`
@@ -1078,12 +1081,13 @@ type FeedTransition struct {
 // Selected is the count of chosen links; Judged is the post-narrowing count
 // Jev was asked about. Listed is omitted when the trace has no listed total.
 type FeedCheckSelection struct {
-	Mode     string `json:"mode" enum:"selected,full"`
-	Selected int    `json:"selected"`
-	Judged   int    `json:"judged"`
-	Listed   *int   `json:"listed,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	Detail   string `json:"detail,omitempty"`
+	Description string `json:"description" description:"Sentence describing which checks ran and why."`
+	Mode        string `json:"mode" enum:"selected,full"`
+	Selected    int    `json:"selected"`
+	Judged      int    `json:"judged"`
+	Listed      *int   `json:"listed,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // FeedUnitChecks is one run, observable once its selection is recorded.
@@ -1099,17 +1103,18 @@ type FeedUnitChecks struct {
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
 }
 
-// FeedFinalChecks is one attempt to run every check for a final review.
+// FeedFinalChecks is one check attempt for a final review.
 // Attempt and StartedAt are absent without durable attempt start evidence;
 // such entries describe recorded results only, never running checks.
 type FeedFinalChecks struct {
-	Review     int        `json:"review"`
-	Attempt    int        `json:"attempt,omitempty"`
-	State      string     `json:"state" enum:"running,passed,failed,incomplete"`
-	Failed     []string   `json:"failed,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
+	Review     int                 `json:"review"`
+	Attempt    int                 `json:"attempt,omitempty"`
+	State      string              `json:"state" enum:"running,passed,failed,incomplete"`
+	Failed     []string            `json:"failed,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	StartedAt  *time.Time          `json:"started_at,omitempty"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty"`
 }
 
 // FeedFinalReview is a recorded review outcome. Reader and Turn identify its

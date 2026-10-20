@@ -932,9 +932,9 @@
           ? el('div', { class: 'meta' }, 'Nothing waits.')
           : el('ul', { class: 'waiting' }, ...r.waiting.map((w) => el('li', { 'data-field': 'waiting' },
             el('span', { class: 'id' }, w.workstream),
-            ' ', w.unit ? 'unit ' + w.unit : 'agent ' + w.agent,
+            ' ', w.unit ? 'unit ' + w.unit : w.review ? 'final review ' + w.review : w.session ? 'session' : 'agent ' + w.agent,
             ': ', waitReasons[w.reason] || w.reason))))),
-      el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' worker slots.'));
+      el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' worker slots. Check slots are shared separately across the factory.'));
   }
 
   function streams() {
@@ -1581,9 +1581,8 @@
         el('strong', { 'data-field': 'checks', 'data-ann': 'role' }, label),
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, checkState(run.state)),
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
-      unit ? checkSelection(run.selection, run.state === 'running') : el('p', { 'data-field': 'selection' },
-        run.state === 'running' ? 'checking every check on the rebased branch' :
-          run.state === 'incomplete' ? 'every check required on the rebased branch' : 'every check ran on the rebased branch'),
+      checkSelection(run.selection, run.state === 'running'),
+      !unit && run.selection ? el('p', { 'data-field': 'selection-description' }, run.selection.description) : null,
       run.failed && run.failed.length ? el('ul', { class: 'notes', 'data-field': 'failed' }, ...run.failed.map(link => el('li', {}, link))) : null,
       run.error ? el('p', { 'data-field': 'error' }, run.error) : null);
   }

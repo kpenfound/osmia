@@ -93,8 +93,9 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 			t.Setenv("PATH", gate+string(os.PathListSeparator)+os.Getenv("PATH"))
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			f.s.checkSlots.resize(1)
 			checking, reading := make(chan struct{}, 2), make(chan struct{}, 2)
-			checksRelease, modelsRelease := make(chan struct{}), make(chan struct{})
+			checksRelease, modelsRelease := make(chan struct{}, 2), make(chan struct{})
 			f.s.options.reviewChecks = checkFunc(func(ctx context.Context, dir string) (CheckResult, error) {
 				if data, err := os.ReadFile(filepath.Join(dir, "UPSTREAM.md")); err != nil || string(data) != "upstream\n" {
 					return CheckResult{}, fmt.Errorf("checks missed upstream: %s %v", data, err)
@@ -122,9 +123,9 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 			defer func() { cancel(); c.Wait() }()
 			must(t, c.Pass(ctx))
 			awaitCheck(t, checking)
-			awaitCheck(t, checking)
-			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 2 {
-				t.Fatalf("final reviews use %d committee slots, want 2", got)
+			awaitCheckSlots(t, f.s, 1, 1)
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
+				t.Fatalf("one checking and one waiting review use %d committee slots, want 1", got)
 			}
 			probe := func() {
 				t.Helper()
@@ -155,8 +156,13 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 					t.Fatalf("replay scratch remains: %s %v", path, err)
 				}
 			}
-			close(checksRelease)
+			checksRelease <- struct{}{}
 			awaitCheck(t, reading)
+			awaitCheck(t, checking)
+			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 2 {
+				t.Fatalf("one reading and one checking review use %d committee slots, want 2", got)
+			}
+			checksRelease <- struct{}{}
 			awaitCheck(t, reading)
 			probe()
 			close(modelsRelease)

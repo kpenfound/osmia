@@ -245,6 +245,7 @@ tailnet = ""
 masons = 4
 reviewers = 2
 committee = 3
+checks = 2
 per_workstream = 2
 
 [shed]
@@ -317,6 +318,15 @@ than `events.window`, and defaults to the longer of `15m` and `events.window`.
 While an event turn of a workstream is queued or running, its new events wait
 for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
+
+`capacity.checks` must be positive, defaults to 2 and limits service Dagger check
+runs across all projects and workstreams, including unit, final-review and session
+runs. A run waits cancellably for a free slot in arrival order before selecting
+and running checks. Waiting does not consume `checks_timeout` or count as an
+incomplete run.
+Check slots are independent of the model-role and per-workstream limits, so
+other work continues while checks wait. Reloading applies a changed limit to
+new starts immediately; executing runs finish even when the limit is lowered.
 
 `mason.max_clean_turns` also bounds the reminders a mason, or a drift mason,
 gets when it reports done with conflict markers left; past it the unit is
@@ -571,16 +581,18 @@ three such runs of one candidate in a row the unit is contested instead: a
 ruling of review runs its checks again, and revise returns it to its mason. One
 run at a time per workstream; a pause holds runs not yet started.
 
-Before the final read, the service runs every check the same way on the
-rebased feature branch commit, within `checks_timeout`, and records the run as
-`final/checks-<k>.json` for final review `k`, with the commit, command, exit
-status, failed checks and the diagnostic excerpt. The complete captured output
+Before the final read, the service uses the same [smart-check selection](smart-checks.md)
+on the rebased feature branch commit against its upstream base and runs the
+selected checks, or every check on a fallback, within `checks_timeout`. It
+records the run as `final/checks-<k>.json` for final review `k`, with the commit,
+selection, command, exit status, failed checks and the diagnostic excerpt. The complete captured output
 is recorded with it as `final/checks-<k>-output.txt`, accessible the same way.
-The final reader's prompt
-carries the result; neither it nor a unit reviewer runs checks. A final run
-that reports no result is recorded as incomplete, and the reader is told the
-checks show nothing about the commit. A retry of the review reads the recorded
-run back instead of running the checks again. The check client inherits only
+The final reader's prompt carries the selection and result; neither it nor a
+unit reviewer runs checks. A final run that reports no result is recorded as
+incomplete, and the read waits for checks to complete. Retries wait longer
+after each incomplete run, up to an hour, and reuse the recorded judgment for
+the same review, commit and selection inputs, including after a restart. A
+completed run is read back instead of running the checks again. The check client inherits only
 PATH and service engine selection, not provider, GitHub or SSH credentials.
 There is no command fallback.
 
