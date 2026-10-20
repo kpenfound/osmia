@@ -617,7 +617,7 @@ svg {
   overflow-wrap: anywhere;
 }
 
-.feed ol {
+.feed > ol {
   display: grid;
   gap: 0.5rem;
   margin: 0;
@@ -652,6 +652,74 @@ svg {
 .entry .text {
   white-space: pre-wrap;
 }
+
+.entry, .entry .card, .entry details, .entry .text, .markdown {
+  min-width: 0;
+}
+
+.entry .markdown {
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p { white-space: pre-wrap; margin: 0.5rem 0; }
+.markdown h1, .markdown h2, .markdown h3,
+.markdown h4, .markdown h5, .markdown h6 {
+  margin: 0.8rem 0 0.4rem;
+  line-height: 1.25;
+}
+.markdown h1 { font-size: 1.5rem; }
+.markdown h2 { font-size: 1.3rem; }
+.markdown h3 { font-size: 1.15rem; }
+.markdown h4, .markdown h5, .markdown h6 { font-size: 1rem; }
+.feed .markdown ul, .feed .markdown ol {
+  display: block;
+  padding-left: 1.6rem;
+  margin: 0.4rem 0;
+  font-size: inherit;
+  color: inherit;
+}
+.markdown ul { list-style: disc; }
+.markdown ol { list-style: decimal; }
+.markdown li > .markdown > p { margin: 0; }
+.markdown blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.8rem;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+.markdown code {
+  font-family: monospace;
+  background: var(--bubble);
+  border-radius: 0.2rem;
+  padding: 0.1rem 0.25rem;
+}
+.markdown pre, .markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+}
+.markdown pre {
+  padding: 0.6rem;
+  white-space: pre;
+  overflow-wrap: normal;
+  background: var(--bubble);
+}
+.markdown pre code { padding: 0; }
+.markdown table { border-collapse: collapse; width: max-content; min-width: 100%; }
+.markdown th, .markdown td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.markdown th { background: var(--bubble); }
+.markdown .align-left { text-align: left; }
+.markdown .align-center { text-align: center; }
+.markdown .align-right { text-align: right; }
 
 .entry[data-kind="status"] .card {
   display: grid;
