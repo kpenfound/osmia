@@ -183,7 +183,11 @@ func (r resolutions) capture(ctx context.Context, scope coreadapter.Scope, view 
 	if err != nil {
 		return err
 	}
-	return mirror(view.Workspace().Directory, w.Path)
+	g, err := r.of(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return err
+	}
+	return captureFiles(ctx, g, view.Workspace().Directory, w.Path)
 }
 
 // records returns the recorded revisions of drift/rebase.json for drift
@@ -575,9 +579,6 @@ func (d drifter) release(ctx context.Context, stream config.WorkstreamID) error 
 // driftHeldError.
 func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w workspace.Worktree, turn, prompt string, paths []string) (bool, error) {
 	if err := d.ensureThread(ctx, stream, driftMasonAgent, masonRole); err != nil {
-		return false, err
-	}
-	if err := d.recoverView(ctx, stream, driftMasonAgent, func() (string, error) { return w.Path, nil }); err != nil {
 		return false, err
 	}
 	th, err := d.repository.Thread(stream, driftMasonAgent)

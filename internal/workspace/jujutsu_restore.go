@@ -45,6 +45,12 @@ func (j *Jujutsu) checkpointPath(operation string) string {
 // is replaced. A repository not made yet records none: nothing of it is
 // there to restore.
 func (j *Jujutsu) Checkpoint(ctx context.Context, operation string, at time.Time) error {
+	if !holdsClone(ctx, cloneKey(j.Clone)) {
+		return errors.New("a jj checkpoint requires ownership of the clone lock; use LocalStep")
+	}
+	if owner, _ := ctx.Value(stepKey{}).(*stepScope); owner == nil || !owner.active.Load() || owner.operation != operation {
+		return errors.New("a jj checkpoint must belong to its LocalStep")
+	}
 	if exists, err := j.initialized(); err != nil || !exists {
 		return err
 	}
@@ -80,7 +86,9 @@ func (j *Jujutsu) Checkpoint(ctx context.Context, operation string, at time.Time
 }
 
 // Settle drops the operation's checkpoint.
-func (j *Jujutsu) Settle(_ context.Context, operation string) error {
+func (j *Jujutsu) Settle(ctx context.Context, operation string) error {
+	_, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	if err := os.Remove(j.checkpointPath(operation)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -101,6 +109,8 @@ func (j *Jujutsu) Settle(_ context.Context, operation string) error {
 // as after a snapshot. A workspace made after the entry is no longer one of
 // the repository's, as Workspace reports, so Acquire makes it again.
 func (j *Jujutsu) Recover(ctx context.Context) ([]string, error) {
+	ctx, unlock := lockClone(ctx, j.Clone)
+	defer unlock()
 	entries, err := os.ReadDir(j.checkpoints())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

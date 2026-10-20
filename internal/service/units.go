@@ -354,7 +354,11 @@ func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, vi
 	if !found {
 		return fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
 	}
-	return mirror(view.Workspace().Directory, w.Path)
+	g, err := u.of(stream)
+	if err != nil {
+		return err
+	}
+	return captureFiles(ctx, g, view.Workspace().Directory, w.Path)
 }
 
 // retriedTurns tells a unit mason's attempt that follows an attempt of the

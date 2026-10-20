@@ -8,6 +8,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,9 @@ func names(url, repository string) bool {
 // owner configured an SSH command of their own, so a passphrase or an unknown
 // host key fails the fetch instead of waiting for a terminal.
 func (g *Git) Fetch(ctx context.Context, remote, branch string) (string, error) {
+	if err := networkUnlocked(ctx, g.Clone); err != nil {
+		return "", err
+	}
 	start := time.Now()
 	commit, err := g.fetch(ctx, remote, branch)
 	ghlog.Log(ctx, start, ghlog.Entry{Action: "workspace.fetch", Access: ghlog.Read, Remote: remote, Branch: branch, Commits: nonEmpty(commit), Err: err})
@@ -92,8 +96,21 @@ func (g *Git) fetch(ctx context.Context, remote, branch string) (string, error) 
 		return "", err
 	}
 	ref := "refs/remotes/" + remote + "/" + branch
-	if _, err := g.runEnv(ctx, env, "fetch", "--quiet", "--no-tags", remote, "+refs/heads/"+branch+":"+ref); err != nil {
-		return "", err
+	for attempt := 0; ; attempt++ {
+		_, err := g.runEnv(ctx, env, "fetch", "--quiet", "--no-tags", remote, "+refs/heads/"+branch+":"+ref)
+		if err == nil {
+			break
+		}
+		if attempt >= 5 || !fetchRefCollision(err) {
+			return "", err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
 	}
 	commit, err := g.run(ctx, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
@@ -102,9 +119,20 @@ func (g *Git) fetch(ctx context.Context, remote, branch string) (string, error) 
 	return commit, nil
 }
 
+// fetchRefCollision recognises both a compare-and-swap race and a ref lock
+// temporarily held by another fetch. Other fetch failures are not retried.
+func fetchRefCollision(err error) bool {
+	text := err.Error()
+	return strings.Contains(text, "cannot lock ref") &&
+		(strings.Contains(text, "but expected") || strings.Contains(text, "File exists") || strings.Contains(text, "reference already exists"))
+}
+
 // RemoteBranch asks a remote which commit one of its branches points at, and
 // whether the branch exists. Nothing is fetched and no ref of the clone moves.
 func (g *Git) RemoteBranch(ctx context.Context, remote, branch string) (string, bool, error) {
+	if err := networkUnlocked(ctx, g.Clone); err != nil {
+		return "", false, err
+	}
 	start := time.Now()
 	commit, exists, err := g.remoteBranch(ctx, remote, branch)
 	outcome := ""
@@ -137,6 +165,9 @@ func (g *Git) remoteBranch(ctx context.Context, remote, branch string) (string, 
 // expected, or absent when expected is empty; otherwise the remote refuses
 // and nothing moves. SSH runs in batch mode as it does for Fetch.
 func (g *Git) Push(ctx context.Context, remote, commit, branch, expected string) error {
+	if err := networkUnlocked(ctx, g.Clone); err != nil {
+		return err
+	}
 	start := time.Now()
 	err := g.push(ctx, remote, commit, branch, expected)
 	commits := nonEmpty(commit)
@@ -524,10 +555,6 @@ func (g *Git) Advance(ctx context.Context, w Worktree, from, to string) error {
 	return err
 }
 
-// replayName names the temporary worktree Replay runs in, under Directory.
-// A leading dot keeps it apart from every workspace name.
-const replayName = ".replay"
-
 // replayer is the core replayer that performs every Git replay below: it
 // cherry-picks one commit at a time, keeping each original's message,
 // author and committer, so the same replay of the same commits onto the
@@ -742,7 +769,11 @@ func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, _ time.Ti
 	if err != nil || descends {
 		return head, nil, err
 	}
-	dir := g.path(replayName)
+	operation, _ := ctx.Value(operationKey{}).(string)
+	if operation == "" {
+		operation = fmt.Sprintf("%x", randomReplayID())
+	}
+	dir := g.path(ReplayName(operation))
 	if err := g.dropReplay(ctx, dir); err != nil {
 		return "", nil, err
 	}
@@ -750,7 +781,12 @@ func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, _ time.Ti
 	if err := os.MkdirAll(g.Directory, 0700); err != nil {
 		return "", nil, err
 	}
-	if _, err := g.run(ctx, "worktree", "add", "--quiet", "--detach", dir, head); err != nil {
+	if err := func() error {
+		locked, unlock := lockClone(ctx, g.Clone)
+		defer unlock()
+		_, err := g.run(locked, "worktree", "add", "--quiet", "--detach", dir, head)
+		return err
+	}(); err != nil {
 		return "", nil, err
 	}
 	boundary := base
@@ -767,6 +803,14 @@ func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, _ time.Ti
 		return "", r.Conflicts, nil
 	}
 	return r.Candidate, nil, nil
+}
+
+func randomReplayID() []byte {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		panic(err)
+	}
+	return id
 }
 
 // unmerged returns the paths the index of the worktree at dir holds
@@ -1054,12 +1098,14 @@ func markedFiles(dir string, paths []string) ([]string, error) {
 // dropReplay removes Replay's temporary worktree at dir, and what a stop left
 // of it.
 func (g *Git) dropReplay(ctx context.Context, dir string) error {
+	ctx, unlock := lockClone(ctx, g.Clone)
+	defer unlock()
 	entries, err := g.list(ctx)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		if g.own(entry, replayName) {
+		if g.own(entry, filepath.Base(dir)) {
 			if err := g.forget(ctx, entry); err != nil {
 				return err
 			}
@@ -1174,6 +1220,13 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 			continue
 		}
 		if entry.prunable {
+			// Re-read after taking ownership: an Acquire may have recreated this
+			// workspace since the unlocked list, and must not be pruned away.
+			if !holdsClone(ctx, cloneKey(g.Clone)) {
+				local, unlock := lockClone(ctx, g.Clone)
+				defer unlock()
+				return g.Workspace(local, name)
+			}
 			return Worktree{}, false, g.forget(ctx, entry)
 		}
 		branch := entry.branch
@@ -1227,6 +1280,8 @@ func (g *Git) replayedBranch(ctx context.Context, dir string) (string, error) {
 
 // forget removes one worktree's metadata from the clone.
 func (g *Git) forget(ctx context.Context, entry listed) error {
+	ctx, unlock := lockClone(ctx, g.Clone)
+	defer unlock()
 	_, err := g.run(ctx, "worktree", "remove", "--force", entry.path)
 	return err
 }
@@ -1239,6 +1294,8 @@ func (g *Git) forget(ctx context.Context, entry listed) error {
 // branch; a directory in the way that is no worktree of the clone is left
 // alone and reported.
 func (g *Git) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, error) {
+	ctx, unlock := lockClone(ctx, g.Clone)
+	defer unlock()
 	if req.Name == "" || req.Branch == "" {
 		return nil, errors.New("a workspace request needs a name and a branch")
 	}
@@ -1282,6 +1339,8 @@ func (g *Git) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, erro
 
 // Release removes the worktree, whatever it holds; the branch stays.
 func (g *Git) Release(ctx context.Context, w vcs.Workspace) error {
+	ctx, unlock := lockClone(ctx, g.Clone)
+	defer unlock()
 	if w == nil || w.Directory() == "" {
 		return errors.New("no workspace to release")
 	}
@@ -1292,6 +1351,8 @@ func (g *Git) Release(ctx context.Context, w vcs.Workspace) error {
 // Prune forgets the provider's own worktrees, those under Directory, whose
 // directories are gone. The owner's other worktrees are left alone.
 func (g *Git) Prune(ctx context.Context) error {
+	ctx, unlock := lockClone(ctx, g.Clone)
+	defer unlock()
 	entries, err := g.list(ctx)
 	if err != nil {
 		return err

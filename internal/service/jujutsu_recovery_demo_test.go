@@ -319,13 +319,10 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	if len(moved) != 1 || !holdsEdits(inCommit(f, moved[0])) {
 		t.Fatalf("the cut-short landing left the feature branch with %v", moved)
 	}
-	// f.stop joins the project's reconcile loop, which writes the checkpoint
-	// synchronously before the cut-short attempt, but wait on the checkpoint
-	// file itself with a bounded deadline rather than assume it is already
-	// visible the instant the service has stopped.
-	deadline := time.Now().Add(demoTimeout)
-	for len(checkpoints(t, f, branchesDirectory)) != 1 && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
+	// Cancellation restores the local checkpoint before relinquishing clone
+	// ownership, so another workstream can safely complete before restart.
+	if left := checkpoints(t, f, branchesDirectory); len(left) != 0 {
+		t.Fatalf("cancelled landing left checkpoints %v", left)
 	}
 	entry, changed := interrupted(t, f, branchesDirectory)
 	if !changed {

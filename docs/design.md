@@ -475,6 +475,24 @@ The feature branch is one workspace on the workstream's repo clone. Each unit ge
 
 A workspace lasts as long as the work it holds. A unit's workspace is removed once the unit merges, since its work is on the feature branch. When a workstream is delivered or abandoned, the service removes its remaining workspaces: it first commits the files of each unit that did not merge to that unit's branch, so abandonment keeps the work. Every branch stays, so each candidate the trace records remains in the clone. Workgroup dependent repair and approved open-PR rework use the same feature branch through the ordinary workspace loop; retiring temporary workspaces never authorizes deleting the trace. A workspace stays while a turn on it is unfinished or, on a finished workstream, while an operation is pending, and a unit's workspace stays while a replay is in progress in it.
 
+Git worktree creation, removal and pruning share a lock keyed by clone. Other
+Git commands on different refs run independently. Each operation has its own
+replay scratch worktree, and a fetch that collides with another fetch updating
+the same ref retries.
+
+A Jujutsu local step holds the clone lock from its checkpoint through its local
+commands and settlement, including any short durable progress write. Copying a
+completed turn's files back and snapshotting them is one checkpointed local step;
+an interrupted copy is retried from the turn's surviving view before its claim
+is released. Fetches,
+pushes, GitHub calls, model turns and checks run outside that span. No checkpoint
+is outstanding when the lock is released. Cancellation restores the interrupted
+step before unlocking; a process crash leaves its checkpoint for startup
+recovery. Recovery retains its whole-repository restore semantics, so a completed
+step of another operation is always older than the interrupted step's checkpoint
+and remains intact. Retries inspect durable progress and branch effects before
+repeating local work.
+
 ### 7.4 Landing a unit
 
 On approval the foreman squashes the unit's workspace to one commit on the feature branch with a message generated from the unit's title and the criteria it serves, then rebases every unit still in flight. A conflict goes to a mason session in the conflicting unit's workspace with the sealed spec and the instruction that the tree carries conflict markers to resolve against it. A session never discovers conflict markers by accident. Reviewers never see them.

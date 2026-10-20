@@ -487,7 +487,15 @@ func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, ag
 		if err != nil {
 			return err
 		}
-		if err := mirror(view, path); err != nil {
+		providers := newUnitWorkspaces(m.cfg, m.repository).streamWorkspaces
+		if agent == driftMasonAgent {
+			providers = driftWorkspaces(m.cfg, m.repository)
+		}
+		provider, err := providers.of(stream)
+		if err != nil {
+			return err
+		}
+		if err := captureFiles(ctx, provider, view, path); err != nil {
 			return err
 		}
 		if err := os.RemoveAll(view); err != nil {

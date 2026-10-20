@@ -632,6 +632,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		}
 		return *result, nil
 	}
+	ctx = workspace.WithOperation(ctx, string(stream)+"/"+op.ID)
 	cfg := a.s.about(a.repository)
 	if !cfg.HasProject() || cfg.Project.ID != a.repository.Project() {
 		return coreadapter.OperationResult{}, errors.New("the project is not active")

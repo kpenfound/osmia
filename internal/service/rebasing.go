@@ -510,10 +510,9 @@ func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in 
 // change ID the trace records for the unit. The workspace's branch, index and files then
 // move to the rebased commit, and the rebase is recorded. A workspace that
 // is missing, already current or behind a feature branch that moved again
-// is refused with the reason as its result, and nothing changes. Each
-// attempt runs between checkpoints of the unit workspaces' state, which a
-// service restarted after the attempt was cut short restores before the
-// rebase is retried.
+// is refused with the reason as its result, and nothing changes. The
+// local step and its result share a clone-locked checkpoint. Cancellation
+// restores it before unlocking; a process crash leaves it for startup recovery.
 func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeRebase(op)
 	if err != nil {
@@ -537,7 +536,7 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return checkpointed(ctx, op.ID, requested, []workspace.Provider{g}, func() (coreadapter.OperationResult, error) {
+	return checkpointed(ctx, string(stream)+"/"+op.ID, requested, []workspace.Provider{g}, func(ctx context.Context) (coreadapter.OperationResult, error) {
 		return r.rebase(ctx, op.ID, stream, in, g, requested)
 	})
 }

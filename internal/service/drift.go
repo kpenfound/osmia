@@ -352,10 +352,10 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // as its base when the base changed, and the rebase's outcome. A workstream
 // that no longer qualifies, or whose branch moved during the rebase, is
 // skipped with the reason as its result. Storage, fetch and Git errors leave
-// the operation pending for another attempt. Each attempt runs between
-// checkpoints of the state of the feature branch and resolution workspaces,
-// which a service restarted after the attempt was cut short restores before
-// the drift rebase is retried.
+// the operation pending for another attempt. Remote observations run before the local step,
+// whose feature and resolution checkpoints settle before the clone lock is
+// released. Cancellation restores that step before unlocking; a process
+// crash leaves its checkpoints for startup recovery.
 func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeDrift(op)
 	if err != nil {
@@ -383,13 +383,97 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		providers = append(providers, g)
 	}
-	return checkpointed(ctx, op.ID, requested, providers, func() (coreadapter.OperationResult, error) {
-		return d.drift(ctx, op.ID, stream, in, requested)
+	selected, result, err := d.driftBase(ctx, op.ID, stream, in)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if result != nil {
+		return *result, nil
+	}
+	// Recover a surviving turn view in its own checkpointed local step,
+	// before the drift step can advance the resolution workspace.
+	if err := d.recoverView(ctx, stream, driftMasonAgent, func() (string, error) {
+		w, err := (resolutions{driftWorkspaces(d.cfg, d.repository)}).find(ctx, stream)
+		return w.Path, err
+	}); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return checkpointed(ctx, string(stream)+"/"+op.ID, requested, providers, func(ctx context.Context) (coreadapter.OperationResult, error) {
+		return d.drift(ctx, op.ID, stream, in, requested, selected)
 	})
 }
 
+// driftBase performs remote observations before the checkpointed local step.
+func (d drifter) driftBase(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput) (seal.Base, *coreadapter.OperationResult, error) {
+	previous, found, err := d.latest(stream, in.Drift)
+	if err != nil {
+		return seal.Base{}, nil, err
+	}
+	if found && (previous.Outcome == driftCarrying || previous.Outcome == driftReplayed || resolving(previous.Outcome)) {
+		return seal.Base{}, nil, nil
+	}
+	if reason, err := d.eligible(stream); err != nil {
+		return seal.Base{}, nil, err
+	} else if reason != "" {
+		result, err := d.skip(ctx, stream, in.Drift, operation, reason)
+		return seal.Base{}, &result, err
+	}
+	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return seal.Base{}, nil, err
+	}
+	if _, exists, err := g.Branch(ctx, featureBranch(stream)); err != nil {
+		return seal.Base{}, nil, err
+	} else if !exists {
+		result, err := d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", featureBranch(stream)))
+		return seal.Base{}, &result, err
+	}
+	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return seal.Base{}, nil, err
+	}
+	if feature.Value == DeliveredState {
+		publication, _, err := currentOwnPublication(d.repository, stream)
+		if err != nil {
+			return seal.Base{}, nil, err
+		}
+		if !pulls.Credentialed(d.s.options.PullRequests) {
+			return seal.Base{}, nil, errNoPullRequestCredential
+		}
+		found, err := d.s.options.PullRequests.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
+		if err != nil {
+			return seal.Base{}, nil, err
+		}
+		if err := recordOwnPullRequestOutcomeFromFind(ctx, d.repository, d.s.now(), stream, operation, publication.PullRequest, found); err != nil {
+			return seal.Base{}, nil, err
+		}
+		open := false
+		for _, pr := range found {
+			if pr.Number == publication.PullRequest && pr.State == "open" && !pr.Merged {
+				open = true
+			}
+		}
+		if !open {
+			result, err := d.skip(ctx, stream, in.Drift, operation, "the delivered pull request is no longer open")
+			return seal.Base{}, &result, err
+		}
+	}
+	_, _, found, err = seal.Latest(d.repository, stream)
+	if err != nil {
+		return seal.Base{}, nil, err
+	}
+	if !found {
+		return seal.Base{}, nil, fmt.Errorf("workstream %s has no seal", stream)
+	}
+	selected, err := d.s.resolveBase(ctx, d.cfg, d.repository, stream, g)
+	if err != nil {
+		return seal.Base{}, nil, err
+	}
+	return selected, nil, nil
+}
+
 // drift is one attempt of the drift rebase Apply describes.
-func (d drifter) drift(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput, requested time.Time) (coreadapter.OperationResult, error) {
+func (d drifter) drift(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput, requested time.Time, selected seal.Base) (coreadapter.OperationResult, error) {
 	rebase, found, err := d.latest(stream, in.Drift)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -431,46 +515,6 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 		}
 		if !exists {
 			return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", branch))
-		}
-		feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if feature.Value == DeliveredState {
-			publication, _, err := currentOwnPublication(d.repository, stream)
-			if err != nil {
-				return coreadapter.OperationResult{}, err
-			}
-			if !pulls.Credentialed(d.s.options.PullRequests) {
-				return coreadapter.OperationResult{}, errNoPullRequestCredential
-			}
-			found, err := d.s.options.PullRequests.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
-			if err != nil {
-				return coreadapter.OperationResult{}, err
-			}
-			if err := recordOwnPullRequestOutcomeFromFind(ctx, d.repository, d.s.now(), stream, operation, publication.PullRequest, found); err != nil {
-				return coreadapter.OperationResult{}, err
-			}
-			open := false
-			for _, pr := range found {
-				if pr.Number == publication.PullRequest && pr.State == "open" && !pr.Merged {
-					open = true
-				}
-			}
-			if !open {
-				return d.skip(ctx, stream, in.Drift, operation, "the delivered pull request is no longer open")
-			}
-		}
-		_, _, found, err := seal.Latest(d.repository, stream)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if !found {
-			return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
-		}
-		selected, err := d.s.resolveBase(ctx, d.cfg, d.repository, stream, g)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
 		}
 		currentBase, err := branchBase(ctx, d.repository, stream, g, tip)
 		if err != nil {

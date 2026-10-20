@@ -379,9 +379,9 @@ func landingCommit(ctx context.Context, g workspace.Provider, tip string, in lan
 // One commit then records units/<unit>/landing.json, the unit's move to
 // merged and every dependent unit whose dependencies have all merged moving
 // to ready. A stale approval is refused with the reason as its result, and
-// nothing is committed. Each attempt runs between checkpoints of the feature
-// branch workspaces' state, which a service restarted after the attempt was
-// cut short restores before the landing is retried.
+// nothing is committed. Its local step and durable result share a
+// clone-locked checkpoint. Cancellation restores it before unlocking, while
+// a process crash leaves it for startup recovery before the landing retries.
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeLand(op)
 	if err != nil {
@@ -418,7 +418,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return checkpointed(ctx, op.ID, requested, []workspace.Provider{g}, func() (coreadapter.OperationResult, error) {
+	return checkpointed(ctx, string(stream)+"/"+op.ID, requested, []workspace.Provider{g}, func(ctx context.Context) (coreadapter.OperationResult, error) {
 		return f.land(ctx, op.ID, stream, in, g, requested)
 	})
 }
