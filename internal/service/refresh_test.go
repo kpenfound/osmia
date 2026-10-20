@@ -31,6 +31,40 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	must(t, configFile.Close())
 	f.opts.Librarian = &Librarian{Engine: f.engine, Hosts: f.opts.Architect.Hosts}
 	f.start(t)
+	// Keep the next unit ready after the first landing. The refresh fixture
+	// exercises that quiet boundary until the refresh request is recorded.
+	project := f.s.sole()
+	stages := *project.pipeline.current.Load()
+	stages.hooks = slices.Clone(stages.hooks)
+	for i, hook := range stages.hooks {
+		if hook.name != "masons" {
+			continue
+		}
+		stages.hooks[i].pass = func(ctx context.Context) error {
+			ops, err := project.repository.Operations(librarianWorkstream(f.project))
+			if err != nil {
+				return err
+			}
+			if slices.ContainsFunc(ops, func(op trace.OperationRecord) bool { return op.Operation.Action == RefreshAction }) {
+				return hook.pass(ctx)
+			}
+			streams, err := project.repository.Workstreams()
+			if err != nil {
+				return err
+			}
+			for _, stream := range streams {
+				state, err := project.repository.Workflow(stream, trace.UnitSubject("resume"))
+				if err != nil {
+					return err
+				}
+				if state.Value == UnitReady || state.Value == UnitImplementing {
+					return hook.pass(ctx)
+				}
+			}
+			return nil
+		}
+	}
+	project.pipeline.current.Store(&stages)
 	must(t, f.repository().RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		ok, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "learnings": []string{"Trace snapshots require a clean worktree."}})

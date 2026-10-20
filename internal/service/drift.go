@@ -99,9 +99,8 @@ func driftIDs(k int) (transition, event string) {
 // requestDrifts asks for a drift rebase of every eligible sealed workstream
 // that is not paused and has no final review or publication in flight,
 // for which due returns why it takes one now,
-// and returns the workstreams it asked for. Drift rebases share the project's
-// lander with landings: while a landing or drift rebase of the project has
-// no result, it asks for nothing.
+// and returns the workstreams it asked for. A landing, drift, final review or
+// publication without a result holds only its own workstream.
 func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
 	streams, err := f.repository.Workstreams()
 	if err != nil {
@@ -122,9 +121,7 @@ func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamI
 				continue
 			}
 			switch o.Operation.Action {
-			case LandAction, DriftAction:
-				return nil, nil
-			case FinalReviewAction, deliveryReviewAction, PublishAction, publishUpstreamAction:
+			case LandAction, DriftAction, FinalReviewAction, deliveryReviewAction, PublishAction, publishUpstreamAction:
 				reviewing[stream] = true
 			}
 		}
@@ -339,8 +336,8 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // the feature branch onto it. A conflicted replay records the upstream
 // commit and the conflicted paths and changes neither the branch nor the
 // seal: the conflicts are resolved and reviewed as resolve says, and the
-// operation stays pending, holding its workstream's landings and the
-// project's other drift rebases, until a reviewer approves the resolved
+// operation stays pending, holding its workstream's landings and other
+// drift rebases, until a reviewer approves the resolved
 // branch, which is then the replay's commit, or the resolution stops and
 // the drift rebase is held, as resolve says. A
 // workstream that becomes ineligible for drift while its conflicts
@@ -650,8 +647,8 @@ func (d drifter) invalidates(stream config.WorkstreamID) (string, error) {
 	return fmt.Sprintf("final review %d read the feature branch on the old upstream base and no longer authorises delivery; a new final review is required", report.Review), nil
 }
 
-// finishCarry uses the unit rebase path while the drift operation holds the
-// project lander. Each requested rebase and conflict turn is durable, so a
+// finishCarry uses the unit rebase path while the drift operation holds its
+// workstream's landings. Each requested rebase and conflict turn is durable, so a
 // retry only asks for work that has not already been recorded.
 func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (coreadapter.OperationResult, error) {
 	b, found, err := d.read(stream)

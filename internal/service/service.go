@@ -173,7 +173,8 @@ type Service struct {
 	// active_projects order.
 	projects []*activeProject
 	// pool is the role capacity the schedulers of every project draw on.
-	pool *scheduler.Shared
+	pool          *scheduler.Shared
+	gitOperations gitOperationPool
 	// spends is the daily spend each project's daily budget pass publishes.
 	spends    daySpends
 	pending   error
@@ -1160,6 +1161,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		options.Class = operationClass
 	}
 	options.Limit = s.modelOperationLimit(repository, options.Limit)
+	options.Limit = s.gitOperationLimit(repository, options.Limit)
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
@@ -1223,10 +1225,10 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
-// concurrentOperation runs model workflows and scheduler-admitted workers
-// beside the pass. operationClass supplies their independent ordering.
+// concurrentOperation selects operations whose inspection and effects run
+// beside the scheduling pass under their operation class's ordering.
 func concurrentOperation(op coreadapter.Operation) bool {
-	if modelOperationRole(op) != "" {
+	if gitOperation(op) || modelOperationRole(op) != "" {
 		return true
 	}
 	if op.Boundary != coreadapter.RunnerBoundary {

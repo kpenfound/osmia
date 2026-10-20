@@ -83,6 +83,9 @@ func TestDefaults(t *testing.T) {
 	if c.Project.ChecksTimeout != "15m" || c.Project.CheckTimeout() != 15*time.Minute {
 		t.Fatalf("checks timeout default: %q %v", c.Project.ChecksTimeout, c.Project.CheckTimeout())
 	}
+	if c.Project.Capacity.GitOperations != 4 {
+		t.Fatalf("git operation default: %+v", c.Project.Capacity)
+	}
 	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
@@ -326,6 +329,8 @@ func TestInvalid(t *testing.T) {
 		{"branch", "", projectConfig + "base_branch = 'bad..branch'\n", "base_branch:"},
 		{"landing", "", projectConfig + "landing = 'merge'\n", "landing:"},
 		{"project wip", "", projectConfig + "[capacity]\nper_workstream = -1\n", "capacity.per_workstream"},
+		{"zero git operations", "", projectConfig + "[capacity]\ngit_operations = 0\n", "capacity.git_operations"},
+		{"negative git operations", "", projectConfig + "[capacity]\ngit_operations = -1\n", "capacity.git_operations"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -756,5 +761,15 @@ func TestPullRequestPollInterval(t *testing.T) {
 				t.Fatalf("default = %q", c.Project.PullRequestPoll)
 			}
 		})
+	}
+}
+
+func TestProjectGitOperationCapacity(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig+"[capacity]\ngit_operations = 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Project.Capacity.GitOperations != 2 {
+		t.Fatalf("git operation capacity: %+v", c.Project.Capacity)
 	}
 }

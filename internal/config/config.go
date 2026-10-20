@@ -264,7 +264,11 @@ func (p Project) IsDefaultRepo() bool { return p.GroupID == "" }
 
 type ProjectCapacity struct {
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
+	GitOperations int `toml:"git_operations" json:"git_operations"`
 }
+
+// DefaultGitOperations bounds one project's repository and GitHub operations.
+const DefaultGitOperations = 4
 
 var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", "librarian", "mason", "reviewer"}
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
@@ -629,7 +633,7 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{perWorkstream}}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{PerWorkstream: perWorkstream, GitOperations: DefaultGitOperations}}
 	if _, err := decode(projectPath, &p, true); err != nil {
 		return Project{}, err
 	}
@@ -686,6 +690,9 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	}
 	if p.Capacity.PerWorkstream <= 0 {
 		return Project{}, fieldError(projectPath, "capacity.per_workstream", "must be positive")
+	}
+	if p.Capacity.GitOperations <= 0 {
+		return Project{}, fieldError(projectPath, "capacity.git_operations", "must be positive")
 	}
 	return p, nil
 }
@@ -761,7 +768,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	// A leftover [beekeeper] section from the removed Beekeeper feature is
 	// accepted and ignored, never decoded into any field, so a top-level

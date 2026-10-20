@@ -188,7 +188,8 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 		return entries[0]
 	}
 	escalation := decisionCard(firstOf(InboxEscalation))
-	contested := decisionCard(firstOf(InboxContested))
+	contestedEntry := firstOf(InboxContested)
+	contested := decisionCard(contestedEntry)
 	amendment := decisionCard(firstOf(InboxAmendment))
 
 	// Observe the page consuming an inbox that no longer lists this contest.

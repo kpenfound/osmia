@@ -90,23 +90,34 @@ func refreshResult(docs []trace.Document) coreadapter.OperationResult {
 }
 
 func refreshPending(repo *trace.Repository) (bool, error) {
+	pending, err := refreshPendingStreams(repo)
+	return len(pending) != 0, err
+}
+
+// refreshPendingStreams names the workstreams covered by unfinished refreshes.
+func refreshPendingStreams(repo *trace.Repository) (map[config.WorkstreamID]bool, error) {
+	pending := map[config.WorkstreamID]bool{}
 	streams, err := repo.Workstreams()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if !slices.Contains(streams, librarianWorkstream(repo.Project())) {
-		return false, nil
+		return pending, nil
 	}
 	ops, err := repo.Operations(librarianWorkstream(repo.Project()))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, op := range ops {
 		if op.Operation.Action == RefreshAction && op.Result == nil {
-			return true, nil
+			var in refreshInput
+			if err := json.Unmarshal(op.Operation.Input, &in); err != nil {
+				return nil, err
+			}
+			pending[in.Workstream] = true
 		}
 	}
-	return false, nil
+	return pending, nil
 }
 
 // Pass serializes refreshes from recorded landings and code-based answers.

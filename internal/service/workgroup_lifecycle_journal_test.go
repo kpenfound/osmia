@@ -136,7 +136,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	must(t, err)
 	_, err = f.c.Archive(ctx, f.stream1)
 	must(t, err)
-	gate.await(t)
+	gate.await(t, f)
 	check := func(boundary string) {
 		t.Helper()
 		journal, err := trace.OpenWorkgroupAuthority(f.s.current().Root, approval.Workgroup)

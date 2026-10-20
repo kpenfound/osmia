@@ -4291,6 +4291,9 @@
       },
       "ConfigProjectCapacity": {
         "properties": {
+          "git_operations": {
+            "type": "integer"
+          },
           "per_workstream": {
             "type": "integer"
           }

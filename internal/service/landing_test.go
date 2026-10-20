@@ -333,8 +333,8 @@ func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, conf
 	return f, stream, repository
 }
 
-// Landing is serial per project: while one landing has no result no other is
-// asked for. Two units approved on the same base both wait to land; once the
+// Landing is serial per workstream: while its landing has no result no other is
+// asked for on that stream. Two units approved on the same base wait to land; once the
 // first lands, the second's workspace is rebased onto the landed commit, its
 // report names the rebased candidate on the new base, and its approval no
 // longer holds: it returns to review, with a notice, and is not asked to land.

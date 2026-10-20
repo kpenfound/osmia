@@ -119,6 +119,9 @@ func (c *chief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 	for _, m := range ownerRuled.FindAllStringSubmatch(req.Prompt, -1) {
 		c.choose(ctx, tools, questions.RelayRulingTool, map[string]any{"question": strings.Split(m[1], ", ")[0], "text": relayedRuling, "scope": "local"})
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return questionResult(req, "session-chief", "Chosen"), nil
 }
 

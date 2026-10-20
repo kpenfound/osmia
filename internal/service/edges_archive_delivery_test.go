@@ -143,7 +143,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	awaitReview := func(review int) DeliveryPresentation {
 		t.Helper()
 		var out DeliveryPresentation
-		lifecycleAwait(t, f, fmt.Sprintf("dependent final review %d", review), func() bool {
+		ready := func() bool {
 			out, err = f.c.Delivery(ctx, f.stream2)
 			threads, readErr := down.Threads(f.stream2)
 			must(t, readErr)
@@ -158,7 +158,42 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 				}
 			}
 			return err == nil && out.Report.Review == review && out.Draft != ""
-		})
+		}
+		changes, closeChanges := serviceChanges(t, f.s)
+		defer closeChanges()
+		deadline := time.Now().Add(demoTimeout)
+		for !ready() {
+			if time.Now().After(deadline) {
+				docs, readErr := trace.Read[trace.Document](down, f.stream2)
+				t.Logf("final report documents: %v", readErr)
+				for _, doc := range docs {
+					if doc.ID != finalReportDocument {
+						continue
+					}
+					var report FinalReport
+					decodeErr := json.Unmarshal([]byte(doc.Content), &report)
+					if decodeErr != nil || (report.Review >= 1 && report.Review <= 3) {
+						t.Logf("final report revision=%d decode-error=%v: %s", doc.Revision, decodeErr, doc.Content)
+					}
+				}
+				units, readErr := followup.Read(down, f.stream2)
+				t.Logf("follow-ups: %+v error=%v", units, readErr)
+				for _, unit := range units {
+					state, stateErr := down.Workflow(f.stream2, trace.UnitSubject(unit.Unit.ID))
+					t.Logf("follow-up %s workflow=%+v error=%v", unit.Unit.ID, state, stateErr)
+				}
+				ops, readErr := down.Operations(f.stream2)
+				t.Logf("delivery review operations: %v", readErr)
+				for _, op := range ops {
+					if op.Operation.Action == deliveryReviewAction {
+						t.Logf("delivery review operation=%s input=%s result=%+v acknowledged=%v", op.Operation.ID, op.Operation.Input, op.Result, op.Acknowledged)
+					}
+				}
+				f.timeout(t, fmt.Sprintf("dependent final review %d", review))
+			}
+			lifecycleAdvanceScheduled(t, f)
+			changes()
+		}
 		return out
 	}
 	approve := func(p DeliveryPresentation) DeliveryApproval {

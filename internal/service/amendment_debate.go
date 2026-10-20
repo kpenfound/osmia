@@ -588,7 +588,7 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int
 	cfg := a.s.about(a.repository)
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
-	if cfg != nil && a.s.options.Architect != nil {
+	if a.s.options.Architect != nil {
 		engine = a.s.options.Architect.Engine
 		hosts = a.s.options.Architect.Hosts
 	}

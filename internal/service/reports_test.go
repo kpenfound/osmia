@@ -359,6 +359,8 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 		}
 		return reportDone("Built")(ctx, req, tools)
 	}
+	// Let a paused pass observe both builds before either can take the slot.
+	awaitPasses(t, &passed, 3)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, other, "resume")
 	awaitPasses(t, &passed, 3)

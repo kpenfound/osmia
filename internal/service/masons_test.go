@@ -581,6 +581,8 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(broken), "resume")
 	must(t, os.MkdirAll(squatter, 0700))
 	must(t, os.WriteFile(filepath.Join(squatter, "notes"), []byte("mine\n"), 0600))
+	// Let a paused pass observe both builds before either can take the slot.
+	awaitPasses(t, passed, 3)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, other, "resume")
 	// Further passes find the broken unit still blocked and record nothing

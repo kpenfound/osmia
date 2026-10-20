@@ -84,7 +84,7 @@ func featureWorkspaces(cfg *config.Config, repository *trace.Repository) streamW
 }
 
 // foreman is the landing controller. Its pass asks to land one approved unit
-// at a time per project and to rebase the unit workspaces a landing left
+// at a time per workstream and to rebase the unit workspaces a landing left
 // behind; its reconciler runs each landing operation, and rebaser each
 // rebase operation. nextDrift is when its drift schedule is next read.
 type foreman struct {
@@ -94,24 +94,13 @@ type foreman struct {
 
 var _ coreadapter.Reconciler = (*foreman)(nil)
 
-// Pass runs one landing and rebase sequence at a time per project. While a
-// landing of the project has no result, it does nothing. Otherwise it keeps
-// the unfinished units of the building and assembled workstreams that are not
-// paused and have no drift rebase in flight on their feature branches,
-// rebasing each unit whose workspace a landing left behind and routing rebase
-// conflicts to masons. A workstream's drift rebase carries that workstream's
-// units itself, and can wait on its conflict resolution for as long as its
-// mason and reviewer take, so it holds back only its own workstream. Once
-// every such unit is current and every rebase has its result, it asks to land
-// the first approved unit, in the workstreams' priority order and each plan's
-// dependency order, whose approval no landing was asked for.
+// Pass keeps each workstream's unfinished units on its feature branch and
+// asks to land its first approved unit once its own rebases have settled.
+// A pending landing, drift or knowledge refresh holds only its workstream.
 func (f *foreman) Pass(ctx context.Context) error {
-	pending, err := refreshPending(f.repository)
+	pending, err := refreshPendingStreams(f.repository)
 	if err != nil {
 		return err
-	}
-	if pending {
-		return nil
 	}
 	streams, err := f.repository.Workstreams()
 	if err != nil {
@@ -124,6 +113,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 	rebased := map[config.WorkstreamID]map[string][]string{}
 	dispatched := map[config.WorkstreamID]map[string]bool{}
 	drifting := map[config.WorkstreamID]bool{}
+	landing := map[config.WorkstreamID]bool{}
 	var candidates []building
 	for _, stream := range streams {
 		if stream == librarian {
@@ -150,7 +140,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 				}
 			case LandAction:
 				if o.Result == nil {
-					return nil
+					landing[stream] = true
 				}
 				in, err := decodeLand(o.Operation)
 				if err != nil {
@@ -177,22 +167,22 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("workstream %s landing: %w", stream, err)
 		}
-		if found && !drifting[stream] && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
+		if found && !landing[stream] && !pending[stream] && !drifting[stream] && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			candidates = append(candidates, b)
 		}
 	}
-	settled := true
+	settled := map[config.WorkstreamID]bool{}
 	for _, b := range candidates {
 		current, err := f.refresh(ctx, b, rebasing[b.stream], dispatched[b.stream], rebased[b.stream])
 		if err != nil {
 			return fmt.Errorf("workstream %s rebase: %w", b.stream, err)
 		}
-		settled = settled && current
-	}
-	if !settled {
-		return nil
+		settled[b.stream] = current && len(rebasing[b.stream]) == 0
 	}
 	for _, b := range startOrder(candidates, state.Priorities, f.cfg.Project.ID) {
+		if !settled[b.stream] {
+			continue
+		}
 		for _, u := range dependencyOrder(b.plan) {
 			if b.states[trace.UnitSubject(u.ID)].Value != UnitApproved {
 				continue
@@ -207,7 +197,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 			if err := f.request(ctx, b.stream, u.ID, review, result); err != nil {
 				return fmt.Errorf("workstream %s unit %s landing: %w", b.stream, u.ID, err)
 			}
-			return nil
+			break
 		}
 	}
 	return nil

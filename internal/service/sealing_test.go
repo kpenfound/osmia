@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -470,7 +471,16 @@ func TestSealingSealsTheLatestRatificationOnly(t *testing.T) {
 // branch it finds.
 func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	var boundary atomic.Pointer[func(string) error]
+	setBoundary := func(fn func(string) error) { boundary.Store(&fn) }
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
+		opts.boundary = func(_ context.Context, name string) error {
+			if fn := boundary.Load(); fn != nil {
+				return (*fn)(name)
+			}
+			return nil
+		}
+	})
 	ctx := context.Background()
 	f.stop(t)
 	f.opts.Committee = nil
@@ -489,13 +499,13 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	}
 	gone := skipped("first")
 	abandoned := make(chan error, 1)
-	f.s.boundary = func(name string) error {
+	setBoundary(func(name string) error {
 		if name == "seal-branch-created" && len(abandoned) == 0 {
 			_, err := f.c.Abandon(ctx, gone, "Not needed after all.")
 			abandoned <- err
 		}
 		return nil
-	}
+	})
 	if _, err := f.c.Ratify(ctx, gone, 1, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -519,18 +529,19 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	// retry resumes from the branch rather than creating another.
 	stream := skipped("second")
 	crashed := make(chan struct{}, 1)
-	f.s.boundary = func(name string) error {
+	setBoundary(func(name string) error {
 		if name == "seal-branch-created" && len(crashed) == 0 {
 			crashed <- struct{}{}
 			return errors.New("crash")
 		}
 		return nil
-	}
+	})
 	if _, err := f.c.Ratify(ctx, stream, 1, 1); err != nil {
 		t.Fatal(err)
 	}
 	f.awaitFeature(t, stream, BuildingState)
-	f.s.boundary = nil
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.buildOperations(t, stream) })
+	boundary.Store(nil)
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)
@@ -565,18 +576,19 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	// retry records no second seal and moves the state.
 	third := skipped("third")
 	recorded := make(chan struct{}, 1)
-	f.s.boundary = func(name string) error {
+	setBoundary(func(name string) error {
 		if name == "seal-recorded" && len(recorded) == 0 {
 			recorded <- struct{}{}
 			return errors.New("crash")
 		}
 		return nil
-	}
+	})
 	if _, err := f.c.Ratify(ctx, third, 1, 1); err != nil {
 		t.Fatal(err)
 	}
 	f.awaitFeature(t, third, BuildingState)
-	f.s.boundary = nil
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.buildOperations(t, third) })
+	boundary.Store(nil)
 	if docs := f.documents(t, third, seal.DocumentID); len(docs) != 1 || docs[0].Revision != 1 {
 		t.Fatalf("seal documents after the crash %+v", docs)
 	}
