@@ -36,11 +36,12 @@ func requireBrowser(t *testing.T) string {
 
 // openBrowser starts the Chromium binary OSMIA_BROWSER names, or skips the
 // test without one.
-func openBrowser(t *testing.T) *page {
+func openBrowser(t *testing.T, browserOptions ...chromedp.ExecAllocatorOption) *page {
 	t.Helper()
 	binary := requireBrowser(t)
 	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(binary), chromedp.NoSandbox,
 		chromedp.Flag("disable-dev-shm-usage", true))
+	options = append(options, browserOptions...)
 	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
 	ctx, cancel := chromedp.NewContext(allocator)
 	t.Cleanup(func() {
