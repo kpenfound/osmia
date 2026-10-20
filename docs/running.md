@@ -326,6 +326,36 @@ credentials, review your session's work and move it along yourself:
   released, while its branch, its commits, its chat and its trace all stay
   readable, and it is listed as ended.
 
+### Destroying sessions
+
+`osmia session destroy <session-id> [--json]` permanently removes an exploratory
+session, whether open or ended; you do not need to end it first.
+`osmia design destroy <design-id> [--json]` removes a design session whose
+marker is still `open`, before you start a workgroup from its brief.
+
+Destroy removes the session's dedicated trace, including its conversation,
+thread, documents and check records, any worktree, and stored model-session
+and turn state under the Osmia root. For an exploratory session it also deletes
+the local `osmia/session/<id>` branch, including unpushed commits. For a design
+session it also removes its one-workstream workgroup from the project's
+`workgroups.json`. The session disappears from lists, status and the sidebar;
+reading it by ID reports not found.
+
+This cannot be undone. Destroy keeps no archive record, retained title or
+tombstone. Pushed branches stay on the remote: destroy never pushes, deletes
+remote branches or changes pull requests or issues. If interrupted, removal
+finishes automatically after the service restarts; the session stays hidden
+while removal is pending.
+
+Destroy is refused without changing anything while a turn is running or being
+started, while a session commit, check, push or end is still in progress
+(including the external check and push), or while a design's workgroup start
+is in progress. A design that has already started a workgroup cannot be
+destroyed. Ordinary workstreams, workgroups and the librarian workstream are
+also refused; their existing abandon/archive controls still apply. Wait for
+busy work to finish before retrying. An unknown or already destroyed ID reports
+not found. The CLI prints the service's refusal message and exits non-zero.
+
 ## Reload
 
 `osmia reload` (or the page's reload control) reads the top-level

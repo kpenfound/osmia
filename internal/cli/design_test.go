@@ -85,6 +85,7 @@ func TestDesignCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"design"}, {"design", "open"}, {"design", "open", string(project), "x"}, {"design", "send", string(id)},
 		{"design", "read"}, {"design", "start"}, {"design", "list", "a", "b"},
+		{"design", "destroy"}, {"design", "destroy", string(id), "extra"}, {"design", "destroy", "not-an-id"},
 	} {
 		if code, _, _ := invoke(t, root, args...); code != 2 {
 			t.Fatalf("%v: exit %d", args, code)

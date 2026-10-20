@@ -76,11 +76,13 @@ const usage = `Usage: osmia <command> [--root PATH]
   session check <session-id> [--json]
   session push <session-id> [--json]
   session end <session-id> [--json]
+  session destroy <session-id> [--json]
   design open <project-id> [--json]
   design list [project-id] [--json]
   design send <design-id> <message> [--json]
   design read <design-id> [--json]
   design start <design-id> [--json]  starts a workgroup from the drafted brief
+  design destroy <design-id> [--json]
   config [--json]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
@@ -291,12 +293,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
-			len(a) == 2 && (a[0] == "check" || a[0] == "push" || a[0] == "end")
+			len(a) == 2 && (a[0] == "check" || a[0] == "push" || a[0] == "end" || a[0] == "destroy")
 	case "design":
 		valid = len(a) >= 1 && (a[0] == "open" && len(a) == 2 ||
 			a[0] == "list" && (len(a) == 1 || len(a) == 2) ||
 			a[0] == "send" && len(a) == 3 ||
-			(a[0] == "read" || a[0] == "start") && len(a) == 2)
+			(a[0] == "read" || a[0] == "start" || a[0] == "destroy") && len(a) == 2)
 	}
 	explicitRatify := o.projectSpecRevision > 0 || o.specRevision > 0 || o.planRevision > 0
 	if explicitRatify && (cmd != "ratify" || o.projectSpecRevision == 0 || o.specRevision == 0 || o.planRevision == 0) {
@@ -1122,6 +1124,29 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Moved unit %s of %s from %s to %s\n", result.Unit, result.Workstream, result.Move.From, result.Move.To)
+		return 0
+	}
+	if (cmd == "session" || cmd == "design") && a[0] == "destroy" {
+		id, err := config.ParseWorkstreamID(a[1])
+		if err != nil {
+			if _, err := config.ParseWorkgroupID(a[1]); err != nil {
+				return invalid()
+			}
+			// Let the service explain why a workgroup cannot be destroyed.
+			id = config.WorkstreamID(a[1])
+		}
+		destroy, label := c.DestroySession, "Session"
+		if cmd == "design" {
+			destroy, label = c.DestroyDesign, "Design session"
+		}
+		result, err := destroy(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "%s %s destroyed\n", label, result.Workstream)
 		return 0
 	}
 	if cmd == "session" && a[0] == "open" {

@@ -56,6 +56,11 @@ func gitIn(t *testing.T, home string, args ...string) string {
 // the root, the project ID and the bare remote's path.
 func sessionFixture(t *testing.T) (string, config.ProjectID, string) {
 	t.Helper()
+	return sessionFixtureWithChecks(t, fakeSessionChecks{})
+}
+
+func sessionFixtureWithChecks(t *testing.T, checks service.ReviewChecks) (string, config.ProjectID, string) {
+	t.Helper()
 	opts, clone := emptyFixture(t)
 	home := filepath.Dir(clone)
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
@@ -69,7 +74,7 @@ func sessionFixture(t *testing.T) (string, config.ProjectID, string) {
 	must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	gitIn(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	gitIn(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	opts = service.Enforce(opts, service.Enforcement{Engine: fakeSessionEngine{}, Checks: fakeSessionChecks{}})
+	opts = service.Enforce(opts, service.Enforcement{Engine: fakeSessionEngine{}, Checks: checks})
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
@@ -192,6 +197,7 @@ func TestSessionUsage(t *testing.T) {
 		{"session", "check"}, {"session", "check", stream, "extra"}, {"session", "check", "not-an-id"},
 		{"session", "push"}, {"session", "push", stream, "extra"}, {"session", "push", "not-an-id"},
 		{"session", "end"}, {"session", "end", stream, "extra"}, {"session", "end", "not-an-id"},
+		{"session", "destroy"}, {"session", "destroy", stream, "extra"}, {"session", "destroy", "not-an-id"},
 		{"session", "unknown", stream},
 		{"session", "open", project, "--profile", "default", "--hard"},
 		{"status", "--profile", "default"}, {"status", "--title", "x"},
