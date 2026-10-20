@@ -169,8 +169,15 @@ The member view is laid out like a chat client:
 - The header shows whether the page is live, the slots in use per role, the
   number of pauses in force, a button for a new workstream and a settings
   menu. The slots open to each role's use and the work waiting for a slot and
-  why. The pauses open to every pause with who set it (you, the daily budget
-  or a provider usage limit), why and when, where you resume one or pause the
+  why. Check slots appear alongside mason, reviewer and committee slots: the
+  factory shares `capacity.checks` (default 2) across every project's unit,
+  final-review and session checks. Waiting entries name the workstream and unit,
+  final review number or session. Counts and waits update as runs start and
+  finish. Check slots are separate from agent and per-workstream limits;
+  waiting does not consume the check timeout. Reload applies a changed limit to
+  new admissions while checks already running finish. The pauses open to every
+  pause with who set it (you, the daily budget or a provider usage limit), why
+  and when, where you resume one or pause the
   factory, a project or a workstream, softly or hard. A backend activity
   button sits beside them, marked whenever an operation is in flight and
   distinctly when one is blocked or has failed; opening it lists every entry

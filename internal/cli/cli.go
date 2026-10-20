@@ -1697,6 +1697,10 @@ func showCapacity(w io.Writer, c *service.CapacityStatus) {
 			what := "unit " + wait.Unit
 			if wait.Turn != "" {
 				what = "turn " + wait.Turn + " of " + wait.Agent
+			} else if wait.Review != 0 {
+				what = fmt.Sprintf("final review %d", wait.Review)
+			} else if wait.Session {
+				what = "session"
 			}
 			fmt.Fprintf(w, "    Waiting: %s %s (%s)\n", wait.Workstream, what, wait.Reason)
 		}

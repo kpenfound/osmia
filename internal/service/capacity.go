@@ -25,7 +25,8 @@ import (
 // them, and the waiting turns are listed in active_projects order.
 // PerWorkstream is the only active project's limit, or the configured default
 // otherwise. Work a pause now in force holds, and work of an abandoned
-// workstream, is not waiting.
+// workstream, is not waiting. Check slots come directly from the service pool,
+// including every check run still waiting for capacity.
 func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 	cfg := s.current()
 	limits := cfg.Capacity
@@ -63,6 +64,12 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 			}
 		}
 	}
+	checks := s.CheckSlots()
+	role := RoleCapacity{Role: checksRole, Limit: checks.Limit, Used: checks.Used, Waiting: []SlotWait{}}
+	for _, w := range checks.Waiting {
+		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Reason: DeferCapacity})
+	}
+	out.Roles = append(out.Roles, role)
 	return out
 }
 
@@ -189,7 +196,7 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 
 // capacity exposes the shared slot accounting without handing scheduling to a model.
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role slot limits, usage, waiting work, and pauses. Limits are configured through config.toml and reload.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. Limits are configured through config.toml and reload.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err

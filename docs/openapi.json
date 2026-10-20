@@ -1284,7 +1284,7 @@
     "/v1/feed/{workstream}": {
       "get": {
         "summary": "List a workstream's conversation, statuses, sessions, all state changes, check runs and final reviews in time order",
-        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's full check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. Captured check output remains in the trace.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
+        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. Captured check output remains in the trace.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
         "operationId": "getFeedByWorkstream",
         "parameters": [
           {
@@ -3632,9 +3632,11 @@
       "CapacityStatus": {
         "properties": {
           "per_workstream": {
+            "description": "Maximum concurrent worker turns per workstream; check slots are independent.",
             "type": "integer"
           },
           "roles": {
+            "description": "Factory-wide mason, reviewer, committee, architect, librarian and checks slot pools, in that order.",
             "items": {
               "$ref": "#/components/schemas/RoleCapacity"
             },
@@ -6216,15 +6218,19 @@
       "RoleCapacity": {
         "properties": {
           "limit": {
+            "description": "Configured slot limit.",
             "type": "integer"
           },
           "role": {
+            "description": "Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams.",
             "type": "string"
           },
           "used": {
+            "description": "Number of slots currently in use.",
             "type": "integer"
           },
           "waiting": {
+            "description": "Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session.",
             "items": {
               "$ref": "#/components/schemas/SlotWait"
             },
@@ -6893,8 +6899,20 @@
           "agent": {
             "type": "string"
           },
+          "project": {
+            "description": "Project of a waiting check run.",
+            "type": "string"
+          },
           "reason": {
             "type": "string"
+          },
+          "review": {
+            "description": "Final review number for a waiting final-review check run.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "True for a waiting session check run; workstream identifies the session.",
+            "type": "boolean"
           },
           "turn": {
             "type": "string"

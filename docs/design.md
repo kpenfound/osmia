@@ -543,7 +543,7 @@ The service runs one controller per role kind, each reconciling its own input st
 | architect | `handed`, amendment requests | one per workstream |
 | shed | `in-shed`, amendment rounds | committee members per proposal, `max_shed_rounds` |
 | mason | `ready`, `implementing`, conflict resolution | `capacity.masons`, plus a per-workstream cap |
-| checks | `checking` | one check run per workstream |
+| checks | unit `checking`, final review and session checks | `capacity.checks` across the factory (default 2) |
 | reviewer | `reviewing`, `assembled` | `capacity.reviewers` |
 | foreman | `approved`, landing events, upstream cadence | one lander per workstream, independent feature branches land concurrently |
 | librarian | repo added, unit merged | one per repo |
@@ -574,6 +574,15 @@ Landing is per workstream: it waits for that workstream's unit rebases and cover
 A freed slot is offered to review before implementation, implementation before debate, debate before drafting, so the factory finishes work rather than widening it. Within a stage, the slot goes to the highest-priority workstream with something ready, and round-robin breaks ties across workstreams and projects.
 
 ### 8.4 Capacity, priority and pause
+
+Check runs share a separate factory-wide pool, configured by `capacity.checks`
+(default 2). Unit, final-review and session checks take a slot before selection
+and Dagger work, across every project and workstream. Runs wait cancellably in
+arrival order when all slots are occupied; waiting consumes no `checks_timeout`
+budget and records no incomplete run. Every exit releases its slot. Check slots
+do not count against mason, reviewer, committee or per-workstream limits, and
+waiting leaves other work free to dispatch. Reload resizes the pool for new
+admissions while executing runs finish; restart begins with no slots held.
 
 Capacity is per role kind and global across every workstream on every project. A per-workstream work-in-progress cap keeps one feature from taking everything when it is alone. No repo reads another repo's trace to share a limit: each repo's passes count the slots it holds, the turns waiting for one and the day's spend from its own trace and publish them to the service, which enforces the shared limits and reports capacity and the daily budget from what the projects last published. A published total follows each project's next pass, so it can briefly overstate a slot that was just freed, never understate one in use.
 
@@ -675,6 +684,14 @@ The trace records each judgment, while the boost is on, under its workstream: th
 ## 10. The service
 
 ### 10.1 One process
+
+The process owns the factory-wide check-slot pool (`capacity.checks`, default 2).
+Status reports a `checks` entry alongside mason, reviewer and committee slots,
+with its limit, slots in use and waiting runs. Each waiting run names its project
+and workstream plus its unit, final review number or session. Admission, release
+and reload publish capacity events so the web slot display updates as runs
+queue, start and finish. This accounting reads the in-memory pool without
+opening a project's trace.
 
 One long-running process holds the scheduler, the threads, the event bus, the tracker and the runtime state. It serves an HTTP API and the web interface on a unix socket for the local command line, optionally on a loopback TCP address for a browser on the same machine, and, through embedded Tailscale, on your tailnet for everything else. Tailnet membership is the security boundary: no in-app authentication, one trusted user. The command line, the web interface and the chief of staff's factory tools all call the same handlers.
 
@@ -871,6 +888,7 @@ tailnet = "osmia"                    # hostname on the tailnet; empty disables
 masons = 4
 reviewers = 2
 committee = 3
+checks = 2                          # unit, final-review and session check runs
 per_workstream = 2
 
 [budget]

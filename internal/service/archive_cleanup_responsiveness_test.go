@@ -66,7 +66,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, quiet}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
+	s := &Service{cfg: cfg, store: store, options: opts, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}}
 	s.activity = newActivityRegistry(s.now)
 	s.setSole(runtimeFor(repo))
 	must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: stream, Title: "fixture workstream", State: AbandonedState, ArchivedAt: demoStart}))

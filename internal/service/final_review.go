@@ -604,10 +604,10 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // The foreman then fetches the configured upstream base branch and replays
 // the feature branch onto it; final/rebase.json records the result before
 // the branch moves, so a retry moves it to the same commit. A replay that
-// conflicts leaves the branch where it was. The service then runs every
-// project check on the rebased commit and records the run in
-// final/checks-<k>.json, which a retry reads back. The first committee member
-// then reads the rebased branch, the check run, the sealed spec and plan and
+// conflicts leaves the branch where it was. The service then runs the selected
+// checks on the rebased commit, using the full suite on selection fallback,
+// and records the run in final/checks-<k>.json, which a retry reads back.
+// The first committee member then reads the rebased branch, the check run, the sealed spec and plan and
 // the charter in a read-only view and records evidence or a gap for every
 // sealed criterion.
 // One commit records final/report.json with the review's move to reviewed or

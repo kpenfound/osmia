@@ -294,7 +294,7 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}}
 	traceExec(t, workstreamTraceDirectory(t, cfg.Root, project, stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.status', 'status', 1, '{not json}')", "workstreams/"+string(stream)+"/status.jsonl")
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
 	list := s.statusList()

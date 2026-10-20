@@ -139,7 +139,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
 	none := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
-	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}, {Role: "architect", Waiting: []service.SlotWait{}}, {Role: "librarian", Waiting: []service.SlotWait{}}}}
+	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}, {Role: "architect", Waiting: []service.SlotWait{}}, {Role: "librarian", Waiting: []service.SlotWait{}}, {Role: "checks", Limit: 2, Waiting: []service.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
@@ -444,12 +444,21 @@ func TestStatusPrintsCapacity(t *testing.T) {
 			{Workstream: stream, Unit: "parser", Agent: "mason-parser", Turn: "mason-parser-1", Reason: "capacity"},
 			{Workstream: quiet, Unit: "validator", Reason: "priority"}}},
 		{Role: "reviewer", Used: 0, Limit: 2, Waiting: []service.SlotWait{}},
+		{Role: "checks", Used: 2, Limit: 2, Waiting: []service.SlotWait{
+			{Workstream: stream, Unit: "parser", Reason: "capacity"},
+			{Workstream: stream, Review: 3, Reason: "capacity"},
+			{Workstream: quiet, Session: true, Reason: "capacity"},
+		}},
 	}})
 	if want := "Capacity (per workstream 2):\n" +
 		"  mason: 1 of 1 slot(s) in use\n" +
 		"    Waiting: " + stream + " turn mason-parser-1 of mason-parser (capacity)\n" +
 		"    Waiting: " + quiet + " unit validator (priority)\n" +
-		"  reviewer: 0 of 2 slot(s) in use\n"; out.String() != want {
+		"  reviewer: 0 of 2 slot(s) in use\n" +
+		"  checks: 2 of 2 slot(s) in use\n" +
+		"    Waiting: " + stream + " unit parser (capacity)\n" +
+		"    Waiting: " + stream + " final review 3 (capacity)\n" +
+		"    Waiting: " + quiet + " session (capacity)\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }
