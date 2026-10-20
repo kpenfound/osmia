@@ -78,7 +78,7 @@ func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDepend
 	}
 	// The dependency has not integrated, so once the check's cooldown has
 	// elapsed the next Pass asks for another refresh.
-	jump(clock, refresh.s.now().Add(2*time.Minute))
+	jump(clock, refresh.s.now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, repo, stream, baseRefreshAction)
 	if next.ID == op.ID {
@@ -109,7 +109,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 	if host.finds != 0 {
 		t.Fatalf("a workstream delivered without a pull request made %d own-PR lookups", host.finds)
 	}
-	jump(clock, refresh.s.now().Add(2*time.Minute))
+	jump(clock, refresh.s.now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, repo, stream, baseRefreshAction)
 	if next.ID == op.ID {
@@ -150,7 +150,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 	if finished, err := ownPullRequestFinished(repo, stream); err != nil || finished {
 		t.Fatalf("an open own pull request reported finished: %v err %v", finished, err)
 	}
-	jump(clock, refresh.s.now().Add(2*time.Minute))
+	jump(clock, refresh.s.now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, repo, stream, baseRefreshAction)
 	if next.ID == op.ID {

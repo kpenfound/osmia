@@ -202,8 +202,8 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	host.mu.Lock()
 	host.prs[0].Merged, host.prs[0].State, host.prs[0].MergeCommit = true, "closed", merged
 	host.mu.Unlock()
-	// Edge observations are polled at most once per minute.
-	f.clock.Advance(time.Minute)
+	// Edge observations are polled at most once per configured interval.
+	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "edge read interrupted before persistence", observed.Load)
 	_, err = f.c.Archive(ctx, f.stream1)
 	must(t, err)

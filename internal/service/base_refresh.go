@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -35,9 +34,6 @@ type baseRefreshInput struct {
 type baseRefresher struct {
 	s          *Service
 	repository *trace.Repository
-	// Archive polling has no member trace to record cadence in. The serial
-	// project pass keeps retry timing locally; merge evidence lives in runtime.
-	archiveChecks map[config.WorkstreamID]time.Time
 }
 
 func baseObservationAt(repo *trace.Repository, stream config.WorkstreamID) (baseObservation, int, error) {
@@ -138,12 +134,15 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 			return err
 		}
 		var latest trace.Transition
+		requested := false
 		for _, t := range transitions {
 			if t.Subject == baseRefreshAction {
-				latest = t
+				latest, requested = t, false
+			} else if t.Subject == driftRequestSubject && t.Actor == ownerActor {
+				requested = true
 			}
 		}
-		if latest.To == "checking" || !latest.At.IsZero() && b.s.now().Sub(latest.At) < time.Minute {
+		if latest.To == "checking" || !requested && !latest.At.IsZero() && b.s.now().Sub(latest.At) < b.s.about(b.repository).Project.PullRequestPollInterval() {
 			continue
 		}
 		subject, err := b.repository.Workflow(stream, baseRefreshAction)

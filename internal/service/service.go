@@ -207,6 +207,8 @@ type Service struct {
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
+	// polls keeps attempt timing across stage rebuilds on reload.
+	polls pullRequestAttempts
 	// statusViews holds the last workstream list statusList produced, so a
 	// request that cannot refresh it within coreReadBound still answers
 	// with that snapshot, marked stale, instead of blocking past the

@@ -83,7 +83,7 @@ func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, read
 	}
 }
 
-// lifecycleAdvanceScheduled advances only to recorded retry or event deadlines;
+// lifecycleAdvanceScheduled advances to retry, event and PR polling deadlines;
 // the live controller still observes effects and owns every transition.
 func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
 	t.Helper()
@@ -107,9 +107,27 @@ func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
 	}
 	cfg, projects := f.s.runtimes()
 	for _, active := range projects {
+		interval := f.s.about(active.repository).Project.PullRequestPollInterval()
+		record(f.s.polls.nextDue(active.id, interval, now))
 		streams, err := active.repository.Workstreams()
 		must(t, err)
 		for _, stream := range streams {
+			transitions, err := trace.Read[trace.Transition](active.repository, stream)
+			if err == nil {
+				for _, transition := range slices.Backward(transitions) {
+					if transition.Subject == baseRefreshAction {
+						record(transition.At.Add(interval))
+						break
+					}
+				}
+			}
+			_, revision, at, err := edgeObservationAt(active.repository, stream)
+			if err == nil && revision > 0 {
+				if attempt, ok := f.s.polls.last(active.id, stream, edgePoll); ok && attempt.at.After(at) {
+					at = attempt.at
+				}
+				record(at.Add(interval))
+			}
 			ops, err := active.repository.Operations(stream)
 			if err != nil {
 				continue

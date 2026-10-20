@@ -13,13 +13,14 @@ import (
 func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, style      string
-		noFork, conflict bool
+		name, style                      string
+		noFork, conflict, projectRequest bool
 	}{
 		{name: "commits", style: "commit-per-unit"},
 		{name: "squash", style: "squash"},
 		{name: "upstream", style: "commit-per-unit", noFork: true},
 		{name: "conflict", style: "squash", conflict: true},
+		{name: "project-request", style: "commit-per-unit", projectRequest: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPublicationFixture(t, tc.style)
@@ -48,7 +49,12 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			if p.pulls.finds != calls || len(driftOperations(t, p.repository, p.stream)) != 0 {
 				t.Fatal("delivered branch was polled")
 			}
-			if _, api := p.s.rebaseWorkstream(ctx, string(p.stream)); api != nil {
+			if tc.projectRequest {
+				out, api := p.s.rebaseProject(ctx, ProjectRebaseRequest{Project: p.project})
+				if api != nil || len(out.Covered) != 1 {
+					t.Fatalf("project rebase: %+v %v", out, api)
+				}
+			} else if _, api := p.s.rebaseWorkstream(ctx, string(p.stream)); api != nil {
 				t.Fatal(api)
 			}
 			passDrifts(t, fm)

@@ -271,7 +271,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				host.prs = append(host.prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
 			}
 			host.mu.Unlock()
-			f.clock.Advance(time.Minute)
+			f.clock.Advance(10 * time.Minute)
 			awaitChecks("ready open provider lookups", 2)
 			assertNoOutcomes()
 			// Hold final resolution after every durable observation, then perform a real restart.
@@ -283,7 +283,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				host.prs[i].MergeCommit = fmt.Sprintf("merged-%d", i)
 			}
 			host.mu.Unlock()
-			f.clock.Advance(time.Minute)
+			f.clock.Advance(10 * time.Minute)
 			select {
 			case <-reached:
 			case <-time.After(demoTimeout):

@@ -65,7 +65,7 @@ func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T
 	// Workstream reads have cached the upstream child. Hold the dependent's
 	// controller after archive lookup and enumeration, before retained reads.
 	armed.Store(true)
-	f.clock.Advance(time.Minute)
+	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "archived upstream retained read held", held.Load)
 	before, beforeRevision, _, err := edgeObservationAt(down, f.stream2)
 	must(t, err)
@@ -113,7 +113,7 @@ func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T
 	down, err = f.s.repository(f.project2)
 	must(t, err)
 	pass := passes.Load()
-	f.clock.Advance(time.Minute)
+	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "edge reconciliation after real restart", func() bool { return passes.Load() > pass+1 })
 	after, afterRevision, _, err := edgeObservationAt(down, f.stream2)
 	must(t, err)
