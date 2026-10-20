@@ -540,6 +540,7 @@ func (d *debate) redraft(stream config.WorkstreamID, attempt string) (map[string
 		if problems, err = dr.validate(specDoc, planDoc); err != nil {
 			return nil, nil, err
 		}
+		problems = append(problems, plan.CheckAcceptanceProblems(specDoc.Content, planDoc.Content, "", "")...)
 	}
 	return files, problems, nil
 }

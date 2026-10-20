@@ -777,8 +777,13 @@ func (d *drafter) judge(stream config.WorkstreamID, attempt string) (string, []s
 	if err != nil || len(problems) > 0 {
 		return draftInvalid, problems, err
 	}
-	if problems, err = d.validate(trace.Document{Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]}); err != nil || len(problems) > 0 {
+	problems, err = d.validate(trace.Document{Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
+	if err != nil {
 		return draftInvalid, problems, err
+	}
+	problems = append(problems, plan.CheckAcceptanceProblems(files[plan.SpecPath], files[plan.PlanPath], "", "")...)
+	if len(problems) > 0 {
+		return draftInvalid, problems, nil
 	}
 	return draftValid, nil, nil
 }
@@ -994,7 +999,7 @@ func (d *drafter) record(ctx context.Context, operation string, stream config.Wo
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		problems = found
+		problems = append(found, plan.CheckAcceptanceProblems(specDoc.Content, planDoc.Content, "", "")...)
 	}
 	if len(problems) > 0 {
 		return d.terminal(ctx, operation, stream, n, "invalid", fmt.Sprintf("draft %d of the spec and plan is invalid:\n- %s", n, strings.Join(problems, "\n- ")))
@@ -1067,12 +1072,13 @@ Your view holds:
 Deliver two files with %s; only what you deliver is kept.
 
 1. spec.md, in Markdown: the intended behaviour, what the feature must not do, and a section headed "## Acceptance criteria" holding the acceptance criteria as a numbered list ("1. ...", "2. ..."), numbered from 1 without gaps or repeats. Each criterion is one statement that can be shown to hold; the plan cites it as spec#<n>.
-2. plan.json: the directed graph of units, as {"version": 2, "units": [...]}. Each unit is {"id": "...", "title": "...", "task": "...", "acceptance": ["..."], "criteria": ["spec#<n>"], "depends_on": ["..."], "footprint": ["..."]}. An id is 1 to 128 letters, digits, '_' or '-', starting with a letter or digit. task tells one mason what to build, as a developer's ticket would. acceptance lists what a reviewer checks against the unit's work to accept it, including the tests it adds or must keep passing. criteria cites the spec criteria the unit serves. depends_on lists the ids of the units it must wait for, and the dependencies form no cycle. footprint lists the entities the unit will touch, by ID or alias from context.md, at least one per unit; units with disjoint footprints may be built at the same time.
+2. plan.json: the directed graph of units, as {"version": 2, "units": [...]}. Each unit is {"id": "...", "title": "...", "task": "...", "acceptance": ["..."], "criteria": ["spec#<n>"], "depends_on": ["..."], "footprint": ["..."]}. An id is 1 to 128 letters, digits, '_' or '-', starting with a letter or digit. task tells one mason what to build, as a developer's ticket would. acceptance lists what a reviewer checks against the unit's work to accept it, optionally naming tests it adds as evidence for a behaviour. criteria cites the spec criteria the unit serves. depends_on lists the ids of the units it must wait for, and the dependencies form no cycle. footprint lists the entities the unit will touch, by ID or alias from context.md, at least one per unit; units with disjoint footprints may be built at the same time.
 
 The draft is accepted only when every unit has a task and at least one acceptance item, every criterion in spec.md is served by at least one unit, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint resolves against the entity map. Start with one coherent unit when the assigned profile can complete and review the outcome. Split only for useful parallelism, reviewability or practical capacity, not file counts, and size each unit so one mason turn can complete it. Units may span layers. When the feature has several units, make one of them responsible for connecting their work in the running product, with acceptance that exercises the whole path rather than each part against fixtures. Footprints schedule work; they do not limit what a mason may change. State neighboring responsibilities and interfaces in boundaries, the owner's hard limits in constraints, and optional approaches, assumptions and file-level pointers in guidance (each an optional string array). Acceptance states observable outcomes, not report formatting or exact test recipes unless the owner explicitly requires them. Keep the spec focused on owner intent; do not elevate engineering choices into owner constraints. Investigation can be a unit with an evidence outcome.
 
 Call %s when something you must know to draft is not in your view: the draft waits for the answer, which arrives as your next turn.
 `, handedPath, draft, DraftTool, questions.AskTool)
+	b.WriteString(acceptanceDraftInstructions)
 	b.WriteString(answered("draft", answers))
 	return b.String()
 }

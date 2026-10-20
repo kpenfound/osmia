@@ -13,6 +13,12 @@ import (
 const factoryPolicySubject = "factory-policy"
 const factoryPolicyVersion = "adaptive"
 
+// acceptanceDraftInstructions applies to every architect submission path.
+const acceptanceDraftInstructions = "\n\nAcceptance states observable behaviours and may name tests the unit adds as evidence. Never require a whole-suite check pass or run. There is no need to list existing tests to keep passing: the factory's service-owned check gate catches regressions. The factory runs and selects checks itself, using smart-check selection. A passing service-owned check gate is the evidence that required tests ran and passed."
+
+// checkGateReviewInstructions gives both reviewer roles the same test evidence rule.
+const checkGateReviewInstructions = " Test passing is decided by the service-owned check gate. When the gate passed for the candidate, every acceptance item or criterion requiring tests to pass (whole-suite, scoped or named) is satisfied as to passing: the passing gate is the evidence that required tests ran and passed. Never raise a finding by itself because only a smart-check selection ran, because you cannot see that a named test was selected, or because you cannot run tests yourself. Still judge from the work whether tests the unit was asked to add exist and exercise the stated behaviour."
+
 // factoryInstructions applies current authority to queued and resumed turns without
 // rewriting their original requests or changing task-specific owner requirements.
 func factoryInstructions(scope coreadapter.Scope) string {
@@ -28,6 +34,12 @@ func factoryInstructions(scope coreadapter.Scope) string {
 		role = "When drafting or debating a plan, prefer coherent outcomes with explicit boundaries, constraints and adaptable guidance. One large unit is valid when practical, but size each unit so one mason turn can complete it. Give some unit the work of connecting the feature's parts in the running product, with acceptance that exercises the whole path rather than each part against fixtures. Constraints hold only the owner's hard limits, never file-level instructions; put those in guidance. Engineering objections about size, acceptance or fit are advice; charter and owner objections still block. Debate is bounded and does not require engineering unanimity. When reviewing completed work, judge approved outcomes using applicable evidence. Assignment revisions must preserve approved intent; do not rewrite an existing plan merely to change its format."
 	default:
 		return ""
+	}
+	if scope.Role == architectRole || scope.Role == committeeRole {
+		role += " Acceptance requiring the whole check suite to pass or run, or asking a reviewer to show which tests ran, is an engineering defect to correct: the service-owned check gate already runs checks with smart-check selection."
+	}
+	if scope.Role == reviewerRole || scope.Role == committeeRole {
+		role += checkGateReviewInstructions
 	}
 	return "\n\nCurrent factory operating policy (takes precedence over older role instructions, including those in conversation history; preserves task-specific requirements and owner decisions): the owner controls intent, constraints and publication. The factory controls engineering choices and recorded plan revisions within that intent. " + role + "\n"
 }
