@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,22 +59,12 @@ func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Re
 func deliveryFixtureWith(t *testing.T, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
 	t.Helper()
 	f, stream, repository, a := newFinalFixtureWith(t, "delivery", extra)
-	ctx := context.Background()
-	mergeDirectly(t, f, repository, stream, "resume", map[string]string{"resume.go": "package demo\n"})
-	mergeDirectly(t, f, repository, stream, "dedupe", map[string]string{"dedupe.go": "package demo\n"})
-	must(t, a.Pass(ctx))
-	in, sealed, err := a.governing(ctx, stream)
-	must(t, err)
-	report := FinalReport{Review: 1, Outcome: finalReviewed, Branch: featureBranch(stream), Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base, Summary: "Resumable uploads", Criteria: []FinalCriterion{
-		{Criterion: "spec#1", Text: "Resume upload", Evidence: "resume.go and TestResume"},
-		{Criterion: "spec#2", Text: "Skip duplicate chunks", Evidence: "dedupe.go and TestDedupe"},
-	}}
-	record := func(r FinalReport, rev int) {
-		content, err := json.Marshal(r)
-		must(t, err)
-		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: rev, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
-	}
-	record(report, 1)
+	report := intakefixture.SeedDelivery(t, repository, stream, func(unit string, files map[string]string) string {
+		return mergeDirectly(t, f, repository, stream, unit, files)
+	}, a.Pass, func(ctx context.Context) (FinalReport, error) {
+		in, sealed, err := a.governing(ctx, stream)
+		return FinalReport{Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base}, err
+	}, finalReviewActor, finalReportDocument, finalReportPath, finalReviewed)
 	f.s.setSole(&activeProject{repository: repository})
 	return f, stream, repository, report
 }

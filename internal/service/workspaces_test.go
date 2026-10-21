@@ -1,27 +1,20 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/workspace"
+	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
 )
 
-// providerOf returns the provider of the workstream's workspaces.
-func providerOf(t *testing.T, w streamWorkspaces, stream config.WorkstreamID) workspace.Provider {
-	t.Helper()
-	g, err := w.of(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return g
-}
+var providerOf = intakefixture.ProviderOf
 
 var (
 	errJJMissing = fmt.Errorf("%w: exec: \"jj\": executable file not found in $PATH", workspace.ErrJJMissing)

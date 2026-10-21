@@ -1,21 +1,21 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/amendment"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
+	amendment "github.com/kpenfound/osmia/internal/amendment"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestCancelHoldsQueuedLandingAndPreservesApprovedCandidate(t *testing.T) {
@@ -288,7 +288,7 @@ func TestCancelUpstreamIncludesDependentsInSharedImpact(t *testing.T) {
 	}
 	f.wait(t, "dependent cancellation", func() bool { return currentChange(t, f.s, f.origin, c.ID).State == "applied" })
 	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-		repo, err := f.s.repository(f.repos[i].id)
+		repo, err := f.s.repository(f.repos[i].ID)
 		must(t, err)
 		st, err := repo.Workflow(id, trace.FeatureSubject)
 		must(t, err)
@@ -417,7 +417,7 @@ func TestAmendNotStartedReplansBeforeBuilderInitializesUnits(t *testing.T) {
 	if ready {
 		t.Fatal("replan admitted before sealing")
 	}
-	z := &sealer{s: f.s, repository: repo}
+	z := &sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
 	ops, err := repo.Operations(id)
 	must(t, err)
 	for _, op := range ops {
@@ -438,7 +438,7 @@ func TestAmendNotStartedReplansBeforeBuilderInitializesUnits(t *testing.T) {
 	}
 	c.Before, c.After, c.Result, c.Impact = before, after, &after, impact
 	must(t, f.s.reworkChangeMember(ctx, repo, impact.Streams[0], &c))
-	b := &builder{s: f.s, repository: repo}
+	b := &builder{S: f.s.intake().BuilderDependencies(), Repository: repo}
 	must(t, b.Pass(ctx))
 	ops, err = repo.Operations(id)
 	must(t, err)

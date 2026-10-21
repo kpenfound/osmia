@@ -69,7 +69,7 @@ func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repositor
 		}
 	}
 	cfg := s.about(repository)
-	g, err := featureWorkspaces(cfg, repository).of(stream)
+	g, err := featureWorkspaces(cfg, repository).Of(stream)
 	if err != nil {
 		return MergeResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open the workspaces of workstream %s; check the clone", stream)}
 	}

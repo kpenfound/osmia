@@ -1,22 +1,22 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // demoPlan has resume and dedupe in internal.trace, ahead of upload and audit
@@ -38,22 +38,22 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	f, masons, passed := newParallelMasonFixtureCounting(t, 2, 3, demoPlan)
 	defer func() { f.stop(t) }()
 	recovered := masonAgent("dedupe") + "-recover-1"
-	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
-	masons.play[recovered] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = reportDone("Uploads resume")
+	masons.Play[recovered] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
 	}
 	f.engine.Mu.Lock()
-	f.engine.Turns[recovered] = masons.turn
+	f.engine.Turns[recovered] = masons.Turn
 	// A clean turn without an outcome gets a follow-up; failing it keeps the
 	// unit implementing, holding its slot.
 	for _, unit := range []string{"upload", "audit"} {
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
-			masons.play[name] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
-			f.engine.Turns[name] = masons.turn
+			masons.Play[name] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
+			f.engine.Turns[name] = masons.Turn
 		}
 	}
 	f.engine.Mu.Unlock()
@@ -88,7 +88,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	f.engine.Mu.Lock()
 	f.engine.Turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if sessionStream(req) != string(hi) {
-			return masons.turn(ctx, req, turn, tools)
+			return masons.Turn(ctx, req, turn, tools)
 		}
 		mu.Lock()
 		dedupeTurns++
@@ -157,7 +157,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	f.awaitMasonRan(t, hi, "audit")
 	awaitPasses(t, passed, 3)
 	settled(t, func() int { mu.Lock(); defer mu.Unlock(); return dedupeTurns })
-	masons.check(t)
+	masons.Check(t)
 	mu.Lock()
 	if dedupeTurns != 1 {
 		t.Fatalf("the first turn of dedupe ran %d times", dedupeTurns)
@@ -186,7 +186,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 		lo: {masonTurnID("resume")},
 	} {
 		var got []string
-		for _, req := range masons.requests(stream) {
+		for _, req := range masons.Requests(stream) {
 			if req.Name != masonAgent("upload")+"-clarify-1" && req.Name != masonAgent("audit")+"-clarify-1" {
 				got = append(got, req.Name)
 			}

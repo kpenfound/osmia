@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/api"
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -46,7 +46,7 @@ func NewProject(t *testing.T, configure ...func(*service.Options, *service.TestH
 	return &Project{Options: opts, Hooks: hooks, S: s, C: c, ID: added.Project.ID, Clone: clone}
 }
 
-// Repository returns the open trace; the fixture Must not close it while running.
+// Repository returns the open trace; the fixture must not close it while running.
 func (f *Project) Repository(t *testing.T) *trace.Repository {
 	t.Helper()
 	repo, err := service.InspectForTest(f.S).Repository(f.ID)
@@ -59,13 +59,11 @@ func (f *Project) Start(t *testing.T) { t.Helper(); f.S, f.C = Start(t, f.Option
 // SeedBuild stops the service before seeding and returns the fixture-owned trace.
 func (f *Project) SeedBuild(t *testing.T, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f.Stop(t)
-	cfg, err := config.Load(f.Options.Config)
-	fixturekit.Must(t, err)
-	repo, err := trace.Open(cfg.Root, cfg.For(f.ID).Project)
-	fixturekit.Must(t, err)
-	t.Cleanup(func() { repo.Close() })
-	return f.recordBuild(t, repo, key, graph, backend, base), repo
+	return intakefixture.SeedBuild(t, f.Stop, func() *config.Config {
+		cfg, err := config.Load(f.Options.Config)
+		fixturekit.Must(t, err)
+		return cfg.For(f.ID)
+	}, f.recordBuild, key, graph, backend, base)
 }
 
 func (f *Project) recordBuild(t *testing.T, repo *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
@@ -79,12 +77,8 @@ func (f *Project) recordBuild(t *testing.T, repo *trace.Repository, key, graph, 
 func (f *Project) SeedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
 	t.Helper()
 	repo := f.Repository(t)
-	backend, err := service.InspectForTest(f.S).WorkspaceBackend(context.Background(), repo)
-	fixturekit.Must(t, err)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
-	id := f.recordBuild(t, repo, key, graph, backend, base)
-	fixturekit.Must(t, service.InspectForTest(f.S).RefreshRuntime())
-	return id
+	access := service.InspectForTest(f.S)
+	return intakefixture.SeedBuilding(t, f.Clone, key, graph, func() (string, error) { return access.WorkspaceBackend(context.Background(), repo) }, func(k, g, b, base string) config.WorkstreamID { return f.recordBuild(t, repo, k, g, b, base) }, access.RefreshRuntime)
 }
 
 // SeedBuildingPaused creates ready builds under an owner pause.

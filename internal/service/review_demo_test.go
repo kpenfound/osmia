@@ -1,23 +1,23 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/questions"
+	agent "github.com/kpenfound/agentcore/agent"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	questions "github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestExactReviewDemonstration exercises review through the local API and
@@ -30,7 +30,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 	p := &faults{}
 	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = reportDone("Initial candidate")
+	masons.Play[masonTurnID("resume")] = reportDone("Initial candidate")
 	var reviews atomic.Int32
 	var old, revised UnitReviewIdentity
 	f.engine.Mu.Lock()
@@ -96,7 +96,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.turn(ctx, req, turn, tools)
+		return chief.Turn(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
@@ -179,6 +179,6 @@ func TestExactReviewDemonstration(t *testing.T) {
 	if thread.Identity.Role != reviewerRole || len(thread.Turns) != 3 || thread.Turns[1].Status() != questions.Waiting {
 		t.Fatalf("reviewer requests and responses: %+v", thread.Turns)
 	}
-	masons.check(t)
-	p.check(t)
+	masons.Check(t)
+	p.Check(t)
 }

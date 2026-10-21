@@ -1,19 +1,19 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	fmt "fmt"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // streak returns the fixture's infrastructure failure streak of role, if any.
@@ -112,11 +112,11 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
-	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errCrashTurn }
+	fake.Play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errCrashTurn }
 	owner := masonAgent("resume") + "-owner-revise-1"
-	fake.play[owner] = reportDone("Owner revision")
+	fake.Play[owner] = reportDone("Owner revision")
 	f.engine.Mu.Lock()
-	f.engine.Turns[owner] = fake.turn
+	f.engine.Turns[owner] = fake.Turn
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "crashing-mason", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
@@ -124,7 +124,7 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
 	checkExhausted(t, q)
 	ran := 0
-	for _, req := range fake.requests(stream) {
+	for _, req := range fake.Requests(stream) {
 		if req.Name == masonTurnID("resume") {
 			ran++
 		}
@@ -149,7 +149,7 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	if th := f.thread(t, stream, masonAgent("resume")); len(th.Turns) != 2 || th.Turns[1].Request.TurnID != owner || th.Turns[1].Status() != "idle" {
 		t.Fatalf("mason turns %+v", th.Turns)
 	}
-	fake.check(t)
+	fake.Check(t)
 }
 
 func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
@@ -159,7 +159,7 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 		opts.schedulePassed = func() { passed.Add(1) }
 	})
 	defer f.stop(t)
-	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
+	fake.Play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
 	stream := f.seedBuilding(t, "misreporting-mason", validPlan)
 	q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
 	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Behavioural || len(q.Attempts) != 1 {
@@ -170,27 +170,27 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	if state, err := f.repository().Workflow(stream, trace.UnitSubject("resume")); err != nil || state.Value != UnitImplementing {
 		t.Fatalf("unit resume is %+v: %v", state, err)
 	}
-	if len(fake.requests(stream)) != 1 {
-		t.Fatalf("mason turns %+v", fake.requests(stream))
+	if len(fake.Requests(stream)) != 1 {
+		t.Fatalf("mason turns %+v", fake.Requests(stream))
 	}
 	if s, ok := f.streak(t, masonRole); ok {
 		t.Fatalf("a behavioural failure made a streak: %+v", s)
 	}
-	fake.check(t)
+	fake.Check(t)
 }
 
 func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
-	fake.play[masonTurnID("resume")] = reportDone("Built")
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	fake.Play[masonTurnID("resume")] = reportDone("Built")
+	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	var mu sync.Mutex
 	crash, reviews := true, map[string]int{}
 	f.engine.Mu.Lock()
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
-			return chief.turn(ctx, req, verified, tools)
+			return chief.Turn(ctx, req, verified, tools)
 		}
 		mu.Lock()
 		reviews[req.Name]++
@@ -251,7 +251,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	if s, ok := f.streak(t, reviewerRole); ok {
 		t.Fatalf("reviewer streak after a success: %+v", s)
 	}
-	fake.check(t)
+	fake.Check(t)
 }
 
 // approvedReviewResult returns the unit's satisfactory review result once it

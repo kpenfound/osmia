@@ -1,24 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"testing"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/bundle"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
 	osmiacharter "github.com/kpenfound/osmia/internal/charter"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // projectFixture writes a root without a project and a local Git clone.
@@ -45,14 +46,7 @@ func projectDirectories(t *testing.T, root string) []string {
 	return names
 }
 
-func hasDiagnostic(ds []Diagnostic, code Code) bool {
-	for _, d := range ds {
-		if d.Code == code {
-			return true
-		}
-	}
-	return false
-}
+var hasDiagnostic = intakefixture.HasDiagnostic
 
 func activeProjects(t *testing.T, root string) []string {
 	t.Helper()

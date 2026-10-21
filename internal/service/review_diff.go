@@ -18,7 +18,7 @@ import (
 func reviewDiffTool(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, identity UnitReviewIdentity) coreadapter.Tool {
 	return reviewtools.DiffTool(reviewtools.PinnedDiff{About: "the unit's candidate against the feature branch commit it was built on", From: identity.Candidate.BaseRevision, To: identity.Candidate.Revision,
 		Read: func(ctx context.Context) (string, error) {
-			g, err := newUnitWorkspaces(cfg, r).of(config.WorkstreamID(scope.Workstream))
+			g, err := newUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
 			if err != nil {
 				return "", err
 			}

@@ -1,23 +1,23 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fakeMasons) {
@@ -66,7 +66,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	}
 	project.pipeline.current.Store(&stages)
 	must(t, f.repository().RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
-	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		ok, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "learnings": []string{"Trace snapshots require a clean worktree."}})
 		if err != nil || !ok {
 			return fmt.Errorf("done: %s: %w", reason, err)
@@ -217,7 +217,7 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	if op.Result.Outcome != "succeeded" {
 		t.Fatalf("refresh: %+v", op.Result)
 	}
-	masons.check(t)
+	masons.Check(t)
 	var in refreshInput
 	must(t, json.Unmarshal(op.Operation.Input, &in))
 	if len(in.Landings) != 1 || in.Landings[0].Unit != "resume" || in.Landings[0].Commit != in.Commit || in.Workstream != stream {
@@ -276,7 +276,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
 	stream := f.seedBuilding(t, "refresh-before-landing", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}

@@ -1,19 +1,19 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"testing"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
 )
 
 func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
@@ -53,7 +53,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				header.Schema, header.ID = "osmia.trace.transition", "in-shed"
 				_, err = repo.SetFeatureState(ctx, header, InShedState, "Owner approved the draft")
 				must(t, err)
-				z := &sealer{s: f.s, repository: repo}
+				z := &sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
 				must(t, z.Pass(ctx))
 				op := actionOperation(t, repo, stream, SealAction)
 				// Lose the response after branch creation, then move upstream before retry.
@@ -73,7 +73,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				must(t, repo.Close())
 				repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 				must(t, err)
-				z.repository = repo
+				z.Repository = repo
 				result, err := z.Apply(ctx, op)
 				must(t, err)
 				if result.Outcome != "succeeded" {
@@ -89,7 +89,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				if observed.State != coreadapter.EffectCompleted {
 					t.Fatal(observed)
 				}
-				g, err := featureWorkspaces(f.s.about(repo), repo).of(stream)
+				g, err := featureWorkspaces(f.s.about(repo), repo).Of(stream)
 				must(t, err)
 				w, found, err := g.Workspace(ctx, string(stream))
 				must(t, err)
@@ -108,7 +108,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				streams = append(streams, stream)
 			}
 			// Removing the ancestor's branch parks the whole descendant chain.
-			g, err := featureWorkspaces(f.s.about(repo), repo).of(streams[0])
+			g, err := featureWorkspaces(f.s.about(repo), repo).Of(streams[0])
 			must(t, err)
 			w, _, err := g.Workspace(ctx, string(streams[0]))
 			must(t, err)

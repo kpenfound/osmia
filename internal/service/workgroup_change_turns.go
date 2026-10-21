@@ -22,8 +22,11 @@ import (
 )
 
 const deltaDraftTool = "deliver_delta"
+
 const deltaReviewTool = "review_delta"
+
 const deltaReplyTool = "answer_delta"
+
 const deltaTurnAction = "workgroup-delta-turn"
 
 type deltaTurnInput struct {
@@ -727,8 +730,8 @@ func (s *Service) deltaTool(wt *trace.Repository, c WorkgroupChange, agent, name
 				if api != nil {
 					return nil, errors.New(api.Message)
 				}
-				draft := &drafter{s: s, repository: repo}
-				problems, err := draft.validate(trace.Document{Content: sl.Spec}, trace.Document{Content: sl.Plan})
+				draft := &drafter{S: s.intake().DrafterDependencies(), Repository: repo}
+				problems, err := draft.Validate(trace.Document{Content: sl.Spec}, trace.Document{Content: sl.Plan})
 				if err != nil {
 					return nil, err
 				}

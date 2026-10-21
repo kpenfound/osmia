@@ -14,8 +14,11 @@ import (
 )
 
 const baseRefreshAction = "base-refresh"
+
 const deliveryReviewAction = "delivery-review"
+
 const publishUpstreamAction = "publish-upstream"
+
 const baseObservationDocument = "base-observation"
 
 // baseObservation pins an integration check without changing the declared
@@ -223,7 +226,7 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return result, nil
 	}
 	cfg := b.s.about(b.repository)
-	g, err := featureWorkspaces(cfg, b.repository).of(in.Workstream)
+	g, err := featureWorkspaces(cfg, b.repository).Of(in.Workstream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

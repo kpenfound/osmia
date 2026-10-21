@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -27,19 +28,13 @@ type contestFixture struct {
 
 func newContestFixture(t *testing.T, key string) *contestFixture {
 	t.Helper()
-	ctx := context.Background()
 	f, stream, repo := newReviewFixture(t, key)
 	f.s.setSole(&activeProject{repository: repo})
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, demoStart, serviceActor)
-	must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_1", Revision: 1, Project: f.project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Unit resume is contested."})
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-events", filepath.Join(t.TempDir(), "events"), demoStart)
-	must(t, err)
+	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
+		Turn: "events_1", Prompt: "Unit resume is contested.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
+	})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
 	return &contestFixture{f: f, stream: stream, repo: repo, r: &reviewers{masons: newMasonController(f.s, repo)}, tool: controls.resolveContested(repo, scope)}
 }
 

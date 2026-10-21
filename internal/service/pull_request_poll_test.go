@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -24,17 +25,11 @@ import (
 func (p *pullRequestAttempts) nextDue(project config.ProjectID, interval time.Duration, now time.Time) time.Time {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var next time.Time
+	attempts := make([]intakefixture.PollAttempt, 0, len(p.attempts))
 	for key, attempt := range p.attempts {
-		if key.project != project {
-			continue
-		}
-		due := attempt.at.Add(interval)
-		if due.After(now) && (next.IsZero() || due.Before(next)) {
-			next = due
-		}
+		attempts = append(attempts, intakefixture.PollAttempt{Project: key.project, At: attempt.at})
 	}
-	return next
+	return intakefixture.NextPollDue(attempts, project, interval, now)
 }
 
 func TestBaseRefreshPullRequestPollInterval(t *testing.T) {

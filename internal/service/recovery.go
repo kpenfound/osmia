@@ -16,8 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-var recoveryActor = trace.Actor{Kind: "service", ID: "thread-recovery"}
-
 // recoverSessions settles sessions left by an earlier service before the
 // controller can dispatch work. Role passes then read the completed
 // interruption from the trace and reconstruct their pending work. A directory

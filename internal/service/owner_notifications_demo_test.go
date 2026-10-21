@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"maps"
-	"net/http"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	maps "maps"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ledgerModTime is the modification time of the notifications ledger at
@@ -90,11 +90,11 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	problems := &demoProblems{}
 	p := &faults{}
 	rulingTurn := amendmentRulingTurn("1")
-	masons.mu.Lock()
-	masons.response = map[string]string{masonTurnID("dedupe"): "I cannot complete this work."}
-	masons.play[rulingTurn] = reportDone("Uploads resume")
+	masons.Mu.Lock()
+	masons.Response = map[string]string{masonTurnID("dedupe"): "I cannot complete this work."}
+	masons.Play[rulingTurn] = reportDone("Uploads resume")
 	for i := 1; i <= 3; i++ {
-		masons.play[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 				return err
 			}
@@ -104,10 +104,10 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 			return nil
 		}
 	}
-	masons.mu.Unlock()
+	masons.Mu.Unlock()
 	// The answer shows the spec must change: the mason asks again, and the
 	// chief of staff routes that question to an amendment.
-	masons.chief.route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
+	masons.Chief.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
@@ -117,16 +117,16 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	// resume's mason asks question 1; its answer turn asks question 2, which
 	// the chief of staff routes to an amendment,
 	// and the turn that brings the owner's ruling spends past the budget.
-	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.Turns[masonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		result, err := masons.turn(ctx, req, verified, tools)
+		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
 		}
 		return result, err
 	}
 	for i := 1; i <= 3; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
+		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.Turn
 	}
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -280,8 +280,8 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	must(t, err)
 	f.awaitFeature(t, stream, DeliveredState)
 	problems.check(t)
-	p.check(t)
-	masons.check(t)
+	p.Check(t)
+	masons.Check(t)
 	prs.Mu.Lock()
 	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft {
 		t.Fatalf("pull requests %+v", prs.Prs)

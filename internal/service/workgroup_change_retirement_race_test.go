@@ -21,9 +21,9 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			gate := &changeRaceGate{step: "change-before-application-lock", reached: make(chan struct{}), released: make(chan struct{})}
-			t.Cleanup(gate.release)
-			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: gate.checkpoint}, trace.EdgeContract, nil)
+			gate := &changeRaceGate{Step: "change-before-application-lock", Reached: make(chan struct{}), Released: make(chan struct{})}
+			t.Cleanup(gate.Release)
+			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: gate.Checkpoint}, trace.EdgeContract, nil)
 			defer f.stop(t)
 			deliverResolutionMembers(t, f)
 			for _, m := range resolutionMembers(f) {
@@ -45,7 +45,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			lock.RLock()
 			unlock := sync.OnceFunc(lock.RUnlock)
 			defer unlock()
-			gate.armed.Store(true)
+			gate.Armed.Store(true)
 			decided, api := f.s.decideChange(ctx, string(f.origin), change.ID, ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
 			if api != nil {
 				t.Fatal(api)
@@ -53,7 +53,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			if decided.State != "approved" || decided.Decision == nil {
 				t.Fatal("owner approval was not recorded")
 			}
-			gate.await(t)
+			gate.Await(t)
 			// The observer holds group coordination after reading the approved
 			// journal, but has not attempted the archive/application guard.
 			coordination := f.s.groupApprovalLock(change.Workgroup)
@@ -82,7 +82,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 				}
 			}
 			unlock()
-			gate.release()
+			gate.Release()
 			// Joining this lock establishes that the held observer returned;
 			// an unchanged journal alone cannot prove it ran after retirement.
 			finished := make(chan struct{})

@@ -1,20 +1,20 @@
 package service
 
 import (
-	"encoding/json"
-	"fmt"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	json "encoding/json"
+	fmt "fmt"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // Each deferral reason is decided from what the pass ends with, in order of
@@ -270,7 +270,7 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 			f.awaitDispatches(t, stream, unit, len(want))
 		}
 	}
-	masons.check(t)
+	masons.Check(t)
 	paused := UnitDispatch{Reason: DeferPaused, Pause: &pause, Message: "Waits while a workstream pause is in force, set by owner."}
 	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, hi, "upload", paused), f.deferred(t, hi, "audit", paused)})
 	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, lo, "upload", slotless(1)), f.deferred(t, lo, "audit", slotless(1))})

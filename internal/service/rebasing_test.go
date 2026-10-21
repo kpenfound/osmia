@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,13 +13,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 // newRebaseFixture creates two implementing units: resume has completed its
@@ -56,24 +55,7 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 // tip.
 func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
 	t.Helper()
-	ctx := context.Background()
-	g := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream))
-	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
-	must(t, err)
-	w := acquired.(workspace.Worktree)
-	tip, _, err := g.Branch(ctx, featureBranch(stream))
-	must(t, err)
-	for name, content := range files {
-		if content == "" {
-			must(t, os.Remove(filepath.Join(w.Path, name)))
-			continue
-		}
-		must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
-		must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
-	}
-	moved, err := g.Snapshot(ctx, w, tip)
-	must(t, err)
-	return moved
+	return intakefixture.MoveFeature(t, workspaces(f.s.current(), branchesDirectory, backendOf(t, f, stream)), stream, files)
 }
 
 // rebaseOperation returns the unit's rebase operations.
@@ -125,9 +107,7 @@ func latestReport(t *testing.T, repository *trace.Repository, stream config.Work
 // finished turn that reported the unit done.
 func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) trace.QueuedTurn {
 	t.Helper()
-	content, err := json.Marshal(MasonReport{Outcome: outcome})
-	must(t, err)
-	return captureMasonTurn(t, f, repository, stream, unit, &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard})
+	return f.sharedTurns().CompleteMasonTurn(t, repository, stream, unit, outcome)
 }
 
 func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
@@ -138,20 +118,7 @@ func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository
 // captureTurn completes the agent's latest queued turn with outcome.
 func captureTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()
-	ctx := context.Background()
-	th, err := repository.Thread(stream, agent)
-	must(t, err)
-	token := "done-" + th.Turns[len(th.Turns)-1].Request.TurnID
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
-	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.clock.Now())
-	must(t, err)
-	h := q.Request.Header
-	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
-	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At, FinalResponse: "Built", Outcome: outcome}}
-	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
-	must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
-	return q
+	return f.sharedTurns().CaptureTurn(t, repository, stream, agent, outcome)
 }
 
 // A mason turn a stop interrupted holds its unit's workspace: after a landing

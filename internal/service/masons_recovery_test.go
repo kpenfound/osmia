@@ -1,20 +1,20 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/isolation"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
@@ -131,7 +131,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	must(t, err)
 	defer repo.Close()
 	m.repository = repo
-	units.repository = repo
+	units.Repository = repo
 	must(t, m.Pass(ctx))
 	must(t, m.Pass(ctx))
 	th, err := repo.Thread(stream, masonAgent("resume"))
@@ -185,9 +185,9 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	// Keep upload implementing after its first turn so the restart exercises
 	// occupied capacity throughout the assertions.
 	clarification := masonAgent("upload") + "-clarify-1"
-	masons.play[clarification] = failMasonTurn
+	masons.Play[clarification] = failMasonTurn
 	f.engine.Mu.Lock()
-	f.engine.Turns[clarification] = masons.turn
+	f.engine.Turns[clarification] = masons.Turn
 	f.engine.Mu.Unlock()
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
@@ -216,7 +216,7 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 		f.awaitMasonRan(t, stream, "resume")
 		f.awaitMasonRan(t, stream, "upload")
 		f.awaitDeferral(t, stream, "audit", DeferCapacity)
-		masons.check(t)
+		masons.Check(t)
 		if got := starts(t, f, stream); !slices.Equal(got, want) {
 			t.Fatalf("after restart %d, started %v, want %v", restart+1, got, want)
 		}

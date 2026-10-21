@@ -47,7 +47,7 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			must(t, err)
 			down, err := f.s.repository(f.project2)
 			must(t, err)
-			publication := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "feature-head", PullRequest: 71, URL: "https://example.invalid/pull/71"}
+			publication := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "feature-head", PullRequest: 71, URL: "https://example.invalid/pull/71"}
 			recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, publication)
 			if tc.edge == trace.EdgeHardBlock {
 				held, err := f.s.holds(f.project2, librarianWorkstream(f.project2), down, scheduler.Candidate{Workstream: f.stream2, Thread: trace.Thread{Identity: trace.Agent{Role: masonRole}}})

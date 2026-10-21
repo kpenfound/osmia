@@ -1,27 +1,28 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newParallelMasonFixtureCounting is newParallelMasonFixture whose service
@@ -43,11 +44,11 @@ func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, dr
 	f.engine.Mu.Lock()
 	defer f.engine.Mu.Unlock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.Turns[masonTurnID(unit)] = fake.turn
+		f.engine.Turns[masonTurnID(unit)] = fake.Turn
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
-			fake.play[name] = failMasonTurn
-			f.engine.Turns[name] = fake.turn
+			fake.Play[name] = failMasonTurn
+			f.engine.Turns[name] = fake.Turn
 		}
 	}
 	return f, fake, passed
@@ -86,17 +87,7 @@ func (p *demoProblems) check(t *testing.T) {
 	}
 }
 
-// eventually polls cond until it holds, failing with what after demoTimeout.
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal(what)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
+var eventually = intakefixture.Eventually
 
 // completedTurn waits until the i-th turn of the agent's thread completed.
 func completedTurn(t *testing.T, f *shedFixture, stream config.WorkstreamID, agent string, i int) trace.QueuedTurn {
@@ -196,10 +187,10 @@ func TestReliabilityDemonstration(t *testing.T) {
 		resumeAttempts     []agent.Request
 	)
 	auditEntered, clarifyEntered, releaseClarify := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	masons.mu.Lock()
-	masons.response = map[string]string{masonTurnID("dedupe"): "Half of dedupe is built"}
-	masons.play[masonTurnID("upload")] = reportDone("Chunks are sent")
-	masons.play[auditRecovered] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Mu.Lock()
+	masons.Response = map[string]string{masonTurnID("dedupe"): "Half of dedupe is built"}
+	masons.Play[masonTurnID("upload")] = reportDone("Chunks are sent")
+	masons.Play[auditRecovered] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if _, err := os.Stat(filepath.Join(req.Workspace.Directory(), auditFile)); err != nil {
 			return fmt.Errorf("the continuation lost the stopped turn's file: %v", err)
 		}
@@ -208,20 +199,20 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return nil
 	}
-	masons.play[dedupeClarified] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[dedupeClarified] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
 	}
-	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
-	masons.mu.Unlock()
+	masons.Play[masonTurnID("resume")] = reportDone("Uploads resume")
+	masons.Mu.Unlock()
 
 	f.engine.Mu.Lock()
 	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	// upload's mason reports what its session cost.
 	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		result, err := masons.turn(ctx, req, verified, tools)
+		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
 		}
@@ -241,7 +232,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		mu.Lock()
 		auditContinuation = req
 		mu.Unlock()
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	// The owner switches masons to the other agent binary while dedupe's
 	// first turn runs.
@@ -253,7 +244,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		if err := c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: masonRole, Profile: "other"}, &ack); err != nil || !ack.Applied {
 			problems.report("profile switch during dedupe's turn: %v %+v", err, ack)
 		}
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	// dedupe's continuation holds the loop until the owner has reloaded.
 	f.engine.Turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -267,7 +258,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	// resume's first session on claude hits the provider's usage limit.
 	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -279,7 +270,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		if backend == agent.AgentClaude {
 			return &agent.Result{ClaudeID: "session-limited", SessionDir: req.SessionDir, IsError: true, RateLimit: &agent.RateLimit{Status: "rejected", Type: "five_hour", ResetsAt: demoStart.Add(5 * time.Hour)}}, nil
 		}
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -504,7 +495,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	f.start(t)
 	c = f.c
 	f.awaitMerged(t, stream, "resume")
-	masons.check(t)
+	masons.Check(t)
 	problems.check(t)
 	if commits := f.landedCommits(t, stream, base); !slices.Equal(commits, moved) {
 		t.Fatalf("the feature branch holds %v; the interrupted landing made %v", commits, moved)
@@ -558,7 +549,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("configuration after the restart: %v, digest %s, want %s", err, cfg.Digest, reloaded.Digest)
 	}
 	var ran []string
-	for _, req := range masons.requests(stream) {
+	for _, req := range masons.Requests(stream) {
 		ran = append(ran, req.Name)
 	}
 	if want := []string{masonTurnID("upload"), auditRecovered, masonTurnID("dedupe"), dedupeClarified, masonTurnID("resume")}; !slices.Equal(ran, want) {

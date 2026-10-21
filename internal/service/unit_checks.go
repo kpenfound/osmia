@@ -541,7 +541,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if checks == nil {
 		return incomplete(errors.New("candidate check runner is unavailable"))
 	}
-	g, err := newUnitWorkspaces(c.cfg, c.repository).of(in.Workstream)
+	g, err := newUnitWorkspaces(c.cfg, c.repository).Of(in.Workstream)
 	if err != nil {
 		return incomplete(err)
 	}

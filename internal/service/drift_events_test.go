@@ -1,22 +1,24 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/events"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/trace"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	events "github.com/kpenfound/osmia/internal/events"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // upstreamMovedEvents returns the workstream's upstream moved events in the
@@ -74,13 +76,7 @@ func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.Wo
 	return n
 }
 
-// handle runs a tool's handler with input and returns its result.
-func handle(t *testing.T, tool coreadapter.Tool, input string) string {
-	t.Helper()
-	out, err := tool.Handle(context.Background(), json.RawMessage(input))
-	must(t, err)
-	return string(out)
-}
+var handle = intakefixture.Handle
 
 // A drift rebase whose feature branch conflicts with upstream tells the
 // chief of staff once, with the conflict: one upstream moved event, raised

@@ -1,27 +1,28 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/amendment"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/readview"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	amendment "github.com/kpenfound/osmia/internal/amendment"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	readview "github.com/kpenfound/osmia/internal/readview"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) {
@@ -162,37 +163,7 @@ func TestChangePassReportsLiveTraceErrorsAndCancellation(t *testing.T) {
 	}
 }
 
-// changeRaceGate stops only the selected production boundary after approval.
-type changeRaceGate struct {
-	step        string
-	armed       atomic.Bool
-	reached     chan struct{}
-	released    chan struct{}
-	once        sync.Once
-	releaseOnce sync.Once
-}
-
-func (g *changeRaceGate) checkpoint(ctx context.Context, step string) error {
-	if !g.armed.Load() || step != g.step {
-		return nil
-	}
-	g.once.Do(func() { close(g.reached) })
-	select {
-	case <-g.released:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-func (g *changeRaceGate) release() { g.releaseOnce.Do(func() { close(g.released) }) }
-func (g *changeRaceGate) await(t *testing.T) {
-	t.Helper()
-	select {
-	case <-g.reached:
-	case <-time.After(demoTimeout):
-		t.Fatalf("production checkpoint %s not reached", g.step)
-	}
-}
+type changeRaceGate = intakefixture.ChangeRaceGate
 
 func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T) {
 	type scenario struct {
@@ -216,19 +187,19 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			ctx := context.Background()
 			cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 			t.Cleanup(cleanup.release)
-			race := &changeRaceGate{step: "member-retirement-snapshot", reached: make(chan struct{}), released: make(chan struct{})}
+			race := &changeRaceGate{Step: "member-retirement-snapshot", Reached: make(chan struct{}), Released: make(chan struct{})}
 			if tc.order == "change-first" {
-				race.step = "change-before-member-effect"
+				race.Step = "change-before-member-effect"
 			}
 			if tc.order == "merged-followup-allocation" {
-				race.step = "change-followup-allocated"
+				race.Step = "change-followup-allocated"
 			}
 			if tc.order == "merged-followup-join" {
-				race.step = "change-followup-joined"
+				race.Step = "change-followup-joined"
 			}
-			t.Cleanup(race.release)
+			t.Cleanup(race.Release)
 			f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
-				if err := race.checkpoint(ctx, step); err != nil {
+				if err := race.Checkpoint(ctx, step); err != nil {
 					return err
 				}
 				return cleanup.checkpoint(ctx, step)
@@ -418,11 +389,11 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			if strings.HasPrefix(tc.order, "merged-followup") {
 				interrupted := tc.order != "merged-followup"
 				if interrupted {
-					race.armed.Store(true)
+					race.Armed.Store(true)
 				}
 				unblock()
 				if interrupted {
-					race.await(t)
+					race.Await(t)
 					authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
 					must(t, err)
 					changes, err := readChanges(authority, host)
@@ -432,8 +403,8 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 						t.Fatal("interrupted follow-up lost pins or falsely completed")
 					}
 					f.stop(t)
-					race.armed.Store(false)
-					race.release()
+					race.Armed.Store(false)
+					race.Release()
 					f.start(t)
 				}
 				lifecycleAwait(t, f, "approved shared follow-up applies", func() bool {
@@ -475,9 +446,9 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			_, err = f.c.Abandon(ctx, retired, "The owner cancelled the driver.")
 			must(t, err)
 			if tc.order == "change-first" {
-				race.armed.Store(true)
+				race.Armed.Store(true)
 				unblock()
-				race.await(t)
+				race.Await(t)
 				_, err = f.c.Archive(ctx, retired)
 				if err == nil || !strings.Contains(err.Error(), "an approved change is being applied to this workgroup; retry") {
 					t.Fatalf("archive must refuse an in-flight member effect promptly: %v", err)
@@ -485,7 +456,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				if _, archived := archiveRecord(t, f.s.store, retired); archived {
 					t.Fatal("refused archive published retirement")
 				}
-				race.release()
+				race.Release()
 				lifecycleAwait(t, f, "application wins retirement race", func() bool {
 					c := currentChange(t, f.s, f.origin, key)
 					return c.State == "applied" && len(c.Applied) == 2
@@ -496,11 +467,11 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				return err
 			}
 			if tc.order == "archive-first" {
-				race.armed.Store(true)
+				race.Armed.Store(true)
 				archived := make(chan error, 1)
 				go func() { archived <- archive() }()
 				select {
-				case <-race.reached:
+				case <-race.Reached:
 				case err := <-archived:
 					t.Fatalf("archive returned before checkpoint: %v", err)
 				case <-time.After(demoTimeout):
@@ -520,7 +491,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				if len(changes) != 1 || !equalJSONTest(changes[0], pinned) {
 					t.Fatal("application crossed the held retirement snapshot")
 				}
-				race.release()
+				race.Release()
 				select {
 				case err := <-archived:
 					must(t, err)
@@ -705,12 +676,12 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 
 func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	ctx := context.Background()
-	gate := &changeRaceGate{step: "group-approval-retry-locked", reached: make(chan struct{}), released: make(chan struct{})}
-	t.Cleanup(gate.release)
+	gate := &changeRaceGate{Step: "group-approval-retry-locked", Reached: make(chan struct{}), Released: make(chan struct{})}
+	t.Cleanup(gate.Release)
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 	t.Cleanup(cleanup.release)
 	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
-		if err := gate.checkpoint(ctx, step); err != nil {
+		if err := gate.Checkpoint(ctx, step); err != nil {
 			return err
 		}
 		return cleanup.checkpoint(ctx, step)
@@ -727,14 +698,14 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	must(t, err)
 	_, err = f.c.Abandon(ctx, f.stream1, "Owner retires this completed member.")
 	must(t, err)
-	gate.armed.Store(true)
+	gate.Armed.Store(true)
 	retry := make(chan error, 1)
 	go func() {
 		_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 		retry <- err
 	}()
 	select {
-	case <-gate.reached:
+	case <-gate.Reached:
 	case err := <-retry:
 		t.Fatalf("approval retry returned before checkpoint: %v", err)
 	case <-time.After(demoTimeout):
@@ -753,7 +724,7 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	case <-time.After(demoTimeout):
 		t.Fatal("archive waited for routine group coordination")
 	}
-	gate.release()
+	gate.Release()
 	select {
 	case err := <-retry:
 		must(t, err)
@@ -883,7 +854,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 			}
 			got, api := f.s.feedList(string(member))
 			if api != nil {
-				return false, apiErrAsError{api}
+				return false, apiErrAsError{Api: api}
 			}
 			shared := slices.DeleteFunc(slices.Clone(got.Entries), func(e FeedEntry) bool {
 				return e.Kind != "message" && e.Kind != "response" && e.Kind != "action" && e.Kind != "status"

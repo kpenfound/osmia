@@ -25,25 +25,6 @@ var sessionActor = trace.Actor{Kind: "owner", ID: "local"}
 // sessionBranch names the branch a session's worktree is created on.
 func sessionBranch(stream config.WorkstreamID) string { return "osmia/session/" + string(stream) }
 
-// isSession reports whether a workstream is a session, so a scheduler role
-// or pass can leave it alone.
-func isSession(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
-	kind, err := repository.Kind(stream)
-	return kind == trace.SessionKind, err
-}
-
-// chiefOfStaffSkip reports a workstream whose events stay undelivered to its
-// chief of staff: an abandoned workstream, as before, and now also a
-// session, which has no chief of staff to deliver them to.
-func chiefOfStaffSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
-	return func(stream config.WorkstreamID) (bool, error) {
-		if session, err := isSession(repository, stream); err != nil || session {
-			return session, err
-		}
-		return abandoned(repository, stream)
-	}
-}
-
 // pendingSession is the journal of one session open in progress. It is
 // written before any other side effect and removed last, so a restart finds
 // an interrupted open and finishes or discards it with the same identity:

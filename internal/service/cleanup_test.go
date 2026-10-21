@@ -1,15 +1,15 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
 	"github.com/kpenfound/agentcore/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
@@ -91,7 +91,7 @@ func assertUnitWorkspace(t *testing.T, f *shedFixture, repository *trace.Reposit
 func branchFile(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, branch, name string) string {
 	t.Helper()
 	ctx := context.Background()
-	g, err := newUnitWorkspaces(f.s.cfg, repository).of(stream)
+	g, err := newUnitWorkspaces(f.s.cfg, repository).Of(stream)
 	must(t, err)
 	tip, exists, err := g.Branch(ctx, branch)
 	must(t, err)
@@ -140,7 +140,7 @@ func TestCleanupRemovesTheWorkspaceOfAMergedUnit(t *testing.T) {
 			assertUnitWorkspace(t, f, repository, stream, "audit", true)
 			assertThere(t, inFlight)
 			assertThere(t, filepath.Join(f.s.cfg.Root.String(), branchesDirectory, string(f.project), string(stream)))
-			g, err := newUnitWorkspaces(f.s.cfg, repository).of(stream)
+			g, err := newUnitWorkspaces(f.s.cfg, repository).Of(stream)
 			must(t, err)
 			if _, exists, err := g.Branch(ctx, unitBranch(stream, "upload")); err != nil || !exists {
 				t.Fatalf("branch of the merged unit is gone: %v", err)
@@ -199,7 +199,7 @@ func TestCleanupKeepsTheWorkOfAnAbandonedWorkstream(t *testing.T) {
 			assertGone(t, feature)
 			assertGone(t, filepath.Join(f.s.cfg.Root.String(), reviewInputsDirectory, string(f.project), string(stream)))
 			assertGone(t, filepath.Join(f.s.cfg.Root.String(), unitsDirectory, string(f.project), string(stream)))
-			g, err := featureWorkspaces(f.s.cfg, repository).of(stream)
+			g, err := featureWorkspaces(f.s.cfg, repository).Of(stream)
 			must(t, err)
 			if _, exists, err := g.Branch(ctx, featureBranch(stream)); err != nil || !exists {
 				t.Fatalf("the feature branch is gone: %v", err)

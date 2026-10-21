@@ -25,18 +25,6 @@ type statusesRead struct {
 	api        *APIError
 }
 
-// statuses reports every workstream of every active project, ordered by last
-// activity time, newest first, or none when no project or trace is active.
-// Last activity is derived only from durable trace records, so a read-only
-// request such as this one never changes it. Workstreams that share a last
-// activity time are ordered by creation time, newest first, then by
-// workstream ID, so the order stays the same across repeated loads and a
-// service restart. Archived workstreams are reported and marked archived. The
-// librarian's workstream carries no feature and is left out. A
-// workstream whose agent turns, unit states, overlap advisories or drift
-// rebases cannot be read is reported without them and its first such failure
-// in unreadable, by workstream.
-
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	snapshot, err := readview.Consistent(func() (statusesRead, error) {
 		list, unreadable, api := s.statusesSnapshot()
@@ -106,7 +94,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 			state, _ := s.effective()
 			list, projectUnreadable, api := s.projectStatuses(active)
 			if api != nil {
-				return projectStatusResult{}, apiErrAsError{api}
+				return projectStatusResult{}, apiErrAsError{Api: api}
 			}
 			var rows []workstreamActivity
 			for i := range list {
@@ -148,7 +136,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 		if err != nil {
 			var wrapped apiErrAsError
 			if errors.As(err, &wrapped) {
-				return nil, nil, wrapped.api
+				return nil, nil, wrapped.Api
 			}
 			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}

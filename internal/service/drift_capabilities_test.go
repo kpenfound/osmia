@@ -64,35 +64,7 @@ func chiefAnswers(t *testing.T, f *shedFixture, repository *trace.Repository, st
 // chiefRecordsAnswer records the production answer without running delivery.
 func chiefRecordsAnswer(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
-	ctx := context.Background()
-	must(t, func() error {
-		_, err := repository.EnsureChiefOfStaff(ctx, stream, f.clock.Now(), ownerActor)
-		return err
-	}())
-	turn := "chief-answer-" + id
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: foremanActor, Cause: "test", Depth: 1},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
-	_, err := repository.EnqueueTurn(ctx, req)
-	must(t, err)
-	token := "claim-" + turn
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), trace.ChiefOfStaff, token)
-	q, err := repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, token, directory, f.clock.Now())
-	must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
-	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.clock.Now)
-	must(t, err)
-	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
-	if i < 0 {
-		t.Fatal("the chief of staff has no answer tool")
-	}
-	input, err := json.Marshal(map[string]any{"question": id, "text": text, "citations": []string{cite}})
-	must(t, err)
-	out, err := tools[i].Handle(ctx, input)
-	must(t, err)
-	if !strings.Contains(string(out), `"recorded":true`) {
-		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
-	}
-	completeClaimedTurn(t, f, repository, stream, trace.ChiefOfStaff, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
+	f.sharedTurns().ChiefRecordsAnswer(t, repository, stream, id, text, cite)
 }
 
 // askTool returns the named tool of list, failing the test if it is absent.

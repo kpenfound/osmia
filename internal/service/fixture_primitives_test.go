@@ -1,35 +1,36 @@
 package service
 
 import (
-	"time"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	config "github.com/kpenfound/osmia/internal/config"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 var recordActivity = fixturekit.RecordActivity
 
-const handedDesign = fixturekit.HandedDesign
+const handedDesign = intakefixture.HandedDesign
 
-const validSpec = fixturekit.ValidSpec
+const validSpec = intakefixture.ValidSpec
 
-const validPlan = fixturekit.ValidPlan
+const validPlan = intakefixture.ValidPlan
 
 const cyclicPlan = fixturekit.CyclicPlan
 
 var queueRoleTurn = fixturekit.QueueRoleTurn
 
-const demoAgent = fixturekit.DemoAgent
+const demoAgent = intakefixture.DemoAgent
 
-const demoThread = fixturekit.DemoThread
+const demoThread = intakefixture.DemoThread
 
 const demoRole = fixturekit.DemoRole
 
-const demoSecret = fixturekit.DemoSecret
+const demoSecret = intakefixture.DemoSecret
 
 var demoStart = fixturekit.DemoStart
 
-const demoTimeout = fixturekit.DemoTimeout
+const demoTimeout = intakefixture.DemoTimeout
 
 type demoClock = fixturekit.DemoClock
 
@@ -39,11 +40,11 @@ type demoTransport = fixturekit.DemoTransport
 
 type demoSessions = fixturekit.DemoSessions
 
-type demoTurn = fixturekit.DemoTurn
+type demoTurn = intakefixture.DemoTurn
 
 type demoEngine = fixturekit.DemoEngine
 
-var callTool = fixturekit.CallTool
+var callTool = intakefixture.CallTool
 
 var demoGit = fixturekit.DemoGit
 
@@ -51,13 +52,13 @@ type chiefTurns = fixturekit.ChiefTurns
 
 var jump = fixturekit.Jump
 
-type fakeTurn = fixturekit.FakeTurn
+type fakeTurn = intakefixture.FakeTurn
 
 type fixedClock = fixturekit.FixedClock
 
 type fakeIssues = fixturekit.FakeIssues
 
-const masonWrote = fixturekit.MasonWrote
+const masonWrote = intakefixture.MasonWrote
 
 const commentedConfig = fixturekit.CommentedConfig
 
@@ -73,21 +74,19 @@ type checkFunc = fixturekit.CheckFunc
 
 var passingChecks = fixturekit.PassingChecks
 
-const project = fixturekit.Project
+const project = intakefixture.Project
 
-const stream = fixturekit.Stream
+const stream = intakefixture.Stream
 
-var must = fixturekit.Must
+var must = intakefixture.Must
 
-var traceQuery = fixturekit.TraceQuery
+var traceQuery = intakefixture.TraceQuery
 
 var traceExec = fixturekit.TraceExec
 
-var workstreamTraceDirectory = fixturekit.WorkstreamTraceDirectory
+var workstreamTraceDirectory = intakefixture.WorkstreamTraceDirectory
 
-var workstreamRecords = fixturekit.WorkstreamRecords
-
-var latestDocumentIn = fixturekit.LatestDocumentIn
+var workstreamRecords = intakefixture.WorkstreamRecords
 
 var workstreamDocument = fixturekit.WorkstreamDocument
 
@@ -122,3 +121,9 @@ type blockingTurns = fixturekit.BlockingTurns
 var pauseOf = fixturekit.PauseOf
 
 type completedRunner = fixturekit.CompletedRunner
+
+type faults = intakefixture.Faults
+
+var amendmentOp = intakefixture.AmendmentOp
+
+var apiError = intakefixture.ApiError

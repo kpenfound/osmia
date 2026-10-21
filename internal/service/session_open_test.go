@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"maps"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	maps "maps"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/reconcile"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	reconcile "github.com/kpenfound/osmia/internal/reconcile"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // newSessionFixture starts a service with one registered, committed
@@ -257,8 +257,6 @@ func TestSessionOpenRetryComparesTheRequestsProject(t *testing.T) {
 	}
 }
 
-// --- Scheduler and pass exclusion ---
-
 // newExclusionFixture is a bare, never-started project trace for testing
 // that a scheduler role or pass leaves a session alone, with extraConfig
 // appended to the top-level configuration.
@@ -377,7 +375,7 @@ func TestArchitectPassSkipsASessionAlongsideAHandedWorkstream(t *testing.T) {
 	must(t, err)
 	before := captureSessionSnapshot(t, repo, session)
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Architect: &Architect{}}}
-	d := &drafter{s: s, repository: repo}
+	d := &drafter{S: s.intake().DrafterDependencies(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return d.Pass(ctx) })
 	draft, err := repo.Workflow(stream, draftSubject)
 	must(t, err)
@@ -406,7 +404,7 @@ func TestShedPassSkipsASessionAlongsideASketchedWorkstream(t *testing.T) {
 	must(t, err)
 	before := captureSessionSnapshot(t, repo, session)
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Committee: &Committee{}}}
-	d := &debate{s: s, repository: repo}
+	d := &debate{S: s.intake().DebateDependencies(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return d.Pass(ctx) })
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	must(t, err)

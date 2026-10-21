@@ -1,79 +1,42 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 )
 
-// requireJJ skips the test when jj is not on PATH, and fails it there when
-// OSMIA_REQUIRE_JJ says jj must be, as in the dagger test containers.
-func requireJJ(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("jj"); err != nil {
-		if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
-			t.Fatalf("jj is required but not on PATH: %v", err)
-		}
-		t.Skip("jj is not installed; Jujutsu workspaces need it")
-	}
-}
+var requireJJ = intakefixture.RequireJJ
 
 // onWorkspaces has the configuration of the fixture under opts hand new
 // workstreams in on backend.
 func onWorkspaces(t *testing.T, opts Options, backend string) {
 	t.Helper()
-	if backend == config.WorkspacesGit {
-		return
-	}
-	if backend == config.WorkspacesJujutsu {
-		requireJJ(t)
-	}
-	path := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(path)
-	must(t, err)
-	lines := strings.Split(string(data), "\n")
-	i := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "workspaces = ") })
-	if i < 0 {
-		t.Fatalf("%s sets no workspaces", path)
-	}
-	lines[i] = fmt.Sprintf("workspaces = %q", backend)
-	must(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0600))
+	intakefixture.OnWorkspaces(t, opts.Config.Root, backend)
 }
 
 // backendOf returns the workspace backend the workstream's manifest records.
 func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	root, err := config.ResolveRoot(f.opts.Config.Root, "")
-	must(t, err)
-	data, ok := traceFile(t, workstreamTraceDirectory(t, root, f.project, stream), "workstreams/"+string(stream)+"/workstream.json")
-	if !ok {
-		t.Fatalf("workstream %s has no manifest", stream)
-	}
-	var manifest struct {
-		Workspaces string `json:"workspaces"`
-	}
-	must(t, json.Unmarshal(data, &manifest))
-	if manifest.Workspaces == "" {
-		return config.WorkspacesGit
-	}
-	return manifest.Workspaces
+	return intakefixture.BackendOf(t, f.opts.Config, f.project, stream)
 }
 
 var (

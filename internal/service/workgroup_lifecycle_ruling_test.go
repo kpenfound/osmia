@@ -93,7 +93,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				}
 				return false
 			})
-			hook := &designInterruption{step: stage, nth: 1, reached: make(chan struct{})}
+			hook := &designInterruption{Step: stage, Nth: 1, Reached: make(chan struct{})}
 			f.hook.Store(hook)
 			finished := make(chan error, 1)
 			if stage == "chief-relay-member" {
@@ -106,7 +106,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				go func() { _, err := f.c.Answer(ctx, original.Number, text, original.Project); finished <- err }()
 			}
 			select {
-			case <-hook.reached:
+			case <-hook.Reached:
 			case <-time.After(demoTimeout):
 				t.Fatal("production question commit did not reach interruption")
 			}

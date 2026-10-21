@@ -1,17 +1,17 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
+	json "encoding/json"
+	slices "slices"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/amendment"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	amendment "github.com/kpenfound/osmia/internal/amendment"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // presentDeliveryDelta supplies a debated delta for controller tests. The
@@ -170,7 +170,7 @@ func TestAmendMergedWorkCreatesOneFollowupAndKeepsMerge(t *testing.T) {
 	if id == "" || c.State == "applied" {
 		t.Fatal("follow-up must wait for its seal")
 	}
-	z := &sealer{s: p.s, repository: p.repository}
+	z := &sealer{S: p.s.intake().SealerDependencies(), Repository: p.repository}
 	must(t, z.Pass(ctx))
 	ops, err := p.repository.Operations(id)
 	must(t, err)

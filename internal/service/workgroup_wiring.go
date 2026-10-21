@@ -2,13 +2,10 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-var errWorkgroupJoining = errors.New("the workgroup is still joining its members")
 
 // crossRepoMemberRepos resolves fixed historical membership to open repo
 // handles. Approved identities locate retired members without their history;

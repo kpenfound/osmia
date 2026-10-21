@@ -1,26 +1,26 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/vcs"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/followup"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/pulls"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	vcs "github.com/kpenfound/agentcore/vcs"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	followup "github.com/kpenfound/osmia/internal/followup"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	pulls "github.com/kpenfound/osmia/internal/pulls"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newCrossRepoEdgeDependent builds a dependent workstream whose build,
@@ -431,7 +431,7 @@ func seedEdgeDependentBase(t *testing.T, f *shedFixture, repo *trace.Repository,
 	baseDoc.ID, baseDoc.Path, baseDoc.Content, baseDoc.Revision = "workstream-base", "base.json", string(data), 1
 	must(t, repo.RecordDocuments(ctx, []trace.Document{baseDoc}))
 
-	g, err := featureWorkspaces(f.s.about(repo), repo).of(stream)
+	g, err := featureWorkspaces(f.s.about(repo), repo).Of(stream)
 	must(t, err)
 	w, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 	must(t, err)

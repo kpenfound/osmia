@@ -1,24 +1,26 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/jev/jevtest"
-	"github.com/kpenfound/agentcore/jev/systemone"
+	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
+	systemone "github.com/kpenfound/agentcore/jev/systemone"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
-	"github.com/kpenfound/osmia/internal/checkselect"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/trace"
+	checkselect "github.com/kpenfound/osmia/internal/checkselect"
+	config "github.com/kpenfound/osmia/internal/config"
+	jev "github.com/kpenfound/osmia/internal/jev"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // runChecks runs the checks controller's passes and reconciles each check
@@ -27,19 +29,9 @@ import (
 // run's result.
 func runChecks(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID) {
 	t.Helper()
-	ctx := context.Background()
-	c := &checkers{masons: newMasonController(s, repository)}
-	for {
-		must(t, c.Pass(ctx))
-		ops, err := repository.Operations(stream)
-		must(t, err)
-		i := slices.IndexFunc(ops, func(op trace.OperationRecord) bool { return op.Operation.Action == CheckAction && op.Result == nil })
-		if i < 0 {
-			return
-		}
-		_, err = attemptOperation(t, s, repository, stream, ops[i].Operation, c)
-		must(t, err)
-	}
+	intakefixture.RunChecks(t, repository, stream, &checkers{masons: newMasonController(s, repository)}, CheckAction, func(op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
+		return attemptOperation(t, s, repository, stream, op, r)
+	})
 }
 
 // newChecksFixture builds a workstream whose unit resume is checking, with
@@ -60,12 +52,7 @@ func boostJev(s *Service, p *jevtest.Provider) {
 	s.jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: s.now}
 }
 
-func unitState(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) string {
-	t.Helper()
-	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	must(t, err)
-	return state.Value
-}
+var unitState = intakefixture.UnitState
 
 func onlyRun(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) UnitCheckRun {
 	t.Helper()
@@ -186,7 +173,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	c := &checkers{masons: newMasonController(f.s, repository)}
 	ops, err := checkOperations(repository, stream)
 	must(t, err)
-	g, err := newUnitWorkspaces(f.s.cfg, repository).of(stream)
+	g, err := newUnitWorkspaces(f.s.cfg, repository).Of(stream)
 	must(t, err)
 	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
 	must(t, err)

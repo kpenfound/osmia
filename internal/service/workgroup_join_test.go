@@ -1,19 +1,19 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // observeJoinPasses instruments the running controllers, without driving a pass.
@@ -70,26 +70,26 @@ func observeJoinPasses(s *Service) func(*testing.T) {
 
 func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) {
 	t.Parallel()
-	joining := &changeRaceGate{step: "workgroup-member-joining", reached: make(chan struct{}), released: make(chan struct{})}
-	transferred := &changeRaceGate{step: "workgroup-member-transferred", reached: make(chan struct{}), released: make(chan struct{})}
-	defer joining.release()
-	defer transferred.release()
+	joining := &changeRaceGate{Step: "workgroup-member-joining", Reached: make(chan struct{}), Released: make(chan struct{})}
+	transferred := &changeRaceGate{Step: "workgroup-member-transferred", Reached: make(chan struct{}), Released: make(chan struct{})}
+	defer joining.Release()
+	defer transferred.Release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) {
 		opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
 		cfg, err := config.Load(opts.Config)
 		must(t, err)
 		runChief(opts, cfg, &chiefTurns{})
 		opts.boundary = func(ctx context.Context, name string) error {
-			if err := joining.checkpoint(ctx, name); err != nil {
+			if err := joining.Checkpoint(ctx, name); err != nil {
 				return err
 			}
-			return transferred.checkpoint(ctx, name)
+			return transferred.Checkpoint(ctx, name)
 		}
 	})
 	defer f.stop(t)
 	observe := observeJoinPasses(f.s)
-	joining.armed.Store(true)
-	transferred.armed.Store(true)
+	joining.Armed.Store(true)
+	transferred.Armed.Store(true)
 	done := make(chan *APIError, 1)
 	var id config.WorkgroupID
 	go func() {
@@ -97,7 +97,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		id, api = f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 		done <- api
 	}()
-	joining.await(t)
+	joining.Await(t)
 	repo, err := f.s.repository(f.project)
 	must(t, err)
 	groups, _, err := trace.Workgroups(repo)
@@ -109,8 +109,8 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		t.Fatalf("premature shared route: %s %v", pointer, err)
 	}
 	observe(t)
-	joining.release()
-	transferred.await(t)
+	joining.Release()
+	transferred.Await(t)
 	pointer, err := repo.CrossRepoWorkgroupOf(f.stream1)
 	must(t, err)
 	groups, _, err = trace.Workgroups(repo)
@@ -141,7 +141,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("incomplete join consumed or claimed events")
 	}
-	transferred.release()
+	transferred.Release()
 	select {
 	case api := <-done:
 		if api != nil {
@@ -193,19 +193,19 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 
 func TestChangeContextFollowsTransferredMemberRoute(t *testing.T) {
 	t.Parallel()
-	gate := &changeRaceGate{reached: make(chan struct{}), released: make(chan struct{})}
-	defer gate.release()
-	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.checkpoint })
-	gate.step = "change-context-routed:" + string(f.stream1)
+	gate := &changeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
+	defer gate.Release()
+	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.Checkpoint })
+	gate.Step = "change-context-routed:" + string(f.stream1)
 	defer f.stop(t)
 	// Start the controller's read on its old local route, then finish the join.
-	gate.armed.Store(true)
-	gate.await(t)
+	gate.Armed.Store(true)
+	gate.Await(t)
 	id, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if api != nil {
 		t.Fatal(api)
 	}
-	gate.release()
+	gate.Release()
 	f.awaitProjectSpec(t)
 	repo, g, _, close, err := f.s.changeContext(context.Background(), string(f.stream1))
 	must(t, err)
@@ -217,10 +217,10 @@ func TestChangeContextFollowsTransferredMemberRoute(t *testing.T) {
 
 func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testing.T) {
 	t.Parallel()
-	gate := &changeRaceGate{reached: make(chan struct{}), released: make(chan struct{})}
-	defer gate.release()
-	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.checkpoint })
-	gate.step = "change-context-routed:" + string(f.stream1)
+	gate := &changeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
+	defer gate.Release()
+	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.Checkpoint })
+	gate.Step = "change-context-routed:" + string(f.stream1)
 	defer f.stop(t)
 	awaitJoinDrafts(t, f)
 	ctx := context.Background()
@@ -234,12 +234,12 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	must(t, err)
 	must(t, authority.Close())
 	observe := observeJoinPasses(f.s)
-	gate.armed.Store(true)
-	gate.await(t)
+	gate.Armed.Store(true)
+	gate.Await(t)
 	// This is a durable interruption of the owner join before its locator.
 	must(t, repo1.RetractChiefOfStaff(ctx, f.stream1))
 	must(t, repo1.RetractWorkgroup(ctx, f.stream1, f.clock.Now(), ownerActor, "draft-workgroup"))
-	gate.release()
+	gate.Release()
 	observe(t)
 	if _, _, _, close, err := f.s.changeContext(ctx, string(f.stream1)); !errors.Is(err, errWorkgroupJoining) {
 		close()

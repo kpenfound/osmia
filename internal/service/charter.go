@@ -2,18 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/trace"
-)
-
-var (
-	errNoActiveProject = errors.New("no active project")
-	errNoTrace         = errors.New("project has no trace")
 )
 
 // loadCharter returns the active project's latest charter revision.

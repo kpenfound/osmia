@@ -11,26 +11,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	crossSpec1 = "# Upload service\n\nThe upload service accepts chunks and acknowledges them.\n\n## Acceptance criteria\n\n1. A chunk is acknowledged once stored.\n2. The acknowledgment names the chunk's offset.\n"
-	crossPlan1 = `{"version": 2, "units": [
-  {"id": "accept", "task": "Accept and store chunks.", "acceptance": ["TestAccept passes"], "criteria": ["spec#1", "spec#2"], "depends_on": [], "footprint": ["internal.trace"]}
-]}
-`
-	crossSpec2 = "# Upload client\n\nThe upload client resumes from the last acknowledged offset.\n\n## Acceptance criteria\n\n1. The client resumes from the last acknowledged offset.\n"
-	crossPlan2 = `{"version": 2, "units": [
-  {"id": "resume", "task": "Resume from the last acknowledged offset.", "acceptance": ["TestResume passes"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]}
-]}
-`
+	crossSpec1 = intakefixture.CrossSpec1
+	crossPlan1 = intakefixture.CrossPlan1
+	crossSpec2 = intakefixture.CrossSpec2
+	crossPlan2 = intakefixture.CrossPlan2
 )
 
 // crossRepoRatifyFixture is two active projects in one service, each with
@@ -98,9 +91,16 @@ func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)
 		must(t, err)
 		return out.Workstream
 	}
-	cf.stream1 = handIn(cf.project, "upload-server")
-	cf.stream2 = handIn(cf.project2, "upload-client")
+	// Install the fake turns before either hand-in can dispatch a draft.
+	cf.stream1 = HandInWorkstream(cf.project, "upload-server")
+	cf.stream2 = HandInWorkstream(cf.project2, "upload-client")
 	cf.scriptDrafts(t)
+	if got := handIn(cf.project, "upload-server"); got != cf.stream1 {
+		t.Fatalf("server hand-in workstream = %s, want %s", got, cf.stream1)
+	}
+	if got := handIn(cf.project2, "upload-client"); got != cf.stream2 {
+		t.Fatalf("client hand-in workstream = %s, want %s", got, cf.stream2)
+	}
 	close(draftsReady)
 	for _, project := range []config.ProjectID{cf.project, cf.project2} {
 		repo, err := cf.s.repository(project)
@@ -115,72 +115,7 @@ func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)
 // workgroup's project-spec draft turn.
 func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 	t.Helper()
-	// verdict calls the tool and requires the verdict it returns.
-	verdict := func(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any, want string) error {
-		got, err := callTool(ctx, tools, name, args)
-		if err != nil {
-			return err
-		}
-		var status draftStatus
-		if err := json.Unmarshal([]byte(got), &status); err != nil {
-			return err
-		}
-		if status.Verdict != want {
-			return fmt.Errorf("%s returned %s, want verdict %s", name, got, want)
-		}
-		return nil
-	}
-	deliver := func(ctx context.Context, tools *mcp.ClientSession, path, content, want string) error {
-		return verdict(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}, want)
-	}
-	f.engine.Mu.Lock()
-	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		dir := req.Workspace.Directory()
-		var spec, plan string
-		switch {
-		case strings.Contains(dir, string(f.stream1)):
-			spec, plan = crossSpec1, crossPlan1
-		case strings.Contains(dir, string(f.stream2)):
-			spec, plan = crossSpec2, crossPlan2
-		default:
-			return nil, fmt.Errorf("unexpected draft workspace %s", dir)
-		}
-		if err := deliver(ctx, tools, "spec.md", spec, draftInvalid); err != nil {
-			return nil, err
-		}
-		if err := deliver(ctx, tools, "plan.json", plan, draftValid); err != nil {
-			return nil, err
-		}
-		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 2}, nil
-	}
-	f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		args := map[string]any{
-			"behavior": "Chunks the server accepts are acknowledged with their offset; the client resumes uploads from the last acknowledged offset.",
-			"contracts": []map[string]any{
-				{"name": "acknowledgment", "text": "The server's acknowledgment of a stored chunk names its offset; the client reads that offset to resume."},
-			},
-			"graph": []map[string]any{
-				{"from": string(f.stream1), "to": string(f.stream2), "type": "contract"},
-			},
-			"slices": []map[string]any{
-				{"workstream": string(f.stream1), "contract_criteria": []int{2}},
-				{"workstream": string(f.stream2), "contract_criteria": []int{1}},
-			},
-		}
-		// A delivery without its intended behaviour is reported invalid and
-		// replaced by the next one.
-		behavior := args["behavior"]
-		args["behavior"] = " "
-		if err := verdict(ctx, tools, ProjectSpecDraftTool, args, draftInvalid); err != nil {
-			return nil, err
-		}
-		args["behavior"] = behavior
-		if err := verdict(ctx, tools, ProjectSpecDraftTool, args, draftValid); err != nil {
-			return nil, err
-		}
-		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
-	}
-	f.engine.Mu.Unlock()
+	intakefixture.ScriptCrossRepoDrafts(t, f.engine, func() (config.WorkstreamID, config.WorkstreamID) { return f.stream1, f.stream2 })
 }
 
 // awaitProjectSpec waits for the workgroup's project spec to be recorded.
@@ -519,7 +454,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	hook := &designInterruption{step: "group-member-decision-prepared", nth: 1, reached: make(chan struct{})}
+	hook := &designInterruption{Step: "group-member-decision-prepared", Nth: 1, Reached: make(chan struct{})}
 	f.hook.Store(hook)
 	finished := make(chan error, 1)
 	go func() {
@@ -527,7 +462,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 		finished <- err
 	}()
 	select {
-	case <-hook.reached:
+	case <-hook.Reached:
 	case <-time.After(demoTimeout):
 		t.Fatal("member preparation was not interrupted")
 	}

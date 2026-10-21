@@ -20,7 +20,9 @@ import (
 )
 
 const pauseTool = "pause"
+
 const resumeTool = "resume"
+
 const pauseGuidance = "When the owner asks you to pause or resume work, call pause or resume with scope factory, project, or workstream. For a workstream include its ID; include the target project's ID when it is another project. Give a reason for a pause. These controls are attributed to the owner."
 
 func (c *runtimeControls) pauseControl(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time, resume bool) coreadapter.Tool {
@@ -124,10 +126,6 @@ func pauseStop(p runtime.Pause) *thread.Stop {
 // running.
 var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true, deliveryReviewAction: true, CheckAction: true}
 
-// errPaused leaves a reconciler operation pending instead of starting a turn:
-// the controller holds the operation until the pause is lifted.
-var errPaused = errors.New("a pause holds the workstream")
-
 // pausing returns the pause in force that covers the workstream of the
 // project, and whether there is one.
 func (s *Service) pausing(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
@@ -225,26 +223,6 @@ func (s *Service) stoppable(ctx context.Context, project config.ProjectID, strea
 		}
 	}
 	return ctx, release
-}
-
-// continueMark separates the turn a pause continuation continues from the
-// sequence of the stopped turn in the continuation's ID.
-const continueMark = "-continue-"
-
-// continuedTurn returns the turn a pause continuation continues, and any
-// other turn itself.
-func continuedTurn(turn string) string {
-	base, _, _ := strings.Cut(turn, continueMark)
-	return base
-}
-
-// isContinuation reports whether the turn continues a turn a hard pause
-// stopped.
-func isContinuation(turn string) bool { return strings.Contains(turn, continueMark) }
-
-// stoppedTurn reports whether a hard pause stopped the completed turn.
-func stoppedTurn(q *trace.QueuedTurn) bool {
-	return q != nil && !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Stop != nil
 }
 
 // continueStopped queues the turn that continues the turn q a hard pause

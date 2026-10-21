@@ -33,7 +33,8 @@ var workstreamMoveTargets = []string{SketchedState, InShedState, RatifiedState, 
 // decision, which it only relays.
 var chiefMoveTargets = []string{BuildingState, AssembledState}
 
-func workstreamMovePath(n int) string     { return fmt.Sprintf("moves/move-%d.json", n) }
+func workstreamMovePath(n int) string { return fmt.Sprintf("moves/move-%d.json", n) }
+
 func workstreamMoveDocument(n int) string { return fmt.Sprintf("%s%d", workstreamMovePrefix, n) }
 
 // workstreamMoves returns the workstream's recorded moves in the order they
@@ -336,7 +337,7 @@ func (s *Service) assemblable(repo *trace.Repository, stream config.WorkstreamID
 
 // featureTip returns the commit the workstream's feature branch is at.
 func (s *Service) featureTip(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) (string, *APIError) {
-	g, err := featureWorkspaces(s.about(repo), repo).of(stream)
+	g, err := featureWorkspaces(s.about(repo), repo).Of(stream)
 	if err != nil {
 		return "", &APIError{Code: Internal, Message: "cannot open the workstream's feature branch"}
 	}

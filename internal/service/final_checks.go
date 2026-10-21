@@ -183,7 +183,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if checks == nil {
 		return CheckResult{ExitCode: -1}, errors.New("candidate check runner is unavailable")
 	}
-	g, err := featureWorkspaces(cfg, a.repository).of(stream)
+	g, err := featureWorkspaces(cfg, a.repository).Of(stream)
 	if err != nil {
 		return CheckResult{ExitCode: -1}, err
 	}

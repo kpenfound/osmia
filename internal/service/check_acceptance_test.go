@@ -1,21 +1,22 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
+	json "encoding/json"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/amendment"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/trace/legacytrace"
+	amendment "github.com/kpenfound/osmia/internal/amendment"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	legacytrace "github.com/kpenfound/osmia/internal/trace/legacytrace"
 )
 
 func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {
@@ -52,15 +53,7 @@ func TestAcceptanceFactoryInstructions(t *testing.T) {
 	assertCheckGateReviewInstructions(t, finalSystemPrompt(config.Project{}))
 }
 
-func acceptancePlan(t *testing.T, graph string, items ...string) string {
-	t.Helper()
-	p, err := plan.Parse([]byte(graph))
-	must(t, err)
-	p.Units[0].Acceptance = items
-	data, err := plan.Encode(p)
-	must(t, err)
-	return string(data)
-}
+var acceptancePlan = intakefixture.AcceptancePlan
 
 func TestDraftWriteCheckAcceptance(t *testing.T) {
 	t.Parallel()
@@ -168,7 +161,7 @@ func TestAmendmentCheckAcceptance(t *testing.T) {
 		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: item.id, Revision: 2, Project: repo.Project(), Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: "fixture"}, Path: item.path, Content: item.text})
 	}
 	must(t, repo.RecordDocuments(context.Background(), docs))
-	a := &amendmentDrafter{&drafter{s: f.s, repository: repo}}
+	a := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
 	for _, tc := range []struct{ name, spec, graph, at string }{
 		{"carryover", strings.Replace(oldSpec, "Acknowledged chunks", "Durably acknowledged chunks", 1), strings.Replace(oldGraph, "A checkpoint is durable", "A checkpoint survives restart", 1), ""},
 		{"changed-criterion", strings.Replace(oldSpec, "All checks pass", "Full check run is green", 1), oldGraph, "spec#1"},
@@ -177,7 +170,7 @@ func TestAmendmentCheckAcceptance(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: architectRole}
-			tool := a.draftTool(scope, "amend-"+tc.name+"-1", a.judge)
+			tool := a.DraftTool(scope, "amend-"+tc.name+"-1", a.Judge)
 			for _, file := range []struct{ path, text string }{{plan.SpecPath, tc.spec}, {plan.PlanPath, tc.graph}} {
 				raw, _ := json.Marshal(map[string]string{"path": file.path, "content": file.text})
 				out, err := tool.Handle(context.Background(), raw)
@@ -197,7 +190,7 @@ func TestAmendmentCheckAcceptance(t *testing.T) {
 			}
 		})
 	}
-	must(t, a.enqueue(context.Background(), f.s.current(), stream, "guidance", 1, "fixture", nil))
+	must(t, a.Enqueue(context.Background(), f.s.current(), stream, "guidance", 1, "fixture", nil))
 	thread, err := repo.Thread(stream, architectAgent)
 	must(t, err)
 	assertAcceptanceDraftInstructions(t, thread.Turns[len(thread.Turns)-1].Request.Prompt)
@@ -346,7 +339,7 @@ func TestShedRedraftCheckAcceptance(t *testing.T) {
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	d := &debate{s: f.s, repository: repo}
+	d := &debate{S: f.s.intake().DebateDependencies(), Repository: repo}
 	for _, tc := range []struct{ name, path, content, at string }{
 		{"criterion", plan.SpecPath, strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1), "spec#1"},
 		{"unit", plan.PlanPath, acceptancePlan(t, validPlan, "dagger check passes"), `unit "resume": acceptance item 1`},
@@ -354,7 +347,7 @@ func TestShedRedraftCheckAcceptance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: architectRole}
 			turn := "reply-acceptance-" + tc.name
-			tool := d.drafter().draftTool(scope, turn, d.judge)
+			tool := d.Drafter().DraftTool(scope, turn, d.Judge)
 			raw, _ := json.Marshal(map[string]string{"path": tc.path, "content": tc.content})
 			out, err := tool.Handle(context.Background(), raw)
 			must(t, err)
@@ -363,7 +356,7 @@ func TestShedRedraftCheckAcceptance(t *testing.T) {
 			if status.Verdict != draftInvalid || len(status.Problems) != 1 || !strings.Contains(status.Problems[0], tc.at) {
 				t.Fatalf("shed verdict: %+v", status)
 			}
-			_, problems, err := d.redraft(stream, turn)
+			_, problems, err := d.Redraft(stream, turn)
 			must(t, err)
 			if !slices.Equal(problems, status.Problems) {
 				t.Fatalf("recording validation differs: %v versus %v", problems, status.Problems)

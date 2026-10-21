@@ -56,12 +56,6 @@ func landIDs(unit string, review int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// featureWorkspaces returns the feature branch workspaces of the configured
-// project, each workstream's on the backend the repository records for it.
-func featureWorkspaces(cfg *config.Config, repository *trace.Repository) streamWorkspaces {
-	return streamWorkspaces{cfg: cfg, repository: repository, directory: branchesDirectory}
-}
-
 // foreman is the landing controller. Its pass asks to land one approved unit
 // at a time per workstream and to rebase the unit workspaces a landing left
 // behind; its reconciler runs each landing operation, and rebaser each
@@ -305,7 +299,7 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "landing " + result.Outcome, Result: result}, nil
 	}
 	branch := featureBranch(stream)
-	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	g, err := featureWorkspaces(f.cfg, f.repository).Of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -383,7 +377,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	g, err := featureWorkspaces(f.cfg, f.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -497,7 +491,7 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 	if latest.Revision != in.Review {
 		return fmt.Sprintf("%s revision %d replaced the approval", latest.Path, latest.Revision), nil
 	}
-	g, err := newUnitWorkspaces(f.cfg, f.repository).of(stream)
+	g, err := newUnitWorkspaces(f.cfg, f.repository).Of(stream)
 	if err != nil {
 		return "", err
 	}
@@ -511,17 +505,6 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 		return "", err
 	}
 	return "stale approval: " + reason, nil
-}
-
-// landingCriteria returns the criteria the unit serves, in plan order.
-func landingCriteria(unit plan.Unit) []string {
-	var criteria []string
-	for _, c := range unit.Criteria {
-		if !slices.Contains(criteria, c) {
-			criteria = append(criteria, c)
-		}
-	}
-	return criteria
 }
 
 // message returns the landing commit's message: its subject is the unit's
@@ -599,7 +582,7 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 	if !ok {
 		return coreadapter.OperationResult{}, fmt.Errorf("the sealed plan and follow-ups of workstream %s have no unit %s", stream, in.Unit)
 	}
-	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	g, err := featureWorkspaces(f.cfg, f.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

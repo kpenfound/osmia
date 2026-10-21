@@ -20,13 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-const (
-	masonRole = "mason"
-	// unitsDirectory is the directory under the root holding the unit
-	// workspaces, by project, workstream and unit.
-	unitsDirectory = "units"
-)
-
 // unitBranch names the branch of a unit's workspace. It lies outside osmia/,
 // where the workstream's feature branch osmia/<workstream> already is a ref.
 func unitBranch(stream config.WorkstreamID, unit string) string {
@@ -47,7 +40,7 @@ var _ coreadapter.Workspaces = unitWorkspaces{}
 // newUnitWorkspaces returns the unit workspaces of the configured project,
 // each workstream's on the backend the repository records for it.
 func newUnitWorkspaces(cfg *config.Config, repository *trace.Repository) unitWorkspaces {
-	return unitWorkspaces{streamWorkspaces{cfg: cfg, repository: repository, directory: unitsDirectory}}
+	return unitWorkspaces{streamWorkspaces{Cfg: cfg, Repository: repository, Directory: unitsDirectory}}
 }
 
 func unitName(stream config.WorkstreamID, unit string) string {
@@ -59,7 +52,7 @@ func unitName(stream config.WorkstreamID, unit string) string {
 // clone has none. A workspace already there is returned with what it holds.
 func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, error) {
 	feature := featureBranch(stream)
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return workspace.Worktree{}, "", err
 	}
@@ -119,7 +112,7 @@ func unitChange(repository *trace.Repository, stream config.WorkstreamID, unit s
 // unit's workspace, and whether there is one to record: a workspace on git
 // worktrees has none, and a change the trace records already stays.
 func (m *masons) changeRecord(ctx context.Context, stream config.WorkstreamID, unit string, w workspace.Worktree) (trace.Document, bool, error) {
-	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	g, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
 	if err != nil {
 		return trace.Document{}, false, err
 	}
@@ -141,7 +134,7 @@ func (m *masons) changeRecord(ctx context.Context, stream config.WorkstreamID, u
 // find returns the unit's workspace and the feature branch commit it
 // descends from when the clone has it, and creates nothing.
 func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, bool, error) {
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return workspace.Worktree{}, "", false, err
 	}
@@ -160,7 +153,7 @@ func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, un
 // the tip of its workstream's feature branch, as after a landing moved the
 // branch, until the workspace is rebased onto it.
 func (u unitWorkspaces) behind(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return false, err
 	}
@@ -187,7 +180,7 @@ func (u unitWorkspaces) snapshot(ctx context.Context, stream config.WorkstreamID
 	if !found {
 		return workspace.Worktree{}, "", "", fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
 	}
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return workspace.Worktree{}, "", "", err
 	}
@@ -276,12 +269,12 @@ func turnViews(cfg *config.Config, project config.ProjectID, stream config.Works
 // workspace on git worktrees records nothing.
 func (u unitWorkspaces) record(ctx context.Context, scope coreadapter.Scope, w workspace.Worktree) error {
 	stream := config.WorkstreamID(scope.Workstream)
-	dir := turnViews(u.cfg, u.repository.Project(), stream, scope.Thread, scope.Turn)
+	dir := turnViews(u.Cfg, u.Repository.Project(), stream, scope.Thread, scope.Turn)
 	path := filepath.Join(dir, recordedName)
 	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return err
 	}
@@ -311,11 +304,11 @@ func (u unitWorkspaces) changed(ctx context.Context, stream config.WorkstreamID,
 	if !found {
 		return nil, false, fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
 	}
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return nil, false, err
 	}
-	revision, err := os.ReadFile(filepath.Join(turnViews(u.cfg, u.repository.Project(), stream, masonAgent(unit), turn), recordedName))
+	revision, err := os.ReadFile(filepath.Join(turnViews(u.Cfg, u.Repository.Project(), stream, masonAgent(unit), turn), recordedName))
 	if errors.Is(err, fs.ErrNotExist) {
 		_, err := g.Record(ctx, w)
 		return nil, false, err
@@ -354,7 +347,7 @@ func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, vi
 	if !found {
 		return fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
 	}
-	g, err := u.of(stream)
+	g, err := u.Of(stream)
 	if err != nil {
 		return err
 	}
@@ -371,6 +364,7 @@ type retriedTurns struct {
 }
 
 var _ coreadapter.Turns = (*retriedTurns)(nil)
+
 var _ coreadapter.ResumeChecker = (*retriedTurns)(nil)
 
 func (t *retriedTurns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {

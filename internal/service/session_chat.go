@@ -84,18 +84,6 @@ func sessionLock(repository *trace.Repository, stream config.WorkstreamID) *sess
 	return v.(*sessionGate)
 }
 
-// unfinishedSessionTurn reports whether the thread holds a turn with no
-// response and no completion: one still queued, claimed or captured
-// without being completed.
-func unfinishedSessionTurn(th trace.Thread) bool {
-	for _, q := range th.Turns {
-		if q.CompletedAt.IsZero() {
-			return true
-		}
-	}
-	return false
-}
-
 // lastSessionRequestAt returns the request time of the thread's most recent
 // turn, or the zero time when it has none yet.
 func lastSessionRequestAt(th trace.Thread) time.Time {

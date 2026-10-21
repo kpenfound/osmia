@@ -583,14 +583,17 @@ func (w *statusResponseWriter) WriteHeader(status int) {
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
+
 func (w *statusResponseWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return w.ResponseWriter.Write(p)
 }
+
 func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (s *Service) Socket() string                           { return s.cfg.Listen.Socket }
+
+func (s *Service) Socket() string { return s.cfg.Listen.Socket }
 
 // WebAddr is the bound address of the web listener, or empty when listen.web
 // is not configured.
@@ -629,7 +632,9 @@ func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListene
 	}
 	return join(hostname, dir)
 }
-func (s *Service) Wait() error  { <-s.done; return s.err }
+
+func (s *Service) Wait() error { <-s.done; return s.err }
+
 func (s *Service) Close() error { s.cancel(); return s.Wait() }
 
 // current returns the loaded configuration; project registration replaces it.
@@ -726,6 +731,7 @@ func RunSignals(ctx context.Context, opts Options) error {
 	defer stop()
 	return Run(ctx, opts)
 }
+
 func removeStaleSocket(path string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -754,6 +760,7 @@ func removeStaleSocket(path string) error {
 	}
 	return os.Remove(path)
 }
+
 func (s *Service) cleanupSocket() {
 	s.listener.Close()
 	if s.web != nil {
@@ -1193,18 +1200,18 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 // repository. Building them runs no hook and applies no operation.
 func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*stages, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
-	draft := &drafter{s: s, repository: repository}
-	rounds := &debate{s: s, repository: repository}
-	seals := &sealer{s: s, repository: repository}
-	build := &builder{s: s, repository: repository}
+	draft := &drafter{S: s.intake().DrafterDependencies(), Repository: repository}
+	rounds := &debate{S: s.intake().DebateDependencies(), Repository: repository}
+	seals := &sealer{S: s.intake().SealerDependencies(), Repository: repository}
+	build := &builder{S: s.intake().BuilderDependencies(), Repository: repository}
 	overlap := &overlaps{s: s, repository: repository}
-	rules := charterer{s: s, repository: repository}
+	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &finalReviewer{s: s, repository: repository}
 	publish := &publisher{s: s, repository: repository}
-	amend := &amendmentDrafter{drafter: draft}
-	amendRounds := amendmentDebate{rounds}
+	amend := &amendmentDrafter{Drafter: draft}
+	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}

@@ -1,24 +1,24 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // productionSliceFixture drafts before enabling the committee. Both members
@@ -418,7 +418,7 @@ func TestProjectSpecProductionRepairsRecordedStaleSlices(t *testing.T) {
 		}
 		// The persisted decision packet already follows these member revisions;
 		// startup only needs to repair the shared slices.
-		must(t, (&debate{s: f.s, repository: repo}).presentPacket(context.Background(), member, true))
+		must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
 		var err error
 		memberRecords[i], err = trace.Read[trace.Record](repo, member)
 		must(t, err)
@@ -495,7 +495,7 @@ func TestProjectSpecProductionRecoversRefreshedMemberApprovals(t *testing.T) {
 		if api != nil {
 			t.Fatal(api)
 		}
-		if _, api = f.s.ratifyMember(context.Background(), o, o.pin); api != nil {
+		if _, api = f.s.ratifyMember(context.Background(), o, o.Pin); api != nil {
 			t.Fatal(api)
 		}
 	}

@@ -1,133 +1,50 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	fs "io/fs"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 )
 
 // masonRoles runs the chief of staff, mason and reviewer in containers, the
 // sandbox the fake engine's boundary check accepts.
 const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
-// fakeMasons is a fake model session standing in for the real mason's model
-// backend: it never calls out to a live model, so a mason's own reasoning,
-// cost and latency are left unverified. Each turn checks that it holds its
-// view's file tools, ask and done, and no amend, records what it saw,
-// writes masonWrote into its view and then plays what play holds for the
-// turn, which ends the turn failed by returning errFailTurn or errCrashTurn.
-type fakeMasons struct {
-	mu       sync.Mutex
-	runs     map[string][]agent.Request
-	problems []string
-	// play holds, by turn ID, what the turn does after writing masonWrote.
-	play     map[string]func(context.Context, agent.Request, *mcp.ClientSession) error
-	response map[string]string
-	// chief plays the fixture's chief-of-staff turns.
-	chief *chief
-}
+type fakeMasons = intakefixture.FakeMasons
 
-func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	listed, err := tools.ListTools(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, tool := range listed.Tools {
-		names = append(names, tool.Name)
-	}
-	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "factory_context", "file_read", "file_write", "project_context", "record_discovery"}) {
-		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
-	}
-	view := req.Workspace.Directory()
-	if err := os.WriteFile(filepath.Join(view, masonWrote), []byte("package trace\n"), 0644); err != nil {
-		m.problems = append(m.problems, err.Error())
-	}
-	stream := sessionStream(req)
-	m.runs[stream] = append(m.runs[stream], req)
-	if play := m.play[req.Name]; play != nil {
-		if err := play(ctx, req, tools); errors.Is(err, errFailTurn) {
-			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reported", SessionDir: req.SessionDir, NumTurns: 1, HasOutcome: true, Outcome: agent.Outcome{Status: "shipped"}}, nil
-		} else if errors.Is(err, errCrashTurn) {
-			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Crashed", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, ErrorSubtype: "execution"}, nil
-		} else if err != nil {
-			m.problems = append(m.problems, fmt.Sprintf("%s: %v", req.Name, err))
-		}
-	}
-	response := "Built"
-	if text, ok := m.response[req.Name]; ok {
-		response = text
-	}
-	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: response, SessionDir: req.SessionDir, NumTurns: 2}, nil
-}
+var sessionStream = intakefixture.SessionStream
 
-// sessionStream returns the workstream of a thread turn, from its session
-// directory threads/<project>/<workstream>/...
-func sessionStream(req agent.Request) string {
-	parts := strings.Split(filepath.ToSlash(req.SessionDir), "/")
-	if i := slices.Index(parts, "threads"); i >= 0 && i+2 < len(parts) {
-		return parts[i+2]
-	}
-	return ""
-}
+var errFailTurn = intakefixture.ErrFailTurn
 
-// errFailTurn is what a fake mason's play returns to end its turn with a
-// behavioural failure: it reports an outcome no mason may report, so the turn
-// is not retried.
-var errFailTurn = errors.New("the turn fails")
+var failMasonTurn = intakefixture.FailMasonTurn
 
-func failMasonTurn(context.Context, agent.Request, *mcp.ClientSession) error {
-	return errFailTurn
-}
-
-// errCrashTurn is what a fake mason's play returns to end its turn with an
-// infrastructure failure, which the runner retries.
-var errCrashTurn = errors.New("the turn crashes")
-
-// requests returns the mason turns that ran in the workstream.
-func (m *fakeMasons) requests(stream config.WorkstreamID) []agent.Request {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.runs[string(stream)])
-}
+var errCrashTurn = intakefixture.ErrCrashTurn
 
 // implementationRuns returns first implementation turns; clarification and
 // revision turns belong to the same unit's continuing work.
 func implementationRuns(m *fakeMasons, stream config.WorkstreamID) []agent.Request {
-	return slices.DeleteFunc(m.requests(stream), func(req agent.Request) bool {
+	return slices.DeleteFunc(m.Requests(stream), func(req agent.Request) bool {
 		return !strings.HasSuffix(req.Name, "-implement")
 	})
-}
-
-func (m *fakeMasons) check(t *testing.T) {
-	t.Helper()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.problems) != 0 {
-		t.Fatal(strings.Join(m.problems, "\n"))
-	}
 }
 
 // newMasonFixture is a debate fixture whose service runs thread turns
@@ -169,8 +86,8 @@ func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare f
 // countingSchedule returns a passed counter and the prepare func that makes
 // opts.schedulePassed advance it once per completed reconciliation pass.
 func countingSchedule() (*atomic.Int64, func(*Options)) {
-	passed := &atomic.Int64{}
-	return passed, func(opts *Options) { opts.schedulePassed = func() { passed.Add(1) } }
+	passed, scheduled := intakefixture.ScheduleCounter()
+	return passed, func(opts *Options) { opts.schedulePassed = scheduled }
 }
 
 // newMasonFixtureWith is newMasonFixtureOn with prepare, when set, changing
@@ -178,46 +95,17 @@ func countingSchedule() (*atomic.Int64, func(*Options)) {
 func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
-		onWorkspaces(t, *opts, backend)
-		// Leave time for status snapshots when instrumented tests run many
-		// service fixtures concurrently.
 		opts.WriteTimeout = time.Minute
 		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
-		if classifier != "" {
-			original := opts.Threads
-			opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
-				cfg.Project.Classifier = classifier
-				return original(r, cfg)
-			}
-		}
-		path := filepath.Join(opts.Config.Root, "config.toml")
-		data, err := os.ReadFile(path)
-		must(t, err)
-		must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
+		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, backend, capacity, classifier, opts.Threads)
 		if prepare != nil {
 			prepare(opts)
 		}
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
-	fake := &fakeMasons{runs: map[string][]agent.Request{}, play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
-	fake.chief = &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	f.engine.Turns["*"] = fake.chief.turn
-	f.engine.Turns[masonTurnID("resume")] = fake.turn
-	f.engine.Turns[masonTurnID("dedupe")] = fake.turn
-	// Most controller fixtures inspect the first turn. A failed follow-up
-	// keeps that unit implementing without starting another clean-turn cycle.
-	for _, unit := range []string{"resume", "dedupe"} {
-		for i := 1; i <= 3; i++ {
-			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
-			fake.play[name] = failMasonTurn
-			f.engine.Turns[name] = fake.turn
-		}
-	}
-	return f, fake
+	return f, intakefixture.ScriptMasons(f.engine, masonTurnID)
 }
 
 // masonTransitions returns the transitions of the mason controller in the
@@ -227,7 +115,7 @@ func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 	var out []transitionMove
 	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Actor == masonActor && (strings.HasPrefix(tr.Subject, "unit-") || strings.HasPrefix(tr.Subject, "unit_") || strings.HasPrefix(tr.Subject, "blocked-mason")) {
-			out = append(out, transitionMove{tr.ID, tr.Subject, tr.From, tr.To, tr.Cause, tr.Reason})
+			out = append(out, transitionMove{ID: tr.ID, Subject: tr.Subject, From: tr.From, To: tr.To, Cause: tr.Cause, Reason: tr.Reason})
 		}
 	}
 	return out
@@ -236,30 +124,7 @@ func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 // awaitMasonRan waits until the unit's first mason turn completed.
 func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
 	t.Helper()
-	wait, close := serviceChanges(t, f.s)
-	defer close()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		select {
-		case <-f.s.done:
-			t.Fatalf("the mason of unit %s of %s could not run: service stopped: %v", unit, stream, f.s.Wait())
-		default:
-		}
-		th, err := f.repository().Thread(stream, masonAgent(unit))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		if err == nil && len(th.Turns) > 0 && !th.Turns[0].CompletedAt.IsZero() {
-			if status := th.Turns[0].Status(); status != "idle" {
-				t.Fatalf("the mason of unit %s of %s ended %s: %+v", unit, stream, status, th.Turns[0])
-			}
-			return th
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the mason of unit %s of %s never ran: %+v", unit, stream, th)
-		}
-		wait()
-	}
+	return f.sharedTurns().AwaitMasonRan(t, stream, unit)
 }
 
 // awaitMasonTransition waits until the mason controller records a
@@ -283,33 +148,12 @@ func (f *shedFixture) startedReason(t *testing.T, stream config.WorkstreamID, un
 }
 
 func started(unit, reason string) transitionMove {
-	return transitionMove{masonTransitionID(unit), trace.UnitSubject(unit), UnitReady, UnitImplementing, trace.UnitSubject(unit) + "-" + UnitReady, reason}
+	return transitionMove{ID: masonTransitionID(unit), Subject: trace.UnitSubject(unit), From: UnitReady, To: UnitImplementing, Cause: trace.UnitSubject(unit) + "-" + UnitReady, Reason: reason}
 }
 
-// settle lets the service's loop run several more passes.
-func settle() { time.Sleep(1500 * time.Millisecond) }
+var settle = intakefixture.Settle
 
-// awaitPasses waits until passed, advanced once per completed reconciliation
-// pass by a schedulePassed hook a fixture's prepare func installed, has
-// counted at least n more passes than when this call began, then returns
-// what the counter observed. It fails at the deadline with the last count,
-// so a check that nothing more happened still runs against passes that
-// demonstrably ran, rather than a fixed sleep that might not have covered
-// any.
-func awaitPasses(t *testing.T, passed *atomic.Int64, n int64) int64 {
-	t.Helper()
-	target := passed.Load() + n
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if got := passed.Load(); got >= target {
-			return got
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("passes %d, want at least %d", passed.Load(), target)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
+var awaitPasses = intakefixture.AwaitPasses
 
 // awaitEventTurns waits until the workstream's chief of staff has received
 // event turns that together carry every wanted body.
@@ -379,7 +223,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	// Further passes find no more to do for either unit: run several, then
 	// check that nothing beyond the one start was recorded.
 	awaitPasses(t, passed, 3)
-	masons.check(t)
+	masons.Check(t)
 
 	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume"))}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
@@ -404,7 +248,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	if req.TurnID != masonTurnID("resume") || req.Unit != "resume" || req.Cause != masonTransitionID("resume") || req.Actor != masonActor {
 		t.Fatalf("mason turn request %+v", req)
 	}
-	runs := masons.requests(stream)
+	runs := masons.Requests(stream)
 	if len(runs) < 1 {
 		t.Fatalf("mason turns run %d times", len(runs))
 	}
@@ -459,7 +303,7 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f.start(t)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, stream, "resume")
-	masons.check(t)
+	masons.Check(t)
 	if runs := implementationRuns(masons, stream); len(runs) != 1 || !strings.Contains(runs[0].Prompt, "# Unit resume\n") {
 		t.Fatalf("initial mason turns: got %d", len(runs))
 	}
@@ -549,7 +393,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 
 	f.editSpec(t, stream, validSpec)
 	f.awaitMasonRan(t, stream, "resume")
-	masons.check(t)
+	masons.Check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 }
 
@@ -585,7 +429,7 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	// Further passes find the broken unit still blocked and record nothing
 	// more against it.
 	awaitPasses(t, passed, 3)
-	masons.check(t)
+	masons.Check(t)
 
 	reasons := f.blocks(t, broken, "resume")
 	if len(reasons) != 1 || !strings.HasPrefix(reasons[0], "unit resume stays ready: its workspace cannot be opened: ") {
@@ -654,7 +498,7 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			// Further passes find the blocked unit still holding no slot and
 			// record nothing more against it.
 			awaitPasses(t, passed, 3)
-			masons.check(t)
+			masons.Check(t)
 			if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !tc.check(got[0]) {
 				t.Fatalf("blocked %q", got)
 			}

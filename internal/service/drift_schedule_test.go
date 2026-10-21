@@ -1,20 +1,20 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // idleStream is a workstream that never starts, so it is neither building
@@ -157,7 +157,7 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 
 	// A final rebase after the drift rebase restarts the interval.
 	finalAt := second.At.Add(30 * time.Minute)
-	g, err := featureWorkspaces(f.s.about(repository), repository).of(stream)
+	g, err := featureWorkspaces(f.s.about(repository), repository).Of(stream)
 	must(t, err)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)

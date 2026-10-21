@@ -1,19 +1,19 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestDesignProductionQueuedDeltaRetiresBeforeExecution(t *testing.T) {
@@ -28,9 +28,9 @@ func TestDesignProductionQueuedDeltaRetiresBeforeExecution(t *testing.T) {
 
 func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	ctx := context.Background()
-	queued := &changeRaceGate{step: "change-delta-queued", reached: make(chan struct{}), released: make(chan struct{})}
+	queued := &changeRaceGate{Step: "change-delta-queued", Reached: make(chan struct{}), Released: make(chan struct{})}
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
-	t.Cleanup(queued.release)
+	t.Cleanup(queued.Release)
 	t.Cleanup(cleanup.release)
 	// Delta scheduling runs in a background observer. Keep the runner pending
 	// until inspection has observed the retired controller's unclaimed intent.
@@ -47,7 +47,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 			return nil, true
 		}
 	}, checkpoint: func(ctx context.Context, step string) error {
-		if err := queued.checkpoint(ctx, step); err != nil {
+		if err := queued.Checkpoint(ctx, step); err != nil {
 			return err
 		}
 		return cleanup.checkpoint(ctx, step)
@@ -64,12 +64,12 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 			}
 		}
 	})
-	queued.armed.Store(true)
+	queued.Armed.Store(true)
 	c, api := f.s.requestChange(ctx, string(f.origin), ChangeRequest{Key: "retired-dispatch", Kind: "amend", Scope: "workgroup", Change: "Revise the shared acknowledgment contract."})
 	if api != nil {
 		t.Fatal(api)
 	}
-	queued.await(t)
+	queued.Await(t)
 	var owner *trace.Repository
 	var intent trace.OperationRecord
 	for _, m := range resolutionMembers(f) {
@@ -110,7 +110,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	}
 	allowDeltas.Store(true)
 	owner.WakeWorkflow()
-	queued.release()
+	queued.Release()
 	cleanup.await(t)
 	ops, err := owner.Operations(address)
 	must(t, err)

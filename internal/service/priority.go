@@ -171,10 +171,3 @@ func effectivePriority(store *runtime.Store, project config.ProjectID) []config.
 	}
 	return []config.WorkstreamID{}
 }
-
-func priorityRefusal(reason string) (json.RawMessage, error) {
-	return json.Marshal(struct {
-		Recorded bool   `json:"recorded"`
-		Reason   string `json:"reason"`
-	}{false, reason})
-}

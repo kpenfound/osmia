@@ -1,16 +1,16 @@
 package service
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"slices"
-	"testing"
+	context "context"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // sealDependent creates a workstream on the backend, building on base when
@@ -39,14 +39,14 @@ func sealDependent(t *testing.T, f *shedFixture, repo *trace.Repository, backend
 	header.Schema, header.ID = "osmia.trace.transition", "in-shed"
 	_, err = repo.SetFeatureState(ctx, header, InShedState, "Owner approved the draft")
 	must(t, err)
-	z := &sealer{s: f.s, repository: repo}
+	z := &sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
 	must(t, z.Pass(ctx))
 	if result, err := z.Apply(ctx, actionOperation(t, repo, stream, SealAction)); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("sealing %+v: %v", result, err)
 	}
 	sealed, _, _, err := seal.Latest(repo, stream)
 	must(t, err)
-	g, err := featureWorkspaces(f.s.about(repo), repo).of(stream)
+	g, err := featureWorkspaces(f.s.about(repo), repo).Of(stream)
 	must(t, err)
 	w, found, err := g.Workspace(ctx, string(stream))
 	must(t, err)
@@ -90,7 +90,7 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			base, held := sealDependent(t, f, repo, backend, "", map[string]string{"base.go": "base\n"})
 			stream, _ := sealDependent(t, f, repo, backend, base, map[string]string{"dependent.go": "dependent\n"})
 			cfg := f.s.about(repo)
-			g, err := featureWorkspaces(cfg, repo).of(stream)
+			g, err := featureWorkspaces(cfg, repo).Of(stream)
 			must(t, err)
 
 			if _, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); api == nil || api.Code != Conflict {

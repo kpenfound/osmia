@@ -41,7 +41,7 @@ func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Rep
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	provider, err := newUnitWorkspaces(cfg, r).of(config.WorkstreamID(scope.Workstream))
+	provider, err := newUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return isolation.Selection{}, err
 	}

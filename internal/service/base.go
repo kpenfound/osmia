@@ -127,7 +127,7 @@ func dependentBaseChanged(ctx context.Context, cfg *config.Config, repo *trace.R
 	if err != nil || !sealed {
 		return false, err
 	}
-	g, err := featureWorkspaces(cfg, repo).of(stream)
+	g, err := featureWorkspaces(cfg, repo).Of(stream)
 	if err != nil {
 		return false, err
 	}
@@ -222,7 +222,7 @@ func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) erro
 				reason = fmt.Sprintf("base workstream %s has no sealed branch yet", parent)
 				break
 			}
-			g, err := featureWorkspaces(s.about(repo), repo).of(parent)
+			g, err := featureWorkspaces(s.about(repo), repo).Of(parent)
 			if err != nil {
 				return err
 			}

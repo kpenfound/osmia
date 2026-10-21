@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/intake"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -418,7 +419,7 @@ func TestServiceSealAndBuildEffectsSurviveRestart(t *testing.T) {
 				}
 			})
 			f.upstream(t)
-			stream, _ := f.ratified(t)
+			stream, _ := f.scenario().Ratified(t)
 			awaitPollSignal(t, gate.entered)
 			f.stop(t)
 			f.opts.boundary = nil
@@ -451,7 +452,7 @@ func TestServiceSealAndBuildEffectsSurviveRestart(t *testing.T) {
 				must(t, err)
 				seen := map[string]int{}
 				for _, tr := range transitions {
-					if tr.Actor == buildingActor || tr.Actor == sealingActor {
+					if tr.Actor == intake.BuildingActor || tr.Actor == sealingActor {
 						seen[tr.ID]++
 					}
 				}

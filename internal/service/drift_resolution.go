@@ -23,23 +23,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-const (
-	// driftMasonAgent is the agent and thread of a workstream's mason that
-	// resolves the conflicts of its drift rebases, and driftReviewerAgent
-	// the reviewer that reads each resolution. Neither name is one a unit's
-	// agent can take.
-	driftMasonAgent    = "drift-mason"
-	driftReviewerAgent = "drift-reviewer"
-	// driftsDirectory is the directory under the root holding the
-	// resolution workspaces of drift rebases, by project and workstream.
-	driftsDirectory = "drifts"
-	// The outcomes drift/rebase.json records while a conflicted drift
-	// rebase is resolved: resolved once the replay holds a candidate for
-	// review, rejected once a review sent it back to the mason.
-	driftResolved = "resolved"
-	driftRejected = "rejected"
-)
-
 // errDriftAwaits wraps why a drift rebase in resolution waits: the
 // operation stays pending, holding its workstream's landings and the
 // project's other drift rebases, until the resolution is approved or held.
@@ -65,7 +48,7 @@ func resolving(outcome string) bool {
 // <root>/drifts/<project>/<workstream>, on driftBranch and on the backend the
 // repository records for the workstream.
 func driftWorkspaces(cfg *config.Config, repository *trace.Repository) streamWorkspaces {
-	return streamWorkspaces{cfg: cfg, repository: repository, directory: driftsDirectory}
+	return streamWorkspaces{Cfg: cfg, Repository: repository, Directory: driftsDirectory}
 }
 
 // driftBranch names the branch drift rebase k of the workstream is
@@ -93,7 +76,7 @@ type resolutions struct{ streamWorkspaces }
 
 // find returns the workstream's resolution workspace when the clone has one.
 func (r resolutions) find(ctx context.Context, stream config.WorkstreamID) (workspace.Worktree, error) {
-	g, err := r.of(stream)
+	g, err := r.Of(stream)
 	if err != nil {
 		return workspace.Worktree{}, err
 	}
@@ -154,7 +137,7 @@ func driftReviewerSelection(ctx context.Context, cfg *config.Config, repository 
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	g, err := driftWorkspaces(cfg, repository).of(stream)
+	g, err := driftWorkspaces(cfg, repository).Of(stream)
 	if err != nil {
 		return isolation.Selection{}, err
 	}
@@ -183,7 +166,7 @@ func (r resolutions) capture(ctx context.Context, scope coreadapter.Scope, view 
 	if err != nil {
 		return err
 	}
-	g, err := r.of(config.WorkstreamID(scope.Workstream))
+	g, err := r.Of(config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return err
 	}
@@ -408,7 +391,7 @@ func (d drifter) resolve(ctx context.Context, stream config.WorkstreamID, rebase
 	if err != nil {
 		return rebase, err
 	}
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := driftWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return rebase, err
 	}
@@ -533,7 +516,7 @@ func awaiting(rebase DriftRebase, err error, format string, args ...any) error {
 // k, creating it on driftBranch from the feature branch's old tip when the
 // clone has none. One a drift rebase before this one left is removed first.
 func (d drifter) resolution(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (workspace.Worktree, error) {
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := driftWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return workspace.Worktree{}, err
 	}
@@ -557,7 +540,7 @@ func (d drifter) resolution(ctx context.Context, stream config.WorkstreamID, reb
 // release removes the workstream's resolution workspace when the clone has
 // one. Its branch stays.
 func (d drifter) release(ctx context.Context, stream config.WorkstreamID) error {
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := driftWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return err
 	}
@@ -609,7 +592,7 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	default:
 		return false, nil
 	}
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := driftWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return false, err
 	}
@@ -816,7 +799,7 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 	if err != nil {
 		return "", err
 	}
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := driftWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return "", err
 	}
@@ -912,7 +895,7 @@ Read both changes with %s, whole or by file and line range. Their changed files,
 // change before the rebase, from its merge base with upstream, and the
 // resolved candidate's change on upstream.
 func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, rebase DriftRebase) ([]reviewtools.PinnedDiff, error) {
-	g, err := driftWorkspaces(cfg, repository).of(stream)
+	g, err := driftWorkspaces(cfg, repository).Of(stream)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -129,7 +130,7 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 			}
 			probe := func() {
 				t.Helper()
-				g, err := featureWorkspaces(f.s.cfg, repo).of(first)
+				g, err := featureWorkspaces(f.s.cfg, repo).Of(first)
 				must(t, err)
 				if backend == config.WorkspacesJujutsu {
 					entries, err := os.ReadDir(filepath.Join(g.(*workspace.Jujutsu).Directory, ".jujutsu", ".jj", "osmia-checkpoints"))
@@ -324,7 +325,7 @@ func TestFinalReviewRestartPreservesAnotherReviewsSettledJujutsuWork(t *testing.
 					t.Fatalf("recorded %d rebases after restart", len(rebases))
 				}
 			}
-			g, err := featureWorkspaces(f.s.about(f.repository()), f.repository()).of(second)
+			g, err := featureWorkspaces(f.s.about(f.repository()), f.repository()).Of(second)
 			must(t, err)
 			tip, exists, err := g.Branch(context.Background(), featureBranch(second))
 			must(t, err)
@@ -354,7 +355,7 @@ func TestShedRedraftRestartReconcilesRecordedEffect(t *testing.T) {
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	d := &debate{s: f.s, repository: repo}
+	d := &debate{S: f.s.intake().DebateDependencies(), Repository: repo}
 	must(t, d.Pass(ctx))
 	op := operationRecord(t, repo, stream, RedraftAction)
 	release, admitted := f.s.modelOperationLimit(repo, nil)(op.Operation)
@@ -368,14 +369,14 @@ func TestShedRedraftRestartReconcilesRecordedEffect(t *testing.T) {
 		t.Fatal("redraft was not claimed")
 	}
 	defer attempt.Close()
-	seen, err := (replier{d}).Inspect(ctx, op.Operation)
+	seen, err := (replier{Debate: d}).Inspect(ctx, op.Operation)
 	must(t, err)
 	observation := attempt.Action("observe", f.s.now())
 	observation.Observation = &seen
 	must(t, attempt.Record(ctx, observation))
 	must(t, attempt.Record(ctx, attempt.Action("effect", f.s.now())))
-	f.script((roundInput{Round: 1, Redraft: true}).turnID(1), nil, nil)
-	_, err = (replier{d}).Apply(ctx, op.Operation)
+	f.script((intake.RoundInput{Round: 1, Redraft: true}).TurnID(1), nil, nil)
+	_, err = (replier{Debate: d}).Apply(ctx, op.Operation)
 	must(t, err)
 	before := operationRecord(t, repo, stream, RedraftAction)
 	if before.Claim == nil || before.Result != nil || before.Acknowledged {
@@ -394,7 +395,11 @@ func TestShedRedraftRestartReconcilesRecordedEffect(t *testing.T) {
 	if docs := f.documents(t, stream, shed.RedraftedDocumentID(1)); len(docs) != 1 {
 		t.Fatalf("recorded %d redrafts", len(docs))
 	}
-	if ran := f.ran(); ran[(roundInput{Round: 1, Redraft: true}).turnID(1)] != 1 || ran[(roundInput{Round: 1, Redraft: true}).turnID(2)] != 0 {
+	ran := map[string]int{}
+	for _, turn := range f.runs() {
+		ran[turn]++
+	}
+	if ran[(intake.RoundInput{Round: 1, Redraft: true}).TurnID(1)] != 1 || ran[(intake.RoundInput{Round: 1, Redraft: true}).TurnID(2)] != 0 {
 		t.Fatalf("restart repeated the architect: %v", ran)
 	}
 }

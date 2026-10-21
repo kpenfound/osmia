@@ -1,26 +1,26 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/questions"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	questions "github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // holdQuestionReview lets delivery and dispatch run while the reviewer
@@ -150,8 +150,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 				opts.ShutdownTimeout = 10 * time.Second
 			})
 			defer func() { stopQuestionJourney(t, f) }()
-			masons.play[masonTurnID("resume")] = reportDone("Resume uploads")
-			masons.play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+			masons.Play[masonTurnID("resume")] = reportDone("Resume uploads")
+			masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n"), 0600); err != nil {
 					return err
 				}
@@ -188,7 +188,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 						return nil, err
 					}
 				default:
-					return chief.turn(ctx, req, turn, tools)
+					return chief.Turn(ctx, req, turn, tools)
 				}
 				return questionResult(req, "session-"+req.Name, "Reviewed"), nil
 			}
@@ -321,8 +321,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			if reviewCalls.Load() != 1 || answerCalls.Load() != 1 || finalCalls.Load() != 1 {
 				t.Fatalf("model turns: review %d, answer %d, final %d", reviewCalls.Load(), answerCalls.Load(), finalCalls.Load())
 			}
-			masons.check(t)
-			problems.check(t)
+			masons.Check(t)
+			problems.Check(t)
 		})
 	}
 }

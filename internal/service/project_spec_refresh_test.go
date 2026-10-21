@@ -1,20 +1,20 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"syscall"
-	"testing"
+	context "context"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	syscall "syscall"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // projectSliceRefreshFixture settles the real drafts, then joins the
@@ -53,7 +53,7 @@ func reviseRefreshMember(t *testing.T, f *crossRepoRatifyFixture, member config.
 	doc.Content = content
 	doc.Cause = "member-revision"
 	must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
-	must(t, (&debate{s: f.s, repository: repo}).presentPacket(context.Background(), member, true))
+	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
 }
 
 func runRefresh(t *testing.T, f *crossRepoRatifyFixture) {
@@ -258,7 +258,7 @@ func TestRecoverMemberApprovalsMatchesRefreshedSlices(t *testing.T) {
 		if api != nil {
 			t.Fatal(api)
 		}
-		_, api = f.s.ratifyMember(context.Background(), o, o.pin)
+		_, api = f.s.ratifyMember(context.Background(), o, o.Pin)
 		if api != nil {
 			t.Fatal(api)
 		}

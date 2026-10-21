@@ -1,27 +1,28 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	fs "io/fs"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/isolation"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // checkGrants reports a request whose grants or verified turn reach beyond a
@@ -104,45 +105,9 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 	return errors.Join(problems...)
 }
 
-// snapshot reads every file below dir, including VCS metadata.
-func snapshot(t *testing.T, dir string) map[string]string {
-	t.Helper()
-	files := map[string]string{}
-	must(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		files[path] = string(data)
-		return err
-	}))
-	return files
-}
+var snapshot = intakefixture.Snapshot
 
-// deliver accepts an owner message and publishes the intent to run it.
-func deliver(t *testing.T, repo *trace.Repository, turn string, version uint64, at time.Time) trace.TurnRequest {
-	t.Helper()
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
-		AgentID: demoAgent, ThreadID: demoThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: "You are the mason.", Prompt: "Owner message: " + turn}
-	_, err := repo.EnqueueTurn(context.Background(), req)
-	must(t, err)
-	event := trace.EventID("deliver_"+turn, "turn")
-	op, err := thread.TurnOperation(project, event, thread.TurnInput{Workstream: stream, Agent: demoAgent, Turn: turn})
-	must(t, err)
-	from := ""
-	if version > 0 {
-		from = "delivering"
-	}
-	tx := trace.Transaction{ExpectedVersion: version, Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
-		Subject: "mason_inbox", From: from, To: "delivering", Reason: "Owner message accepted for the mason thread"},
-		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
-	_, err = repo.Transact(context.Background(), tx)
-	must(t, err)
-	return req
-}
+var deliver = intakefixture.Deliver
 
 func TestThreadContinuityAcrossRestart(t *testing.T) {
 	// serial: subtests set process env GITHUB_TOKEN, GH_TOKEN and OSMIA_DELIVERY_TOKEN via t.Setenv

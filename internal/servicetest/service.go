@@ -4,7 +4,6 @@ package servicetest
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -70,10 +70,7 @@ func ActivityFixture(t *testing.T) (service.Options, *config.Config, *trace.Repo
 }
 func WithWeb(t *testing.T, opts service.Options, addr string) {
 	t.Helper()
-	path := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(path)
-	fixturekit.Must(t, err)
-	fixturekit.Must(t, os.WriteFile(path, append(data, []byte("[listen]\nweb = \""+addr+"\"\n")...), 0600))
+	intakefixture.WithWeb(t, opts.Config.Root, addr)
 }
 func ServiceChanges(t *testing.T, s *service.Service) (func(), func()) {
 	t.Helper()
@@ -82,4 +79,12 @@ func ServiceChanges(t *testing.T, s *service.Service) (func(), func()) {
 		t.Fatal("cannot wait on a stopped service")
 	}
 	return func() { t.Helper(); fixturekit.Must(t, wait()) }, release
+}
+
+// StartContext starts a real service with the caller's cancellable lifetime.
+func StartContext(ctx context.Context, opts service.Options, hooks service.TestHooks) (*service.Service, error) {
+	if hooks.ReviewChecks == nil {
+		hooks.ReviewChecks = fixturekit.PassingChecks
+	}
+	return service.StartForTest(ctx, opts, hooks)
 }

@@ -507,17 +507,6 @@ func (s *Service) dispatchProjectSpecDraft(ctx context.Context, wt *trace.Reposi
 	return s.recordProjectSpecDraft(ctx, wt, g, host, turn, result)
 }
 
-// queuedTurn reports whether the thread already has a queued turn with the
-// given ID.
-func queuedTurn(t trace.Thread, turn string) bool {
-	for _, q := range t.Turns {
-		if q.Request.TurnID == turn {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Service) enqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, turn string) error {
 	profile, _, err := s.roleExecution(s.current(), architectRole)
 	if err != nil {

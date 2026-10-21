@@ -63,7 +63,7 @@ func resolveTurnID(unit string, k int) string {
 // reports whether every unit is current, so a landing may be asked for.
 func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]bool, dispatched map[string]bool, rebased map[string][]string) (bool, error) {
 	units := newUnitWorkspaces(f.cfg, f.repository)
-	g, err := units.of(b.stream)
+	g, err := units.Of(b.stream)
 	if err != nil {
 		return false, err
 	}
@@ -434,7 +434,7 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "rebase " + result.Outcome, Result: result}, nil
 	}
 	branch := unitBranch(stream, in.Unit)
-	g, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
+	g, err := newUnitWorkspaces(r.cfg, r.repository).Of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -508,7 +508,7 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return *result, nil
 	}
-	g, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
+	g, err := newUnitWorkspaces(r.cfg, r.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

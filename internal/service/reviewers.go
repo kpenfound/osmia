@@ -22,8 +22,8 @@ import (
 )
 
 const verdictTool = "verdict"
+
 const verdictOutcome = "verdict"
-const reviewerRole = "reviewer"
 
 var reviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
 
@@ -111,9 +111,6 @@ func (t *verdictTurns) CheckResume(ctx context.Context, previous, next coreadapt
 
 type reviewers struct{ *masons }
 
-func reviewerAgent(unit string) string {
-	return reviewerRole + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
-}
 func reviewTurnID(unit string, version uint64) string {
 	return fmt.Sprintf("%s-review-%d", reviewerAgent(unit), version)
 }
@@ -758,7 +755,7 @@ func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, un
 	if reason := staleReview(reviewed, current); reason != "" {
 		return reason, nil
 	}
-	git, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	git, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
 	if err != nil {
 		return "", err
 	}

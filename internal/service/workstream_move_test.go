@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -22,21 +23,16 @@ import (
 // turn of the workstream. The turn answers the owner when owner is set.
 func chiefMoveTool(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, turn string, owner bool) coreadapter.Tool {
 	t.Helper()
-	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, demoStart, serviceActor)
-	must(t, err)
 	actor, cause := serviceActor, "fixture"
 	if owner {
 		actor, cause = ownerActor, "owner-message"
 	}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.project, Workstream: stream, At: demoStart, Actor: actor, Cause: cause},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "The final review failed."})
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-"+turn, filepath.Join(t.TempDir(), turn), demoStart)
-	must(t, err)
+	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
+		Turn: turn, Prompt: "The final review failed.", Actor: actor, Cause: cause, Token: "token-" + turn, Directory: turn,
+	})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	return controls.moveWorkstream(repo, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn})
+	return controls.moveWorkstream(repo, scope)
 }
 
 func callMove(t *testing.T, tool coreadapter.Tool, input string) string {

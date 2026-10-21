@@ -1,19 +1,19 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // parallelPlan has resume and dedupe in internal.trace, and upload and audit
@@ -51,22 +51,7 @@ func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "")
-	mapping, err := kb.Load(f.repository())
-	must(t, err)
-	for _, name := range []string{"upload", "audit"} {
-		mapping.Entities = append(mapping.Entities, kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}})
-	}
-	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), librarianActor, "fixture"))
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	for _, unit := range []string{"upload", "audit"} {
-		f.engine.Turns[masonTurnID(unit)] = fake.turn
-		for i := 1; i <= 3; i++ {
-			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
-			fake.play[name] = failMasonTurn
-			f.engine.Turns[name] = fake.turn
-		}
-	}
+	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
 	return f, fake
 }
 
@@ -94,7 +79,7 @@ func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 	f.awaitMasonRan(t, stream, "resume")
 	f.awaitMasonRan(t, stream, "upload")
 	f.awaitDeferral(t, stream, "audit", DeferWorkstreamCap)
-	masons.check(t)
+	masons.Check(t)
 	if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}; !slices.Equal(got, want) {
 		t.Fatalf("started %v, want %v", got, want)
 	}
@@ -110,16 +95,16 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	p := &faults{}
 	f, masons := newParallelMasonFixture(t, 2, 2, parallelPlan)
 	defer f.stop(t)
-	chief := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	chief := &chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = chief.turn
-	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.Turns["*"] = chief.Turn
+	f.engine.Turns[masonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "waiting", parallelPlan)
 	f.awaitMasonRan(t, stream, "audit")
 	f.awaitDeferral(t, stream, "dedupe", DeferEntangled)
-	p.check(t)
-	masons.check(t)
+	p.Check(t)
+	masons.Check(t)
 
 	transitions := masonTransitions(t, f, stream)
 	parkedAt := slices.Index(transitions, parked("resume", "1"))
@@ -138,7 +123,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 	t.Parallel()
 	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
 	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
 	var mu sync.Mutex
 	started := map[string]bool{}
 	both, release := make(chan struct{}), make(chan struct{})
@@ -159,13 +144,13 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 			return fmt.Errorf("the session of %s never overlapped the other mason's", req.Name)
 		}
 	}
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
 			return nil, err
 		}
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
@@ -176,7 +161,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
@@ -186,7 +171,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.turn(ctx, req, verified, tools)
+		return chief.Turn(ctx, req, verified, tools)
 	}
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "overlap", disjointPlan)
@@ -198,5 +183,5 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 	}
 	close(release)
 	f.awaitMasonRan(t, stream, "upload")
-	masons.check(t)
+	masons.Check(t)
 }

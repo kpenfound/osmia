@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/status"
@@ -90,104 +89,12 @@ func newLifecycleDesignFixture(t *testing.T) (*productionDesignFixture, *lifecyc
 // second controller or a reconciliation pass from the test.
 func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, ready func() bool) {
 	t.Helper()
-	changes, closeChanges := serviceChanges(t, f.s)
-	defer closeChanges()
-	deadline := time.Now().Add(demoTimeout)
-	for !ready() {
-		if time.Now().After(deadline) {
-			f.timeout(t, phase)
-		}
-		lifecycleAdvanceScheduled(t, f)
-		changes()
-	}
-}
-
-// lifecycleAdvanceScheduled advances to retry, event and PR polling deadlines;
-// the live controller still observes effects and owns every transition.
-func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
-	t.Helper()
-	if f.stream1 != "" && f.project != "" {
-		repo, err := f.s.repository(f.project)
-		must(t, err)
-		decision, found, err := repo.GroupApprovalOf(f.origin)
-		if err != nil || !found || !decision.Complete {
-			return
-		}
-	} else {
-		return
-	}
-	now := f.clock.Now()
-	next := now.Add(time.Second)
-	scheduled := false
-	record := func(at time.Time) {
-		if at.After(now) && (!scheduled || at.Before(next)) {
-			next, scheduled = at, true
-		}
-	}
-	cfg, projects := f.s.runtimes()
-	for _, active := range projects {
-		interval := f.s.about(active.repository).Project.PullRequestPollInterval()
-		record(f.s.polls.nextDue(active.id, interval, now))
-		streams, err := active.repository.Workstreams()
-		must(t, err)
-		for _, stream := range streams {
-			transitions, err := trace.Read[trace.Transition](active.repository, stream)
-			if err == nil {
-				for _, transition := range slices.Backward(transitions) {
-					if transition.Subject == baseRefreshAction {
-						record(transition.At.Add(interval))
-						break
-					}
-				}
-			}
-			_, revision, at, err := edgeObservationAt(active.repository, stream)
-			if err == nil && revision > 0 {
-				if attempt, ok := f.s.polls.last(active.id, stream, edgePoll); ok && attempt.at.After(at) {
-					at = attempt.at
-				}
-				record(at.Add(interval))
-			}
-			ops, err := active.repository.Operations(stream)
-			if err != nil {
-				continue
-			} // A concurrently moved trace is not a deadline.
-			for _, op := range ops {
-				if !op.Acknowledged {
-					record(op.RetryAt)
-				}
-			}
-			outbox, err := active.repository.Outbox(stream)
-			if err != nil {
-				continue
-			}
-			for _, e := range outbox {
-				if e.Acknowledged || e.Event.Operation != nil || e.Claim != nil {
-					continue
-				}
-				window := cfg.EventWindow()
-				if e.Event.Kind == trace.ProgressKind {
-					window = cfg.EventProgressWindow()
-				}
-				record(e.At.Add(window))
-			}
-		}
-	}
-	f.clock.Advance(next.Sub(now))
+	f.sharedDesign().LifecycleAwait(t, phase, ready)
 }
 
 func lifecycleWorker(t *testing.T, f *productionDesignFixture, project config.ProjectID, stream config.WorkstreamID, worker, turn, prompt string) {
 	t.Helper()
-	repo, err := f.s.repository(project)
-	must(t, err)
-	threads, err := repo.Threads(stream)
-	must(t, err)
-	if !slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.ID == worker }) {
-		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: worker, Project: project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "workstream_created"}
-		must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: masonRole, ThreadID: worker}))
-	}
-	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn + "_" + worker, Project: project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "workstream_created"}
-	_, err = repo.EnqueueTurn(context.Background(), trace.TurnRequest{Header: h, AgentID: worker, ThreadID: worker, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are a member mason.", Prompt: prompt})
-	must(t, err)
+	f.sharedDesign().LifecycleWorker(t, project, stream, worker, turn, prompt)
 }
 
 func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing.T) {
@@ -810,7 +717,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 
 			_, err = f.c.Abandon(ctx, f.stream1, "Owner cancelled the source-repo member.")
 			must(t, err)
-			hook := &designInterruption{step: step, nth: 1, reached: make(chan struct{})}
+			hook := &designInterruption{Step: step, Nth: 1, Reached: make(chan struct{})}
 			finished := make(chan error, 1)
 			if strings.HasPrefix(step, "archive-cleanup-") {
 				f.hook.Store(hook)
@@ -822,7 +729,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 				go func() { _, err := f.c.Archive(ctx, f.stream1); finished <- err }()
 			}
 			select {
-			case <-hook.reached:
+			case <-hook.Reached:
 			case err := <-finished:
 				t.Fatalf("archive returned before retirement boundary: %v", err)
 			case <-time.After(demoTimeout):
@@ -934,4 +841,9 @@ func TestDesignProductionLifecycleRecoversLegacyArchiveEvidence(t *testing.T) {
 	f.start(t)
 	_, err = f.c.Send(ctx, f.stream2, "Continue after recovery of the retained archive.")
 	must(t, err)
+}
+
+func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
+	t.Helper()
+	f.sharedDesign().LifecycleAdvanceScheduled(t)
 }

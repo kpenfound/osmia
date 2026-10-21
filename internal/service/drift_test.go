@@ -1,23 +1,24 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // driftOperations returns the workstream's drift rebase operations in the
@@ -43,17 +44,7 @@ func driftRecords(t *testing.T, repository *trace.Repository, stream config.Work
 	return out
 }
 
-// seals returns every recorded revision of seal.json.
-func seals(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []seal.Seal {
-	t.Helper()
-	var out []seal.Seal
-	for _, d := range streamDocuments(t, repository, stream, seal.DocumentID) {
-		s, err := seal.Parse([]byte(d.Content))
-		must(t, err)
-		out = append(out, s)
-	}
-	return out
-}
+var seals = intakefixture.Seals
 
 // testDrift makes every eligible workstream due for a drift rebase.
 func testDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

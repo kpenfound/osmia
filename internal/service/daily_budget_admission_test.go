@@ -29,9 +29,9 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	f.start(t)
 
 	release := make(chan struct{})
-	masons.mu.Lock()
-	masons.play[masonTurnID("upload")] = reportDone("Chunks are sent")
-	masons.mu.Unlock()
+	masons.Mu.Lock()
+	masons.Play[masonTurnID("upload")] = reportDone("Chunks are sent")
+	masons.Mu.Unlock()
 	f.engine.Mu.Lock()
 	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		select {
@@ -39,7 +39,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		result, err := masons.turn(ctx, req, verified, tools)
+		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
 		}

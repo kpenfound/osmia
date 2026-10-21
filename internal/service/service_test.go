@@ -1,65 +1,38 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"sync"
-	"syscall"
-	"testing"
-	"time"
+	bufio "bufio"
+	bytes "bytes"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	io "io"
+	net "net"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	sync "sync"
+	syscall "syscall"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // writeCharter records content as the project's next charter revision
 // through the API, as the owner does, and returns that revision.
 func writeCharter(t *testing.T, c *Client, project config.ProjectID, content string) trace.Document {
 	t.Helper()
-	ctx := context.Background()
-	current, err := c.Charter(ctx, project)
-	must(t, err)
-	doc, err := c.EditCharter(ctx, project, CharterEdit{Revision: current.Revision, Content: content})
-	must(t, err)
-	return doc
+	return intakefixture.WriteCharter(t, c, project, content)
 }
 
-// editDraft records spec and plan as the owner's edit of stream's draft
-// through the API. An empty argument keeps that document as it is.
-func editDraft(t *testing.T, c *Client, stream config.WorkstreamID, spec, plan string) map[string]trace.Document {
-	t.Helper()
-	ctx := context.Background()
-	docs, err := c.Documents(ctx, stream)
-	must(t, err)
-	if spec == "" {
-		spec = docs["spec"].Content
-	}
-	if plan == "" {
-		plan = docs["plan"].Content
-	}
-	edited, err := c.EditDraft(ctx, stream, DraftEdit{SpecRevision: docs["spec"].Revision, PlanRevision: docs["plan"].Revision, Spec: spec, Plan: plan})
-	must(t, err)
-	return edited
-}
-
-// awaitAcknowledged polls fetch until it returns operations and the reconcile
-// controller has acknowledged every one of them. An operation's result and its
-// acknowledgement are committed after the state its Apply commits, so a test
-// that reached an operation through an awaited state must wait here before it
-// asserts on the operation's result, acknowledgement or history.
 var awaitAcknowledged = fixturekit.AwaitAcknowledged
 
 func fixture(t *testing.T) Options {
@@ -93,11 +66,7 @@ func start(t *testing.T, opts Options) (*Service, *Client) {
 
 func mutation(t *testing.T, c *Client, method, kind string, input any) {
 	t.Helper()
-	var result MutationResponse
-	must(t, c.Do(context.Background(), method, Prefix+"/runtime/"+kind, input, &result))
-	if !result.Applied {
-		t.Fatal("not acknowledged")
-	}
+	intakefixture.Mutation(t, c, method, kind, input)
 }
 
 func TestRoundTrip(t *testing.T) {
@@ -520,37 +489,7 @@ func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
 	start(t, opts)
 }
 
-// recordSpec records content as the owner's next revision of stream's spec
-// directly in its trace, whatever the workstream's state.
-func recordSpec(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, content string) {
-	t.Helper()
-	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
-	var latest *trace.Document
-	for i := range docs {
-		if docs[i].Path == "spec.md" {
-			latest = &docs[i]
-		}
-	}
-	if latest == nil {
-		t.Fatalf("workstream %s records no spec", stream)
-	}
-	next := *latest
-	next.Revision++
-	next.Content, next.At, next.Actor, next.Cause, next.Depth = content, latest.At.Add(time.Second), trace.Actor{Kind: "owner", ID: "local"}, "owner-edit", 0
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{next}))
-}
-
-// documentCommit returns the commit that recorded the latest revision of the
-// document at path in stream's trace.
-func documentCommit(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, path string) string {
-	t.Helper()
-	rows := traceQuery(t, workstreamTraceDirectory(t, root, project, stream), "SELECT CAST(commit_seq AS TEXT) FROM records WHERE path = ? AND schema = 'osmia.trace.document' AND json_extract(body, '$.path') = ? ORDER BY seq DESC LIMIT 1", "workstreams/"+string(stream)+"/documents.jsonl", path)
-	if len(rows) != 1 {
-		t.Fatalf("workstream %s records no %s", stream, path)
-	}
-	return string(rows[0])
-}
+var recordSpec = intakefixture.RecordSpec
 
 // committedPaths returns, for each commit of the trace in directory after
 // the first after commits, the record paths and document paths it wrote.

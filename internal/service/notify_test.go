@@ -1,25 +1,26 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	io "io"
+	http "net/http"
+	httptest "net/http/httptest"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/eventstream"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	eventstream "github.com/kpenfound/osmia/internal/eventstream"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // fakeWebhook records the bodies posted to it and answers with status. It
@@ -148,17 +149,7 @@ func (f *fakeInbox) set(entries ...InboxEntry) {
 	}
 }
 
-// soon polls ok until it holds, failing with what after 20 seconds.
-func soon(t *testing.T, what string, ok func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
+var soon = intakefixture.Soon
 
 // settled waits until count stops changing for a 50ms window, so a check
 // right after it returns sees nothing still in flight (such as a webhook

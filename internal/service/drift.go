@@ -306,7 +306,7 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d of %s onto %s is %s in its conflict resolution; the branch stays at %s until a reviewer approves the resolution", in.Drift, r.Before, r.Upstream.Commit, r.Outcome, r.Before)}, nil
 	}
 	branch := featureBranch(stream)
-	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := featureWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -373,7 +373,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	var providers []workspace.Provider
 	for _, kind := range []streamWorkspaces{featureWorkspaces(d.cfg, d.repository), driftWorkspaces(d.cfg, d.repository)} {
-		g, err := kind.of(stream)
+		g, err := kind.Of(stream)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -414,7 +414,7 @@ func (d drifter) driftBase(ctx context.Context, operation string, stream config.
 		result, err := d.skip(ctx, stream, in.Drift, operation, reason)
 		return seal.Base{}, &result, err
 	}
-	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := featureWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return seal.Base{}, nil, err
 	}
@@ -494,7 +494,7 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 		}
 	}
 	replayed := found && rebase.Outcome == driftReplayed
-	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	g, err := featureWorkspaces(d.cfg, d.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

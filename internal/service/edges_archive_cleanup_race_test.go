@@ -51,7 +51,7 @@ func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T
 	must(t, err)
 	down, err := f.s.repository(f.project2)
 	must(t, err)
-	p := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "feature-head", PullRequest: 71}
+	p := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "feature-head", PullRequest: 71}
 	recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, p)
 	// A stale earlier-PR merge must not be used by the interrupted read.
 	resolutionDocument(t, up, f.stream1, ownPullRequestOutcomeDocument, ownPullRequestOutcomePath, ownPullRequestOutcome{PullRequest: 70, Outcome: ownPullRequestOutcomeMerged, MergeCommit: "stale-merge"})

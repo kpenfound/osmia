@@ -28,10 +28,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// AssembledState is the feature state of a workstream whose planned units
-// have all merged.
-const AssembledState = "assembled"
-
 // FinalReviewAction is the runner-boundary operation action that rebases an
 // assembled workstream's feature branch onto upstream one last time and runs
 // one committee member's read of the resulting branch against the sealed spec
@@ -104,11 +100,6 @@ const (
 	FindingBlocking = "blocking"
 	FindingAdvisory = "advisory"
 )
-
-// maxFinalRounds is how many final reviews of one workstream may find
-// blocking problems before further revisions of its assembled plan are the
-// owner's decision rather than the chief of staff's.
-const maxFinalRounds = 3
 
 // reportBlocking returns what stops the reviewed report from authorising delivery
 // on its own: each criterion no merged unit serves and each blocking finding.
@@ -283,7 +274,7 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if !found {
 		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).of(stream)
+	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).Of(stream)
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}
@@ -521,7 +512,7 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 	if !rebased {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded and has recorded no rebase", in.Review)}, nil
 	}
-	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).of(stream)
+	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).Of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -619,7 +610,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
 	}
-	g, err := featureWorkspaces(cfg, a.repository).of(stream)
+	g, err := featureWorkspaces(cfg, a.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -728,27 +719,11 @@ func (a *finalReviewer) recordRebase(ctx context.Context, stream config.Workstre
 	return a.repository.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// nextRevision returns the revision the next record of a workstream
-// document takes.
-func nextRevision(repository *trace.Repository, stream config.WorkstreamID, id string) (int, error) {
-	docs, err := trace.Read[trace.Document](repository, stream)
-	if err != nil {
-		return 0, err
-	}
-	revision := 1
-	for _, d := range docs {
-		if d.ID == id && d.Revision >= revision {
-			revision = d.Revision + 1
-		}
-	}
-	return revision, nil
-}
-
 // read drives the first committee member's turn of the review to its end
 // and records the report it left. It abandons a turn a previous service stop
 // interrupted and starts a new turn, carrying checks, while attempts remain.
 func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport, checks FinalCheckRun) (coreadapter.OperationResult, error) {
-	if err := (&debate{s: a.s, repository: a.repository}).ensureCommittee(ctx, stream, 1); err != nil {
+	if err := (&debate{S: a.s.intake().DebateDependencies(), Repository: a.repository}).EnsureCommittee(ctx, stream, 1); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	member := committeeAgent(1)
@@ -978,7 +953,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 			cfg := a.s.about(a.repository)
 			read := func(from, to string) func(ctx context.Context) (string, error) {
 				return func(ctx context.Context) (string, error) {
-					g, err := featureWorkspaces(cfg, a.repository).of(stream)
+					g, err := featureWorkspaces(cfg, a.repository).Of(stream)
 					if err != nil {
 						return "", err
 					}
@@ -1156,7 +1131,7 @@ func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream co
 	if err := os.RemoveAll(workspace); err != nil {
 		return nil, err
 	}
-	g, err := featureWorkspaces(cfg, a.repository).of(stream)
+	g, err := featureWorkspaces(cfg, a.repository).Of(stream)
 	if err != nil {
 		return nil, err
 	}
@@ -1570,7 +1545,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 	}
 	if dependency.Base != "" {
 		cfg := a.s.about(a.repository)
-		g, err := featureWorkspaces(cfg, a.repository).of(stream)
+		g, err := featureWorkspaces(cfg, a.repository).Of(stream)
 		if err != nil {
 			return report, "", err
 		}

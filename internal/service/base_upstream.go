@@ -25,7 +25,7 @@ func (s *Service) baseUpstream(ctx context.Context, raw string, req BaseUpstream
 		return BaseUpstreamResponse{}, api
 	}
 	cfg := s.about(repository)
-	g, err := featureWorkspaces(cfg, repository).of(stream)
+	g, err := featureWorkspaces(cfg, repository).Of(stream)
 	if err != nil {
 		return BaseUpstreamResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open the workspaces of workstream %s; check the clone", stream)}
 	}

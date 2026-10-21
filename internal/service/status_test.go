@@ -1,36 +1,35 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/isolation"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/status"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	status "github.com/kpenfound/osmia/internal/status"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const (
-	chiefAgent  = "agent_chief"
-	chiefThread = "thread_chief"
-	quiet       = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
-)
+const chiefAgent = intakefixture.ChiefAgent
+const chiefThread = intakefixture.ChiefThread
+const quiet = intakefixture.Quiet
 
 // queueChiefTurn accepts an owner message for the chief of staff and
 // publishes the intent to run it.

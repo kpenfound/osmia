@@ -1,25 +1,26 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/reconcile"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	reconcile "github.com/kpenfound/osmia/internal/reconcile"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // dedupeReport is the outcome a mason of unit dedupe of independentPlan and
@@ -31,8 +32,8 @@ var dedupeReport = "skip acknowledged chunks"
 func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f, masons := newMasonFixture(t, 1, drafted)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
+	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	defer f.engine.Mu.Unlock()
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -43,7 +44,7 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons)
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.turn(ctx, req, verified, tools)
+		return chief.Turn(ctx, req, verified, tools)
 	}
 	return f, masons
 }
@@ -51,21 +52,14 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons)
 // landOperations returns the workstream's landing operations.
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != LandAction })
+	return intakefixture.LandOperations(t, repository, stream, LandAction)
 }
 
 // approvedReview returns the latest recorded review result of the unit.
 func approvedReview(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, UnitReviewResult) {
 	t.Helper()
 	f := &foreman{masons: &masons{repository: repository}}
-	review, result, ok, err := f.approval(stream, unit, 0)
-	must(t, err)
-	if !ok {
-		t.Fatalf("unit %s has no satisfactory review: %+v", unit, review)
-	}
-	return review, result
+	return intakefixture.ApprovedReview(t, stream, unit, f.approval)
 }
 
 // landedCommits returns the commits of the feature branch since base.
@@ -115,7 +109,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 	stream, _ := f.builtAs(t, "landing")
 	f.awaitMerged(t, stream, "resume")
 	f.awaitUnit(t, stream, "dedupe", UnitImplementing)
-	masons.check(t)
+	masons.Check(t)
 
 	review, result := approvedReview(t, f.repository(), stream, "resume")
 	candidate, base := result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision
@@ -285,32 +279,10 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 // candidate and applies it, as a reviewer turn and the reviewer controller do.
 func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, unit, criterion string) {
 	t.Helper()
-	ctx := context.Background()
 	r := &reviewers{masons: newMasonController(s, repository)}
-	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	must(t, err)
-	_, identity, err := r.prepareUnitReview(ctx, stream, unit)
-	must(t, err)
-	turn := reviewTurnID(unit, state.Version)
-	data, err := json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	must(t, err)
-	docs, err := trace.Read[trace.Document](repository, stream)
-	must(t, err)
-	var latest trace.Document
-	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
-			latest = d
-		}
-	}
-	latest.Revision++
-	latest.Content = string(data) + "\n"
-	latest.At = time.Now()
-	latest.Cause = turn
-	must(t, repository.RecordDocuments(ctx, []trace.Document{latest}))
-	must(t, r.one(ctx, stream, unit, state, false))
-	if approved, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || approved.Value != UnitApproved {
-		t.Fatalf("unit %s is %+v: %v", unit, approved, err)
-	}
+	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity UnitReviewIdentity, turn string) ([]byte, error) {
+		return json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
+	}, reviewTurnID, reviewDocument, r.one, UnitApproved)
 }
 
 // newApprovedFixture creates two units with completed mason turns, candidate
@@ -326,10 +298,7 @@ func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, conf
 	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
-	seedReview(t, f, repository, stream, "resume", resumeReport)
-	seedReview(t, f, repository, stream, "dedupe", dedupeReport)
-	approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
-	approveDirectly(t, f.s, repository, stream, "dedupe", "spec#2")
+	intakefixture.SeedApprovedUnits(t, func(u, o string) { seedReview(t, f, repository, stream, u, o) }, func(u, c string) { approveDirectly(t, f.s, repository, stream, u, c) })
 	return f, stream, repository
 }
 

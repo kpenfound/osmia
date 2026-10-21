@@ -1,19 +1,18 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
@@ -24,9 +23,10 @@ import (
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newFinalFixture seeds a sealed validPlan with a committee runner and no
@@ -41,8 +41,7 @@ func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamI
 func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, extra, nil)
-	base := f.upstream(t)
-	stream, repository := seedBuild(t, f, key, validPlan, config.WorkspacesGit, base)
+	stream, repository := f.buildFixture().SeedGit(t, key)
 	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
 }
 
@@ -50,14 +49,7 @@ func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.
 // and records the unit merged, as a landing does, and returns the new tip.
 func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, files map[string]string) string {
 	t.Helper()
-	commit := moveFeature(t, f, stream, files)
-	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: trace.UnitSubject(unit) + "-" + UnitMerged, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: foremanActor, Cause: "landing-" + unit}
-	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: UnitMerged, Reason: fmt.Sprintf("unit %s landed as %s", unit, commit)}})
-	must(t, err)
-	return commit
+	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), foremanActor, UnitMerged)
 }
 
 // advanceUpstream commits files on upstream's main and returns the commit.
@@ -83,98 +75,30 @@ func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) stri
 // finalOperations returns the workstream's final review operations.
 func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != FinalReviewAction })
-	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
-	return ops
+	return intakefixture.FinalOperations(t, repository, stream, FinalReviewAction)
 }
 
-// streamDocuments returns the recorded revisions of one workstream document.
-func streamDocuments(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string) []trace.Document {
-	t.Helper()
-	docs, err := trace.Read[trace.Document](repository, stream)
-	must(t, err)
-	return slices.DeleteFunc(docs, func(d trace.Document) bool { return d.ID != id })
-}
+var streamDocuments = intakefixture.StreamDocuments
 
-// transitionByID returns the workstream's transition with the given ID.
-func transitionByID(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string) trace.Transition {
-	t.Helper()
-	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
-	i := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == id })
-	if i < 0 {
-		t.Fatalf("workstream %s has no transition %s", stream, id)
-	}
-	return transitions[i]
-}
+var transitionByID = intakefixture.TransitionByID
 
-// chiefEvent reports whether e is an event the chief of staff receives as
-// information: a notice or routine progress.
-func chiefEvent(e trace.Event) bool {
-	return e.Kind == trace.NoticeKind || e.Kind == trace.ProgressKind
-}
+var chiefEvent = intakefixture.ChiefEvent
 
-// noticeOf returns the notice the transition raised for the chief of staff.
-func noticeOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, transition string) string {
-	t.Helper()
-	outbox, err := repository.Outbox(stream)
-	must(t, err)
-	for _, entry := range outbox {
-		if entry.TransitionID == transition && chiefEvent(entry.Event) {
-			return entry.Event.Body
-		}
-	}
-	t.Fatalf("transition %s told the chief of staff nothing", transition)
-	return ""
-}
+var noticeOf = intakefixture.NoticeOf
 
 // assembleBoth merges both units of validPlan, checking that the workstream
 // stays building while one is unmerged, and asks for the first final review.
 // It returns the feature branch tip and the review's operation.
 func assembleBoth(t *testing.T, f *shedFixture, repository *trace.Repository, a *finalReviewer, stream config.WorkstreamID, resume, dedupe map[string]string) (string, coreadapter.Operation) {
 	t.Helper()
-	ctx := context.Background()
-	building := func() {
-		t.Helper()
-		must(t, a.Pass(ctx))
-		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != BuildingState {
-			t.Fatalf("the workstream is %+v with a unit unmerged: %v", feature, err)
-		}
-	}
-	building()
-	mergeDirectly(t, f, repository, stream, "resume", resume)
-	building()
-	head := mergeDirectly(t, f, repository, stream, "dedupe", dedupe)
-	must(t, a.Pass(ctx))
-	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
-		t.Fatalf("the workstream is %+v with every unit merged: %v", feature, err)
-	}
-	if ops := finalOperations(t, repository, stream); len(ops) != 0 {
-		t.Fatalf("final reviews asked for in the pass that assembled: %+v", ops)
-	}
-	must(t, a.Pass(ctx))
-	must(t, a.Pass(ctx))
-	ops := finalOperations(t, repository, stream)
-	if len(ops) != 1 {
-		t.Fatalf("final review operations %+v", ops)
-	}
-	return head, ops[0].Operation
+	return intakefixture.AssembleBoth(t, repository, a, stream, func(unit string, files map[string]string) string {
+		return mergeDirectly(t, f, repository, stream, unit, files)
+	}, resume, dedupe, AssembledState, FinalReviewAction)
 }
 
 // finalTurn installs the fake committee member's turn of final review k.
-func (f *shedFixture) finalTurn(k, attempt int, run func(ctx context.Context, tools *mcp.ClientSession) error) string {
-	turn := finalTurnID(k, committeeAgent(1), attempt)
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if err := run(ctx, tools); err != nil {
-			return nil, err
-		}
-		return &agent.Result{ClaudeID: "session-" + turn, ResultText: "Read the branch", SessionDir: req.SessionDir, NumTurns: 1}, nil
-	}
-	return turn
+func (f *shedFixture) finalTurn(k, attempt int, run func(context.Context, *mcp.ClientSession) error) string {
+	return intakefixture.FinalTurn(f.engine, finalTurnID(k, committeeAgent(1), attempt), run)
 }
 
 // A workstream moves to assembled only once every planned unit has merged.
@@ -930,7 +854,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 					t.Fatal("Jev was not asked")
 				}
 				state, _ := requests[0].State.(map[string]any)
-				g, err := featureWorkspaces(f.s.cfg, repo).of(stream)
+				g, err := featureWorkspaces(f.s.cfg, repo).Of(stream)
 				must(t, err)
 				diff, err := g.Diff(context.Background(), upstream, run.Commit)
 				must(t, err)

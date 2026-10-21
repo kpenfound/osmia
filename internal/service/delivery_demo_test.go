@@ -1,21 +1,21 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/followup"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	followup "github.com/kpenfound/osmia/internal/followup"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
@@ -27,8 +27,8 @@ func TestDeliveryDemonstration(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	masons.play[masonTurnID("resume")] = reportDone("Resume uploads")
-	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = reportDone("Resume uploads")
+	masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if added, err := followup.Read(f.repository(), stream); err != nil || len(added) != 0 {
 		t.Fatalf("an advisory finding built follow-ups %+v: %v", added, err)
 	}
-	masons.check(t)
+	masons.Check(t)
 	presented, err := f.c.Delivery(ctx, stream)
 	must(t, err)
 	// The draft is a short spec summary, not an account of the work: it does

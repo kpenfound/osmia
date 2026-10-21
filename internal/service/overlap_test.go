@@ -1,24 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // overlapEntities has the subsystems internal and cmd; internal.trace,
@@ -38,19 +39,7 @@ func overlapEntities() kb.Map {
 	}}
 }
 
-// sealOf is a seal of one unit per footprint, resolved against the map.
-func sealOf(t *testing.T, k int, m kb.Map, footprints ...[]string) seal.Seal {
-	t.Helper()
-	var p plan.Plan
-	for i, names := range footprints {
-		p.Units = append(p.Units, plan.Unit{ID: fmt.Sprintf("u%d", i+1), Footprint: names})
-	}
-	resolved, unresolved := seal.Take(p, m)
-	if len(unresolved) != 0 {
-		t.Fatalf("unresolved %v", unresolved)
-	}
-	return seal.Seal{Seal: k, Footprints: resolved}
-}
+var sealOf = intakefixture.SealOf
 
 // Two sealed footprints overlap when both name an entity or when an entity's
 // path patterns cover the other's; the advisory names the most specific

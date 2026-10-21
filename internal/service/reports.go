@@ -14,8 +14,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/followup"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/status"
@@ -210,45 +208,6 @@ func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
 	return done
 }
 
-func refuseReport(format string, args ...any) (json.RawMessage, error) {
-	return json.Marshal(struct {
-		Recorded bool   `json:"recorded"`
-		Reason   string `json:"reason"`
-	}{false, fmt.Sprintf(format, args...)})
-}
-
-// sealedUnit returns the unit of the latest sealed plan or follow-up scope names.
-func sealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Unit, error) {
-	stream := config.WorkstreamID(scope.Workstream)
-	latest, _, found, err := seal.Latest(repository, stream)
-	if err != nil {
-		return plan.Unit{}, err
-	}
-	if !found {
-		return plan.Unit{}, fmt.Errorf("workstream %s has no seal", stream)
-	}
-	graph, err := sealedPlan(repository, stream, latest.Revision.Plan)
-	if err != nil {
-		return plan.Unit{}, err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
-		return plan.Unit{}, err
-	}
-	unit, ok := p.Unit(scope.Unit)
-	if !ok {
-		added, found, err := followup.Find(repository, stream, scope.Unit)
-		if err != nil {
-			return plan.Unit{}, err
-		}
-		if !found {
-			return plan.Unit{}, fmt.Errorf("the sealed plan and follow-ups of workstream %s have no unit %s", stream, scope.Unit)
-		}
-		return added.Unit, nil
-	}
-	return unit, nil
-}
-
 // checkReport returns why a report is incomplete: an empty outcome or an
 // empty learning. It returns "" for a complete report.
 func checkReport(report MasonReport) string {
@@ -272,6 +231,7 @@ type reportingTurns struct {
 }
 
 var _ coreadapter.Turns = (*reportingTurns)(nil)
+
 var _ coreadapter.ResumeChecker = (*reportingTurns)(nil)
 
 func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
@@ -361,7 +321,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if err != nil {
 		return false, false, err
 	}
-	g, err := units.of(b.stream)
+	g, err := units.Of(b.stream)
 	if err != nil {
 		return false, false, err
 	}

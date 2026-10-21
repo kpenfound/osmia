@@ -394,7 +394,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if in.Maintenance && (!report.Maintenance || report.Upstream == nil || report.Upstream.Workstream == "" && (in.Upstream != cfg.Project.Upstream || in.Base != cfg.Project.BaseBranch)) {
 		return p.refuse(ctx, stream, in, "publication requires a fresh delivery maintenance review of its current base")
 	}
-	g, err := featureWorkspaces(cfg, p.repository).of(stream)
+	g, err := featureWorkspaces(cfg, p.repository).Of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

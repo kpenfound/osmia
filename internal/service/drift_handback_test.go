@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -34,15 +35,9 @@ func holdDrift(t *testing.T, f *shedFixture, d drifter, stream config.Workstream
 // its scope.
 func chiefTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, id string) coreadapter.Scope {
 	t.Helper()
-	ctx := context.Background()
-	_, err := repository.EnsureChiefOfStaff(ctx, stream, f.clock.Now(), serviceActor)
-	must(t, err)
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: serviceActor, Cause: "fixture"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: id, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "The drift rebase is held."})
-	must(t, err)
-	_, err = repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-"+id, filepath.Join(t.TempDir(), id), f.clock.Now())
-	must(t, err)
-	return coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: id}
+	return intakefixture.ClaimChiefTurn(t, repository, f.project, stream, f.clock.Now, intakefixture.ChiefTurnInput{
+		Turn: id, Prompt: "The drift rebase is held.", Actor: serviceActor, Cause: "fixture", Token: "token-" + id, Directory: id,
+	})
 }
 
 // The chief of staff hands a held drift rebase back with a note: the next

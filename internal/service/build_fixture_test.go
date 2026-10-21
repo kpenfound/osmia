@@ -2,8 +2,7 @@ package service
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 
@@ -17,22 +16,20 @@ import (
 // stopped service's open repository for controller tests.
 func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
-	return recordBuild(t, f, repository, key, graph, backend, base), repository
+	return intakefixture.SeedBuild(t, f.stop, f.s.current, func(t *testing.T, r *trace.Repository, k, g, b, base string) config.WorkstreamID {
+		return recordBuild(t, f, r, k, g, b, base)
+	}, key, graph, backend, base)
 }
 
 // seedBuilding gives a running service a sealed build ready for unit dispatch.
 func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
 	t.Helper()
-	backend, err := f.s.newWorkspaces(context.Background(), f.s.about(f.repository()))
-	must(t, err)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream := recordBuild(t, f, f.repository(), key, graph, backend.Backend, base)
-	must(t, f.s.refreshRuntime())
-	return stream
+	return intakefixture.SeedBuilding(t, f.clone, key, graph, func() (string, error) {
+		b, err := f.s.newWorkspaces(context.Background(), f.s.about(f.repository()))
+		return b.Backend, err
+	}, func(k, g, b, base string) config.WorkstreamID {
+		return recordBuild(t, f, f.repository(), k, g, b, base)
+	}, f.s.refreshRuntime)
 }
 
 // seedBuildingPaused creates ready builds under an owner pause.
@@ -69,38 +66,34 @@ func newReviewFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 // passes its checks, so the unit is reviewing.
 func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
 	t.Helper()
-	seedChecking(t, f, repository, stream, unit, outcome)
-	runChecks(t, f.s, repository, stream)
-	if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitReviewing {
-		t.Fatalf("fixture unit %s is %s, not reviewing: %v", unit, state.Value, err)
-	}
+	intakefixture.SeedReview(t, repository, stream, unit, outcome, UnitReviewing, func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) {
+		seedChecking(t, f, r, w, u, o)
+	}, func(t *testing.T, r *trace.Repository, w config.WorkstreamID) { runChecks(t, f.s, r, w) })
 }
 
 // seedChecking records a completed mason report and snapshots its
 // candidate, so the unit is checking.
 func seedChecking(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
 	t.Helper()
+	intakefixture.SeedChecking(t, f.unitSeedDriver(repository), repository, stream, unit, outcome)
+}
+
+func (f *shedFixture) unitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[building] {
 	m := newMasonController(f.s, repository)
-	ctx := context.Background()
-	b, found, err := m.read(stream)
-	must(t, err)
-	if !found {
-		t.Fatal("fixture workstream is not building")
+	return intakefixture.UnitSeedDriver[building]{Read: m.read, Start: m.start, Finish: m.finish,
+		Open: newUnitWorkspaces(f.s.current(), repository).open,
+		Complete: func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) trace.QueuedTurn {
+			return completeMasonTurn(t, f, r, w, u, o)
+		},
 	}
-	started, blocked, err := m.start(ctx, b, unit)
-	must(t, err)
-	if !started || blocked {
-		t.Fatalf("fixture unit %s did not start", unit)
-	}
-	w, _, err := newUnitWorkspaces(f.s.cfg, repository).open(ctx, stream, unit)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n"), 0644))
-	completeMasonTurn(t, f, repository, stream, unit, outcome)
-	b, _, err = m.read(stream)
-	must(t, err)
-	moved, blocked, err := m.finish(ctx, b, unit)
-	must(t, err)
-	if !moved || blocked {
-		t.Fatalf("fixture unit %s did not enter checking", unit)
+}
+
+func (f *shedFixture) buildFixture() intakefixture.BuildFixture {
+	return intakefixture.BuildFixture{
+		Upstream: f.upstream,
+		Seed: func(t *testing.T, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
+			return seedBuild(t, f, key, graph, backend, base)
+		},
+		Start: f.start,
 	}
 }

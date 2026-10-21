@@ -1,47 +1,35 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	http "net/http"
+	httptest "net/http/httptest"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // awaitExtraction polls status until the latest extraction is terminal.
 func awaitExtraction(t *testing.T, c *Client) ExtractionState {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		cfg, err := c.Configuration(context.Background())
-		must(t, err)
-		if cfg.Project != nil && cfg.Project.Extraction != nil {
-			if x := cfg.Project.Extraction; x.State == "succeeded" || x.State == "failed" {
-				return *x
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("extraction did not finish: %+v", cfg.Project)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+	return intakefixture.AwaitExtraction(t, c.Configuration)
 }
 
 // awaitExtractionAcknowledged polls the librarian workstream until the latest
@@ -210,19 +198,7 @@ func (f *librarianFixture) runs() []string {
 	return slices.Clone(f.engine.Runs)
 }
 
-func entitiesWith(t *testing.T, seed kb.Map, alias string) string {
-	t.Helper()
-	m := kb.Map{Version: kb.Version}
-	for _, e := range seed.Entities {
-		if e.ID == "internal.trace" {
-			e.Aliases = append(e.Aliases, alias)
-		}
-		m.Entities = append(m.Entities, e)
-	}
-	data, err := kb.Encode(m)
-	must(t, err)
-	return string(data)
-}
+var entitiesWith = intakefixture.EntitiesWith
 
 // checkLibrarianBoundary makes the negative assertions from inside the turn:
 // only tracked files, the current knowledge base and the seed are visible, the

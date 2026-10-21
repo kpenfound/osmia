@@ -236,7 +236,7 @@ func (c *workspaceCleanup) pending(stream config.WorkstreamID) (bool, error) {
 // workspace of a unit that did not merge has its files committed to the
 // unit's branch first; one with a replay in progress stays.
 func (c *workspaceCleanup) releaseUnit(ctx context.Context, stream config.WorkstreamID, unit string, merged bool) error {
-	g, err := newUnitWorkspaces(c.cfg, c.repository).of(stream)
+	g, err := newUnitWorkspaces(c.cfg, c.repository).Of(stream)
 	if err != nil {
 		return err
 	}
@@ -284,7 +284,7 @@ func keep(ctx context.Context, g workspace.Provider, stream config.WorkstreamID,
 
 // release removes the workstream's workspace of one kind; its branch stays.
 func (c *workspaceCleanup) release(ctx context.Context, kind streamWorkspaces, stream config.WorkstreamID) error {
-	g, err := kind.of(stream)
+	g, err := kind.Of(stream)
 	if err != nil {
 		return err
 	}

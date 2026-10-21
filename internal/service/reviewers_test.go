@@ -1,23 +1,23 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // reviewSummary is how a fixture reviewer says it verified the acceptance.
@@ -269,9 +269,9 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 			f.stop(t)
 		}
 	}()
-	masons.play[masonTurnID("resume")] = reportDone("Built")
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
 	entered := make(chan struct{})
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
@@ -279,7 +279,7 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
-		return chief.turn(ctx, req, turn, tools)
+		return chief.Turn(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "interrupted-review", independentPlan)
@@ -322,7 +322,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 			p := &faults{}
 			f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
 			defer f.stop(t)
-			masons.play[masonTurnID("resume")] = reportDone("Built")
+			masons.Play[masonTurnID("resume")] = reportDone("Built")
 			var reviews atomic.Int32
 			started, release := make(chan struct{}), make(chan struct{})
 			defer func() {
@@ -356,7 +356,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 					}
 					return &agent.Result{ClaudeID: "asked", ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
 				}
-				return chief.turn(ctx, req, turn, tools)
+				return chief.Turn(ctx, req, turn, tools)
 			}
 			f.engine.Mu.Unlock()
 			f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
@@ -421,8 +421,8 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 			if len(th.Turns) != wantTurns || th.Turns[0].Status() != questions.Waiting {
 				t.Fatalf("reviewer turns: %+v", th.Turns)
 			}
-			p.check(t)
-			masons.check(t)
+			p.Check(t)
+			masons.Check(t)
 		})
 	}
 }
@@ -432,8 +432,8 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, independentPlan)
 	defer f.stop(t)
 	f.s.cfg.Shed.MaxBounces = 1
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
+	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
@@ -443,7 +443,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: "reviewed", ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.turn(ctx, req, turn, tools)
+		return chief.Turn(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "contested", independentPlan)
@@ -511,7 +511,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	if _, found, err := latestContestedRuling(f.repository(), stream, "resume", 2); err != nil || !found {
 		t.Fatalf("ruling lost: %v %v", found, err)
 	}
-	masons.check(t)
+	masons.Check(t)
 }
 
 // A reviewing unit whose workspace a landing left behind the feature branch

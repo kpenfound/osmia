@@ -153,7 +153,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if reason := checkReport(MasonReport{Outcome: report.Outcome, Learnings: report.Learnings}); reason != "" {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
 	}
-	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	g, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
 	}

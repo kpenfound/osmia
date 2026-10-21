@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
 
-	"github.com/chromedp/chromedp"
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	chromedp "github.com/chromedp/chromedp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestBrowserOwnerWorkflowDemonstration takes one workstream from a hand-in
@@ -69,11 +69,11 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	problems := &demoProblems{}
 	faults := &faults{}
 	rulingTurn := amendmentRulingTurn("1")
-	masons.mu.Lock()
-	masons.response = map[string]string{masonTurnID("dedupe"): "I cannot complete this work."}
-	masons.play[rulingTurn] = reportDone("Uploads resume")
+	masons.Mu.Lock()
+	masons.Response = map[string]string{masonTurnID("dedupe"): "I cannot complete this work."}
+	masons.Play[rulingTurn] = reportDone("Uploads resume")
 	for i := 1; i <= 3; i++ {
-		masons.play[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 				return err
 			}
@@ -83,10 +83,10 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 			return nil
 		}
 	}
-	masons.mu.Unlock()
+	masons.Mu.Unlock()
 	// The answer shows the spec must change: the mason asks again, and the
 	// chief of staff routes that question to an amendment.
-	masons.chief.route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
+	masons.Chief.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
@@ -95,10 +95,10 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	f.engine.Mu.Lock()
 	// resume's mason asks question 1, and its answer turn asks question 2,
 	// which the chief of staff routes to an amendment.
-	f.engine.Turns[masonTurnID("resume")] = masons.asking(faults, "", "1")
-	f.engine.Turns[rulingTurn] = masons.turn
+	f.engine.Turns[masonTurnID("resume")] = masons.Asking(faults, "", "1")
+	f.engine.Turns[rulingTurn] = masons.Turn
 	for i := 1; i <= 3; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
+		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.Turn
 	}
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -310,8 +310,8 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.AwaitText(ws+"[data-field=state]", DeliveredState)
 
 	problems.check(t)
-	faults.check(t)
-	masons.check(t)
+	faults.Check(t)
+	masons.Check(t)
 	prs.Mu.Lock()
 	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft {
 		t.Fatalf("pull requests %+v", prs.Prs)

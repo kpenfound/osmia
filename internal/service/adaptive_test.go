@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io"
 	"log/slog"
 	"net/http"
@@ -421,20 +422,10 @@ func TestRecoveryDecisionDoesNotResetLoopGuard(t *testing.T) {
 // raiseFixtureContest records explicit escalation for owner-inbox fixtures.
 func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()
-	contest, found, err := unitContest(r, stream, unit)
-	must(t, err)
-	if !found {
-		t.Fatal("fixture unit has no contest")
-	}
-	data, err := json.Marshal(ChiefContestDecision{Contest: contest.ID, Decision: escalateContest, Turn: "fixture"})
-	must(t, err)
-	h := contest.Header
-	h.Schema = "osmia.trace.document"
-	h.ID = trace.UnitSubject(unit) + "-chief-" + contest.ID
-	h.Revision = 1
-	h.Actor = chiefActor
-	h.Cause = contest.ID
-	must(t, r.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: chiefContestPath(unit, contest.ID), Content: string(data)}}))
+	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
+		c, found, err := unitContest(r, stream, unit)
+		return c.Header, found, err
+	}, chiefActor, escalateContest, chiefContestPath)
 }
 
 func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {

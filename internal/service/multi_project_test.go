@@ -1,25 +1,23 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 const (
@@ -30,40 +28,20 @@ const (
 // twoProjectFixture is a root with two active projects that share one mason
 // slot, each with its own trace, workstream and mason thread.
 type twoProjectFixture struct {
-	opts    Options
-	cfg     *config.Config
-	clock   *demoClock
-	turns   *blockingTurns
-	streams map[config.ProjectID]config.WorkstreamID
-	mu      sync.Mutex
-	live    map[config.ProjectID]*trace.Repository
+	opts     Options
+	cfg      *config.Config
+	clock    *demoClock
+	turns    *blockingTurns
+	streams  map[config.ProjectID]config.WorkstreamID
+	scenario *fixturekit.TwoProjectScenario
 }
 
 func newTwoProjectFixture(t *testing.T) *twoProjectFixture {
 	t.Helper()
-	data := fixturekit.TwoProjects(t)
+	data := fixturekit.NewTwoProjectScenario(t)
 	opts := testOptions(data.Config)
-	opts.Workstreams = nil
-	cfg := data.Loaded
-	root := opts.Config.Root
-	f := &twoProjectFixture{opts: opts, cfg: cfg, clock: data.Clock, streams: data.Streams, live: map[config.ProjectID]*trace.Repository{}}
-
-	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Done"}}
-	f.turns = &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply, reply, reply, reply)}, Hooks: map[string]func(context.Context){}}
-	f.opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
-		if cfg.Project.ID != r.Project() {
-			return nil, fmt.Errorf("project %s bound with the configuration of %q", r.Project(), cfg.Project.ID)
-		}
-		f.mu.Lock()
-		f.live[r.Project()] = r
-		f.mu.Unlock()
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: f.turns, Now: f.clock.Now},
-			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
-				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", string(r.Project()), in.Agent, in.Turn)}, nil
-			}}, nil
-	}
-	f.opts.Reconciliation.Now = f.clock.Now
-	return f
+	opts.Workstreams, opts.Threads, opts.Reconciliation.Now = nil, data.Threads, data.Clock.Now
+	return &twoProjectFixture{opts: opts, cfg: data.Loaded, clock: data.Clock, streams: data.Streams, turns: data.Turns, scenario: data}
 }
 
 // queue accepts an owner message to the project's mason thread.
@@ -76,8 +54,7 @@ func (f *twoProjectFixture) queue(t *testing.T, repo *trace.Repository, id confi
 	must(t, err)
 }
 
-// turn is the ID queue gives a project's turn.
-func turn(id config.ProjectID, name string) string { return string(id[len(id)-4:]) + "-" + name }
+var turn = intakefixture.Turn
 
 // block makes the named turn signal entered and wait for release or for its
 // context to end.
@@ -96,9 +73,7 @@ func (f *twoProjectFixture) block(id config.ProjectID, name string) (entered, re
 }
 
 func (f *twoProjectFixture) repository(id config.ProjectID) *trace.Repository {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.live[id]
+	return f.scenario.Repository(id)
 }
 
 // dispatchedTurns lists the turns the project's trace has turn operations for.
@@ -116,14 +91,7 @@ func (f *twoProjectFixture) dispatchedTurns(t *testing.T, repo *trace.Repository
 	return out
 }
 
-func await(t *testing.T, what string, ch chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(demoTimeout):
-		t.Fatalf("%s did not happen", what)
-	}
-}
+var await = intakefixture.Await
 
 func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *testing.T) {
 	t.Parallel()

@@ -72,12 +72,12 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		},
 	}
 	f := resolutionApprovedFixture(t, configuration, trace.EdgeMergeOrder, host, func(f *productionDesignFixture) {
-		clone := f.repos[1].clone
+		clone := f.repos[1].Clone
 		home := filepath.Dir(clone)
 		// The configured upstream is a local bare remote, so publication never
 		// reaches GitHub or a real repository.
 		host.Fork = func() string {
-			return strings.TrimSpace(demoGit(t, home, "-C", f.repos[1].remote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(f.stream2)))
+			return strings.TrimSpace(demoGit(t, home, "-C", f.repos[1].Remote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(f.stream2)))
 		}
 		configureDeliverySigner(t, clone)
 		f.engine.Mu.Lock()
@@ -134,7 +134,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	must(t, err)
 	down, err := f.s.repository(f.project2)
 	must(t, err)
-	upstream := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "upstream-feature", PullRequest: 71, URL: "https://example.invalid/pull/71"}
+	upstream := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "upstream-feature", PullRequest: 71, URL: "https://example.invalid/pull/71"}
 	recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, upstream)
 	host.Mu.Lock()
 	host.Prs = []pulls.PullRequest{{Number: upstream.PullRequest, State: "open", HeadRepository: upstream.Fork, Head: upstream.Branch, URL: upstream.URL}}
@@ -335,7 +335,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if ready.PullRequest != draft.PullRequest || ready.Commit == draft.Commit {
 		t.Fatalf("ready publication lost PR identity or content update: %+v", ready)
 	}
-	clone := f.repos[1].clone
+	clone := f.repos[1].Clone
 	if got := strings.TrimSpace(demoGit(t, filepath.Dir(clone), "-C", clone, "show", ready.Commit+":internal/trace/dependency.txt")); got != merged {
 		t.Fatalf("published dependency=%q", got)
 	}

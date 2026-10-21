@@ -1,16 +1,16 @@
 package service
 
 import (
-	"context"
-	"fmt"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
+	context "context"
+	fmt "fmt"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // assembleForTest moves a sealed workstream to assembled as the foreman does once
@@ -150,7 +150,7 @@ func TestDependentOfAMergedBaseRebasesOntoUpstream(t *testing.T) {
 	base, held := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 	cfg := f.s.about(repo)
-	g, err := featureWorkspaces(cfg, repo).of(stream)
+	g, err := featureWorkspaces(cfg, repo).Of(stream)
 	must(t, err)
 	if selected, err := f.s.resolveBase(ctx, cfg, repo, stream, g); err != nil || selected.Workstream != base {
 		t.Fatalf("before the merge the dependent builds on %+v: %v", selected, err)

@@ -267,7 +267,7 @@ func (s *Service) changeMemberMerged(ctx context.Context, repo *trace.Repository
 }
 
 func (s *Service) changeSealReady(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id string) (bool, error) {
-	if err := (&sealer{s: s, repository: repo}).reconcile(ctx, stream); err != nil {
+	if err := (&sealer{S: s.intake().SealerDependencies(), Repository: repo}).Reconcile(ctx, stream); err != nil {
 		return false, err
 	}
 	_, _, found, err := seal.PreparedLatest(repo, stream)
@@ -412,14 +412,14 @@ func (s *Service) settleChangeRequester(ctx context.Context, c WorkgroupChange) 
 			transitions[n].ID = trace.UnitSubject(req.Unit) + "_waiting_amendment_" + req.ID
 		}
 	}
-	a := amendmentDebate{&debate{s: s, repository: repo}}
+	a := amendmentDebate{Debate: &debate{S: s.intake().DebateDependencies(), Repository: repo}}
 	cause := workgroupChangeDocument(c.ID)
 	verb := map[string]string{"approve": "approved", "reject": "rejected"}[c.Decision.Decision]
 	decision := AmendmentDecision{Decision: c.Decision.Decision, Actor: "owner", Note: "The owner " + verb + " the workgroup impact summary. " + c.Reply}
-	if err := a.deliverRuling(ctx, pa.Origin, req, decision, cause, "The impact summary decision preserves the recorded project spec until an approved delta is applied."); err != nil {
+	if err := a.DeliverRuling(ctx, pa.Origin, req, decision, cause, "The impact summary decision preserves the recorded project spec until an approved delta is applied."); err != nil {
 		return err
 	}
-	return a.resumeUnit(ctx, pa.Origin, req, cause, verb, "owner", transitions)
+	return a.ResumeUnit(ctx, pa.Origin, req, cause, verb, "owner", transitions)
 }
 
 func (s *Service) reworkChangeMember(ctx context.Context, repo *trace.Repository, row amendment.StreamImpact, c *WorkgroupChange) error {
@@ -604,7 +604,7 @@ func (s *Service) resumeChangeUnits(ctx context.Context, repo *trace.Repository,
 		if app.Amendment != "group-"+id {
 			continue
 		}
-		a := amendmentDebate{&debate{s: s, repository: repo}}
+		a := amendmentDebate{Debate: &debate{S: s.intake().DebateDependencies(), Repository: repo}}
 		for _, unit := range app.Rework {
 			st, err := repo.Workflow(stream, trace.UnitSubject(unit))
 			if err != nil {
@@ -612,7 +612,7 @@ func (s *Service) resumeChangeUnits(ctx context.Context, repo *trace.Repository,
 			}
 			if st.Value == UnitImplementing {
 				moved := trace.Transition{Header: trace.Header{ID: changeIdentity("change-" + id + "-rework-" + unit), At: s.now()}, Subject: trace.UnitSubject(unit), To: UnitImplementing}
-				if err := a.enqueueAmended(ctx, stream, app, unit, moved); err != nil {
+				if err := a.EnqueueAmended(ctx, stream, app, unit, moved); err != nil {
 					return err
 				}
 			}

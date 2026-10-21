@@ -23,8 +23,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const readRemoteFileTool = "read_remote_file"
-
 type remoteFile struct {
 	Repository string `json:"repository"`
 	Ref        string `json:"ref"`
@@ -112,6 +110,7 @@ func githubFile(ctx context.Context, client *http.Client, token string, f remote
 	f.Content = string(data)
 	return f, nil
 }
+
 func escapePath(path string) []string {
 	parts := strings.Split(path, "/")
 	for i := range parts {

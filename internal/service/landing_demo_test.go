@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // landingPlan has two independent units, resume and audit, and dedupe,
@@ -150,7 +150,7 @@ func TestLandingDemonstration(t *testing.T) {
 	must(t, err)
 
 	for unit, u := range landingUnits {
-		masons.play[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if u.file != "" {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), u.file), []byte("package trace\n// "+unit+"\n"), 0644); err != nil {
 					return err
@@ -169,7 +169,7 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 	demo := &landingDemo{reviews: map[string][]UnitReviewIdentity{}}
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("audit")] = masons.turn
+	f.engine.Turns[masonTurnID("audit")] = masons.Turn
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range landingUnits {
@@ -248,7 +248,7 @@ func TestLandingDemonstration(t *testing.T) {
 	for _, unit := range []string{"resume", "audit", "dedupe"} {
 		f.awaitMerged(t, stream, unit)
 	}
-	masons.check(t)
+	masons.Check(t)
 	landings := landingByUnit(t, f.repository(), stream)
 	decoded := map[string]UnitLanding{}
 	for unit, d := range landings {
@@ -390,7 +390,7 @@ func TestLandingDemonstration(t *testing.T) {
 		t.Fatalf("knowledge provenance %+v; prose %+v", sources, prose.Header)
 	}
 	var resumePrompt, dedupePrompt string
-	for _, req := range masons.requests(stream) {
+	for _, req := range masons.Requests(stream) {
 		switch req.Name {
 		case masonTurnID("resume"):
 			resumePrompt = req.Prompt

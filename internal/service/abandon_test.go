@@ -1,33 +1,31 @@
 package service
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
-	"github.com/kpenfound/osmia/internal/reconcile"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	adaptertest "github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	reconcile "github.com/kpenfound/osmia/internal/reconcile"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func ptr(s string) *string { return &s }
+var ptr = intakefixture.Ptr
 
 // abandonCall posts an abandon request to the service's handler.
 func abandonCall(t *testing.T, s *Service, id config.WorkstreamID, body string) (int, string) {
 	t.Helper()
-	w := httptest.NewRecorder()
-	s.handle(w, httptest.NewRequest(http.MethodPost, Prefix+"/abandon/"+string(id), strings.NewReader(body)))
-	return w.Code, w.Body.String()
+	return intakefixture.AbandonCall(t, s.handle, id, body)
 }
 
 func TestAbandonHandedWorkstream(t *testing.T) {

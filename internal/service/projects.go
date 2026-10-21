@@ -25,11 +25,6 @@ type pendingProject struct {
 	Project config.Project `json:"project"`
 }
 
-var (
-	registrationActor = trace.Actor{Kind: "owner", ID: "local"}
-	serviceActor      = trace.Actor{Kind: "service", ID: "osmia"}
-)
-
 func (s *Service) step(name string) error {
 	if s.boundary != nil {
 		return s.boundary(name)
@@ -48,18 +43,6 @@ func projectView(root config.Root, p config.Project) ProjectView {
 func repoView(root config.Root, p config.Project) RepoView {
 	directory, _ := root.ProjectTrace(p.ID)
 	return RepoView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Landing: p.Landing, Trace: directory, KB: filepath.Join(directory, "kb"), EntityMap: filepath.Join(directory, trace.EntitiesPath), Default: p.IsDefaultRepo()}
-}
-
-// groupMembers returns every repo of the project default belongs to, default
-// itself included, in the order they appear in all.
-func groupMembers(all []config.Project, group config.ProjectID) []config.Project {
-	var members []config.Project
-	for _, p := range all {
-		if p.Group() == group {
-			members = append(members, p)
-		}
-	}
-	return members
 }
 
 // projectGroupView builds the view of the project any repo of belongs to:
@@ -287,6 +270,7 @@ func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectRespo
 func activeError(id config.ProjectID) *APIError {
 	return &APIError{Code: ProjectActive, Message: fmt.Sprintf("project %s already owns this registration or clone; use a separate clone for another project", id)}
 }
+
 func incomplete(id config.ProjectID, err error) *APIError {
 	reason := "storage failure"
 	switch {
@@ -297,6 +281,7 @@ func incomplete(id config.ProjectID, err error) *APIError {
 	}
 	return &APIError{Code: Internal, Message: fmt.Sprintf("registration of project %s is incomplete (%s); fix the root and run osmia project add again to finish it", id, reason)}
 }
+
 func (s *Service) added(p config.Project) ProjectResponse {
 	view := s.projectGroupView(p)
 	return ProjectResponse{Project: view, NextStep: "Write the charter with: osmia edit charter " + string(view.ID)}
@@ -327,6 +312,7 @@ func (s *Service) reserve(p *config.Project) error {
 	}
 	return errors.New("no free project identity")
 }
+
 func (s *Service) writePending(p pendingProject) error {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {
@@ -338,6 +324,7 @@ func (s *Service) writePending(p pendingProject) error {
 	}
 	return writeFileSynced(path, append(data, '\n'))
 }
+
 func (s *Service) readPending() (*pendingProject, error) {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {

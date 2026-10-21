@@ -1,32 +1,34 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	exec "os/exec"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // resumeReport is the outcome a mason of unit resume of independentPlan and
 // validPlan reports.
 var resumeReport = "resume from the last chunk"
-var exampleCard = coreadapter.Card{Headline: "Uploads resume", Happened: "The storage client resumes uploads from the last chunk.", NeedsYou: "Review the candidate."}
+
+var exampleCard = intakefixture.ExampleCard
 
 // newMasonController returns the mason controller of the service's
 // configuration over repository.
@@ -34,28 +36,7 @@ func newMasonController(s *Service, repository *trace.Repository) *masons {
 	return &masons{s: s, cfg: s.cfg, repository: repository}
 }
 
-// done calls the done tool and returns whether the service accepted the
-// report, and its reason when it did not.
-func done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (bool, string, error) {
-	for key, value := range map[string]string{"headline": exampleCard.Headline, "happened": exampleCard.Happened, "needs_you": exampleCard.NeedsYou} {
-		if _, ok := args[key]; !ok {
-			args[key] = value
-		}
-	}
-	text, err := callTool(ctx, tools, doneTool, args)
-	if err != nil {
-		return false, err.Error(), nil
-	}
-	var out struct {
-		Recorded bool   `json:"recorded"`
-		Reason   string `json:"reason"`
-		Next     string `json:"next"`
-	}
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return false, "", fmt.Errorf("done returned %q: %w", text, err)
-	}
-	return out.Recorded, out.Reason, nil
-}
+var done = intakefixture.Done
 
 // reportDone plays a mason turn that calls done once with a complete report
 // whose outcome is outcome.
@@ -89,20 +70,7 @@ func TestFinishNoticeWithOptionalOwnerAction(t *testing.T) {
 // awaitUnit waits until the unit of the workstream is in state.
 func (f *shedFixture) awaitUnit(t *testing.T, stream config.WorkstreamID, unit, state string) {
 	t.Helper()
-	wait, close := serviceChanges(t, f.s)
-	defer close()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		got, err := f.repository().Workflow(stream, trace.UnitSubject(unit))
-		must(t, err)
-		if got.Value == state {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("unit %s of %s is %q, never %s", unit, stream, got.Value, state)
-		}
-		wait()
-	}
+	f.sharedTurns().AwaitUnit(t, stream, unit, state)
 }
 
 // reports returns the recorded revisions of the unit's report.
@@ -154,7 +122,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		{map[string]any{"outcome": " "}, "outcome is required: say what the unit's work now does and how you checked its acceptance"},
 		{map[string]any{"outcome": "Built", "learnings": []string{" "}}, "learning 1 is empty"},
 	}
-	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		missing, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "approved"})
 		if err != nil || !strings.Contains(missing, `"recorded":false`) || !strings.Contains(missing, `headline is required`) {
 			return fmt.Errorf("missing card: %q %v", missing, err)
@@ -198,7 +166,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		return nil
 	}
-	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built"}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
 		}
@@ -221,7 +189,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	f.awaitUnit(t, stream, "dedupe", UnitImplementing)
-	masons.check(t)
+	masons.Check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitImplementing}})
 
 	th, err := f.repository().Thread(stream, masonAgent("resume"))
@@ -266,7 +234,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 
 	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", masonTurnID("resume"), report.Candidate, unitBranch(stream, "resume"), featureBranch(stream), report.Base)
-	checking := transitionMove{checkingTransitionID("resume", 1), trace.UnitSubject("resume"), UnitImplementing, UnitChecking, turn.Response.ID, reason}
+	checking := transitionMove{ID: checkingTransitionID("resume", 1), Subject: trace.UnitSubject("resume"), From: UnitImplementing, To: UnitChecking, Cause: turn.Response.ID, Reason: reason}
 	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), checking, started("dedupe", f.startedReason(t, stream, "dedupe"))}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
@@ -341,7 +309,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second")
 	blocked, other := lowHigh(built[0], built[1])
 	var lock string
-	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if sessionStream(req) != string(blocked) {
 			return nil
 		}
@@ -365,7 +333,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	f.awaitMasonRan(t, other, "resume")
 	awaitPasses(t, &passed, 3)
 	settled(t, func() int { return len(f.blocks(t, blocked, "resume")) })
-	masons.check(t)
+	masons.Check(t)
 	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: git add: "
 	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
 		t.Fatalf("blocked %q", got)
@@ -378,9 +346,9 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 		t.Fatalf("the workstream started another unit: %v", err)
 	}
 
-	masons.mu.Lock()
+	masons.Mu.Lock()
 	err := os.Remove(lock)
-	masons.mu.Unlock()
+	masons.Mu.Unlock()
 	must(t, err)
 	f.awaitUnit(t, blocked, "resume", UnitReviewing)
 	docs := f.reports(t, blocked, "resume")

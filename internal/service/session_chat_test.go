@@ -1,14 +1,14 @@
 package service
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	os "os"
+	filepath "path/filepath"
+	regexp "regexp"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,18 +58,9 @@ var awaitSession = fixturekit.AwaitSession
 // accepts it, the way awaitConversation does for the package's fixed stream.
 func awaitConversationOn(t *testing.T, c *Client, id config.WorkstreamID, done func(ConversationResponse) bool) ConversationResponse {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		list, err := c.Conversation(context.Background(), id)
-		must(t, err)
-		if done(list) {
-			return list
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("conversation did not settle: %+v", list)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return intakefixture.AwaitView(t, func() (ConversationResponse, error) {
+		return c.Conversation(context.Background(), id)
+	}, done, "conversation did not settle: %+v")
 }
 
 // TestSessionMessageStartsOneTurnAndRecordsTheReply covers spec#6: an owner
@@ -900,7 +892,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		masonResume, masonPrompt = req.ResumeID, req.Prompt
-		return masons.turn(ctx, req, verified, tools)
+		return masons.Turn(ctx, req, verified, tools)
 	}
 	chiefFallback := f.engine.Turns["*"]
 	var sessionResumeIDs []string

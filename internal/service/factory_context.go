@@ -15,8 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const factoryContextTool = "factory_context"
-
 // factoryContext exposes workstream records independently of conversation replay.
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: factoryContextTool, Effect: coreadapter.ToolRead,

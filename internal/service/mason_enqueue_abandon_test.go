@@ -1,21 +1,21 @@
 package service
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"testing"
+	context "context"
+	os "os"
+	filepath "path/filepath"
+	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/trace"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 	for _, step := range []string{"mason-implementing", "mason-turn-queued"} {
 		t.Run(step, func(t *testing.T) {
 			ctx := context.Background()
-			gate := &changeRaceGate{step: step, reached: make(chan struct{}), released: make(chan struct{})}
+			gate := &changeRaceGate{Step: step, Reached: make(chan struct{}), Released: make(chan struct{})}
 			cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
-			t.Cleanup(gate.release)
+			t.Cleanup(gate.Release)
 			t.Cleanup(cleanup.release)
 			f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{
 				wait: lifecycleAwait,
@@ -27,7 +27,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 					must(t, file.Close())
 				},
 				checkpoint: func(ctx context.Context, step string) error {
-					if err := gate.checkpoint(ctx, step); err != nil {
+					if err := gate.Checkpoint(ctx, step); err != nil {
 						return err
 					}
 					return cleanup.checkpoint(ctx, step)
@@ -37,11 +37,11 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			address, unit := f.stream1, "accept"
-			gate.step = step + ":" + string(address) + ":" + unit
-			gate.armed.Store(true)
+			gate.Step = step + ":" + string(address) + ":" + unit
+			gate.Armed.Store(true)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			must(t, err)
-			gate.await(t)
+			gate.Await(t)
 			repo, err := f.s.repository(f.project)
 			must(t, err)
 			state, err := repo.Workflow(address, trace.UnitSubject(unit))
@@ -64,7 +64,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			must(t, err)
 			_, err = f.c.Archive(ctx, address)
 			must(t, err)
-			gate.release()
+			gate.Release()
 			cleanup.await(t)
 			th, err := repo.Thread(address, masonAgent(unit))
 			must(t, err)

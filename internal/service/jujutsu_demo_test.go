@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	fs "io/fs"
+	os "os"
+	exec "os/exec"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // forkCommit is what a reader of the fork sees of one commit of the
@@ -150,9 +150,9 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	problems := &demoProblems{}
 	p := &faults{}
 	answered := questions.TurnID("1")
-	masons.mu.Lock()
-	masons.play[answered] = reportDone("Uploads resume")
-	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Mu.Lock()
+	masons.Play[answered] = reportDone("Uploads resume")
+	masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
@@ -161,10 +161,10 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 		return nil
 	}
-	masons.mu.Unlock()
+	masons.Mu.Unlock()
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
-	f.engine.Turns[answered] = masons.turn
+	f.engine.Turns[masonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.engine.Turns[answered] = masons.Turn
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
@@ -247,7 +247,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		if onJJ != (backend == config.WorkspacesJujutsu) {
 			t.Fatalf("the %s workspaces of workstream %s are %T on %s", name, stream, provider, backend)
 		}
-		store := filepath.Join(cfg.Root.String(), w.directory, string(cfg.Project.ID), ".jujutsu")
+		store := filepath.Join(cfg.Root.String(), w.Directory, string(cfg.Project.ID), ".jujutsu")
 		if _, err := os.Stat(store); onJJ != (err == nil) {
 			t.Fatalf("the %s workspaces' Jujutsu repository %s on %s: %v", name, store, backend, err)
 		}
@@ -265,8 +265,8 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	must(t, err)
 	f.awaitFeature(t, stream, DeliveredState)
 	problems.check(t)
-	p.check(t)
-	masons.check(t)
+	p.Check(t)
+	masons.Check(t)
 	prs.Mu.Lock()
 	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft || prs.Prs[0].HeadCommit != forkBranch() {
 		t.Fatalf("pull requests %+v", prs.Prs)

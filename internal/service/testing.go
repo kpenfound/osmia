@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"slices"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/scheduler"
 
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
@@ -15,6 +20,7 @@ import (
 // StartForTest binds these before startup recovery and controller launch.
 // Production callers use Start and Options.
 type TestHooks struct {
+	Enforcement    *TestEnforcementBinding
 	ReviewChecks   ReviewChecks
 	Boundary       func(context.Context, string) error
 	SchedulePassed func()
@@ -25,6 +31,9 @@ type TestHooks struct {
 
 // StartForTest starts the real service with fixture execution boundaries.
 func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service, error) {
+	if hooks.Enforcement != nil {
+		opts.controls = hooks.Enforcement.controls
+	}
 	if hooks.ReviewChecks != nil {
 		opts.reviewChecks = hooks.ReviewChecks
 	}
@@ -46,7 +55,7 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	return Start(ctx, opts)
 }
 
-// TestAccess exposes fixture operations without exposing controller objects.
+// TestAccess exposes fixture operations and composed controllers for tests.
 type TestAccess struct{ s *Service }
 
 // InspectForTest returns the fixture access for a started service.
@@ -176,4 +185,114 @@ func (a TestAccess) SessionTurnRunning(stream config.WorkstreamID) bool {
 // SessionGit returns the service's session workspace provider for assertions.
 func (a TestAccess) SessionGit(project config.ProjectID) *workspace.Git {
 	return sessionGit(a.s.current().For(project))
+}
+
+// Intake exposes the composed owner-gate dependencies to controller fixtures.
+func (a TestAccess) Intake() *intake.Controller { return a.s.intake() }
+
+// SetTrace replaces a stopped fixture's sole runtime after its trace is reopened.
+func (a TestAccess) SetTrace(repo *trace.Repository) {
+	a.s.mu.Lock()
+	defer a.s.mu.Unlock()
+	if repo == nil {
+		a.s.projects = nil
+		return
+	}
+	a.s.projects = []*activeProject{{id: repo.Project(), repository: repo}}
+}
+
+// Handle exercises the local handler without a network transport.
+func (a TestAccess) Handle(w http.ResponseWriter, r *http.Request) { a.s.handle(w, r) }
+
+// NewFixtureForTest composes an idle fixture from local state without launching controllers.
+func NewFixtureForTest(cfg *config.Config, opts Options, store *runtime.Store, repos []*trace.Repository) *Service {
+	s := &Service{cfg: cfg, options: opts, store: store}
+	for _, r := range repos {
+		s.projects = append(s.projects, &activeProject{id: r.Project(), repository: r})
+	}
+	return s
+}
+
+// DoneForTest reports when shutdown finishes.
+func (s *Service) DoneForTest() <-chan struct{} { return s.done }
+
+// LifetimeForTest reports the controller lifetime used at recovery boundaries.
+func (s *Service) LifetimeForTest() context.Context { return s.lifetime }
+
+// ReadyForTest reports whether startup finished.
+func (s *Service) ReadyForTest() bool { return s.ready.Load() }
+
+// ErrForTest reads the shutdown result after DoneForTest closes.
+func (s *Service) ErrForTest() error { return s.err }
+
+// TimeoutForTest returns the client's ordinary request budget.
+func (c *Client) TimeoutForTest() time.Duration { return c.defaultTimeout }
+
+// SetTimeoutForTest adjusts the fixture's request budget.
+func (c *Client) SetTimeoutForTest(d time.Duration) { c.defaultTimeout = d }
+
+func (a TestAccess) Feed(raw string) (FeedResponse, *APIError) { return a.s.feedList(raw) }
+func (a TestAccess) Delivery(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
+	return a.s.deliveryPresentation(ctx, raw)
+}
+func (a TestAccess) ApproveDelivery(ctx context.Context, raw string, r DeliveryDecision) (DeliveryApproval, *APIError) {
+	return a.s.approveDelivery(ctx, raw, r)
+}
+func (a TestAccess) RuleContested(ctx context.Context, w, u string, r ContestedRulingRequest) (ContestedRulingResponse, *APIError) {
+	return a.s.ruleContested(ctx, w, u, r)
+}
+func (a TestAccess) DispatchHolds(c *config.Config, r *trace.Repository) func(scheduler.Candidate) (bool, error) {
+	return a.s.dispatchHolds(c, r)
+}
+func (a TestAccess) Holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+	return a.s.holds(p, w, r, c)
+}
+func (a TestAccess) Halt(p config.ProjectID) error {
+	_, active := a.s.runtimeOf(p)
+	if active == nil {
+		return nil
+	}
+	return a.s.halt(active)
+}
+
+type TestPollAttempt struct {
+	Project    config.ProjectID
+	Workstream config.WorkstreamID
+	Kind       string
+	At         time.Time
+}
+
+func (a TestAccess) PollAttempts() []TestPollAttempt {
+	a.s.polls.mu.Lock()
+	defer a.s.polls.mu.Unlock()
+	var out []TestPollAttempt
+	for key, at := range a.s.polls.attempts {
+		out = append(out, TestPollAttempt{Project: key.project, Workstream: key.stream, Kind: key.kind, At: at.at})
+	}
+	return out
+}
+
+// TestEnforcementBinding retains the runtime binding of fixture enforcement closures.
+type TestEnforcementBinding struct{ controls *runtimeControls }
+
+// EnforcementBindingForTest returns the binding created by Enforce. It can
+// accompany Threads when a fixture copies that execution boundary alone.
+func EnforcementBindingForTest(opts Options) *TestEnforcementBinding {
+	return &TestEnforcementBinding{controls: opts.controls}
+}
+
+// HoldAnswerDelivery stages an answer-delivery hold for each active project's
+// next scheduling pass. Other controllers and conversation turns keep running.
+func (a TestAccess) HoldAnswerDelivery() {
+	_, projects := a.s.runtimes()
+	for _, project := range projects {
+		stage := *project.pipeline.current.Load()
+		stage.hooks = slices.Clone(stage.hooks)
+		for i := range stage.hooks {
+			if stage.hooks[i].name == "answers" {
+				stage.hooks[i].pass = func(context.Context) error { return nil }
+			}
+		}
+		project.pipeline.next.Store(&stage)
+	}
 }

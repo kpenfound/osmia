@@ -438,7 +438,7 @@ func TestHeldCheckSlotsAllowOtherMasonsAndReviewersAndRestartEmpty(t *testing.T)
 		return true
 	}
 	masonEntered := make(chan struct{})
-	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error {
+	fake.Play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error {
 		close(masonEntered)
 		return errFailTurn
 	}

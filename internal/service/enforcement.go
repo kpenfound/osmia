@@ -259,7 +259,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				// Both tools are registered unconditionally; Select's Narrow
 				// decides, per turn, whether either is actually reachable.
-				return append(tools, draftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls, scope)), nil
+				return append(tools, draftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope)), nil
 			},
 			Hosts: e.Hosts,
 			// resumableEngine's heuristic fallback (used only when e.Engine has

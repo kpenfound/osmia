@@ -1,23 +1,23 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/agentcore/jev/jevtest"
-	"github.com/kpenfound/agentcore/jev/systemone"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
+	systemone "github.com/kpenfound/agentcore/jev/systemone"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestMasonContestedRuling(t *testing.T) {
@@ -32,17 +32,17 @@ func TestMasonContestedRuling(t *testing.T) {
 			t.Parallel()
 			f, fake := newMasonFixture(t, 1, validPlan)
 			defer f.stop(t)
-			fake.response = map[string]string{masonTurnID("resume"): tc.response}
+			fake.Response = map[string]string{masonTurnID("resume"): tc.response}
 			ownerTurn := masonAgent("resume") + "-owner-revise-"
 			f.engine.Mu.Lock()
 			if tc.name == "bound" {
 				for i := 1; i < f.s.cfg.Mason.MaxCleanTurns; i++ {
-					delete(fake.play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
+					delete(fake.Play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
 				}
 			}
-			f.engine.Turns[ownerTurn+"1"] = fake.turn
-			f.engine.Turns[ownerTurn+"2"] = fake.turn
-			f.engine.Turns[ownerTurn+"3"] = fake.turn
+			f.engine.Turns[ownerTurn+"1"] = fake.Turn
+			f.engine.Turns[ownerTurn+"2"] = fake.Turn
+			f.engine.Turns[ownerTurn+"3"] = fake.Turn
 			f.engine.Mu.Unlock()
 			stream := f.seedBuilding(t, tc.name+"-ruling", validPlan)
 			f.awaitUnit(t, stream, "resume", UnitContested)
@@ -74,12 +74,12 @@ func TestMasonContestedRuling(t *testing.T) {
 			turnID := fmt.Sprintf("%s%d", ownerTurn, reset)
 			if tc.name == "bound" {
 				continuation := fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), reset+1)
-				fake.play[continuation] = reportDone("Owner revision")
+				fake.Play[continuation] = reportDone("Owner revision")
 				f.engine.Mu.Lock()
-				f.engine.Turns[continuation] = fake.turn
+				f.engine.Turns[continuation] = fake.Turn
 				f.engine.Mu.Unlock()
 			} else {
-				fake.play[turnID] = reportDone("Owner revision")
+				fake.Play[turnID] = reportDone("Owner revision")
 			}
 			ruling, err := f.c.RuleContested(context.Background(), stream, "resume", "revise", "Use the existing workspace")
 			if err != nil || ruling.Ruling.ResetTurn != reset || ruling.Ruling.Decision != "revise" {
@@ -129,7 +129,7 @@ func TestMasonContestedRuling(t *testing.T) {
 			if rulings != 1 {
 				t.Fatalf("ruling transitions: %d", rulings)
 			}
-			fake.check(t)
+			fake.Check(t)
 		})
 	}
 }
@@ -146,14 +146,14 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 			t.Parallel()
 			f, fake := newMasonFixture(t, 1, validPlan)
 			defer f.stop(t)
-			fake.response = map[string]string{masonTurnID("resume"): tc.response}
-			fake.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+			fake.Response = map[string]string{masonTurnID("resume"): tc.response}
+			fake.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 				_, err := callTool(ctx, tools, "file_read", map[string]any{"path": masonWrote})
 				return err
 			}
-			delete(fake.play, masonAgent("resume")+"-clarify-1")
+			delete(fake.Play, masonAgent("resume")+"-clarify-1")
 			f.engine.Mu.Lock()
-			f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.turn
+			f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.Turn
 			f.engine.Mu.Unlock()
 			stream := f.seedBuilding(t, "classified", validPlan)
 			deadline := time.Now().Add(demoTimeout)
@@ -206,10 +206,10 @@ func TestMasonJevClassification(t *testing.T) {
 		must(t, errors.Join(err, configFile.Close()))
 	})
 	defer f.stop(t)
-	fake.response = map[string]string{masonTurnID("resume"): "Wrote the store. The unit is ready for review."}
-	delete(fake.play, masonAgent("resume")+"-clarify-1")
+	fake.Response = map[string]string{masonTurnID("resume"): "Wrote the store. The unit is ready for review."}
+	delete(fake.Play, masonAgent("resume")+"-clarify-1")
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.turn
+	f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.Turn
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "jev-classified", validPlan)
 	deadline := time.Now().Add(demoTimeout)
@@ -258,7 +258,7 @@ func TestMasonModelClassifier(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f, fake := newConfiguredMasonFixture(t, "masons = 1\n", validPlan, "default")
 			defer f.stop(t)
-			fake.response = map[string]string{masonTurnID("resume"): "Edited the file."}
+			fake.Response = map[string]string{masonTurnID("resume"): "Edited the file."}
 			f.engine.Mu.Lock()
 			for i := 1; i <= tc.attempts; i++ {
 				i := i

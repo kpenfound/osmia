@@ -68,7 +68,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	}, AbandonedState, "cancelled")
 	must(t, err)
 	blockArchiveCleanup(t, repo, f.project, retained, demoStart, registrationActor)
-	must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.repos[0].main, "osmia/session/"+string(session), "Explore uploads", demoStart, registrationActor))
+	must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.repos[0].Main, "osmia/session/"+string(session), "Explore uploads", demoStart, registrationActor))
 	legacyChiefs := map[config.WorkstreamID]trace.Thread{}
 	for _, stream := range []config.WorkstreamID{live, retained} {
 		legacyChiefs[stream], err = repo.ChiefOfStaffThread(stream)

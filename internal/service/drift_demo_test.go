@@ -1,25 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	exec "os/exec"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/config"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // driftPlan has resume, and audit, which depends on it, so audit is built and
@@ -137,7 +137,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 		f.awaitDrift(t, stream, "rebased-1")
 	}
 	settle()
-	masons.check(t)
+	masons.Check(t)
 	for _, stream := range streams {
 		repository := f.repository()
 		ops := checkDrifts(t, repository, stream, 1, "once the interval elapsed")
@@ -334,8 +334,8 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, driftPlan)
 	defer func() { f.stop(t) }()
-	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
-	masons.play[masonTurnID("audit")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = reportDone("Uploads resume")
+	masons.Play[masonTurnID("audit")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal", "trace", "audit.go"), []byte("package trace\n// audit\n"), 0644); err != nil {
 			return err
 		}
@@ -347,7 +347,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	}
 	demo := &driftDemo{units: &landingDemo{reviews: map[string][]UnitReviewIdentity{}}, owner: f.c, project: f.project, clone: f.clone, resolving: make(chan struct{})}
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("audit")] = masons.turn
+	f.engine.Turns[masonTurnID("audit")] = masons.Turn
 	f.engine.Turns[driftResolveTurnID(1, 1)] = demo.resolve
 	f.engine.Turns[driftMasonAgent+"-recover-1"] = demo.recover
 	f.engine.Turns[driftReviewTurnID(1, 1)] = demo.reviewDrift
@@ -428,7 +428,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	f.stop(t)
 	f.start(t)
 	f.awaitMerged(t, stream, "audit")
-	masons.check(t)
+	masons.Check(t)
 	demo.check(t)
 	repository = f.repository()
 

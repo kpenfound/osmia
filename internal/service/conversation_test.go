@@ -1,20 +1,21 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // conversationFixture creates a project with a trace holding two workstreams
@@ -43,27 +44,12 @@ func runChief(opts *Options, cfg *config.Config, turns *chiefTurns) {
 // awaitConversation polls the listing until done accepts it.
 func awaitConversation(t *testing.T, c *Client, done func(ConversationResponse) bool) ConversationResponse {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		list, err := c.Conversation(context.Background(), stream)
-		must(t, err)
-		if done(list) {
-			return list
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("conversation did not settle: %+v", list)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return intakefixture.AwaitView(t, func() (ConversationResponse, error) {
+		return c.Conversation(context.Background(), stream)
+	}, done, "conversation did not settle: %+v")
 }
 
-func states(list ConversationResponse) []string {
-	var out []string
-	for _, e := range list.Entries {
-		out = append(out, e.Kind+":"+string(e.State))
-	}
-	return out
-}
+var states = intakefixture.States
 
 func TestConversationRunsMessagesInOrder(t *testing.T) {
 	t.Parallel()

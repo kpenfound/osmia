@@ -179,7 +179,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	f.awaitApproved(t)
 	f.wait(t, "members initialized", func() bool {
 		for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-			r, err := f.s.repository(f.repos[i].id)
+			r, err := f.s.repository(f.repos[i].ID)
 			must(t, err)
 			st, err := r.Workflow(id, trace.UnitSubject("local"))
 			must(t, err)
@@ -192,7 +192,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	keptStates := map[config.WorkstreamID]trace.WorkflowState{}
 	keptTips := map[config.WorkstreamID]string{}
 	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-		r, err := f.s.repository(f.repos[i].id)
+		r, err := f.s.repository(f.repos[i].ID)
 		must(t, err)
 		sealed, _, _, err := seal.Latest(r, id)
 		must(t, err)
@@ -209,7 +209,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		recordUnitMerged(t, r, id, contract)
 		keptStates[id], err = r.Workflow(id, trace.UnitSubject("local"))
 		must(t, err)
-		keptTips[id] = strings.TrimSpace(demoGit(t, f.repos[i].clone, "-C", f.repos[i].clone, "rev-parse", featureBranch(id)))
+		keptTips[id] = strings.TrimSpace(demoGit(t, f.repos[i].Clone, "-C", f.repos[i].Clone, "rev-parse", featureBranch(id)))
 	}
 	const key = "offset-delta"
 	var approvedRevision atomic.Int64
@@ -311,7 +311,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	f.wait(t, "approved delta applied", func() bool { return currentChange(t, f.s, f.origin, key).State == "applied" })
 	c = currentChange(t, f.s, f.origin, key)
 	for i, member := range []config.WorkstreamID{f.stream1, f.stream2} {
-		repo, err := f.s.repository(f.repos[i].id)
+		repo, err := f.s.repository(f.repos[i].ID)
 		must(t, err)
 		spec, _, found, err := repo.ProjectSpecOf(member)
 		must(t, err)
@@ -323,7 +323,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		if st != keptStates[member] {
 			t.Fatal("unaffected unit lost its state/version")
 		}
-		tip := strings.TrimSpace(demoGit(t, f.repos[i].clone, "-C", f.repos[i].clone, "rev-parse", featureBranch(member)))
+		tip := strings.TrimSpace(demoGit(t, f.repos[i].Clone, "-C", f.repos[i].Clone, "rev-parse", featureBranch(member)))
 		if tip != keptTips[member] {
 			t.Fatal("amendment changed landed commits")
 		}

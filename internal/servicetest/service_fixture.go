@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -15,12 +16,7 @@ import (
 // through the API, as the owner does, and returns that revision.
 func WriteCharter(t *testing.T, c *service.Client, project config.ProjectID, content string) trace.Document {
 	t.Helper()
-	ctx := context.Background()
-	current, err := c.Charter(ctx, project)
-	fixturekit.Must(t, err)
-	doc, err := c.EditCharter(ctx, project, api.CharterEdit{Revision: current.Revision, Content: content})
-	fixturekit.Must(t, err)
-	return doc
+	return intakefixture.WriteCharter(t, c, project, content)
 }
 
 // EditDraft records spec and plan as the owner's edit of the workstream's draft
@@ -43,9 +39,5 @@ func EditDraft(t *testing.T, c *service.Client, stream config.WorkstreamID, spec
 
 func Mutation(t *testing.T, c *service.Client, method, kind string, input any) {
 	t.Helper()
-	var result api.MutationResponse
-	fixturekit.Must(t, c.Do(context.Background(), method, api.Prefix+"/runtime/"+kind, input, &result))
-	if !result.Applied {
-		t.Fatal("not acknowledged")
-	}
+	intakefixture.Mutation(t, c, method, kind, input)
 }

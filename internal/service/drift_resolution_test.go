@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,43 +28,7 @@ import (
 // fails records a retry and no result, so the operation stays pending.
 func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
 	t.Helper()
-	ctx := context.Background()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	i := slices.IndexFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID == op.ID })
-	if i < 0 {
-		t.Fatalf("operation %s is not recorded", op.ID)
-	}
-	var result coreadapter.OperationResult
-	var applied error
-	now := s.now()
-	must(t, repository.WithOperation(ctx, stream, ops[i].EventID, foremanActor, func() time.Time { return now }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
-		seen, err := r.Inspect(ctx, op)
-		if err != nil {
-			return err
-		}
-		observe := a.Action("observe", now)
-		observe.Observation = &seen
-		if err := a.Record(ctx, observe); err != nil {
-			return err
-		}
-		if seen.State == coreadapter.EffectCompleted {
-			result = *seen.Result
-		} else {
-			if err := a.Record(ctx, a.Action("effect", now)); err != nil {
-				return err
-			}
-			if result, applied = r.Apply(ctx, op); applied != nil {
-				retry := a.Action("retry", now)
-				retry.Failure, retry.RetryAt = applied.Error(), now.Add(time.Nanosecond)
-				return a.Record(ctx, retry)
-			}
-		}
-		done := a.Action("result", now)
-		done.Result = &result
-		return a.Record(ctx, done)
-	}))
-	return result, applied
+	return intakefixture.AttemptOperation(t, s.now(), foremanActor, repository, stream, op, r)
 }
 
 // awaitResolution attempts the drift operation and fails unless it waits
@@ -98,13 +63,7 @@ func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 // finished turn with outcome.
 func completeClaimedTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, q trace.QueuedTurn, outcome *coreadapter.Outcome) {
 	t.Helper()
-	ctx := context.Background()
-	h := q.Request.Header
-	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
-	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: q.Claim.Token}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Outcome: outcome}}
-	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
-	must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+	f.sharedTurns().CompleteClaimedTurn(t, repository, stream, agent, q, outcome)
 }
 
 // resolvedDone is the outcome of a drift mason turn whose done the service

@@ -19,10 +19,10 @@ import (
 )
 
 const changeBoundarySubject = "change-boundary"
-const requestChangeTool = "request_change"
-const decideChangeTool = "decide_change"
 
-var errChangeBoundary = errors.New("an owner-approved change holds work at a unit boundary")
+const requestChangeTool = "request_change"
+
+const decideChangeTool = "decide_change"
 
 const changeGuidance = "When the owner asks to amend or cancel, call request_change with a stable key, kind amend or cancel, scope workgroup or workstream, and the requested change. The committee debates only the delta. Present the single impact summary; call decide_change only from an explicit owner approval or rejection of its current revision. For cancellation ask at that time whether open PRs are closed or left as drafts. Merged work stays intact."
 
@@ -76,7 +76,8 @@ type WorkgroupChange struct {
 	Failure   string                                      `json:"failure,omitempty"`
 }
 
-func workgroupChangePath(id string) string     { return "tools/workgroup-change-" + id + ".json" }
+func workgroupChangePath(id string) string { return "tools/workgroup-change-" + id + ".json" }
+
 func workgroupChangeDocument(id string) string { return "workgroup-change-" + id }
 
 func changeIdentity(id string) string {

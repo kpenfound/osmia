@@ -1,20 +1,20 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"testing"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestSequentialImplementation demonstrates sequential implementation through the local
@@ -26,7 +26,7 @@ func TestSequentialImplementation(t *testing.T) {
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("resume")] = fake.asking(p, "", "1")
+	f.engine.Turns[masonTurnID("resume")] = fake.Asking(p, "", "1")
 	f.engine.Mu.Unlock()
 	stream := f.builtPaused(t, factory, "sequential")[0]
 	f.awaitDispatches(t, stream, "resume", 1)
@@ -38,13 +38,13 @@ func TestSequentialImplementation(t *testing.T) {
 
 	f.awaitMasonTransitions(t, stream, 2)
 	f.awaitQuestion(t, stream, "1", trace.QuestionEscalated)
-	p.check(t)
-	fake.check(t)
+	p.Check(t)
+	fake.Check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "dedupe", State: UnitPlanned}})
 	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1")}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("transitions before answer: %+v, want %+v", got, want)
 	}
-	first := fake.requests(stream)
+	first := fake.Requests(stream)
 	if len(first) != 1 || !strings.Contains(first[0].Prompt, "# Unit resume\n") || !strings.Contains(first[0].Prompt, "seal: 1\n") || !strings.Contains(first[0].Prompt, "## Acceptance\n- spec#1 holds, shown by TestResume (new-test)") || strings.Contains(first[0].Prompt, "# Unit dedupe") {
 		t.Fatalf("mason bundle or dispatch: %+v", first)
 	}
@@ -81,8 +81,8 @@ func TestSequentialImplementation(t *testing.T) {
 	f.rule(t, "1")
 	f.awaitTurn(t, stream, masonAgent("resume"), questions.TurnID("1"))
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	p.check(t)
-	fake.check(t)
+	p.Check(t)
+	fake.Check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitPlanned}})
 	if got := f.question(t, stream, "1").State; got != trace.QuestionAnswered {
 		t.Fatalf("question state %s", got)

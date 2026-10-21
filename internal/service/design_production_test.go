@@ -1,44 +1,31 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/isolation"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/readview"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/status"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	agent "github.com/kpenfound/agentcore/agent"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	status "github.com/kpenfound/osmia/internal/status"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const productionBrief = "Decisions: keep the acknowledged offset contract stable.\nIntent and tradeoffs: implement chunk storage in the server and resumption in the client, changing both repos.\nRejected options: client-only retries.\n"
-
-type designInterruption struct {
-	step     string
-	nth      int32
-	count    atomic.Int32
-	lifetime context.Context
-	reached  chan struct{}
-}
+type designInterruption = intakefixture.DesignInterruption
 
 type productionDesignFixture struct {
 	*crossRepoRatifyFixture
@@ -54,33 +41,9 @@ type productionDesignFixture struct {
 	configuration productionDesignConfiguration
 }
 
-type productionChiefDispatch struct {
-	mu                         sync.Mutex
-	bindings                   int
-	prepared                   thread.TurnInput
-	prepareError               string
-	scope                      coreadapter.Scope
-	selectionError, toolsError string
-	engineName, handler        string
-}
+type productionChiefDispatch = intakefixture.ProductionChiefDispatch
 
-func productionWorker(scope coreadapter.Scope) bool {
-	return scope.Role == masonRole && slices.Contains([]string{"worker_first", "worker_second", "worker_unaffected"}, scope.Thread)
-}
-
-type productionWorkerWorkspaces struct{ production coreadapter.Workspaces }
-
-func (w productionWorkerWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
-	if productionWorker(req.Scope) {
-		return stagedWorkspaces{}.Acquire(ctx, req)
-	}
-	return w.production.Acquire(ctx, req)
-}
-
-type productionDesignRepo struct {
-	id                            config.ProjectID
-	clone, upstream, remote, main string
-}
+type productionDesignRepo = intakefixture.ProductionDesignRepo
 
 type productionDesignConfiguration struct {
 	options    func(*Options)
@@ -99,214 +62,28 @@ func newProductionDesignFixture(t *testing.T) *productionDesignFixture {
 
 func newConfiguredProductionDesignFixture(t *testing.T, configuration productionDesignConfiguration) *productionDesignFixture {
 	t.Helper()
-	ctx := context.Background()
-	opts, clone, engine, sessions, _ := newArchitectOptions(t)
-	file, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-	must(t, err)
-	_, err = file.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 2\n[shed]\nmax_rounds = 1\n")
-	must(t, errors.Join(err, file.Close()))
-	clock := &fixedClock{At: demoStart}
-	opts.Reconciliation.Now = clock.Now
-	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
-	opts = enforced
-	opts.Librarian = nil
-	if configuration.options != nil {
-		configuration.options(&opts)
-	}
-	production := opts.Threads
-	dispatch := &productionChiefDispatch{}
-	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
-		bound, err := production(r, cfg)
-		if err != nil {
-			return nil, err
+	return intakefixture.NewProductionDesign(t, func(clock *fixedClock) intakefixture.ProductionDesignStart[*productionDesignFixture] {
+		opts, clone, engine, sessions, _ := newArchitectOptions(t)
+		intakefixture.ConfigureProductionDesign(t, opts.Config.Root)
+		opts.Reconciliation.Now = clock.Now
+		opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
+		opts.Librarian = nil
+		if configuration.options != nil {
+			configuration.options(&opts)
 		}
-		d := bound.(thread.Dispatcher)
-		if _, shared := trace.WorkgroupProjectID(r.Project()); shared {
-			dispatch.mu.Lock()
-			dispatch.bindings++
-			dispatch.mu.Unlock()
-			prepare := d.Prepare
-			d.Prepare = func(ctx context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
-				prepared, err := prepare(ctx, in)
-				dispatch.mu.Lock()
-				dispatch.prepared, dispatch.prepareError = in, fmt.Sprint(err)
-				dispatch.mu.Unlock()
-				return prepared, err
-			}
+		af := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions}
+		f := &productionDesignFixture{crossRepoRatifyFixture: &crossRepoRatifyFixture{architectFixture: af}, clock: clock, dispatch: &productionChiefDispatch{}, configuration: configuration}
+		return intakefixture.ProductionDesignStart[*productionDesignFixture]{
+			Fixture: f, Scenario: f.sharedDesign(), Threads: opts.Threads, Hooks: &f.hook,
+			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
+				return turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
+			},
+			Bind: func(threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error), boundary func(context.Context, string) error) {
+				af.opts.Threads, af.opts.boundary = threads, boundary
+			},
+			Start: f.start, Stop: f.stop, Running: func() bool { return f.s != nil },
 		}
-		turns := d.Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
-		originalSelect, originalScoped := turns.Select, turns.Scoped
-		originalCapture := turns.Capture
-		turns.Workspaces = productionWorkerWorkspaces{production: turns.Workspaces}
-		turns.Capture = func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {
-			if productionWorker(scope) {
-				return nil
-			}
-			return originalCapture(ctx, scope, view, result)
-		}
-		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-			if !productionWorker(scope) {
-				selection, err := originalSelect(ctx, scope)
-				if scope.Role == trace.ChiefOfStaff {
-					dispatch.mu.Lock()
-					dispatch.scope, dispatch.selectionError = scope, fmt.Sprint(err)
-					dispatch.mu.Unlock()
-				}
-				return selection, err
-			}
-			directory := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
-			return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: directory, Directory: directory}, Narrow: &coreadapter.Capabilities{Tools: []string{questions.AskTool}}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, os.MkdirAll(directory, 0700)
-		}
-		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if !productionWorker(scope) {
-				tools, err := originalScoped(ctx, scope)
-				if scope.Role == trace.ChiefOfStaff {
-					dispatch.mu.Lock()
-					dispatch.toolsError = fmt.Sprint(err)
-					dispatch.mu.Unlock()
-				}
-				return tools, err
-			}
-			return questions.Tools(r, scope.Thread, scope, clock.Now)
-		}
-		return d, nil
-	}
-	af := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions}
-	f := &productionDesignFixture{crossRepoRatifyFixture: &crossRepoRatifyFixture{architectFixture: af}, clock: clock, dispatch: dispatch, configuration: configuration}
-	af.opts.boundary = func(lifetime context.Context, step string) error {
-		hook := f.hook.Load()
-		if hook != nil && hook.step == step && hook.count.Add(1) == hook.nth {
-			hook.lifetime = lifetime
-			close(hook.reached)
-			<-lifetime.Done()
-			return lifetime.Err()
-		}
-		if configuration.checkpoint != nil {
-			return configuration.checkpoint(lifetime, step)
-		}
-		return nil
-	}
-	if configuration.wait != nil {
-		t.Cleanup(func() {
-			if f.s != nil {
-				f.stop(t)
-			}
-		})
-	}
-	f.start(t)
-	added, err := f.c.AddProject(ctx, request(clone))
-	must(t, err)
-	f.project, f.trace = added.Project.ID, added.Project.Trace
-	writeCharter(t, f.c, added.Project.ID, shedCharter)
-	main := f.upstream(t)
-	f.repos = append(f.repos, productionDesignRepo{f.project, clone, "dagger/dagger", filepath.Join(filepath.Dir(clone), "remotes", "dagger", "dagger.git"), main})
-	home := filepath.Dir(clone)
-	second := filepath.Join(home, "client")
-	must(t, os.MkdirAll(filepath.Join(second, "internal", "trace"), 0700))
-	demoGit(t, home, "init", "--quiet", second)
-	must(t, os.WriteFile(filepath.Join(second, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
-	demoGit(t, home, "-C", second, "add", "internal")
-	demoGit(t, home, "-C", second, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	demoGit(t, home, "-C", second, "branch", "-M", "main")
-	bare := filepath.Join(home, "remotes", "owner", "client.git")
-	must(t, os.MkdirAll(filepath.Dir(bare), 0700))
-	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", second, bare)
-	demoGit(t, home, "-C", second, "remote", "add", "upstream", bare)
-	other, err := f.c.AddRepo(ctx, RepoAddRequest{Project: f.project, Upstream: "owner/client", Clone: second})
-	must(t, err)
-	for _, repo := range other.Project.Repos {
-		if repo.Clone == second {
-			f.project2 = repo.ID
-		}
-	}
-	if f.project2 == "" {
-		t.Fatal("second repo was not registered")
-	}
-	f.repos = append(f.repos, productionDesignRepo{f.project2, second, "owner/client", bare, strings.TrimSpace(demoGit(t, home, "-C", bare, "rev-parse", "refs/heads/main"))})
-	f.checkRepos(t)
-	if configuration.handIn {
-		f.origin = HandInWorkstream(f.project, "production-handin")
-	} else {
-		opened, err := f.c.OpenDesign(ctx, f.project)
-		must(t, err)
-		f.origin = opened.Design.Workstream
-	}
-	f.stream1 = HandInWorkstream(f.project, "design-"+string(f.origin))
-	f.stream2 = HandInWorkstream(f.project2, "design-"+string(f.origin))
-	f.scriptDrafts(t)
-	for i := 1; i <= 2; i++ {
-		turn := roundTurnID(1, committeeAgent(i), 1)
-		engine.Mu.Lock()
-		engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			if f.stream1 == f.origin {
-				return questionResult(req, "session-committee-"+req.Name, "The single-repo draft fits the charter."), nil
-			}
-			context, err := readTool(ctx, tools, "context.md")
-			if err != nil {
-				return nil, err
-			}
-			if !strings.Contains(context, "Draft project spec") || !strings.Contains(context, "acknowledgment") || !strings.Contains(context, string(f.stream1)) || !strings.Contains(context, string(f.stream2)) {
-				return nil, errors.New("committee did not receive the shared draft, contracts and graph")
-			}
-			return questionResult(req, "session-committee-"+req.Name, "The proposed contract and slice fit the charter."), nil
-		}
-		engine.Mu.Unlock()
-	}
-	af.script(replyTurnID(1, 1), nil, nil)
-	engine.Mu.Lock()
-	engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if verified.VCS || req.Grants.VCS || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 {
-			return nil, errors.New("architect has mutation or VCS authority")
-		}
-		// The recorded selection is returned, again when it is delivered
-		// again.
-		var results []string
-		for range 2 {
-			got, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project), string(f.project2)}})
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, got)
-		}
-		var selected struct {
-			Recorded bool           `json:"recorded"`
-			Members  []designMember `json:"members"`
-		}
-		if err := json.Unmarshal([]byte(results[0]), &selected); err != nil {
-			return nil, err
-		}
-		if !selected.Recorded || len(selected.Members) != 2 || selected.Members[0].Repo != f.project || selected.Members[1].Repo != f.project2 || selected.Members[0].Workstream == "" || results[1] != results[0] {
-			return nil, fmt.Errorf("%s returned %v", affectedReposTool, results)
-		}
-		return questionResult(req, "session-selection", "Both repos are affected."), nil
-	}
-	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		names, err := toolNames(ctx, tools)
-		if err != nil {
-			return nil, err
-		}
-		if slices.Contains(names, draftBriefToolName) {
-			_, err = callTool(ctx, tools, draftBriefToolName, map[string]any{"content": productionBrief})
-			return questionResult(req, "session-design", productionBrief), err
-		}
-		return questionResult(req, "session-chief", "The service is following the agreed design."), nil
-	}
-	engine.Mu.Unlock()
-	if configuration.handIn {
-		return f
-	}
-	_, err = f.c.DesignMessage(ctx, f.origin, "Build resumable uploads in both the server and client repos.")
-	must(t, err)
-	f.wait(t, "design reply", func() bool {
-		conversation, err := f.c.DesignConversation(ctx, f.origin)
-		must(t, err)
-		return len(conversation.Entries) == 2 && conversation.Entries[1].State == TurnDone
-	})
-	repo, err := f.s.repository(f.project)
-	must(t, err)
-	f.before, err = repo.ChiefOfStaffThread(f.origin)
-	must(t, err)
-	return f
+	}, configuration.handIn, configuration.wait != nil, configuration.checkpoint)
 }
 
 func (f *productionDesignFixture) start(t *testing.T) {
@@ -317,246 +94,28 @@ func (f *productionDesignFixture) start(t *testing.T) {
 
 func (f *productionDesignFixture) checkRepos(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
-	for _, expected := range f.repos {
-		cfg := f.s.current().For(expected.id)
-		if cfg.Project.Clone != expected.clone || cfg.Project.Upstream != expected.upstream || cfg.Project.BaseBranch != "main" {
-			t.Fatalf("repo %s config changed: %+v", expected.id, cfg.Project)
-		}
-		provider := workspaces(cfg, branchesDirectory, config.WorkspacesGit)
-		remote, err := provider.Remote(ctx, cfg.Project.Upstream)
-		must(t, err)
-		if remote != "upstream" {
-			t.Fatalf("repo %s resolved remote %q, want upstream", expected.id, remote)
-		}
-		url := strings.TrimSpace(demoGit(t, filepath.Dir(expected.clone), "-C", expected.clone, "remote", "get-url", remote))
-		if url != expected.remote {
-			t.Fatalf("repo %s remote URL %q, want %q", expected.id, url, expected.remote)
-		}
-		commit, found, err := provider.RemoteBranch(ctx, remote, cfg.Project.BaseBranch)
-		must(t, err)
-		if !found || commit != expected.main {
-			t.Fatalf("repo %s upstream main=%q exists=%v, want %q", expected.id, commit, found, expected.main)
-		}
-	}
+	f.sharedDesign().CheckRepos(t)
 }
 
 func (f *productionDesignFixture) wait(t *testing.T, phase string, done func() bool) {
 	t.Helper()
-	if f.configuration.wait != nil {
-		f.configuration.wait(t, f, phase, done)
-		return
-	}
-	deadline := time.Now().Add(demoTimeout)
-	for !done() {
-		if time.Now().After(deadline) {
-			f.timeout(t, phase)
-		}
-		f.clock.Advance(time.Second)
-		time.Sleep(20 * time.Millisecond)
-	}
+	f.sharedDesign().Wait(t, phase, done)
 }
 
 func (f *productionDesignFixture) timeout(t *testing.T, phase string) {
 	t.Helper()
-	t.Logf("phase=%s design=%s members=%s/%s now=%v ready=%v lifetime=%v engine-runs=%v", phase, f.origin, f.stream1, f.stream2, f.clock.Now(), f.s.ready.Load(), f.s.lifetime.Err(), f.runs())
-	if hook := f.hook.Load(); hook != nil {
-		t.Logf("injection step=%s hits=%d target=%d", hook.step, hook.count.Load(), hook.nth)
-	}
-	select {
-	case <-f.s.done:
-		t.Logf("service terminated: %v", f.s.err)
-	default:
-		t.Log("service terminal error: none recorded; shutdown has not completed")
-	}
-	for i, member := range []config.WorkstreamID{f.origin, f.stream1, f.stream2} {
-		if member == "" || (i == 1 && member == f.origin) {
-			continue
-		}
-		project := f.project
-		if i == 2 {
-			project = f.project2
-		}
-		repo, err := f.s.repository(project)
-		if err != nil {
-			t.Logf("project=%s member=%s repository error=%v", project, member, err)
-			continue
-		}
-		states, stateErr := repo.WorkflowStates(member)
-		prepared, _, sealed, sealErr := seal.PreparedLatest(repo, member)
-		t.Logf("project=%s member=%s states=%+v state-error=%v prepared=%v seal=%+v seal-error=%v", project, member, states, stateErr, sealed, prepared, sealErr)
-		approval, found, approvalErr := repo.GroupApprovalOf(member)
-		t.Logf("member=%s group=%s decision=%v complete=%v slices=%d graph=%+v group-error=%v", member, approval.Workgroup, found, approval.Complete, len(approval.ProjectSpec.Slices), approval.ProjectSpec.Graph, approvalErr)
-		for _, pin := range approval.Members {
-			t.Logf("pinned project=%s member=%s spec=%d plan=%d round=%d", pin.Project, pin.Workstream, pin.Spec, pin.Plan, pin.Round)
-		}
-		ops, err := repo.Operations(member)
-		if err != nil {
-			t.Logf("member=%s operations error=%v", member, err)
-		}
-		for _, op := range ops {
-			failure := ""
-			for _, h := range op.History {
-				if h.Failure != "" {
-					failure = h.Failure
-				}
-			}
-			t.Logf("member=%s operation=%s action=%s input=%s result=%+v retry=%v acknowledged=%v failure=%s", member, op.Operation.ID, op.Operation.Action, op.Operation.Input, op.Result, op.RetryAt, op.Acknowledged, failure)
-		}
-		f.logTurns(t, repo, member)
-		docs, err := trace.Read[trace.Document](repo, member)
-		if err != nil {
-			t.Logf("member=%s documents error=%v", member, err)
-		}
-		for _, doc := range docs {
-			if strings.HasPrefix(doc.Path, "tools/") {
-				t.Logf("member=%s tool=%s revision=%d cause=%s", member, doc.Path, doc.Revision, doc.Cause)
-			}
-		}
-		if i == 1 {
-			chief, host, _, close, err := f.s.chiefRepository(context.Background(), repo, member)
-			if err == nil {
-				f.logTurns(t, chief, host)
-				close()
-			} else {
-				t.Logf("shared chief error=%v", err)
-			}
-		}
-	}
-	f.ownerSummary(t)
-	t.Fatalf("production design workflow timed out in %s", phase)
-}
-
-// ownerSummary follows the broad diagnostics so bounded check output retains
-// the accepted request and the dispatch evidence nearest to the failure.
-func (f *productionDesignFixture) ownerSummary(t *testing.T) {
-	t.Helper()
-	if f.owner.Turn == "" {
-		return
-	}
-	sent := f.owner
-	terminal := "running"
-	select {
-	case <-f.s.done:
-		terminal = fmt.Sprint(f.s.err)
-	default:
-	}
-	t.Logf("OWNER turn=%s address=%s design=%s members=%s/%s accepted=%v now=%v ready=%v lifetime=%v terminal=%s", sent.Turn, f.ownerAddress, f.origin, f.stream1, f.stream2, sent.At, f.clock.Now(), f.s.ready.Load(), f.s.lifetime.Err(), terminal)
-	f.dispatch.mu.Lock()
-	t.Logf("OWNER dispatch-bindings=%d prepared=%+v preparation-error=%s scope=%+v selection-error=%s tools-error=%s engine-name=%s handler=%s", f.dispatch.bindings, f.dispatch.prepared, f.dispatch.prepareError, f.dispatch.scope, f.dispatch.selectionError, f.dispatch.toolsError, f.dispatch.engineName, f.dispatch.handler)
-	f.dispatch.mu.Unlock()
-	f.engine.Mu.Lock()
-	engineRan := slices.Contains(f.engine.Runs, sent.Turn)
-	handler := "fallback"
-	if f.engine.Turns[sent.Turn] != nil {
-		handler = "named"
-	}
-	f.engine.Mu.Unlock()
-	t.Logf("OWNER sent-engine-ran=%v selected-handler=%s", engineRan, handler)
-	repo, err := f.s.repository(f.project)
-	if err != nil {
-		t.Logf("OWNER source error=%v", err)
-		return
-	}
-	chief, host, _, release, err := f.s.chiefRepository(context.Background(), repo, f.origin)
-	if err != nil {
-		t.Logf("OWNER shared error=%v", err)
-		return
-	}
-	defer release()
-	id, err := repo.CrossRepoWorkgroupOf(f.origin)
-	if err != nil {
-		t.Logf("OWNER group error=%v", err)
-		return
-	}
-	_, group, _, err := repo.CrossRepoProjectSpec(id)
-	if err != nil {
-		t.Logf("OWNER group read error=%v", err)
-		return
-	}
-	leader := leastWorkstream(group.Members[1:])
-	for i, address := range []config.WorkstreamID{f.origin, f.stream1, f.stream2} {
-		project := f.project
-		if i == 2 {
-			project = f.project2
-		}
-		member, err := f.s.repository(project)
-		if err != nil {
-			t.Logf("OWNER address=%s project=%s error=%v", address, project, err)
-			continue
-		}
-		target, routedHost, _, closeTarget, err := f.s.chiefRepository(context.Background(), member, address)
-		if err != nil {
-			t.Logf("OWNER address=%s route error=%v", address, err)
-			continue
-		}
-		t.Logf("OWNER address=%s project=%s shared-project=%s host=%s shared-handle=%v leader=%s", address, project, target.Project(), routedHost, target == chief && routedHost == host, leader)
-		closeTarget()
-		if address == leader {
-			streams, err := member.Workstreams()
-			t.Logf("OWNER leader-project=%s stream-order=%v error=%v", project, streams, err)
-		}
-		ops, err := member.Operations(address)
-		if err != nil {
-			t.Logf("OWNER address=%s operation-error=%v", address, err)
-		}
-		for _, op := range ops {
-			if !op.Acknowledged && op.RetryAt.After(f.clock.Now()) {
-				t.Logf("OWNER pending-retry member=%s operation=%s action=%s retry=%v", address, op.Operation.ID, op.Operation.Action, op.RetryAt)
-			}
-		}
-	}
-	th, err := chief.Thread(host, trace.ChiefOfStaff)
-	if err != nil {
-		t.Logf("OWNER thread error=%v", err)
-		return
-	}
-	q, ready := nextReadyTurn(th)
-	t.Logf("OWNER shared-project=%s host=%s identity-project=%s identity-thread=%s status=%s active=%s parked=%v oldest=%s ready=%v", chief.Project(), host, th.Identity.Project, th.Identity.ThreadID, th.Status, th.Active, th.Parked(), q.Request.TurnID, ready)
-	for _, turn := range th.Turns {
-		if turn.Request.TurnID != sent.Turn && turn.Request.TurnID != q.Request.TurnID {
-			continue
-		}
-		failure, response := "", ""
-		if turn.Response != nil {
-			failure, response = turn.Response.Failure, turn.Response.ID
-		}
-		t.Logf("OWNER turn=%s request=%s revision=%d project=%s workstream=%s actor=%+v text-matches=%v status=%s claim=%+v response=%s completed=%v failure=%s", turn.Request.TurnID, turn.Request.ID, turn.Request.Revision, turn.Request.Project, turn.Request.Workstream, turn.Request.Actor, turn.Request.Prompt == sent.Text, turn.Status(), turn.Claim, response, turn.CompletedAt, failure)
-	}
-	op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
-	if err != nil {
-		t.Logf("OWNER operation error=%v", err)
-		return
-	}
-	observation, err := (thread.Dispatcher{Runner: thread.Runner{Store: chief}}).Inspect(context.Background(), op)
-	t.Logf("OWNER dispatch=%s observation=%+v error=%v; direct dispatch has no retry timer", op.ID, observation, err)
+	f.sharedDesign().Timeout(t, phase)
 }
 
 func (f *productionDesignFixture) recordEngine(req agent.Request, handler string) {
-	f.dispatch.mu.Lock()
-	f.dispatch.engineName, f.dispatch.handler = req.Name, handler
-	f.dispatch.mu.Unlock()
+	f.dispatch.Mu.Lock()
+	f.dispatch.EngineName, f.dispatch.Handler = req.Name, handler
+	f.dispatch.Mu.Unlock()
 }
 
 func (f *productionDesignFixture) logTurns(t *testing.T, repo *trace.Repository, member config.WorkstreamID) {
 	t.Helper()
-	threads, err := repo.Threads(member)
-	if err != nil {
-		t.Logf("member=%s threads error=%v", member, err)
-	}
-	for _, thread := range threads {
-		t.Logf("project=%s member=%s thread=%s role=%s status=%s active=%s parked=%v", repo.Project(), member, thread.Identity.ThreadID, thread.Identity.Role, thread.Status, thread.Active, thread.Parked())
-		for _, turn := range thread.Turns {
-			failure := ""
-			if turn.Response != nil {
-				failure = turn.Response.Failure
-			}
-			t.Logf("member=%s thread=%s sequence=%d turn=%s request=%s revision=%d claim=%+v status=%s completed=%v response=%v failure=%s", member, thread.Identity.ThreadID, turn.Sequence, turn.Request.TurnID, turn.Request.ID, turn.Request.Revision, turn.Claim, turn.Status(), turn.CompletedAt, turn.Response != nil, failure)
-			for _, attempt := range turn.Attempts {
-				t.Logf("turn=%s attempt=%d at=%v path=%s replay-from=%d omitted=%d failure=%s", turn.Request.TurnID, attempt.Number, attempt.At, attempt.Path, attempt.ReplayFrom, attempt.Omitted, attempt.Failure)
-			}
-		}
-	}
+	f.sharedDesign().LogTurns(t, repo, member)
 }
 
 // awaitOwnerTurnRunning waits for the injected engine, while the live service
@@ -654,296 +213,29 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent Conve
 
 func (f *productionDesignFixture) startOwner(t *testing.T) {
 	t.Helper()
-	_, err := f.c.DesignStart(context.Background(), f.origin)
-	must(t, err)
-	repo, err := f.s.repository(f.project)
-	must(t, err)
-	f.handed, err = trace.Get[trace.Document](repo, f.origin, handedDocument, 1)
-	must(t, err)
+	f.sharedDesign().StartOwner(t)
 }
 
 func (f *productionDesignFixture) awaitPacket(t *testing.T) PacketResponse {
 	t.Helper()
-	var packet PacketResponse
-	f.wait(t, "ratification packet", func() bool {
-		a, err := f.c.Packet(context.Background(), f.origin)
-		if err != nil || a.ProjectSpec == nil {
-			return false
-		}
-		if _, err := f.c.Packet(context.Background(), f.stream2); err != nil {
-			return false
-		}
-		packet = a
-		return true
-	})
-	for i, member := range []config.WorkstreamID{f.stream1, f.stream2} {
-		project := f.project
-		if i == 1 {
-			project = f.project2
-		}
-		repo, err := f.s.repository(project)
-		must(t, err)
-		for n := 1; n <= 2; n++ {
-			th, err := repo.Thread(member, committeeAgent(n))
-			must(t, err)
-			if len(th.Turns) != 1 {
-				t.Fatalf("member %s committee %d has %d turns", member, n, len(th.Turns))
-			}
-			turn := th.Turns[0]
-			if turn.Response == nil || turn.Response.Failure != "" || turn.CompletedAt.IsZero() || turn.Status() != "idle" || turn.Response.Result.FinalResponse != "The proposed contract and slice fit the charter." {
-				failure, reply := "no response", ""
-				if turn.Response != nil {
-					failure, reply = turn.Response.Failure, turn.Response.Result.FinalResponse
-				}
-				t.Fatalf("member %s committee %d did not review its actual project context: turn=%s request=%s status=%s completed=%v attempts=%d failure=%s reply=%s", member, n, turn.Request.TurnID, turn.Request.ID, turn.Status(), turn.CompletedAt, len(turn.Attempts), failure, reply)
-			}
-		}
-	}
-	return packet
+	return f.sharedDesign().AwaitPacket(t)
 }
 
 func (f *productionDesignFixture) checkContinuation(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
-	for i, m := range []config.WorkstreamID{f.stream1, f.stream2} {
-		p := f.project
-		if i == 1 {
-			p = f.project2
-		}
-		repo, err := f.s.repository(p)
-		must(t, err)
-		streams, err := repo.Workstreams()
-		must(t, err)
-		features := slices.DeleteFunc(slices.Clone(streams), func(stream config.WorkstreamID) bool {
-			return stream == librarianWorkstream(p) || stream == f.origin
-		})
-		if !slices.Equal(features, []config.WorkstreamID{m}) {
-			t.Fatalf("repo has lost or duplicated its allocated member: %v", features)
-		}
-		if f.s.Context().Mode(p) != bundle.ModeFile {
-			t.Fatal("production path requires Hearsay")
-		}
-		handed, err := trace.Get[trace.Document](repo, m, handedDocument, 1)
-		must(t, err)
-		if handed.Content != f.handed.Content || handed.Source != f.handed.Source {
-			t.Fatal("member input differs from the immutable brief")
-		}
-		cfg := f.s.current().For(p)
-		for _, name := range []string{"spec.md", "plan.json", "handed", "tools/design-brief.json", "workgroups", ".osmia"} {
-			if _, err := os.Stat(filepath.Join(cfg.Project.Clone, name)); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("factory state leaked into target repo at %s: %v", name, err)
-			}
-		}
-		if _, err := repo.Thread(m, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("member retains an independent chief: %v", err)
-		}
-		groups, _, err := trace.Workgroups(repo)
-		must(t, err)
-		if _, found := trace.WorkgroupOf(groups, m); found {
-			t.Fatal("member retains a one-workstream group")
-		}
-		target, host, _, close, err := f.s.chiefRepository(ctx, repo, m)
-		must(t, err)
-		chief, err := target.Thread(host, trace.ChiefOfStaff)
-		close()
-		must(t, err)
-		if len(chief.Turns) < len(f.before.Turns) {
-			t.Fatal("design turns were lost")
-		}
-		if !equalJSONTest(f.before.Identity, chief.Identity) || len(f.before.Turns) > 0 && !equalJSONTest(f.before.Turns, chief.Turns[:len(f.before.Turns)]) {
-			t.Fatal("design identity, requests, responses or recovery state changed at adoption")
-		}
-	}
-	repo, err := f.s.repository(f.project)
-	must(t, err)
-	id, err := repo.CrossRepoWorkgroupOf(f.origin)
-	must(t, err)
-	_, group, _, err := repo.CrossRepoProjectSpec(id)
-	must(t, err)
-	if group.Conversation == nil || group.Conversation.Workstream != f.origin || group.Conversation.Project != f.project ||
-		len(group.Members) != 3 || group.Members[0] != f.origin ||
-		!slices.Contains(group.Members[1:], f.stream1) || !slices.Contains(group.Members[1:], f.stream2) {
-		t.Fatalf("continued conversation or exact member coverage changed: %+v", group)
-	}
-	groups, err := os.ReadDir(filepath.Join(f.s.current().Root.String(), "workgroups"))
-	must(t, err)
-	if len(groups) != 1 || groups[0].Name() != string(id) {
-		t.Fatalf("start or recovery duplicated workgroup authority: %v", groups)
-	}
-	handed, err := trace.Get[trace.Document](repo, f.origin, handedDocument, 1)
-	must(t, err)
-	if !equalJSONTest(handed, f.handed) {
-		t.Fatal("immutable handed brief changed")
-	}
-	alias, err := f.c.Status(ctx, f.origin)
-	must(t, err)
-	if alias.Workstream != f.stream1 || alias.Project != f.project {
-		t.Fatalf("design status did not resolve to its member: %+v", alias)
-	}
-	listed, err := f.c.Statuses(ctx)
-	must(t, err)
-	if slices.ContainsFunc(listed.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == f.origin }) {
-		t.Fatal("status list exposes the adopted design host as independent work")
-	}
-	if _, err := repo.Thread(f.origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("source retains an authoritative queue")
-	}
-	historical, err := trace.Read[trace.TurnRequest](repo, f.origin)
-	must(t, err)
-	if len(f.before.Turns) > 0 && !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.before.Turns[0].Request.ID }) {
-		t.Fatal("historical design request was lost")
-	}
-	chief, _, _, closeChief, err := f.s.chiefRepository(ctx, repo, f.stream1)
-	must(t, err)
-	defer closeChief()
-	matching, err := readview.Consistent(func() (bool, error) {
-		var entries []ConversationEntry
-		var feed []FeedEntry
-		for i, member := range []config.WorkstreamID{f.origin, f.stream1, f.stream2} {
-			conversation, err := f.c.Conversation(ctx, member)
-			if err != nil {
-				return false, err
-			}
-			got, api := f.s.feedList(string(member))
-			if api != nil {
-				return false, apiErrAsError{api}
-			}
-			shared := slices.DeleteFunc(slices.Clone(got.Entries), func(e FeedEntry) bool {
-				return e.Kind != "message" && e.Kind != "response" && e.Kind != "action" && e.Kind != "status"
-			})
-			if i == 0 {
-				entries, feed = conversation.Entries, shared
-			} else if !equalJSONTest(entries, conversation.Entries) || !equalJSONTest(feed, shared) {
-				return false, nil
-			}
-		}
-		return true, nil
-	}, chief.Generation)
-	must(t, err)
-	if !matching {
-		t.Fatal("continued address and member endpoints resolve to different conversations or feeds")
-	}
+	f.sharedDesign().CheckContinuation(t)
 }
 
-func equalJSONTest(a, b any) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
-}
+var equalJSONTest = intakefixture.EqualJSONTest
 
 func (f *productionDesignFixture) assertBarrier(t *testing.T) {
 	t.Helper()
-	alias, err := f.c.Status(context.Background(), f.origin)
-	must(t, err)
-	if alias.Workstream != f.stream1 || (alias.State != nil && (*alias.State == RatifiedState || *alias.State == BuildingState)) {
-		t.Fatalf("design status bypassed pending group authority: %+v", alias)
-	}
-	for i, m := range []config.WorkstreamID{f.stream1, f.stream2} {
-		p := f.project
-		if i == 1 {
-			p = f.project2
-		}
-		repo, err := f.s.repository(p)
-		must(t, err)
-		approved, err := repo.GroupApproved(m)
-		must(t, err)
-		if approved {
-			t.Fatal("incomplete group is approved")
-		}
-		approval, found, err := repo.GroupApprovalOf(m)
-		must(t, err)
-		if !found || approval.Complete || len(approval.Members) != 2 || !slices.ContainsFunc(approval.Members, func(pin trace.GroupMemberApproval) bool {
-			return pin.Project == p && pin.Workstream == m && pin.Spec == 1 && pin.Plan == 1
-		}) {
-			t.Fatal("pending group decision lost its exact member pins")
-		}
-		st, err := f.c.Status(context.Background(), m)
-		must(t, err)
-		if st.State != nil && (*st.State == RatifiedState || *st.State == BuildingState) {
-			t.Fatalf("partial effective member state: %+v", st)
-		}
-		if _, _, sealed, err := seal.Latest(repo, m); err != nil || sealed {
-			t.Fatalf("partial effective seal: %v %v", sealed, err)
-		}
-		if _, ok, err := (&masons{s: f.s, repository: repo}).read(m); err != nil || ok {
-			t.Fatalf("unit admission bypasses approval: %v %v", ok, err)
-		}
-		held, err := f.s.holds(p, librarianWorkstream(p), repo, scheduler.Candidate{Workstream: m, Thread: trace.Thread{Identity: trace.Agent{Role: masonRole}}, Turn: trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Unit: "accept"}}}})
-		must(t, err)
-		if !held {
-			t.Fatal("scheduler bypasses group barrier")
-		}
-		if wait, err := edgeWaiting(repo, m); err != nil || !wait {
-			t.Fatalf("contracts released before approval: %v %v", wait, err)
-		}
-		_, event := buildIDs(1)
-		build := coreadapter.Operation{ID: trace.OperationID(p, m, event), Boundary: coreadapter.RepositoryBoundary, Action: BuildAction, Input: json.RawMessage(`{"seal":1}`)}
-		result, err := (&builder{s: f.s, repository: repo}).Apply(context.Background(), build)
-		must(t, err)
-		if result.Outcome != "failed" {
-			t.Fatalf("direct build bypassed completion: %+v", result)
-		}
-		_, event = landIDs("accept", 1)
-		input, err := json.Marshal(landInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"})
-		must(t, err)
-		land := coreadapter.Operation{ID: trace.OperationID(p, m, event), Boundary: coreadapter.RepositoryBoundary, Action: LandAction, Input: input}
-		result, err = (&foreman{masons: &masons{s: f.s, repository: repo}}).Apply(context.Background(), land)
-		must(t, err)
-		if result.Outcome != "failed" || !strings.Contains(result.Evidence, "workgroup seal preparations") {
-			t.Fatalf("direct landing bypassed completion: %+v", result)
-		}
-		ops, err := repo.Operations(m)
-		must(t, err)
-		if slices.ContainsFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action == BuildAction }) {
-			t.Fatal("build admitted before group completion")
-		}
-	}
+	f.sharedDesign().AssertBarrier(t)
 }
 
 func (f *productionDesignFixture) awaitApproved(t *testing.T) {
 	t.Helper()
-	f.wait(t, "group approval completion", func() bool {
-		repo, err := f.s.repository(f.project)
-		must(t, err)
-		ok, err := repo.GroupApproved(f.stream1)
-		must(t, err)
-		return ok
-	})
-	for i, m := range []config.WorkstreamID{f.stream1, f.stream2} {
-		p := f.project
-		if i == 1 {
-			p = f.project2
-		}
-		repo, err := f.s.repository(p)
-		must(t, err)
-		record, _, ok, err := seal.Latest(repo, m)
-		must(t, err)
-		if !ok || record.Revision.Spec != 1 || record.Revision.Plan != 1 {
-			t.Fatalf("wrong pinned seal: %+v", record)
-		}
-		expected := f.repos[i]
-		if record.Base.Remote != "upstream" || record.Base.Branch != "main" || record.Base.Commit != expected.main || record.Branch != featureBranch(m) {
-			t.Fatalf("repo %s seal has wrong upstream base or branch: %+v", p, record)
-		}
-		fetched := strings.TrimSpace(demoGit(t, filepath.Dir(expected.clone), "-C", expected.clone, "rev-parse", "refs/remotes/upstream/main"))
-		if fetched != expected.main {
-			t.Fatalf("repo %s fetched main=%q, want %q", p, fetched, expected.main)
-		}
-		docs, err := trace.Read[trace.Document](repo, m)
-		must(t, err)
-		seals, decisions := 0, 0
-		for _, d := range docs {
-			if d.ID == seal.DocumentID {
-				seals++
-			}
-			if strings.HasSuffix(d.Path, "/ratification.json") {
-				decisions++
-			}
-		}
-		if seals != 1 || decisions != 1 {
-			t.Fatalf("duplicate member effects: seals=%d decisions=%d", seals, decisions)
-		}
-	}
+	f.sharedDesign().AwaitApproved(t)
 }
 
 func TestDesignProductionStartDraftRatifyAndRestart(t *testing.T) {
@@ -990,7 +282,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 				f.stop(t)
 				f.start(t)
 			}
-			hook := &designInterruption{step: step, nth: 1, reached: make(chan struct{})}
+			hook := &designInterruption{Step: step, Nth: 1, Reached: make(chan struct{})}
 			f.hook.Store(hook)
 			f.startOwner(t)
 			var ratifyDone chan error
@@ -1003,12 +295,12 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 				}()
 			}
 			select {
-			case <-hook.reached:
+			case <-hook.Reached:
 				t.Logf("reached %s design=%s members=%s/%s repos=%s/%s", step, f.origin, f.stream1, f.stream2, f.project, f.project2)
 			case <-time.After(demoTimeout):
 				f.timeout(t, "interruption boundary "+step)
 			}
-			if hook.lifetime != f.s.lifetime || hook.lifetime.Err() != nil {
+			if hook.Lifetime != f.s.lifetime || hook.Lifetime.Err() != nil {
 				t.Fatal("interruption did not bind the running service lifetime")
 			}
 			if ratifyDone != nil {
@@ -1016,7 +308,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 			}
 			f.stop(t)
 			t.Logf("stopped service at %s", step)
-			if !errors.Is(hook.lifetime.Err(), context.Canceled) {
+			if !errors.Is(hook.Lifetime.Err(), context.Canceled) {
 				t.Fatal("service stop did not cancel the intercepted lifetime")
 			}
 			if ratifyDone != nil {
@@ -1102,7 +394,7 @@ func TestDesignProductionExistingMemberApprovalsRecoverCompletion(t *testing.T) 
 		if api != nil {
 			t.Fatal(api)
 		}
-		if _, api := f.s.ratifyMember(ctx, owner, owner.pin); api != nil {
+		if _, api := f.s.ratifyMember(ctx, owner, owner.Pin); api != nil {
 			t.Fatal(api)
 		}
 	}
@@ -1120,7 +412,7 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 	defer f.stop(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
-	hook := &designInterruption{step: "group-decision-recorded", nth: 1, reached: make(chan struct{})}
+	hook := &designInterruption{Step: "group-decision-recorded", Nth: 1, Reached: make(chan struct{})}
 	f.hook.Store(hook)
 	returned := make(chan error, 1)
 	go func() {
@@ -1128,7 +420,7 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 		returned <- err
 	}()
 	select {
-	case <-hook.reached:
+	case <-hook.Reached:
 	case <-time.After(demoTimeout):
 		f.timeout(t, "pinned owner decision")
 	}
@@ -1625,4 +917,66 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 		t.Fatalf("recovery exceeded the persisted attempt bound: %d", len(q.Attempts))
 	}
 	f.checkContinuation(t)
+}
+
+func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign {
+	shared := &intakefixture.ProductionDesign{
+		Changes: func(t *testing.T) (func(), func()) { return serviceChanges(t, f.s) },
+		Scheduled: func() (*config.Config, []intakefixture.ScheduledProject) {
+			cfg, active := f.s.runtimes()
+			return cfg, intakefixture.ScheduledProjects(active, func(p *activeProject) intakefixture.ScheduledProject {
+				interval := f.s.about(p.repository).Project.PullRequestPollInterval()
+				return intakefixture.ScheduledProject{ID: p.id, Repository: p.repository, Interval: interval, NextPoll: f.s.polls.nextDue(p.id, interval, f.clock.Now())}
+			})
+		},
+		LastEdgePoll: func(p config.ProjectID, w config.WorkstreamID) (time.Time, bool) {
+			attempt, ok := f.s.polls.last(p, w, edgePoll)
+			return attempt.at, ok
+		},
+		EdgeObservationAt: func(r *trace.Repository, w config.WorkstreamID) (int, time.Time, error) {
+			_, rev, at, err := edgeObservationAt(r, w)
+			return rev, at, err
+		},
+
+		Project: &f.project, Project2: &f.project2, Trace: &f.trace,
+		Origin: &f.origin, Stream1: &f.stream1, Stream2: &f.stream2,
+		Before: &f.before, Handed: &f.handed, Owner: &f.owner, OwnerAddress: &f.ownerAddress, Repos: &f.repos, ContextMode: func(p config.ProjectID) bundle.Mode { return f.s.Context().Mode(p) },
+		Clone: f.clone, Engine: f.engine, Clock: f.clock, Dispatch: f.dispatch,
+		Client:     func() intakefixture.ProductionDesignClient { return f.c },
+		Config:     func() *config.Config { return f.s.current() },
+		Repository: func(p config.ProjectID) (*trace.Repository, error) { return f.s.repository(p) },
+		ChiefRepository: func(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
+			return f.s.chiefRepository(ctx, r, w)
+		},
+		Feed:  func(w string) (FeedResponse, *APIError) { return f.s.feedList(w) },
+		Ready: func() bool { return f.s.ready.Load() }, Done: func() <-chan struct{} { return f.s.done },
+		Lifetime: func() context.Context { return f.s.lifetime }, Error: func() error { return f.s.err }, Runs: f.runs,
+		LogHook: func(t *testing.T) {
+			if hook := f.hook.Load(); hook != nil {
+				t.Logf("injection step=%s hits=%d target=%d", hook.Step, hook.Count.Load(), hook.Nth)
+			}
+		},
+		WriteCharter: func(t *testing.T, p config.ProjectID, text string) { writeCharter(t, f.c, p, text) },
+		Upstream:     f.upstream, Script: f.script, ScriptDrafts: f.scriptDrafts, Workspaces: workspaces,
+		ReadBuilding: func(r *trace.Repository, w config.WorkstreamID) (bool, error) {
+			_, ok, err := (&masons{s: f.s, repository: r}).read(w)
+			return ok, err
+		},
+		Holds: func(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+			return f.s.holds(p, w, r, c)
+		},
+		EdgeWaiting: edgeWaiting,
+		Builder: func(r *trace.Repository) coreadapter.Reconciler {
+			return &builder{S: f.s.intake().BuilderDependencies(), Repository: r}
+		},
+		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
+			_, event := landIDs("accept", 1)
+			return intakefixture.TryLanding(ctx, r, m, event, LandAction, landInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
+		},
+		LeastWorkstream: leastWorkstream, NextReadyTurn: nextReadyTurn, LibrarianWorkstream: librarianWorkstream,
+	}
+	if f.configuration.wait != nil {
+		shared.WaitMode = func(t *testing.T, phase string, done func() bool) { f.configuration.wait(t, f, phase, done) }
+	}
+	return shared
 }
