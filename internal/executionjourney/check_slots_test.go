@@ -419,7 +419,7 @@ func TestHeldCheckSlotsAllowOtherMasonsAndReviewersAndRestartEmpty(t *testing.T)
 	f.engine.Mu.Lock()
 	f.engine.Turns[review.TurnID] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		close(reviewerEntered)
-		return &agent.Result{ResultText: "Reviewed", NumTurns: 1}, nil
+		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.Mu.Unlock()
 	f.start(t)
