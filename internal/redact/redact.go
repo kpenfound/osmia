@@ -27,9 +27,9 @@ func Secrets(s string, secrets ...string) string {
 
 // EnvSecrets names the environment variables whose values Secrets must
 // always redact, beyond the GitHub token and any caller-supplied secret:
-// the tailnet auth key and the Jev boost's default API key environment
-// variable.
-var EnvSecrets = []string{"GITHUB_TOKEN", "TS_AUTHKEY", "OPENROUTER_API_KEY"}
+// the tailnet auth key and the Jev boost's TypeSafe and OpenRouter API key
+// environment variables.
+var EnvSecrets = []string{"GITHUB_TOKEN", "TS_AUTHKEY", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY"}
 
 // registered holds secret values Register has recorded: configured values
 // with no fixed environment variable name, such as the Jev boost's API key

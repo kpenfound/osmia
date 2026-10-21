@@ -1032,16 +1032,19 @@ request and needs no Jev credential. The other settings show their defaults:
 ```toml
 [jev]
 enabled = false
-# Base URL of a TypeSafe-compatible API; requests go to <url>/v1/systemone.
-url = "https://openrouter.ai/api"
+# Base URL of TypeSafe's own API; requests go to <url>/v1/systemone.
+url = "https://api.typesafe.ai"
 # The model asked. An alias moves when a new version ships; name a versioned
-# model your provider accepts to keep tuned thresholds stable.
-model = "~typesafe/jev-latest"
+# model your provider accepts (e.g. "jev-1.13.0") to keep tuned thresholds stable.
+model = "jev-latest"
 # The environment variable holding the API key.
-api_key_env = "OPENROUTER_API_KEY"
+api_key_env = "TYPESAFE_API_KEY"
 # How long one request may take, at most 1m.
 timeout = "10s"
 ```
+
+To reach Jev through OpenRouter, set `url = "https://openrouter.ai/api"`,
+`model = "~typesafe/jev-latest"` and `api_key_env = "OPENROUTER_API_KEY"`.
 
 The settings are validated whether or not the boost is on, and apply through
 reload. The service reads the key when it makes a request; configuration

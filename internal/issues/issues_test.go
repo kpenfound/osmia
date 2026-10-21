@@ -150,7 +150,7 @@ func TestGitHubFetchLogsOneGitHubActivityRecordPerCall(t *testing.T) {
 func TestGitHubFetchLogNeverCarriesSecretsOrIssueBody(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "sentinel-github-token")
 	t.Setenv("TS_AUTHKEY", "sentinel-ts-authkey")
-	t.Setenv("OPENROUTER_API_KEY", "sentinel-jev-key")
+	t.Setenv("TYPESAFE_API_KEY", "sentinel-jev-key")
 	const title = "sentinel issue title"
 	const body = "sentinel issue body text"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

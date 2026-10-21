@@ -13,6 +13,19 @@ func TestSecretsRedactsCredentialURLsAndCallerSecrets(t *testing.T) {
 	}
 }
 
+func TestKnownSecretsRedactsJevCredentials(t *testing.T) {
+	// Serial: sets the supported Jev API key environment variables.
+	for _, name := range []string{"TYPESAFE_API_KEY", "OPENROUTER_API_KEY"} {
+		t.Run(name, func(t *testing.T) {
+			key := "synthetic-jev-credential"
+			t.Setenv(name, key)
+			if got := Secrets("request failed with credential "+key, KnownSecrets()...); got != "request failed with credential [redacted]" {
+				t.Fatal("Jev credential was not redacted")
+			}
+		})
+	}
+}
+
 // TestKnownSecretsIncludesRegisteredValues shows that a value Register
 // records joins EnvSecrets' fixed names in every later call to
 // KnownSecrets, so a caller-configured secret whose environment variable

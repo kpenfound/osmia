@@ -410,7 +410,7 @@ func TestEnabledJevBoostNeedsItsKey(t *testing.T) {
 	env := map[string]string{}
 	o.Getenv = func(name string) string { return env[name] }
 	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "jev"), Warn, "OPENROUTER_API_KEY is not set")
-	env["OPENROUTER_API_KEY"] = "set"
-	expect(t, find(t, Run(context.Background(), o), "jev"), Pass, "~typesafe/jev-latest")
+	expect(t, find(t, checks, "jev"), Warn, "TYPESAFE_API_KEY is not set")
+	env["TYPESAFE_API_KEY"] = "set"
+	expect(t, find(t, Run(context.Background(), o), "jev"), Pass, "jev-latest")
 }

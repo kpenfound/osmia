@@ -665,7 +665,7 @@ A mason in a Docker Sandbox may also be given Dagger, so it can run the project'
 
 Some decisions inside a turn are small, bounded judgments rather than generation: which of four classes a mason's final response falls in, whether a question's honest answer would change the sealed spec or plan, whether a proposed answer appears to contradict a ruling, which of a project's checks a unit's change can affect. An optional Jev boost asks those of Jev, TypeSafe's System One model, which takes textual state and typed questions and returns typed answers with probability distributions: a Choice selects one supplied option, a Score rates against supplied levels, and a Noul is the probability that a proposition holds. Larger generative models remain responsible for implementation, planning, explanations and review.
 
-One global setting turns the boost on or off for every judgment; there is no per-judgment switch. It is off by default. The service reaches Jev through a TypeSafe-compatible API, OpenRouter by default, with a credential referenced through an environment variable that no session receives. Jev holds no tool, no version control and no delivery credential; a judgment sees only the state its question needs.
+One global setting turns the boost on or off for every judgment; there is no per-judgment switch. It is off by default. The service reaches Jev through a TypeSafe-compatible API, TypeSafe's own API by default, with a credential referenced through an environment variable that no session receives. Jev holds no tool, no version control and no delivery credential; a judgment sees only the state its question needs.
 
 Every judgment has a supported fallback, which is the workflow as it runs without Jev. A judgment falls back when the boost is off, its credential is missing, the provider times out, is rate limited, unavailable or refuses the request, the response does not answer the questions in the shape they require, or the judgment's own acceptance, such as a confidence threshold, declines the answers. Thresholds are per judgment and tuned against a pinned model version; confidence is derived from the answer's distribution and is never treated as a verified probability of being correct. Requests are bounded by a short timeout and at most one retry of a transient failure. A rate limit, or repeated outages, cools every judgment down together, so an outage falls back at once rather than producing a retry storm.
 
@@ -905,9 +905,9 @@ per_day = "150.00"                   # a pause
 
 [jev]
 enabled = false                      # one switch for every Jev judgment
-# url = "https://openrouter.ai/api"
-# model = "~typesafe/jev-latest"
-# api_key_env = "OPENROUTER_API_KEY"
+# url = "https://api.typesafe.ai"
+# model = "jev-latest"
+# api_key_env = "TYPESAFE_API_KEY"
 
 [notify]
 webhook = "https://ntfy.sh/..."

@@ -8,11 +8,14 @@ import (
 	"github.com/kpenfound/agentcore/jev"
 )
 
-// The Jev defaults reach Jev through OpenRouter's TypeSafe-compatible API.
+// The Jev defaults reach Jev through TypeSafe's own API.
+// TODO: Replace the local constants with aliases to agentcore's jev defaults
+// once a released agentcore version defaults to TypeSafe's own API with these
+// same values.
 const (
-	DefaultJevURL       = jev.DefaultURL
-	DefaultJevModel     = jev.DefaultModel
-	DefaultJevAPIKeyEnv = jev.DefaultAPIKeyEnv
+	DefaultJevURL       = "https://api.typesafe.ai"
+	DefaultJevModel     = "jev-latest"
+	DefaultJevAPIKeyEnv = "TYPESAFE_API_KEY"
 	DefaultJevTimeout   = "10s"
 )
 

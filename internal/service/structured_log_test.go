@@ -50,7 +50,7 @@ func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
 
 // TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction shows that the
 // Jev boost's API key is covered by redaction whichever environment
-// variable api_key_env names, not only the default OPENROUTER_API_KEY:
+// variable api_key_env names, not only the default TYPESAFE_API_KEY:
 // once the service reads the key through a real request, every later log
 // write that happens to contain the key's value is redacted.
 func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {

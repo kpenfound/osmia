@@ -165,8 +165,8 @@ afresh. Each attempt keeps its own start and result evidence.
 
 Jev receives only the judgment's state and questions: the check links, the
 changed file paths with their line counts, and the diff when it fits. With
-the default settings this goes to OpenRouter. Jev holds no tool, no version
-control and no delivery credential.
+the default settings this goes to TypeSafe's own API. Jev holds no tool, no
+version control and no delivery credential.
 
 ## Limits
 
@@ -194,7 +194,7 @@ collections runs more than it would with each link judged.
 no Osmia service, configuration or trace:
 
 ```sh
-export OPENROUTER_API_KEY=...
+export TYPESAFE_API_KEY=...
 go run ./cmd/smartcheck                    # run the checks Jev selects
 go run ./cmd/smartcheck -v                 # also explain the selection
 go run ./cmd/smartcheck --dry-run -v       # explain without running checks
@@ -217,7 +217,7 @@ with `dagger check`'s status.
 | `--threshold` | `0.5` | The probability a check needs to be selected |
 | `-C` | `.` | Run in another working tree |
 | `--model`, `--url` | the `[jev]` defaults | Which Jev model to ask, and where |
-| `--api-key-env` | `OPENROUTER_API_KEY` | The variable holding the API key; the command stops when it is unset |
+| `--api-key-env` | `TYPESAFE_API_KEY` | The variable holding the API key; the command stops when it is unset |
 
 Arguments after `--` go to `dagger check`. With `-v`, the output looks like:
 

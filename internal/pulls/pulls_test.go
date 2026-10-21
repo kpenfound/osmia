@@ -305,7 +305,7 @@ func TestGitHubActionSucceedsEvenWhenTheLogWriterFails(t *testing.T) {
 func TestGitHubLogNeverCarriesSecretsOrPullRequestBodies(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "sentinel-github-token")
 	t.Setenv("TS_AUTHKEY", "sentinel-ts-authkey")
-	t.Setenv("OPENROUTER_API_KEY", "sentinel-jev-key")
+	t.Setenv("TYPESAFE_API_KEY", "sentinel-jev-key")
 	const title = "sentinel pull request title"
 	const body = "sentinel pull request body text"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
