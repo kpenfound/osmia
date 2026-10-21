@@ -18,14 +18,6 @@ type publicationFixture struct {
 	pulls      *fakePulls
 }
 
-// newPublicationFixture reviews an assembled workstream, gives the clone a
-// local bare fork of owner/dagger as its origin remote and a fake pull
-// request host, and configures the delivery style.
-func newPublicationFixture(t *testing.T, style string) *publicationFixture {
-	t.Helper()
-	return newPublicationFixtureWith(t, style, "")
-}
-
 func newPublicationFixtureWith(t *testing.T, style, extra string) *publicationFixture {
 	t.Helper()
 	f, stream, repository, report := deliveryFixtureWith(t, extra)
@@ -62,13 +54,7 @@ func (p *publicationFixture) request(t *testing.T) coreadapter.Operation {
 	return fixturekit.RequestPublication(t, p.repository, p.stream, PublishAction, p.publisher().Pass)
 }
 
-func (p *publicationFixture) feature(t *testing.T) string {
+func newPublicationFixture(t *testing.T, style string) *publicationFixture {
 	t.Helper()
-	return fixturekit.PublicationFeature(t, p.repository, p.stream)
-}
-
-func (p *publicationFixture) reopen(t *testing.T) {
-	t.Helper()
-	p.repository = fixturekit.ReopenPublication(t, p.repository, p.s.cfg.Root, p.s.cfg.Project)
-	p.s.setSole(&activeProject{repository: p.repository})
+	return newPublicationFixtureWith(t, style, "")
 }

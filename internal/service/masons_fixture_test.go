@@ -1,17 +1,14 @@
 package service
 
 import (
-	fmt "fmt"
+	"fmt"
+	"sync/atomic"
+	"testing"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-
-	plan "github.com/kpenfound/osmia/internal/plan"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
@@ -63,11 +60,4 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier st
 	return f, intakefixture.ScriptMasons(f.engine, masonTurnID)
 }
 
-var settle = intakefixture.Settle
-
 var awaitPasses = intakefixture.AwaitPasses
-
-func (f *shedFixture) awaitEventTurns(t *testing.T, stream config.WorkstreamID, want ...string) {
-	t.Helper()
-	intakefixture.AwaitEventTurns(t, f.repository(), stream, want...)
-}

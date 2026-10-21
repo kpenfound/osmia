@@ -27,8 +27,6 @@ var abandoned = intake.Abandoned
 
 const amendmentApplied = intake.AmendmentApplied
 
-var amendmentMasonTurn = intake.AmendmentMasonTurn
-
 const AmendmentRoundAction = intake.AmendmentRoundAction
 
 const AmendmentReplyAction = intake.AmendmentReplyAction
@@ -54,8 +52,6 @@ const amendmentResealed = intake.AmendmentResealed
 const amendmentUnapplied = intake.AmendmentUnapplied
 
 const amendmentRuled = intake.AmendmentRuled
-
-var amendmentActor = intake.AmendmentActor
 
 var amendmentDecisionID = intake.AmendmentDecisionID
 
@@ -95,8 +91,6 @@ const architectRole = intake.ArchitectRole
 
 const architectAgent = intake.ArchitectAgent
 
-const architectThread = intake.ArchitectThread
-
 const SketchedState = intake.SketchedState
 
 const DraftTool = intake.DraftTool
@@ -116,8 +110,6 @@ const draftValid = intake.DraftValid
 const draftInvalid = intake.DraftInvalid
 
 type draftStatus = intake.DraftStatus
-
-var draftNext = intake.DraftNext
 
 var architectPrompt = intake.ArchitectPrompt
 
@@ -199,8 +191,6 @@ const draftBriefToolName = intake.DraftBriefToolName
 
 const designReadRepoToolName = intake.DesignReadRepoToolName
 
-const designStartTransition = intake.DesignStartTransition
-
 var designLock = intake.DesignLock
 
 var isDesignWorkstream = intake.IsDesignWorkstream
@@ -251,8 +241,6 @@ const driftsDirectory = intake.DriftsDirectory
 
 const driftResolved = intake.DriftResolved
 
-const driftRejected = intake.DriftRejected
-
 var revisionWorkersIdle = intake.RevisionWorkersIdle
 
 const librarianRole = intake.LibrarianRole
@@ -279,15 +267,9 @@ const factoryPolicySubject = intake.FactoryPolicySubject
 
 const factoryPolicyVersion = intake.FactoryPolicyVersion
 
-const acceptanceDraftInstructions = intake.AcceptanceDraftInstructions
-
 var recordFactoryPolicy = intake.RecordFactoryPolicy
 
 const AssembledState = intake.AssembledState
-
-const maxFinalRounds = intake.MaxFinalRounds
-
-var nextRevision = intake.NextRevision
 
 var groupApprovalResponse = intake.GroupApprovalResponse
 
@@ -296,8 +278,6 @@ const MaxHandedBytes = intake.MaxHandedBytes
 const handedDocument = intake.HandedDocument
 
 const HandedState = intake.HandedState
-
-var handInKey = intake.HandInKey
 
 var HandInWorkstream = intake.HandInWorkstream
 
@@ -399,8 +379,6 @@ const SealAction = intake.SealAction
 
 const RatifiedState = intake.RatifiedState
 
-const sealSubject = intake.SealSubject
-
 const branchesDirectory = intake.BranchesDirectory
 
 var sealingActor = intake.SealingActor
@@ -414,8 +392,6 @@ var latestRatification = intake.LatestRatification
 var decodeSeal = intake.DecodeSeal
 
 var isSession = intake.IsSession
-
-var chiefOfStaffSkip = intake.ChiefOfStaffSkip
 
 var unfinishedSessionTurn = intake.UnfinishedSessionTurn
 
@@ -438,8 +414,6 @@ var roundTurnID = intake.RoundTurnID
 type debate = intake.Debate
 
 var Dissent = intake.Dissent
-
-var latestPin = intake.LatestPin
 
 type shedOwner = intake.ShedOwner
 
@@ -477,17 +451,11 @@ const ReplyAction = intake.ReplyAction
 
 const RedraftAction = intake.RedraftAction
 
-var replyTurnID = intake.ReplyTurnID
-
 type replier = intake.Replier
 
 const masonRole = intake.MasonRole
 
 const unitsDirectory = intake.UnitsDirectory
-
-var errChangeBoundary = intake.ErrChangeBoundary
-
-var queuedTurn = intake.QueuedTurn
 
 var errWorkgroupJoining = intake.ErrWorkgroupJoining
 

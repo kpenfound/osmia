@@ -65,3 +65,9 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 
 var checkpointed = execution.Checkpointed
 var captureFiles = execution.CaptureFiles
+
+var unitName = execution.UnitName
+
+func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, agent string, view func() (string, error)) error {
+	return m.driver().RecoverView(ctx, stream, agent, view)
+}

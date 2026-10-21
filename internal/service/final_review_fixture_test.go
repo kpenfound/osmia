@@ -52,8 +52,6 @@ var transitionByID = intakefixture.TransitionByID
 
 var chiefEvent = intakefixture.ChiefEvent
 
-var noticeOf = intakefixture.NoticeOf
-
 // assembleBoth merges both units of validPlan, checking that the workstream
 // stays building while one is unmerged, and asks for the first final review.
 // It returns the feature branch tip and the review's operation.

@@ -1,28 +1,28 @@
 package service
 
 import (
-	context "context"
-	errors "errors"
-	slices "slices"
-	strings "strings"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
 
-	agent "github.com/kpenfound/agentcore/agent"
-	bundle "github.com/kpenfound/osmia/internal/bundle"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	isolation "github.com/kpenfound/osmia/internal/isolation"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	scheduler "github.com/kpenfound/osmia/internal/scheduler"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	status "github.com/kpenfound/osmia/internal/status"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/status"
+	"github.com/kpenfound/osmia/internal/thread"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type designInterruption = intakefixture.DesignInterruption
@@ -926,12 +926,12 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			cfg, active := f.s.runtimes()
 			return cfg, intakefixture.ScheduledProjects(active, func(p *activeProject) intakefixture.ScheduledProject {
 				interval := f.s.about(p.repository).Project.PullRequestPollInterval()
-				return intakefixture.ScheduledProject{ID: p.id, Repository: p.repository, Interval: interval, NextPoll: f.s.polls.nextDue(p.id, interval, f.clock.Now())}
+				return intakefixture.ScheduledProject{ID: p.id, Repository: p.repository, Interval: interval, NextPoll: nextPollDue(&f.s.polls, p.id, interval, f.clock.Now())}
 			})
 		},
 		LastEdgePoll: func(p config.ProjectID, w config.WorkstreamID) (time.Time, bool) {
-			attempt, ok := f.s.polls.last(p, w, edgePoll)
-			return attempt.at, ok
+			attempt, ok := f.s.polls.Last(p, w, edgePoll)
+			return attempt.At, ok
 		},
 		EdgeObservationAt: func(r *trace.Repository, w config.WorkstreamID) (int, time.Time, error) {
 			_, rev, at, err := edgeObservationAt(r, w)

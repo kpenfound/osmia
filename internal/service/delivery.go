@@ -30,8 +30,6 @@ const FindingBlocking = delivery.FindingBlocking
 
 var finalTurnID = delivery.FinalTurnID
 
-var allMerged = delivery.AllMerged
-
 var decodeFinalReview = delivery.DecodeFinalReview
 
 var countSeverity = delivery.CountSeverity
@@ -39,8 +37,6 @@ var countSeverity = delivery.CountSeverity
 var finalRoundsWithBlocking = delivery.FinalRoundsWithBlocking
 
 var latestFinalReport = delivery.LatestFinalReport
-
-var finalReportBaseStale = delivery.FinalReportBaseStale
 
 type FinalCheckRun = delivery.FinalCheckRun
 
@@ -62,12 +58,6 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	return s.delivery().ApproveDelivery(ctx, raw, req)
 }
 
-func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
-	return s.delivery().DeliveryGate(ctx, repository, stream, description)
-}
-
-var errNoPullRequestCredential = delivery.ErrNoPullRequestCredential
-
 var publicationAction = delivery.PublicationAction
 
 const PublishAction = delivery.PublishAction
@@ -82,8 +72,6 @@ const publicationOpened = delivery.PublicationOpened
 
 type publishInput = delivery.PublishInput
 
-var publications = delivery.Publications
-
 const ownPullRequestOutcomeDocument = delivery.OwnPullRequestOutcomeDocument
 
 const ownPullRequestOutcomeMerged = delivery.OwnPullRequestOutcomeMerged
@@ -92,18 +80,6 @@ const ownPullRequestOutcomeClosed = delivery.OwnPullRequestOutcomeClosed
 
 type ownPullRequestOutcome = delivery.OwnPullRequestOutcome
 
-var ownPullRequestOutcomeAt = delivery.OwnPullRequestOutcomeAt
-
-var currentOwnPublication = delivery.CurrentOwnPublication
-
-var ownPullRequestFinished = delivery.OwnPullRequestFinished
-
-var ownPullRequestOutcomeDocumentFor = delivery.OwnPullRequestOutcomeDocumentFor
-
-var pullRequestOutcomeOf = delivery.PullRequestOutcomeOf
-
-var recordOwnPullRequestOutcomeFromFind = delivery.RecordOwnPullRequestOutcomeFromFind
-
 const mergePath = delivery.MergePath
 
 const mergeDocument = delivery.MergeDocument
@@ -111,8 +87,6 @@ const mergeDocument = delivery.MergeDocument
 func (s *Service) recordMerge(ctx context.Context, raw string) (MergeResponse, *APIError) {
 	return s.delivery().RecordMerge(ctx, raw)
 }
-
-var deliveryMerge = delivery.ReadDeliveryMerge
 
 func (s *Service) publicationEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
 	return s.delivery().PublicationEntry(repository, w)
@@ -126,3 +100,7 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 
 const FinalReportTool = delivery.FinalReportTool
 const FindingAdvisory = delivery.FindingAdvisory
+
+var ownPullRequestOutcomeAt = delivery.OwnPullRequestOutcomeAt
+
+var publications = delivery.Publications

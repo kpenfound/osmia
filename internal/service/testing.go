@@ -7,18 +7,17 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/jev"
-
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/scheduler"
-
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -213,7 +212,7 @@ func (a TestAccess) Handle(w http.ResponseWriter, r *http.Request) { a.s.handle(
 
 // NewFixtureForTest composes an idle fixture from local state without launching controllers.
 func NewFixtureForTest(cfg *config.Config, opts Options, store *runtime.Store, repos []*trace.Repository) *Service {
-	s := &Service{cfg: cfg, options: opts, store: store}
+	s := &Service{cfg: cfg, options: opts, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}}
 	for _, r := range repos {
 		s.projects = append(s.projects, &activeProject{id: r.Project(), repository: r})
 	}
@@ -262,21 +261,10 @@ func (a TestAccess) Halt(p config.ProjectID) error {
 	return a.s.halt(active)
 }
 
-type TestPollAttempt struct {
-	Project    config.ProjectID
-	Workstream config.WorkstreamID
-	Kind       string
-	At         time.Time
-}
+type TestPollAttempt = lifecycle.TestPollAttempt
 
 func (a TestAccess) PollAttempts() []TestPollAttempt {
-	a.s.polls.mu.Lock()
-	defer a.s.polls.mu.Unlock()
-	var out []TestPollAttempt
-	for key, at := range a.s.polls.attempts {
-		out = append(out, TestPollAttempt{Project: key.project, Workstream: key.stream, Kind: key.kind, At: at.at})
-	}
-	return out
+	return a.s.polls.AttemptsForTest()
 }
 
 // TestEnforcementBinding retains the runtime binding of fixture enforcement closures.
@@ -354,3 +342,6 @@ func (a TestAccess) Holding(r *trace.Repository) func(config.WorkstreamID, corea
 func (a TestAccess) ModelOperationLimit(r *trace.Repository) func(coreadapter.Operation) (func(), bool) {
 	return a.s.modelOperationLimit(r, nil)
 }
+
+// LifecycleController exposes the composed lifecycle controller to fixtures.
+func (a TestAccess) LifecycleController() *lifecycle.Controller { return a.s.lifecycle() }

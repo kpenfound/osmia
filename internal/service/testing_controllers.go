@@ -122,7 +122,7 @@ func DriftForTest(s *Service, r *trace.Repository) *TestDriftDriver {
 	return &TestDriftDriver{drifter{&foreman{masons: &masons{s: s, cfg: s.about(r), repository: r}}}}
 }
 func (d *TestDriftDriver) Request(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
-	return d.requestDrifts(ctx, due)
+	return d.RequestDrifts(ctx, due)
 }
 
 // BaseRefreshForTest reconciles a local observation with fixture boundaries.
@@ -131,7 +131,7 @@ func BaseRefreshForTest(s *Service, repo *trace.Repository, now func() time.Time
 		s.options.Reconciliation.Now = now
 	}
 	s.boundary = boundary
-	return &baseRefresher{s: s, repository: repo}
+	return &baseRefresher{S: s.lifecycle(), Repository: repo}
 }
 
 type TestBaseObservation = baseObservation

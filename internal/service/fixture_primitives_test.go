@@ -1,11 +1,11 @@
 package service
 
 import (
-	time "time"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 var recordActivity = fixturekit.RecordActivity
@@ -96,8 +96,6 @@ var traceCommits = fixturekit.TraceCommits
 
 var traceFile = fixturekit.TraceFile
 
-var recordCharter = fixturekit.RecordCharter
-
 type sessionEngine = fixturekit.SessionEngine
 
 type checkOutcome = fixturekit.CheckOutcome
@@ -127,3 +125,5 @@ var amendmentOp = intakefixture.AmendmentOp
 var apiError = intakefixture.ApiError
 
 var passing = fixturekit.Passing
+
+var actionOperation = fixturekit.ActionOperation

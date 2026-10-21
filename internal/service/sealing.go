@@ -32,7 +32,7 @@ func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation
 	case DriftAction:
 		return drifter{a.lands}.Inspect(ctx, op)
 	case baseRefreshAction:
-		return (&baseRefresher{s: a.lands.s, repository: a.seals.Repository}).Inspect(ctx, op)
+		return (&baseRefresher{S: a.lands.s.lifecycle(), Repository: a.seals.Repository}).Inspect(ctx, op)
 	case PublishAction, publishUpstreamAction:
 		return a.publishes.Inspect(ctx, op)
 	}
@@ -55,7 +55,7 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 	case DriftAction:
 		return drifter{a.lands}.Apply(ctx, op)
 	case baseRefreshAction:
-		return (&baseRefresher{s: a.lands.s, repository: a.seals.Repository}).Apply(ctx, op)
+		return (&baseRefresher{S: a.lands.s.lifecycle(), Repository: a.seals.Repository}).Apply(ctx, op)
 	case PublishAction, publishUpstreamAction:
 		return a.publishes.Apply(ctx, op)
 	}

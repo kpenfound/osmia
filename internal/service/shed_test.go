@@ -1,16 +1,13 @@
 package service
 
 import (
-	context "context"
+	"context"
+	"testing"
 
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	testing "testing"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const shedCharter = intakefixture.ShedCharter
@@ -20,13 +17,6 @@ const shedCharter = intakefixture.ShedCharter
 type shedFixture struct {
 	*architectFixture
 	members int
-}
-
-// newShedFixture debates for one round, so a test of a round finds the shed
-// at rest once the round's debate concluded.
-func newShedFixture(t *testing.T, members int) *shedFixture {
-	t.Helper()
-	return newDebateFixture(t, members, 1)
 }
 
 // newDebateFixture debates for at most the given number of rounds. The
@@ -87,5 +77,3 @@ func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want s
 	t.Helper()
 	f.scenario().AwaitShed(t, stream, want, never...)
 }
-
-var shedTool = intakefixture.ShedTool

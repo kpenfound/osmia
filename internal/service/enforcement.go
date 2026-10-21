@@ -77,7 +77,7 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 		return nil, err
 	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.changeControl(r, scope, false), controls.changeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.moveUnit(r, scope), controls.moveWorkstream(r, scope), controls.handBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
+	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
@@ -158,7 +158,7 @@ func Enforce(opts Options, e Enforcement) Options {
 		}
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg, r)
-		drifts := resolutions{driftWorkspaces(cfg, r)}
+		drifts := resolutions{StreamWorkspaces: driftWorkspaces(cfg, r)}
 		reports := &masonReports{}
 		verdicts := &reviewerReports{}
 		turns := &isolation.Turns{
@@ -184,7 +184,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				execution := threadExecution(scope.Role, role)
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
-					return drifts.selection(ctx, scope, execution)
+					return drifts.Selection(ctx, scope, execution)
 				}
 				if scope.Role == masonRole {
 					return units.selection(ctx, scope, execution)
@@ -276,7 +276,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return nil
 				}
 				if scope.Thread == driftMasonAgent {
-					return drifts.capture(ctx, scope, view)
+					return drifts.Capture(ctx, scope, view)
 				}
 				return units.capture(ctx, scope, view, result)
 			},

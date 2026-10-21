@@ -6,16 +6,11 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const finalRebasePath = delivery.FinalRebasePath
-
 const finalFailed = delivery.FinalFailed
-
-var reportBlocking = delivery.ReportBlocking
 
 var finalTurnPrefix = delivery.FinalTurnPrefix
 
@@ -50,27 +45,13 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return d.driver().Apply(ctx, op)
 }
 
-func (d *finalReviewer) followup(stream config.WorkstreamID, report FinalReport, revision int) (followup.Unit, bool, error) {
-	return d.driver().Followup(stream, report, revision)
-}
-
-func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {
-	return d.driver().FinalGate(ctx, stream)
-}
-
 var finalSystemPrompt = delivery.FinalSystemPrompt
-
-var finalPrompt = delivery.FinalPrompt
 
 var finalChecksDocument = delivery.FinalChecksDocument
 
 var finalChecksPath = delivery.FinalChecksPath
 
 var finalCheckAttemptPath = delivery.FinalCheckAttemptPath
-
-func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
-	return d.driver().IncompleteChecks(stream, k, commit)
-}
 
 var descriptionHash = delivery.DescriptionHash
 
@@ -95,18 +76,12 @@ func (d *publisher) driver() *delivery.Publisher {
 
 func (d *publisher) Pass(ctx context.Context) error { return d.driver().Pass(ctx) }
 
-var decodePublish = delivery.DecodePublish
-
 func (d *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return d.driver().Inspect(context.Background(), op)
 }
 
 func (d *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return d.driver().Apply(ctx, op)
-}
-
-func (d *publisher) recordPublication(ctx context.Context, stream config.WorkstreamID, record DeliveryPublication) error {
-	return d.driver().RecordPublication(ctx, stream, record)
 }
 
 const ownPullRequestOutcomePath = delivery.OwnPullRequestOutcomePath

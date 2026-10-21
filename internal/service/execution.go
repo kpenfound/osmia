@@ -1,22 +1,16 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/execution"
-
 	"context"
-
-	"github.com/kpenfound/osmia/internal/workspace"
-
 	"time"
 
-	"github.com/kpenfound/osmia/internal/coreadapter"
-
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
-
-	"github.com/kpenfound/osmia/internal/trace"
-
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 var masonTurnID = execution.MasonTurnID
@@ -36,8 +30,6 @@ var dispatchDocument = execution.DispatchDocument
 
 var currentDeferral = execution.CurrentDeferral
 var unitBranch = execution.UnitBranch
-
-var unitName = execution.UnitName
 
 type UnitChange = execution.UnitChange
 
@@ -90,7 +82,6 @@ type reviewerReports = execution.ReviewerReports
 type verdictTurns = execution.VerdictTurns
 
 var reviewTurnID = execution.ReviewTurnID
-var answerQuestionID = execution.AnswerQuestionID
 
 var staleReview = execution.StaleReview
 
@@ -113,10 +104,7 @@ var decodeLand = execution.DecodeLand
 const RebaseAction = execution.RebaseAction
 
 var rebaseDocument = execution.RebaseDocument
-var rebaseIDs = execution.RebaseIDs
-var resolveTurnID = execution.ResolveTurnID
 
-var jujutsuMarkers = execution.JujutsuMarkers
 var decodeRebase = execution.DecodeRebase
 
 const doneTool = execution.DoneTool
@@ -129,8 +117,6 @@ type UnitReport = execution.UnitReport
 var reportDocument = execution.ReportDocument
 
 type masonReports = execution.MasonReports
-
-var turnKey = execution.TurnKey
 
 type reportingTurns = execution.ReportingTurns
 
@@ -148,9 +134,6 @@ var unitContest = execution.UnitContest
 var chiefDecisions = execution.ChiefDecisions
 var chiefRulingsLeft = execution.ChiefRulingsLeft
 var contestRaised = execution.ContestRaised
-
-var exhausted = execution.Exhausted
-var failureHistory = execution.FailureHistory
 
 const maxRecoveries = execution.MaxRecoveries
 
@@ -209,17 +192,10 @@ func newUnitWorkspaces(cfg *config.Config, repo *trace.Repository) unitWorkspace
 func (u unitWorkspaces) driver() execution.UnitWorkspaces { return u.UnitWorkspaces }
 func (m *masons) Pass(ctx context.Context) error          { return m.driver().Pass(ctx) }
 
-func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, agent string, workspace func() (string, error)) error {
-	return m.driver().RecoverView(ctx, stream, agent, workspace)
-}
-
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	return m.driver().Read(stream)
 }
 
-func (m *masons) readSealed(stream config.WorkstreamID) (building, bool, error) {
-	return m.driver().ReadSealed(stream)
-}
 func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
 	return m.driver().Bundle(ctx, stream, unit)
 }
@@ -283,9 +259,6 @@ func (f *foreman) Pass(ctx context.Context) error { return f.driver().Pass(ctx) 
 func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int) (trace.Document, UnitReviewResult, bool, error) {
 	return f.driver().Approval(stream, unit, revision)
 }
-func (f *foreman) header(id string, stream config.WorkstreamID, unit, cause string, at time.Time) trace.Header {
-	return f.driver().Header(id, stream, unit, cause, at)
-}
 
 func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return f.driver().Inspect(ctx, op)
@@ -299,10 +272,6 @@ func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (tim
 }
 func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {
 	return f.driver().Current(ctx, stream, in, result)
-}
-
-func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]bool, dispatched map[string]bool, rebased map[string][]string) (bool, error) {
-	return f.driver().Refresh(ctx, b, rebasing, dispatched, rebased)
 }
 
 func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {

@@ -75,7 +75,7 @@ func TestAbandonRunningTurnReturningWaitingSettlesOperation(t *testing.T) {
 		t.Fatal(api)
 	}
 	removed := make(chan error, 1)
-	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}, finish: func(root config.Root, p config.ProjectID, w config.WorkstreamID) error {
+	cleanup := &archiveCleanup{S: s.lifecycle(), Workspaces: &workspaceCleanup{Cfg: cfg, Repository: repo, Now: s.now}, Finish: func(root config.Root, p config.ProjectID, w config.WorkstreamID) error {
 		err := trace.FinishWorkstreamTraceDeletion(root, p, w)
 		removed <- err
 		return err

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -103,7 +102,7 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 			t.Fatal("priority remains")
 		}
 	}
-	must(t, (&workgroupResolver{s: s, repository: repository}).Pass(ctx))
+	must(t, (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass(ctx))
 	must(t, repository.Serialize(func() error { return s.sole().pipeline.schedule(ctx) }))
 }
 
@@ -278,7 +277,7 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 				assertCode(t, err, NotFound)
 				_, err = c.Design(ctx, stream)
 				assertCode(t, err, NotFound)
-				must(t, (&workgroupResolver{s: s, repository: s.sole().repository}).Pass(ctx))
+				must(t, (&workgroupResolver{S: s.lifecycle(), Repository: s.sole().repository}).Pass(ctx))
 				must(t, s.Close())
 				interrupt.Store(false)
 				s, c = start(t, opts)

@@ -1,12 +1,12 @@
 package service
 
 import (
-	testing "testing"
+	"testing"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // independentPlan is validPlan with no dependency between its units.
@@ -17,12 +17,6 @@ const independentPlan = `{"version": 1, "units": [
 `
 
 var allTransitions = intakefixture.AllTransitions
-
-// builtAs is built with the design handed in under key.
-func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
-	t.Helper()
-	return f.scenario().BuiltAs(t, key)
-}
 
 // builtPaused builds one workstream for each key, as builtAs does, and sets a
 // soft pause of the target once their packets wait for ratification, so no
@@ -49,3 +43,8 @@ func (f *shedFixture) ratifiedBuild(t *testing.T, stream config.WorkstreamID) tr
 
 // checkUnits checks the unit states the status API lists for the workstream,
 // alone and in the list.
+
+func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
+	t.Helper()
+	return f.scenario().BuiltAs(t, key)
+}

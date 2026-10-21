@@ -1,21 +1,17 @@
 package service
 
 import (
-	context "context"
+	"context"
+	"testing"
 
-	testing "testing"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var resumeReport = "resume from the last chunk"
-
-var exampleCard = intakefixture.ExampleCard
 
 func newMasonController(s *Service, repository *trace.Repository) *masons {
 	return &masons{s: s, cfg: s.cfg, repository: repository}

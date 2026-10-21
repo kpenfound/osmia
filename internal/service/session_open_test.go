@@ -1,25 +1,25 @@
 package service
 
 import (
-	context "context"
-	json "encoding/json"
-	errors "errors"
-	fmt "fmt"
-	maps "maps"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
-	time "time"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	reconcile "github.com/kpenfound/osmia/internal/reconcile"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // newSessionFixture starts a service with one registered, committed
@@ -499,7 +499,7 @@ func TestBaseRefreshPassSkipsASessionAlongsideADependentWorkstream(t *testing.T)
 	before := captureSessionSnapshot(t, repo, session)
 	clock := &demoClock{At: demoStart}
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
-	b := &baseRefresher{s: s, repository: repo}
+	b := &baseRefresher{S: s.lifecycle(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return b.Pass(ctx) })
 	if baseRefreshOperationCount2(t, repo, stream) == 0 {
 		t.Fatal("the dependent workstream's base refresh was not requested")
@@ -560,7 +560,7 @@ func TestDriftPassSkipsASessionAlongsideABuildingWorkstream(t *testing.T) {
 	var requested []config.WorkstreamID
 	drivenPass(t, s, repo, func() error {
 		var err error
-		requested, err = f.requestDrifts(ctx, func(ws config.WorkstreamID) (string, error) { return "owner requested", nil })
+		requested, err = f.RequestDrifts(ctx, func(ws config.WorkstreamID) (string, error) { return "owner requested", nil })
 		return err
 	})
 	found := false

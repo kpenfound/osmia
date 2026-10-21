@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"time"
 
@@ -65,21 +64,14 @@ func (s *Service) pollTask(ctx context.Context, repository *trace.Repository, ki
 	return nil
 }
 
-// pollOrder resumes after the last admitted stream so a full pool cannot
-// repeatedly admit only the beginning of a large scan.
-func pollOrder[T any](ctx context.Context, kind string, items []T, stream func(T) config.WorkstreamID) []T {
+func pollCursor(ctx context.Context, kind string) config.WorkstreamID {
 	tasks, _ := ctx.Value(pollTaskContext{}).(*networkPollTasks)
 	if tasks == nil {
-		return items
+		return ""
 	}
 	tasks.mu.Lock()
-	last := tasks.cursor[kind]
-	tasks.mu.Unlock()
-	i := slices.IndexFunc(items, func(item T) bool { return stream(item) == last })
-	if i < 0 || i == len(items)-1 {
-		return items
-	}
-	return append(slices.Clone(items[i+1:]), items[:i+1]...)
+	defer tasks.mu.Unlock()
+	return tasks.cursor[kind]
 }
 
 // runNetworkPolls keeps remote observation independent of scheduling. Each

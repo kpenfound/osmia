@@ -1,118 +1,41 @@
 package service
 
 import (
-	context "context"
-	json "encoding/json"
-	fmt "fmt"
-	io "io"
-	http "net/http"
-	httptest "net/http/httptest"
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	eventstream "github.com/kpenfound/osmia/internal/eventstream"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/eventstream"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // fakeWebhook records the bodies posted to it and answers with status. It
 // stands in for the owner's real webhook endpoint, leaving that endpoint's
 // actual network behaviour and availability unverified.
-type fakeWebhook struct {
-	*httptest.Server
-	mu     sync.Mutex
-	bodies []string
-	// answers holds the status each post in bodies was answered with.
-	answers []int
-	status  int
-	// ledger, when set, is the notification ledger that must hold each
-	// posted body as pending before the post arrives.
-	ledger string
-}
+type fakeWebhook struct{ *fixturekit.Webhook }
 
-func newFakeWebhook(t *testing.T) *fakeWebhook {
-	t.Helper()
-	w := &fakeWebhook{status: http.StatusOK}
-	w.Server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		if r.Method != http.MethodPost || r.URL.Path != "/hook/secret" || r.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
-			t.Errorf("request %s %s %s", r.Method, r.URL.Path, r.Header.Get("Content-Type"))
-		}
-		if w.ledger != "" && !pendingIn(w.ledger, string(body)) {
-			t.Errorf("posted before the ledger recorded it as pending: %q", body)
-		}
-		w.bodies = append(w.bodies, string(body))
-		w.answers = append(w.answers, w.status)
-		rw.WriteHeader(w.status)
-	}))
-	t.Cleanup(w.Close)
-	return w
-}
-
-// pendingIn reports whether the ledger at path holds body as a pending
-// notification.
-func pendingIn(path, body string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var l notifyLedger
-	if json.Unmarshal(data, &l) != nil {
-		return false
-	}
-	for _, rec := range l.Notifications {
-		if rec.State == notificationPending && rec.Body == body {
-			return true
-		}
-	}
-	return false
-}
-
-// records makes the webhook check that each post is recorded as pending in
-// the ledger of opts' root first.
+func newFakeWebhook(t *testing.T) *fakeWebhook { return &fakeWebhook{fixturekit.NewWebhook(t)} }
 func (w *fakeWebhook) records(opts Options) *fakeWebhook {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.ledger = filepath.Join(opts.Config.Root, "notifications.json")
+	w.Webhook.Records(opts.Config.Root)
 	return w
 }
-
-func (w *fakeWebhook) hook() string { return w.URL + "/hook/secret" }
-
-func (w *fakeWebhook) respond(status int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.status = status
-}
-
-func (w *fakeWebhook) received() []string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return slices.Clone(w.bodies)
-}
-
-// accepted returns the posts the webhook answered with a success status.
-func (w *fakeWebhook) accepted() []string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	var out []string
-	for i, body := range w.bodies {
-		if w.answers[i] < 300 {
-			out = append(out, body)
-		}
-	}
-	return out
-}
+func (w *fakeWebhook) hook() string       { return w.Hook() }
+func (w *fakeWebhook) respond(status int) { w.Respond(status) }
+func (w *fakeWebhook) received() []string { return w.Received() }
+func (w *fakeWebhook) accepted() []string { return w.Accepted() }
 
 // await waits until the webhook has received n posts and returns them.
 func (w *fakeWebhook) await(t *testing.T, n int) []string {
