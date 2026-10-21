@@ -63,9 +63,6 @@ const checksRole = execution.ChecksRole
 
 var checksActor = execution.ChecksActor
 
-const checkRetryDelay = execution.CheckRetryDelay
-const maxIncompleteChecks = execution.MaxIncompleteChecks
-
 type checkInput = execution.CheckInput
 type UnitCheckRun = execution.UnitCheckRun
 
@@ -79,7 +76,6 @@ var checksSubject = execution.ChecksSubject
 
 var checkBlockedSubject = execution.CheckBlockedSubject
 
-var quoteLinks = execution.QuoteLinks
 var unitReviewerIdentity = execution.UnitReviewerIdentity
 var unitReviewerSelection = execution.UnitReviewerSelection
 
@@ -113,8 +109,6 @@ type landInput = execution.LandInput
 var landingDocument = execution.LandingDocument
 var landIDs = execution.LandIDs
 var decodeLand = execution.DecodeLand
-
-const subjectLength = execution.SubjectLength
 
 const RebaseAction = execution.RebaseAction
 

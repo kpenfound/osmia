@@ -22,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/ghlog"
@@ -1208,8 +1209,8 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
-	finals := &finalReviewer{s: s, repository: repository}
-	publish := &publisher{s: s, repository: repository}
+	finals := &delivery.FinalReviewer{S: s.delivery(), Repository: repository}
+	publish := &delivery.Publisher{S: s.delivery(), Repository: repository}
 	amend := &amendmentDrafter{Drafter: draft}
 	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}

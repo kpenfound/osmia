@@ -1,4 +1,4 @@
-package service
+package executionjourney
 
 import (
 	"context"
@@ -135,7 +135,7 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 			if last.Base != "main" || last.PullRequest != 100 || last.URL != in.Retarget.URL || last.PriorURL != last.URL || last.BaseWorkstream != "" {
 				t.Fatal(last)
 			}
-			pending, err := upstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
+			pending, err := p.s.delivery().UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
 			must(t, err)
 			if pending {
 				t.Fatal("completed retarget still pending")

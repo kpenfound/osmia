@@ -1,4 +1,4 @@
-package service
+package executionjourney
 
 import (
 	"context"
@@ -49,7 +49,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	// reopening the trace with an existing judgment and unfinished attempt.
 	apply := func(ctx context.Context) <-chan error {
 		t.Helper()
-		release, admitted := f.s.modelOperationLimit(a.repository, nil)(op)
+		release, admitted := InspectForTest(f.s).ModelOperationLimit(a.repository)(op)
 		if !admitted {
 			t.Fatal("review did not acquire committee capacity")
 		}

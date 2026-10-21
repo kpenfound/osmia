@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 
-	"github.com/kpenfound/osmia/internal/seal"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -62,8 +60,6 @@ var amendmentActor = intake.AmendmentActor
 var amendmentDecisionID = intake.AmendmentDecisionID
 
 var amendmentRulingTurn = intake.AmendmentRulingTurn
-
-type amendmentCase = intake.AmendmentCase
 
 func (s *Service) amendmentView(raw string, id string) (AmendmentResponse, *APIError) {
 	return s.intake().AmendmentView(raw, id)
@@ -325,8 +321,6 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 	return s.intake().OpenDecisions(ctx, repository, w)
 }
 
-const publicationEscalation = intake.PublicationEscalation
-
 func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (AnswerResponse, *APIError) {
 	return s.intake().Answer(ctx, raw, req)
 }
@@ -350,8 +344,6 @@ const continueMark = intake.ContinueMark
 var continuedTurn = intake.ContinuedTurn
 
 var isContinuation = intake.IsContinuation
-
-var stoppedTurn = intake.StoppedTurn
 
 var priorityRefusal = intake.PriorityRefusal
 
@@ -397,8 +389,6 @@ var copyCommit = intake.CopyCommit
 
 const readRemoteFileTool = intake.ReadRemoteFileTool
 
-var refuseReport = intake.RefuseReport
-
 var sealedUnit = intake.SealedUnit
 
 const reviewerRole = intake.ReviewerRole
@@ -437,8 +427,6 @@ const InShedState = intake.InShedState
 
 const shedSubject = intake.ShedSubject
 
-const maxRoundAttempts = intake.MaxRoundAttempts
-
 type Committee = intake.Committee
 
 var committeeAgent = intake.CommitteeAgent
@@ -452,10 +440,6 @@ type debate = intake.Debate
 var Dissent = intake.Dissent
 
 var latestPin = intake.LatestPin
-
-var errNoCommittee = intake.ErrNoCommittee
-
-var ownerHeader = intake.OwnerHeader
 
 type shedOwner = intake.ShedOwner
 
@@ -605,8 +589,4 @@ func (s *Service) intakeMasonBundle(ctx context.Context, repo *trace.Repository,
 }
 func (s *Service) intakeBlockMason(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit, cause, reason string) error {
 	return (&masons{s: s, cfg: s.about(repo), repository: repo}).block(ctx, stream, unit, cause, reason)
-}
-
-func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amendmentCase, current seal.Seal, dissent []shed.Entry, note string) *APIError {
-	return intake.New(intake.Dependencies{FinalRoundsWithBlocking: finalRoundsWithBlocking}).EngineeringRevision(r, stream, c, current, dissent, note)
 }

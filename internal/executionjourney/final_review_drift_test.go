@@ -1,4 +1,4 @@
-package service
+package executionjourney
 
 import (
 	"context"

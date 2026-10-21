@@ -232,7 +232,7 @@ type runnerAdapter struct {
 	amend       *amendmentDrafter
 	amendRounds amendmentDebate
 	rounds      *debate
-	finals      *finalReviewer
+	finals      coreadapter.Reconciler
 	checks      *checkers
 }
 

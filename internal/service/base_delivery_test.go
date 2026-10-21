@@ -12,95 +12,42 @@ import (
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type repositoryPulls map[string]*fakePulls
-
-func (r repositoryPulls) Find(ctx context.Context, repository, head, branch string) ([]pulls.PullRequest, error) {
-	return r[repository].Find(ctx, repository, head, branch)
-}
-func (r repositoryPulls) Create(ctx context.Context, repository string, n pulls.New) (pulls.PullRequest, error) {
-	return r[repository].Create(ctx, repository, n)
-}
-
-func (r repositoryPulls) Ready(ctx context.Context, repository string, number int) (pulls.PullRequest, error) {
-	return r[repository].Ready(ctx, repository, number)
-}
+type repositoryPulls = fixturekit.RepositoryPulls
 
 func maintenanceFixture(t *testing.T) *publicationFixture {
 	t.Helper()
 	p := newPublicationFixture(t, "commit-per-unit")
-	ctx := context.Background()
-	upstream := p.s.cfg.Project.Upstream
-	// Record a completed delivery on the fork, then configure the canonical
-	// upstream for the integration check and second publication.
-	p.s.cfg.Project.Upstream = p.s.cfg.Project.Fork
-	p.approve(t, nil)
-	result, err := p.publisher().Apply(ctx, p.request(t))
-	must(t, err)
-	if result.Outcome != "succeeded" {
-		t.Fatal(result)
-	}
-	p.s.cfg.Project.Upstream = upstream
-	parent := config.WorkstreamID("w_fffffffffffffffffffffffffffffff0")
-	repo := p.repository
-	must(t, repo.CreateWorkstream(ctx, parent, p.s.now(), trace.Actor{Kind: "owner", ID: "owner"}))
-	sealed, doc, _, err := seal.Latest(repo, p.stream)
-	must(t, err)
-	sealed.Branch = featureBranch(parent)
-	data, err := seal.Encode(sealed)
-	must(t, err)
-	doc.Workstream, doc.Content, doc.Revision = parent, string(data), 1
-	must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
-	h := doc.Header
-	h.Schema, h.ID = "osmia.trace.transition", "parent-delivered"
-	_, err = repo.SetFeatureState(ctx, h, DeliveredState, "Parent delivered before upstream integration")
-	must(t, err)
-	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "branch", sealed.Branch, sealed.Base.Commit)
-	base := trace.WorkstreamBase{Workstream: p.stream, Base: parent, Revision: 1}
-	data, err = json.Marshal(base)
-	must(t, err)
-	doc.Workstream, doc.ID, doc.Path, doc.Content = p.stream, "workstream-base", "base.json", string(data)
-	must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
-	// A second upstream commit forces maintenance to move the reviewed branch.
-	advanceUpstream(t, p.shedFixture, map[string]string{"INTEGRATED.md": "dependency is integrated\n"})
-	host := &fakePulls{Fork: func() string { tip, _ := p.forkBranch(t); return tip }}
-	p.s.options.PullRequests = repositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
-	refresh := &baseRefresher{s: p.s, repository: repo}
-	must(t, refresh.Pass(ctx))
-	op := actionOperation(t, repo, p.stream, baseRefreshAction)
-	result = settleOperation(t, p.s, repo, p.stream, op, refresh)
-	if result.Outcome != "succeeded" {
-		t.Fatal(result)
-	}
-	observed, rev, err := baseObservationAt(repo, p.stream)
-	must(t, err)
-	if rev != 1 || observed.Unavailable || observed.Base.Workstream != "" {
-		t.Fatalf("integration %+v %d", observed, rev)
-	}
+	intakefixture.PrepareDeliveryMaintenance(t, intakefixture.DeliveryMaintenance{
+		Config: p.s.cfg, Repository: p.repository, Stream: p.stream, Clone: p.clone, Now: p.s.now,
+		Approve: func() { p.approve(t, nil) },
+		Publish: func() (coreadapter.OperationResult, error) {
+			return p.publisher().Apply(context.Background(), p.request(t))
+		},
+		AdvanceUpstream: func(files map[string]string) { advanceUpstream(t, p.shedFixture, files) },
+		ForkTip:         func() string { tip, _ := p.forkBranch(t); return tip },
+		Refresh: func(host *fakePulls, upstream string) coreadapter.OperationResult {
+			p.s.options.PullRequests = repositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
+			refresh := &baseRefresher{s: p.s, repository: p.repository}
+			must(t, refresh.Pass(context.Background()))
+			op := actionOperation(t, p.repository, p.stream, baseRefreshAction)
+			return settleOperation(t, p.s, p.repository, p.stream, op, refresh)
+		},
+		Observation: func(r *trace.Repository, w config.WorkstreamID) (seal.Base, bool, int, error) {
+			o, rev, err := baseObservationAt(r, w)
+			return o.Base, o.Unavailable, rev, err
+		},
+	})
 	return p
 }
 
-func actionOperation(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, action string) coreadapter.Operation {
-	t.Helper()
-	ops, err := repo.Operations(stream)
-	must(t, err)
-	var found coreadapter.Operation
-	var at time.Time
-	for _, op := range ops {
-		if op.Operation.Action == action && op.Transition.At.After(at) {
-			found = op.Operation
-			at = op.Transition.At
-		}
-	}
-	if found.ID == "" {
-		t.Fatalf("no %s operation", action)
-	}
-	return found
-}
+var actionOperation = fixturekit.ActionOperation
 
 func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *testing.T) {
 	t.Parallel()
@@ -295,8 +242,4 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	if observed.Unavailable || observed.Base.Workstream != "" || observed.Base.Commit == "" {
 		t.Fatalf("integration observation %+v", observed)
 	}
-}
-
-func (r repositoryPulls) Update(ctx context.Context, repository string, number int, change pulls.Update) (pulls.PullRequest, error) {
-	return r[repository].Update(ctx, repository, number, change)
 }

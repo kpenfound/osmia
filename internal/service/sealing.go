@@ -16,7 +16,7 @@ type repositoryAdapter struct {
 	seals     *sealer
 	builds    *builder
 	lands     *foreman
-	publishes *publisher
+	publishes coreadapter.Reconciler
 }
 
 func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {

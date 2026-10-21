@@ -30,3 +30,7 @@ type shedFixture struct {
 }
 
 const shedCharter = intakefixture.ShedCharter
+
+func newDebateFixture(t *testing.T, members, rounds int) *shedFixture {
+	return newDebateFixtureWith(t, members, rounds, "", nil)
+}

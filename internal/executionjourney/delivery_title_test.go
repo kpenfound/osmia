@@ -1,145 +1,15 @@
-package service
+package executionjourney
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// setStatusGoal records goal as the workstream's chief-of-staff status, the
-// value workstreamTitle (and archiveTitle and status) read as the
-// workstream's title.
-func setStatusGoal(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, goal string, at time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	_, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor)
-	must(t, err)
-	turn := fmt.Sprintf("status-%d", at.UnixNano())
-	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: serviceActor, Cause: "fixture"}
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set status"})
-	must(t, err)
-	session := t.TempDir()
-	_, err = repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, turn+"-token", session, at)
-	must(t, err)
-	_, err = repository.SetStatus(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(repository.Project()), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn},
-		trace.StatusContent{Goal: goal, Note: "status", Agents: []string{}}, at, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
-	must(t, err)
-}
-
-// recordHanded records a handed document for stream with the given recorded
-// source, as hand-in would, so draftDelivery can read it.
-func recordHanded(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, source string, at time.Time) {
-	t.Helper()
-	must(t, repository.Append(context.Background(), trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"},
-		Path: "handed/input.md", Content: "# Handed issue title\n\nBody.\n", Source: source}))
-}
-
-// TestDraftDeliveryTitleIsTheWorkstreamStatusGoal shows the drafted title is
-// the latest chief-of-staff status goal, not text taken from the final
-// review's summary (spec#1).
-func TestDraftDeliveryTitleIsTheWorkstreamStatusGoal(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
-	defer repository.Close()
-	setStatusGoal(t, repository, stream, "Ship resumable uploads to users", time.Now().UTC())
-	title, _, err := draftDelivery(f.s.about(repository), repository, stream, report)
-	must(t, err)
-	if title != "Ship resumable uploads to users" {
-		t.Fatalf("title %q, want the status goal, not the final review's summary %q", title, report.Summary)
-	}
-}
-
-// TestDraftDeliveryTitleFallsBackToSpecHeadingWithoutAGoal shows that a
-// workstream with no status goal gets a meaningful fallback title (the
-// sealed spec's first heading) before the bare workstream ID (spec#2).
-func TestDraftDeliveryTitleFallsBackToSpecHeadingWithoutAGoal(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
-	defer repository.Close()
-	title, _, err := draftDelivery(f.s.about(repository), repository, stream, report)
-	must(t, err)
-	if title != "Resumable uploads" {
-		t.Fatalf("title %q, want the spec's first heading", title)
-	}
-	if title == "Workstream "+string(stream) {
-		t.Fatal("fell all the way back to the bare workstream ID")
-	}
-}
-
-// TestDraftDeliveryBodyIsASpecSummaryWithNoWorkAccounting shows the drafted
-// body is a short prose summary of the sealed spec, with no per-criterion
-// evidence or gap lines, no landed-unit list and no reviewed commit hash
-// (spec#3).
-func TestDraftDeliveryBodyIsASpecSummaryWithNoWorkAccounting(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
-	defer repository.Close()
-	_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
-	must(t, err)
-	if !strings.Contains(body, "An interrupted upload resumes from its last acknowledged chunk") {
-		t.Fatalf("body %q does not hold the spec's opening prose", body)
-	}
-	for _, unwanted := range []string{report.Commit, "spec#1", "spec#2", "Landed units", "resume.go", "dedupe.go", "Evidence:", "Gap:"} {
-		if strings.Contains(body, unwanted) {
-			t.Fatalf("body %q still accounts for the work with %q", body, unwanted)
-		}
-	}
-}
-
-// TestDraftDeliveryClosesAnIssueInTheTargetRepository shows that a
-// workstream handed in from a GitHub issue in the repository the pull
-// request targets gets a "closes #N" reference (spec#4).
-func TestDraftDeliveryClosesAnIssueInTheTargetRepository(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
-	defer repository.Close()
-	recordHanded(t, repository, stream, "https://github.com/dagger/dagger/issues/42", time.Now().UTC())
-	_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
-	must(t, err)
-	if !strings.Contains(body, "closes #42") {
-		t.Fatalf("body %q does not close the same-repository issue", body)
-	}
-}
-
-// TestDraftDeliveryClosesAnIssueInAnotherRepository shows that a workstream
-// handed in from a GitHub issue in a different repository than the pull
-// request targets gets a "closes OWNER/REPO#N" reference (spec#5).
-func TestDraftDeliveryClosesAnIssueInAnotherRepository(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
-	defer repository.Close()
-	recordHanded(t, repository, stream, "https://github.com/acme/other/issues/7", time.Now().UTC())
-	_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
-	must(t, err)
-	if !strings.Contains(body, "closes acme/other#7") {
-		t.Fatalf("body %q does not close the other-repository issue", body)
-	}
-}
-
-// TestDraftDeliveryNoClosingReferenceForFileOrStdin shows that a workstream
-// handed in from a file or stdin gets no closing issue reference (spec#6).
-func TestDraftDeliveryNoClosingReferenceForFileOrStdin(t *testing.T) {
-	t.Parallel()
-	for _, source := range []string{"file:/home/owner/design.md", "stdin"} {
-		t.Run(source, func(t *testing.T) {
-			f, stream, repository, report := deliveryFixture(t)
-			defer repository.Close()
-			recordHanded(t, repository, stream, source, time.Now().UTC())
-			_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
-			must(t, err)
-			if strings.Contains(body, "closes") {
-				t.Fatalf("body %q closes an issue for a %s hand-in", body, source)
-			}
-		})
-	}
-}
 
 // TestDeliveryPresentationShowsTheTitleAndKeepsTheBodyEditable shows that
 // the presentation carries the title to be published alongside the drafted
@@ -184,7 +54,7 @@ func TestDeliveryApprovalIsStaleWhenTheStatusGoalChangesBeforeApproval(t *testin
 	if api != nil {
 		t.Fatal(api)
 	}
-	setStatusGoal(t, repository, stream, "A new status goal", time.Now().UTC())
+	fixturekit.SetStatusGoal(t, repository, stream, "A new status goal", time.Now().UTC())
 	if _, api := f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: first.Report.Review, ReviewRevision: first.ReviewRevision, Commit: first.Report.Commit, DraftHash: first.DraftHash}); api == nil || api.Code != Conflict {
 		t.Fatalf("approved a presentation whose title the owner was not shown: %v", api)
 	}
@@ -213,7 +83,7 @@ func TestPublicationOpensThePullRequestWithTheStatusGoalAsItsTitle(t *testing.T)
 	p := newPublicationFixture(t, "commit-per-unit")
 	ctx := context.Background()
 	long := strings.Repeat("Ship the resumable upload feature to every customer ", 3)
-	setStatusGoal(t, p.repository, p.stream, long, p.s.now())
+	fixturekit.SetStatusGoal(t, p.repository, p.stream, long, p.s.now())
 	p.approve(t, nil)
 	op := p.request(t)
 	result, err := p.publisher().Apply(ctx, op)
@@ -241,7 +111,7 @@ func TestPublicationUsesTheApprovedTitleDespiteALaterStatusGoalChange(t *testing
 	if approval.Title != "Resumable uploads" {
 		t.Fatalf("approval title %q", approval.Title)
 	}
-	setStatusGoal(t, p.repository, p.stream, "A completely different later goal", p.s.now())
+	fixturekit.SetStatusGoal(t, p.repository, p.stream, "A completely different later goal", p.s.now())
 	op := p.request(t)
 	result, err := p.publisher().Apply(ctx, op)
 	if err != nil || result.Outcome != "succeeded" {
@@ -261,7 +131,7 @@ func TestSameRepositoryMaintenanceUpdatesAnExistingPullRequestsTitle(t *testing.
 	t.Parallel()
 	p := sameRepositoryMaintenance(t)
 	before := p.pulls.Prs[0].Title
-	setStatusGoal(t, p.repository, p.stream, "A refreshed delivery title", p.s.now())
+	fixturekit.SetStatusGoal(t, p.repository, p.stream, "A refreshed delivery title", p.s.now())
 	approveMaintenance(t, p)
 	if before == "A refreshed delivery title" {
 		t.Fatal("fixture already used the new title")

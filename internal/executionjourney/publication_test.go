@@ -1,11 +1,10 @@
-package service
+package executionjourney
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -39,90 +39,46 @@ func newPublicationFixture(t *testing.T, style string) *publicationFixture {
 func newPublicationFixtureWith(t *testing.T, style, extra string) *publicationFixture {
 	t.Helper()
 	f, stream, repository, report := deliveryFixtureWith(t, extra)
-	home := filepath.Dir(f.clone)
-	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork}
-	p.pulls = &fakePulls{Fork: func() string { commit, _ := p.forkBranch(t); return commit }}
-	f.s.mu.Lock()
+	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report}
+	p.fork, p.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := p.forkBranch(t); return commit })
 	f.s.cfg.Project.Landing = style
 	f.s.options.PullRequests = p.pulls
-	f.s.mu.Unlock()
 	return p
 }
 
-// forkBranch returns the commit the fork's delivery branch is at, and
-// whether it exists.
 func (p *publicationFixture) forkBranch(t *testing.T) (string, bool) {
 	t.Helper()
-	out := strings.TrimSpace(demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(p.stream)))
-	return out, out != ""
+	return fixturekit.PublicationForkBranch(t, p.fork, featureBranch(p.stream))
 }
 
-// approve records the owner's approval of the presented draft, or of the
-// given description.
 func (p *publicationFixture) approve(t *testing.T, description *string) DeliveryApproval {
 	t.Helper()
-	presented, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
-	if api != nil {
-		t.Fatal(api)
-	}
-	approval, api := p.s.approveDelivery(context.Background(), string(p.stream), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: description})
-	if api != nil {
-		t.Fatal(api)
-	}
-	return approval
+	return fixturekit.ApprovePublication(t, p.stream, description, p.s.deliveryPresentation, p.s.approveDelivery)
 }
 
 func (p *publicationFixture) publisher() *publisher {
 	return &publisher{s: p.s, repository: p.repository}
 }
 
-// operations returns the workstream's publish operations, in request order.
 func (p *publicationFixture) operations(t *testing.T) []coreadapter.Operation {
 	t.Helper()
-	ops, err := p.repository.Operations(p.stream)
-	must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != PublishAction })
-	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
-	var out []coreadapter.Operation
-	for _, o := range ops {
-		out = append(out, o.Operation)
-	}
-	return out
+	return fixturekit.PublicationOperations(t, p.repository, p.stream, PublishAction)
 }
 
-// request runs the publication controller's pass and returns the one
-// publish operation it asked for.
 func (p *publicationFixture) request(t *testing.T) coreadapter.Operation {
 	t.Helper()
-	before := len(p.operations(t))
-	must(t, p.publisher().Pass(context.Background()))
-	ops := p.operations(t)
-	if len(ops) != before+1 {
-		t.Fatalf("the pass asked for %d publications, want one more than %d", len(ops), before)
-	}
-	return ops[len(ops)-1]
+	return fixturekit.RequestPublication(t, p.repository, p.stream, PublishAction, p.publisher().Pass)
 }
 
 func (p *publicationFixture) feature(t *testing.T) string {
 	t.Helper()
-	state, err := p.repository.Workflow(p.stream, trace.FeatureSubject)
-	must(t, err)
-	return state.Value
+	return fixturekit.PublicationFeature(t, p.repository, p.stream)
 }
 
-// reopen closes the trace and opens it again, as a restarted service does.
 func (p *publicationFixture) reopen(t *testing.T) {
 	t.Helper()
-	p.repository.Close()
-	reopened, err := trace.Open(p.s.cfg.Root, p.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	p.repository = reopened
-	p.s.setSole(&activeProject{repository: reopened})
+	p.repository = fixturekit.ReopenPublication(t, p.repository, p.s.cfg.Root, p.s.cfg.Project)
+	p.s.setSole(&activeProject{repository: p.repository})
 }
 
 func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t *testing.T) {

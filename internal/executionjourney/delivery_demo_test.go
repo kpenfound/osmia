@@ -1,21 +1,21 @@
-package service
+package executionjourney
 
 import (
-	context "context"
-	fmt "fmt"
-	os "os"
-	filepath "path/filepath"
-	strings "strings"
-	testing "testing"
-	time "time"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	followup "github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/followup"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
@@ -98,9 +98,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	must(t, err)
 	defer repository.Close()
 	f.s.setSole(&activeProject{repository: repository})
-	f.s.mu.Lock()
 	f.s.cfg.Project.Landing = "commit-per-unit"
-	f.s.mu.Unlock()
 	home := filepath.Dir(f.clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	must(t, os.MkdirAll(filepath.Dir(fork), 0700))

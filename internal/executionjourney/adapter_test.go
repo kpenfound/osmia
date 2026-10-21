@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
@@ -261,4 +262,22 @@ func (c *runtimeControls) moveUnit(r *trace.Repository, s coreadapter.Scope) cor
 }
 func (c *runtimeControls) resolveContested(r *trace.Repository, s coreadapter.Scope) coreadapter.Tool {
 	return c.execution().ResolveContested(r, s)
+}
+
+func (s *Service) delivery() *delivery.Controller {
+	c := service.InspectForTest(s.core()).DeliveryController()
+	if s.jev != nil {
+		c.Jev = s.jev
+	}
+	c.Committee = s.options.Committee
+	c.Checks = s.options.reviewChecks
+	c.PullRequests = s.options.PullRequests
+	if s.options.Reconciliation.Now != nil {
+		c.Now = s.options.Reconciliation.Now
+	}
+	c.Execution = s.execution
+	if s.boundary != nil {
+		c.Step = s.boundary
+	}
+	return c
 }

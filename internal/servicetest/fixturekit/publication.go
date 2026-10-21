@@ -120,3 +120,31 @@ func (c *FakePulls) Update(_ context.Context, repository string, number int, cha
 	}
 	return pulls.PullRequest{}, errors.New("pull request not found")
 }
+
+type RepositoryPulls map[string]*FakePulls
+
+func (r RepositoryPulls) Find(ctx context.Context, repository, head, branch string) ([]pulls.PullRequest, error) {
+	return r[repository].Find(ctx, repository, head, branch)
+}
+func (r RepositoryPulls) Create(ctx context.Context, repository string, n pulls.New) (pulls.PullRequest, error) {
+	return r[repository].Create(ctx, repository, n)
+}
+
+func (r RepositoryPulls) Ready(ctx context.Context, repository string, number int) (pulls.PullRequest, error) {
+	return r[repository].Ready(ctx, repository, number)
+}
+
+func (r RepositoryPulls) Update(ctx context.Context, repository string, number int, change pulls.Update) (pulls.PullRequest, error) {
+	return r[repository].Update(ctx, repository, number, change)
+}
+
+// PublicationFork prepares a local bare delivery remote and its fake host.
+func PublicationFork(t *testing.T, clone string, tip func() string) (string, *FakePulls) {
+	t.Helper()
+	home := filepath.Dir(clone)
+	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
+	Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	DemoGit(t, home, "init", "--quiet", "--bare", fork)
+	DemoGit(t, home, "-C", clone, "remote", "add", "origin", fork)
+	return fork, &FakePulls{Fork: tip}
+}

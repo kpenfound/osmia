@@ -15,6 +15,9 @@ import (
 
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -334,4 +337,20 @@ func (a TestAccess) SetJudge(j *jev.Judge) { a.s.jev = j }
 // RecoverWorkspaces restores fixture checkpoints through startup recovery for tests.
 func (a TestAccess) RecoverWorkspaces(ctx context.Context, cfg *config.Config) error {
 	return a.s.recoverWorkspaces(ctx, cfg)
+}
+
+// DeliveryController exposes the composed delivery capabilities to stopped fixtures.
+func (a TestAccess) DeliveryController() *delivery.Controller { return a.s.delivery() }
+
+// SetStoppedPullRequests replaces delivery hosting on a stopped fixture.
+func (a TestAccess) SetStoppedPullRequests(client pulls.Client) { a.s.options.PullRequests = client }
+
+// Holding reads the same operation holds used by the service reconciler.
+func (a TestAccess) Holding(r *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
+	return a.s.holding(r)
+}
+
+// ModelOperationLimit exposes the service's operation admission to stopped fixtures.
+func (a TestAccess) ModelOperationLimit(r *trace.Repository) func(coreadapter.Operation) (func(), bool) {
+	return a.s.modelOperationLimit(r, nil)
 }

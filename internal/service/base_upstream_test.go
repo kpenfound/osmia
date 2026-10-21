@@ -2,14 +2,14 @@ package service
 
 import (
 	context "context"
-	os "os"
-	filepath "path/filepath"
+
 	slices "slices"
 	testing "testing"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	seal "github.com/kpenfound/osmia/internal/seal"
-	shed "github.com/kpenfound/osmia/internal/shed"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -18,52 +18,7 @@ import (
 // returns the workstream and its feature branch tip.
 func sealDependent(t *testing.T, f *shedFixture, repo *trace.Repository, backend string, base config.WorkstreamID, files map[string]string) (config.WorkstreamID, string) {
 	t.Helper()
-	ctx := context.Background()
-	stream, err := config.NewWorkstreamID()
-	must(t, err)
-	must(t, repo.CreateWorkstreamOn(ctx, stream, backend, f.s.now(), ownerActor))
-	if base != "" {
-		_, err = repo.SetWorkstreamBase(ctx, stream, base, 0, f.s.now())
-		must(t, err)
-	}
-	header := trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: ownerActor, Cause: "owner-ratification"}
-	ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
-	must(t, err)
-	var docs []trace.Document
-	for _, d := range []struct{ id, path, content string }{{"spec", "spec.md", validSpec}, {"plan", "plan.json", validPlan}, {shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratified)}} {
-		h := header
-		h.ID = d.id
-		docs = append(docs, trace.Document{Header: h, Path: d.path, Content: d.content})
-	}
-	must(t, repo.RecordDocuments(ctx, docs))
-	header.Schema, header.ID = "osmia.trace.transition", "in-shed"
-	_, err = repo.SetFeatureState(ctx, header, InShedState, "Owner approved the draft")
-	must(t, err)
-	z := &sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
-	must(t, z.Pass(ctx))
-	if result, err := z.Apply(ctx, actionOperation(t, repo, stream, SealAction)); err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("sealing %+v: %v", result, err)
-	}
-	sealed, _, _, err := seal.Latest(repo, stream)
-	must(t, err)
-	g, err := featureWorkspaces(f.s.about(repo), repo).Of(stream)
-	must(t, err)
-	w, found, err := g.Workspace(ctx, string(stream))
-	must(t, err)
-	if !found {
-		t.Fatal("no feature workspace")
-	}
-	for name, content := range files {
-		must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
-	}
-	commit, err := g.Snapshot(ctx, w, sealed.Base.Commit)
-	must(t, err)
-	tip, _, err := g.Branch(ctx, sealed.Branch)
-	must(t, err)
-	if tip != commit {
-		must(t, g.Advance(ctx, w, tip, commit))
-	}
-	return stream, commit
+	return intakefixture.SealDependent(t, f.s.intake(), repo, backend, base, files)
 }
 
 // A workstream parked because its base was abandoned shows in the inbox with

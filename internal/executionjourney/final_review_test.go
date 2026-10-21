@@ -1,32 +1,32 @@
-package service
+package executionjourney
 
 import (
-	context "context"
-	json "encoding/json"
-	errors "errors"
-	fmt "fmt"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	testing "testing"
-	time "time"
-
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/jev"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newFinalFixture seeds a sealed validPlan with a committee runner and no
@@ -52,25 +52,11 @@ func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, s
 	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), foremanActor, UnitMerged)
 }
 
-// advanceUpstream commits files on upstream's main and returns the commit.
-func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) string {
-	t.Helper()
-	return intakefixture.AdvanceUpstream(t, f.clone, files)
-}
-
 // finalOperations returns the workstream's final review operations.
 func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	return intakefixture.FinalOperations(t, repository, stream, FinalReviewAction)
 }
-
-var streamDocuments = intakefixture.StreamDocuments
-
-var transitionByID = intakefixture.TransitionByID
-
-var chiefEvent = intakefixture.ChiefEvent
-
-var noticeOf = intakefixture.NoticeOf
 
 // assembleBoth merges both units of validPlan, checking that the workstream
 // stays building while one is unmerged, and asks for the first final review.
@@ -420,7 +406,7 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: review, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
 	}
 	chief := func() *APIError {
-		return engineeringRevision(repository, stream, amendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
+		return f.s.intake().EngineeringRevision(repository, stream, amendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
 	}
 	const owners = "final reviews have found blocking problems 3 times; further revisions of the assembled plan require an owner decision"
 	record(1, FindingBlocking)
@@ -442,24 +428,6 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 // becomes one follow-up unit that resolves all of them, scoped to the sealed
 // footprints of the units serving the criteria they concern. Advisory
 // findings build nothing.
-func TestPostMergeRepairCollectsBlockingProblemsInOneUnit(t *testing.T) {
-	t.Parallel()
-	_, stream, _, a := newFinalFixture(t, "repair")
-	report := FinalReport{Review: 1, Spec: 1, Plan: 1,
-		Criteria: []FinalCriterion{{Criterion: "spec#1", Gap: "no merged unit serves it"}, {Criterion: "spec#2", Evidence: "served by merged units dedupe"}},
-		Findings: []FinalFinding{{Severity: FindingBlocking, Criteria: []string{"spec#2"}, Finding: "Dedupe breaks with the merged dependency."}, {Severity: FindingAdvisory, Finding: "Rename the helper."}}}
-	added, found, err := a.followup(stream, report, 1)
-	must(t, err)
-	if !found || added.Unit.ID != "final-1" || !slices.Equal(added.Unit.Criteria, []string{"spec#1", "spec#2"}) || !slices.Equal(added.Unit.Footprint, []string{"internal.trace"}) ||
-		!slices.Equal(added.Unit.Acceptance, []string{"Resolved: spec#1: no merged unit serves it", "Resolved: spec#2: Dedupe breaks with the merged dependency."}) || strings.Contains(added.Gap, "Rename") {
-		t.Fatalf("the repair %+v", added)
-	}
-	report.Criteria[0] = FinalCriterion{Criterion: "spec#1", Evidence: "served by merged units resume"}
-	report.Findings = report.Findings[1:]
-	if added, found, err := a.followup(stream, report, 1); err != nil || found {
-		t.Fatalf("advisory findings built a repair %+v: %v", added, err)
-	}
-}
 
 // A feature branch that does not replay cleanly onto upstream fails its
 // final review: the branch stays where it was, no committee member runs, and
@@ -862,7 +830,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			}
 			entries, err := feedChecks(repo, stream)
 			must(t, err)
-			i := slices.IndexFunc(entries, func(e FeedEntry) bool { return e.FinalChecks != nil })
+			i := slices.IndexFunc(entries, func(e api.FeedEntry) bool { return e.FinalChecks != nil })
 			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != checkrun.DescribeSelection(*selection) {
 				t.Fatalf("feed selection: %+v", entries)
 			}

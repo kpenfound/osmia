@@ -1,16 +1,16 @@
-package service
+package executionjourney
 
 import (
-	context "context"
-	fmt "fmt"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	testing "testing"
+	"context"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // assembleForTest moves a sealed workstream to assembled as the foreman does once
@@ -120,7 +120,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 			}
 			w, err := loadTraceWalk(repo, stream)
 			must(t, err)
-			chain, _, gaps := w.delivery()
+			chain, _, gaps := w.Delivery()
 			if chain == nil || chain.Merge == nil || chain.Merge.Path != mergePath || chain.Merged != upstream {
 				t.Fatalf("the trace's delivery %+v", chain)
 			}

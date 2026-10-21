@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -77,21 +79,21 @@ func ChecksForTest(d *TestUnitDriver) *TestCheckDriver {
 }
 
 // TestFinalDriver prepares final-review evidence used by amendment fixtures.
-type TestFinalDriver struct{ *finalReviewer }
+type TestFinalDriver struct{ *delivery.FinalReviewer }
 
 func FinalForTest(s *Service, r *trace.Repository) *TestFinalDriver {
-	return &TestFinalDriver{&finalReviewer{s: s, repository: r}}
+	return &TestFinalDriver{&delivery.FinalReviewer{S: s.delivery(), Repository: r}}
 }
 func (d *TestFinalDriver) Gate(ctx context.Context, w config.WorkstreamID) (FinalReport, string, error) {
-	return d.finalGate(ctx, w)
+	return d.FinalGate(ctx, w)
 }
 func (d *TestFinalDriver) Governing(ctx context.Context, w config.WorkstreamID) (finalReviewInput, seal.Seal, error) {
-	return d.governing(ctx, w)
+	return d.FinalReviewer.Governing(ctx, w)
 }
 
 // RefusePublicationForTest records a local publication refusal for inbox fixtures.
 func RefusePublicationForTest(ctx context.Context, s *Service, r *trace.Repository, w config.WorkstreamID, in publishInput, reason string) (coreadapter.OperationResult, error) {
-	return (&publisher{s: s, repository: r}).refuse(ctx, w, in, reason)
+	return (&delivery.Publisher{S: s.delivery(), Repository: r}).Refuse(ctx, w, in, reason)
 }
 
 // TestUnitWorkspaces exposes only opening and snapshotting fixture workspaces.
@@ -121,4 +123,36 @@ func DriftForTest(s *Service, r *trace.Repository) *TestDriftDriver {
 }
 func (d *TestDriftDriver) Request(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
 	return d.requestDrifts(ctx, due)
+}
+
+// BaseRefreshForTest reconciles a local observation with fixture boundaries.
+func BaseRefreshForTest(s *Service, repo *trace.Repository, now func() time.Time, boundary func(string) error) coreadapter.Reconciler {
+	if now != nil {
+		s.options.Reconciliation.Now = now
+	}
+	s.boundary = boundary
+	return &baseRefresher{s: s, repository: repo}
+}
+
+type TestBaseObservation = baseObservation
+
+var TestBaseObservationAt = baseObservationAt
+var TestResolved = resolved
+
+const TestBaseObservationDocument = baseObservationDocument
+
+const TestDriftPath = driftPath
+const TestDriftReplayed = driftReplayed
+
+var TestDependentBaseChanged = dependentBaseChanged
+
+// TestTraceWalk reads trace provenance used by delivery integration assertions.
+type TestTraceWalk struct{ walk *traceWalk }
+
+func LoadTraceWalkForTest(r *trace.Repository, w config.WorkstreamID) (*TestTraceWalk, error) {
+	v, e := loadTraceWalk(r, w)
+	return &TestTraceWalk{v}, e
+}
+func (w *TestTraceWalk) Delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
+	return w.walk.delivery()
 }

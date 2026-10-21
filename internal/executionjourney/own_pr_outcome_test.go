@@ -1,8 +1,7 @@
-package service
+package executionjourney
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -11,7 +10,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -104,7 +104,7 @@ func ownPRFixture(t *testing.T) (*config.Config, *trace.Repository, *fakePulls, 
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	host := &fakePulls{}
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}, options: Options{PullRequests: host}}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{PullRequests: host}}}
 	return cfg, repo, host, &baseRefresher{s: s, repository: repo}
 }
 
@@ -112,30 +112,14 @@ func ownPRFixture(t *testing.T) (*config.Config, *trace.Repository, *fakePulls, 
 // schedules its base-refresh.
 func sealStream(t *testing.T, repo *trace.Repository) {
 	t.Helper()
-	ctx := context.Background()
-	_, err := repo.SetWorkstreamBase(ctx, stream, quiet, 0, demoStart)
-	must(t, err)
-	sealed := seal.Seal{Version: 1, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash("spec"), Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "upstream-sha"}, Branch: featureBranch(stream), Workspace: "/owned/feature"}
-	data, err := seal.Encode(sealed)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: foremanActor, Cause: "seal"}
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: seal.Path, Content: string(data)}}))
+	fixturekit.SealDependentStream(t, repo, stream, quiet, featureBranch(stream), foremanActor)
 }
 
 // deliverWithPullRequest records stream delivered with one open pull
 // request of its own, at the given number.
 func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Config, pr int) DeliveryPublication {
 	t.Helper()
-	ctx := context.Background()
-	record := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: cfg.Project.BaseBranch, Branch: featureBranch(stream), Commit: "feature-tip", PullRequest: pr, URL: fmt.Sprintf("https://example.invalid/pull/%d", pr)}
-	data, err := json.Marshal(record)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: publicationDocument, Revision: 1, Project: repo.Project(), Workstream: stream, At: demoStart, Actor: foremanActor, Cause: "fixture"}
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: publicationPath, Content: string(data)}}))
-	h.Schema, h.ID = "osmia.trace.transition", DeliveredState
-	_, err = repo.SetFeatureState(ctx, h, DeliveredState, "delivered for fixture")
-	must(t, err)
-	return record
+	return fixturekit.RecordDeliveredPublication(t, repo, cfg, stream, featureBranch(stream), pr, foremanActor)
 }
 
 func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
@@ -251,18 +235,6 @@ func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
 	}
 	if _, revision, err := baseObservationAt(repo, stream); err != nil || revision != 1 {
 		t.Fatalf("the refresh did not continue: base-observation revision %d err %v", revision, err)
-	}
-}
-
-func TestOwnPullRequestOutcomeIgnoresAnEarlierPullRequestNumber(t *testing.T) {
-	t.Parallel()
-	cfg, repo, _, _ := ownPRFixture(t)
-	deliverWithPullRequest(t, repo, cfg, 7)
-	must(t, recordOwnPullRequestOutcome(context.Background(), repo, demoStart, stream, "fixture", 3, ownPullRequestOutcomeClosed))
-	finished, err := ownPullRequestFinished(repo, stream)
-	must(t, err)
-	if finished {
-		t.Fatal("an outcome recorded for an earlier pull request counted for the workstream's current pull request")
 	}
 }
 

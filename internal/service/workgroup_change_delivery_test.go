@@ -1,17 +1,17 @@
 package service
 
 import (
-	context "context"
-	json "encoding/json"
-	slices "slices"
-	strings "strings"
-	testing "testing"
+	"context"
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
 
-	amendment "github.com/kpenfound/osmia/internal/amendment"
-	config "github.com/kpenfound/osmia/internal/config"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/osmia/internal/amendment"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // presentDeliveryDelta supplies a debated delta for controller tests. The
