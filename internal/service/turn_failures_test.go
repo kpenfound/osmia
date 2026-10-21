@@ -115,9 +115,9 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errCrashTurn }
 	owner := masonAgent("resume") + "-owner-revise-1"
 	fake.play[owner] = reportDone("Owner revision")
-	f.engine.mu.Lock()
-	f.engine.turns[owner] = fake.turn
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[owner] = fake.turn
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "crashing-mason", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 
@@ -187,8 +187,8 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
 	var mu sync.Mutex
 	crash, reviews := true, map[string]int{}
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			return chief.turn(ctx, req, verified, tools)
 		}
@@ -205,7 +205,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "crashing-reviewer", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 	th := f.thread(t, stream, reviewerAgent("resume"))

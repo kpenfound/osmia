@@ -15,14 +15,13 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // unrelatedStream1 and unrelatedStream2 are each their own one-workstream
@@ -81,7 +80,7 @@ clone = "`+home2+`"
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	f := &crossRepoInboxFixture{cfg: opts, clock: clock, project1: project, project2: otherProject, stream1: stream, stream2: otherStream,
 		ticks: make(chan time.Time), live: map[config.ProjectID]*trace.Repository{}}
@@ -109,9 +108,9 @@ clone = "`+home2+`"
 		must(t, repo.Close())
 	}
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	f.engine = &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	f.engine = &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
@@ -130,7 +129,7 @@ clone = "`+home2+`"
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -402,15 +401,15 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			return questionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
-	f.engine.turns["build1"] = ask(question1)
-	f.engine.turns["build2"] = ask(question2)
-	f.engine.turns["build_u1"] = ask(questionU1)
-	f.engine.turns["build_u2"] = ask(questionU2)
+	f.engine.Turns["build1"] = ask(question1)
+	f.engine.Turns["build2"] = ask(question2)
+	f.engine.Turns["build_u1"] = ask(questionU1)
+	f.engine.Turns["build_u2"] = ask(questionU2)
 
 	var flagMu sync.Mutex
 	var escalated1, escalated2, escalatedU1, escalatedU2 bool
 	var relayed bool
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		flagMu.Lock()
 		switch {
 		// Each cross-repo member's own question numbering is local to its
@@ -467,7 +466,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
-	f.engine.turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return questionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 

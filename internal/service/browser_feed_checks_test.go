@@ -15,6 +15,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -49,7 +50,7 @@ func startFeedChecks(t *testing.T, f *shedFixture, checks ReviewChecks, action s
 func openCheckFeed(t *testing.T, f *shedFixture, stream config.WorkstreamID) *page {
 	t.Helper()
 	p := openBrowser(t)
-	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`
    window.feedEvents = [];
    window.sameFeedDocument = true;
@@ -63,19 +64,12 @@ func openCheckFeed(t *testing.T, f *shedFixture, stream config.WorkstreamID) *pa
    };`).Do(ctx)
 		return err
 	}))
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.selectWorkstream(stream)
-	p.awaitText(`[data-workstream="`+string(stream)+`"] [data-kind=transition][data-subject=feature]`, "Workstream")
-	p.eval(`window.feedEvents.length = 0`, nil)
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.SelectWorkstream(stream)
+	p.AwaitText(`[data-workstream="`+string(stream)+`"] [data-kind=transition][data-subject=feature]`, "Workstream")
+	p.Eval(`window.feedEvents.length = 0`, nil)
 	return p
-}
-
-func awaitFeedEvent(p *page, stream config.WorkstreamID) {
-	p.t.Helper()
-	p.await("the workstream notification on the page's EventSource", `window.feedEvents.some(event => event.workstream === `+quote(string(stream))+`)`)
-	p.await("the same document", `window.sameFeedDocument === true`)
-	p.eval(`window.feedEvents.length = 0`, nil)
 }
 
 func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
@@ -107,12 +101,12 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			}
 			p := openCheckFeed(t, f, stream)
 			const entry = `[data-kind=unit_checks][data-unit=resume][data-run="1"]`
-			p.await("checks have not started", `!document.querySelector(`+quote(entry)+`)`)
+			p.Await("checks have not started", `!document.querySelector(`+quote(entry)+`)`)
 			allow()
 			ran := awaitCheck(t, checks.entered)
 			awaitFeedEvent(p, stream)
-			p.await("the running check entry", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-			p.awaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
+			p.Await("the running check entry", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
+			p.AwaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
 			selection := "checking " + strconv.Itoa(selected) + " of " + strconv.Itoa(judged)
 			if mode == "full" {
 				selection = "checking every check: the Jev boost is off"
@@ -122,30 +116,30 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			} else if len(ran) != selected {
 				t.Fatalf("runner received %v, want %d selected checks", ran, selected)
 			}
-			p.awaitText(entry+` [data-field=selection]`, selection)
+			p.AwaitText(entry+` [data-field=selection]`, selection)
 			if mode == "narrowed" {
-				p.awaitText(entry+` [data-field=listed]`, "narrowed from 129 listed")
+				p.AwaitText(entry+` [data-field=listed]`, "narrowed from 129 listed")
 			}
 			assertFeedAnnotations(t, p, entry, 1)
 			// A recorded failure tests both the terminal state and wrapping a long
 			// check link on a phone. The full run completes successfully.
 			state := ChecksFailed
 			failed := checks.links[0]
-			outcome := checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport(failed)}}
+			outcome := checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport(failed)}}
 			if mode == "full" {
 				state = ChecksPassed
-				outcome = checkOutcome{result: CheckResult{Output: passedReport}}
+				outcome = checkOutcome{Result: CheckResult{Output: passedReport}}
 			}
 			checks.release <- outcome
 			awaitFeedEvent(p, stream)
-			p.await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
+			p.Await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
 			if mode == "full" {
 				selection = "every check ran: the Jev boost is off"
 			} else {
-				p.awaitText(entry+` [data-field=failed]`, failed)
+				p.AwaitText(entry+` [data-field=failed]`, failed)
 			}
-			p.awaitText(entry+` [data-field=selection]`, selection)
-			p.await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)
+			p.AwaitText(entry+` [data-field=selection]`, selection)
+			p.Await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)
 			assertFeedAnnotations(t, p, entry, 1)
 		})
 	}
@@ -187,38 +181,38 @@ func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {
 		if starts := finalCheckStarts(t, f.repository(), stream); len(starts) != 0 {
 			t.Fatalf("checks started during %s: %+v", boundary, starts)
 		}
-		p.await("no check entry during "+boundary, `!document.querySelector('[data-kind=final_checks]')`)
+		p.Await("no check entry during "+boundary, `!document.querySelector('[data-kind=final_checks]')`)
 		release <- struct{}{}
 	}
 	if ran := awaitCheck(t, checks.entered); len(ran) != 0 {
 		t.Fatalf("final checks selected links: %v", ran)
 	}
 	awaitFeedEvent(p, stream)
-	p.await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-	p.awaitText(entry+` [data-field=selection]`, "checking every check: the Jev boost is off")
-	p.awaitText(entry+` [data-field=selection-description]`, "every check ran: the Jev boost is off")
-	p.await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
+	p.Await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
+	p.AwaitText(entry+` [data-field=selection]`, "checking every check: the Jev boost is off")
+	p.AwaitText(entry+` [data-field=selection-description]`, "every check ran: the Jev boost is off")
+	p.Await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
 	assertFeedAnnotations(t, p, entry, 1)
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	awaitFeedEvent(p, stream)
-	p.await("the final checks passed", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'passed'`)
+	p.Await("the final checks passed", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'passed'`)
 	const outcome = `[data-kind=final_review][data-review="1"]`
-	p.awaitText(outcome+` [data-field=outcome]`, "reviewed")
-	p.awaitText(outcome+` [data-field=blocking]`, "0 blocking findings")
-	p.awaitText(outcome+` [data-field=gaps]`, "0 uncovered criteria")
-	p.awaitText(outcome+` [data-field=turn]`, turn)
+	p.AwaitText(outcome+` [data-field=outcome]`, "reviewed")
+	p.AwaitText(outcome+` [data-field=blocking]`, "0 blocking findings")
+	p.AwaitText(outcome+` [data-field=gaps]`, "0 uncovered criteria")
+	p.AwaitText(outcome+` [data-field=turn]`, turn)
 	session := `[data-kind=session][data-turn="` + turn + `"]`
-	p.await("the final reader's completed turn", `document.querySelector(`+quote(session)+`)?.dataset.state === 'done'`)
-	p.awaitText(session+` [data-field=profile]`, "default")
+	p.Await("the final reader's completed turn", `document.querySelector(`+quote(session)+`)?.dataset.state === 'done'`)
+	p.AwaitText(session+` [data-field=profile]`, "default")
 	const transition = `[data-kind=transition][data-subject=final-review][data-to=reviewed-1]`
-	p.awaitText(transition+` [data-field=subject]`, "Final review")
-	p.awaitText(transition+` [data-field=from]`, "requested-1")
-	p.awaitText(transition+` [data-field=to]`, "reviewed-1")
-	p.awaitText(transition+` [data-field=reason]`, "final review 1 read")
+	p.AwaitText(transition+` [data-field=subject]`, "Final review")
+	p.AwaitText(transition+` [data-field=from]`, "requested-1")
+	p.AwaitText(transition+` [data-field=to]`, "reviewed-1")
+	p.AwaitText(transition+` [data-field=reason]`, "final review 1 read")
 	assertFeedAnnotations(t, p, entry+", "+outcome+", "+transition, 3)
 	// The link identifies the same agent turn shown in the feed.
 	var linked bool
-	p.eval(`document.querySelector(`+quote(outcome+` [data-field=turn]`)+`).hash === '#' + document.querySelector(`+quote(session)+`).id`, &linked)
+	p.Eval(`document.querySelector(`+quote(outcome+` [data-field=turn]`)+`).hash === '#' + document.querySelector(`+quote(session)+`).id`, &linked)
 	if !linked {
 		t.Fatal("final review does not link its reader turn")
 	}
@@ -228,9 +222,9 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.selectWorkstream(stream)
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.SelectWorkstream(stream)
 	repo := f.s.sole().repository
 	at := f.s.now()
 	selection := &CheckSelection{Mode: selectionSelected, Links: []string{"dag://go/check"}, Candidates: 113}
@@ -246,11 +240,11 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 		feedDocument(t, repo, stream, checkDocumentID("upload", run), checkPath("upload", run), 1, at,
 			UnitCheckRun{Unit: "upload", Run: run, Status: state, Selection: selection, Error: errorText, StartedAt: at, FinishedAt: at})
 		entry := `[data-kind=unit_checks][data-unit=upload][data-run="` + strconv.Itoa(run) + `"]`
-		p.awaitText(entry+` [data-field=state]`, checkStateLabel(state))
-		p.awaitText(entry+` [data-field=selection]`, "checking 1 of 113")
-		p.await("no invented listed total", `!document.querySelector(`+quote(entry+` [data-field=listed]`)+`)`)
+		p.AwaitText(entry+` [data-field=state]`, checkStateLabel(state))
+		p.AwaitText(entry+` [data-field=selection]`, "checking 1 of 113")
+		p.Await("no invented listed total", `!document.querySelector(`+quote(entry+` [data-field=listed]`)+`)`)
 		if errorText != "" {
-			p.awaitText(entry+` [data-field=error]`, errorText)
+			p.AwaitText(entry+` [data-field=error]`, errorText)
 		}
 	}
 	// Legacy final results have no start/attempt evidence; they still render
@@ -261,24 +255,24 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 		FinalCheckAttempt{Review: 1, Attempt: 2, StartedAt: at})
 	feedDocument(t, repo, stream, finalReportDocument, finalReportPath, 1, at,
 		FinalReport{Review: 1, Outcome: finalFailed, Failure: "reader did not produce a report"})
-	p.awaitText(`[data-kind=final_checks][data-attempt=""] [data-field=state]`, "not completed")
-	p.awaitText(`[data-kind=final_checks][data-attempt=""] [data-field=error]`, "engine unavailable")
-	p.awaitText(`[data-kind=final_checks][data-attempt="2"] [data-field=state]`, "running")
-	p.awaitText(`[data-kind=final_review] [data-field=failure]`, "reader did not produce a report")
+	p.AwaitText(`[data-kind=final_checks][data-attempt=""] [data-field=state]`, "not completed")
+	p.AwaitText(`[data-kind=final_checks][data-attempt=""] [data-field=error]`, "engine unavailable")
+	p.AwaitText(`[data-kind=final_checks][data-attempt="2"] [data-field=state]`, "running")
+	p.AwaitText(`[data-kind=final_review] [data-field=failure]`, "reader did not produce a report")
 	listed := 214
 	selected := &CheckSelection{Mode: selectionSelected, Links: []string{"dag://go/check"}, Candidates: 37, Listed: &listed, Judgment: "judgment_final"}
 	feedDocument(t, repo, stream, finalCheckAttemptDocument(2, 1), finalCheckAttemptPath(2, 1), 1, at,
 		FinalCheckAttempt{Review: 2, Attempt: 1, Selection: selected, StartedAt: at})
 	const finalEntry = `[data-kind=final_checks][data-review="2"][data-attempt="1"]`
-	p.awaitText(finalEntry+` [data-field=selection]`, "checking 1 of 37")
-	p.awaitText(finalEntry+` [data-field=listed]`, "narrowed from 214 listed")
-	p.awaitText(finalEntry+` [data-field=selection-description]`, selected.describe())
+	p.AwaitText(finalEntry+` [data-field=selection]`, "checking 1 of 37")
+	p.AwaitText(finalEntry+` [data-field=listed]`, "narrowed from 214 listed")
+	p.AwaitText(finalEntry+` [data-field=selection-description]`, describeSelection(*selected))
 	feedDocument(t, repo, stream, finalChecksDocument(2), finalChecksPath(2), 1, at,
 		FinalCheckRun{Review: 2, Attempt: 1, Selection: selected, Status: ChecksPassed, StartedAt: at, FinishedAt: at})
-	p.awaitText(finalEntry+` [data-field=state]`, "passed")
-	p.awaitText(finalEntry+` [data-field=selection-description]`, selected.describe())
+	p.AwaitText(finalEntry+` [data-field=state]`, "passed")
+	p.AwaitText(finalEntry+` [data-field=selection-description]`, describeSelection(*selected))
 	var selectedText string
-	p.eval(`document.querySelector(`+quote(finalEntry)+`).textContent`, &selectedText)
+	p.Eval(`document.querySelector(`+quote(finalEntry)+`).textContent`, &selectedText)
 	if strings.Contains(selectedText, "every check") {
 		t.Fatalf("selected final entry claims full run: %s", selectedText)
 	}
@@ -291,3 +285,4 @@ func checkStateLabel(state string) string {
 	}
 	return state
 }
+func awaitFeedEvent(p *page, ws config.WorkstreamID) { browsertest.AwaitFeedEvent(p.Page, ws) }

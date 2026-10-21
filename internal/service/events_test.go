@@ -24,14 +24,6 @@ func (f turnsFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreada
 	return f(ctx, p)
 }
 
-type fixedClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *fixedClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
-func (c *fixedClock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
-
 func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -43,7 +35,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -181,7 +173,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)

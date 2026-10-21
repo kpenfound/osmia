@@ -15,12 +15,11 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // forkCommit is what a reader of the fork sees of one commit of the
@@ -143,7 +142,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch}
 	f.opts.PullRequests = prs
 
 	// resume's mason asks question 1 and reports done on the answer's turn;
@@ -163,11 +162,11 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		return nil
 	}
 	masons.mu.Unlock()
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
-	f.engine.turns[answered] = masons.turn
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.Turns[answered] = masons.turn
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
@@ -184,7 +183,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 
 	// noJJ fails the test if a .jj is anywhere in the owner's clone. The
@@ -268,11 +267,11 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	problems.check(t)
 	p.check(t)
 	masons.check(t)
-	prs.mu.Lock()
-	if len(prs.prs) != 1 || prs.creates != 1 || prs.prs[0].Body != presented.Draft || prs.prs[0].HeadCommit != forkBranch() {
-		t.Fatalf("pull requests %+v", prs.prs)
+	prs.Mu.Lock()
+	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft || prs.Prs[0].HeadCommit != forkBranch() {
+		t.Fatalf("pull requests %+v", prs.Prs)
 	}
-	prs.mu.Unlock()
+	prs.Mu.Unlock()
 	st, err = f.c.Status(ctx, stream)
 	must(t, err)
 	if st.Workspaces != backend {

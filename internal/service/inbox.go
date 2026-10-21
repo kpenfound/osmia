@@ -57,13 +57,13 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 			if errors.As(err, &wrapped) {
 				return InboxResponse{}, wrapped.api
 			}
-			return InboxResponse{}, &APIError{Internal, err.Error()}
+			return InboxResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		out.Entries = append(out.Entries, entries...)
 
 		ids, err := s.crossRepoWorkgroupIDs(ctx, active.repository)
 		if err != nil {
-			return InboxResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the cross-repo workgroups of project %s; check the trace repository", active.id)}
+			return InboxResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the cross-repo workgroups of project %s; check the trace repository", active.id)}
 		}
 		for _, id := range ids {
 			if seenWorkgroup[id] {
@@ -138,7 +138,7 @@ func (s *Service) crossRepoWorkgroupIDs(ctx context.Context, repository *trace.R
 // answers it, so the entry is never confused with either real member's own,
 // independently numbered inbox.
 func (s *Service) workgroupInbox(ctx context.Context, known *trace.Repository, id config.WorkgroupID) ([]InboxEntry, *APIError) {
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the inbox of workgroup %s; check the trace repository", id)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the inbox of workgroup %s; check the trace repository", id)}
 	_, g, _, err := known.CrossRepoProjectSpec(id)
 	if err != nil {
 		return nil, failed
@@ -182,7 +182,7 @@ func (s *Service) workgroupInbox(ctx context.Context, known *trace.Repository, i
 // projectInbox lists the open owner decisions of one project.
 func (s *Service) projectInbox(ctx context.Context, active *activeProject) ([]InboxEntry, *APIError) {
 	out := InboxResponse{Entries: []InboxEntry{}}
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the inbox of project %s; check the trace repository", active.id)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the inbox of project %s; check the trace repository", active.id)}
 	repository := active.repository
 	statuses, err := repository.Statuses()
 	if err != nil {
@@ -718,7 +718,7 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 	case p.Delivered && !p.Maintenance:
 		return InboxEntry{}, false, nil
 	}
-	blocking := p.Report.blocking()
+	blocking := reportBlocking(p.Report)
 	review, prior, _, err := deliveryDocuments(repository, stream)
 	if err != nil {
 		return InboxEntry{}, false, err
@@ -787,9 +787,9 @@ func eligibleQuickReply(recommendation string) bool {
 func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (AnswerResponse, *APIError) {
 	number, err := strconv.Atoi(raw)
 	if err != nil || number < 1 || strconv.Itoa(number) != raw {
-		return AnswerResponse{}, &APIError{Validation, "inbox entry must be a number from osmia inbox"}
+		return AnswerResponse{}, &APIError{Code: Validation, Message: "inbox entry must be a number from osmia inbox"}
 	}
-	unknown := &APIError{Validation, fmt.Sprintf("there is no inbox entry %d; list the entries with osmia inbox", number)}
+	unknown := &APIError{Code: Validation, Message: fmt.Sprintf("there is no inbox entry %d; list the entries with osmia inbox", number)}
 	var repository *trace.Repository
 	if target, closeTarget, matched, api := s.workgroupInboxRepository(ctx, req.Project); matched {
 		if api != nil {
@@ -809,7 +809,7 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 		repository = active.repository
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		return AnswerResponse{}, &APIError{Validation, "text must not be empty"}
+		return AnswerResponse{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	return s.ruleInbox(ctx, repository, number, req.Text, unknown)
 }
@@ -832,14 +832,14 @@ func (s *Service) workgroupInboxRepository(ctx context.Context, project config.P
 	_, g, _, err := projects[0].repository.CrossRepoProjectSpec(id)
 	if err != nil {
 		s.log().Error("cannot resolve inbox workgroup", "workgroup", id, "error", err.Error())
-		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot resolve workgroup %s; check the trace repository", id)}
+		return nil, noop, true, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve workgroup %s; check the trace repository", id)}
 	}
 	if len(g.Members) < 2 {
 		return nil, noop, false, nil
 	}
 	members, err := s.crossRepoMemberRepos(ctx, g)
 	if err != nil {
-		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot resolve the members of workgroup %s: %v", id, err)}
+		return nil, noop, true, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the members of workgroup %s: %v", id, err)}
 	}
 	wt, err := trace.OpenWorkgroupTrace(s.current().Root, id, members)
 	if wt != nil && err != nil {
@@ -847,7 +847,7 @@ func (s *Service) workgroupInboxRepository(ctx context.Context, project config.P
 	}
 	if err != nil {
 		s.log().Error("cannot open inbox workgroup", "workgroup", id, "error", err.Error())
-		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot open workgroup %s; check the trace repository", id)}
+		return nil, noop, true, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open workgroup %s; check the trace repository", id)}
 	}
 	return wt, func() { wt.Close() }, true, nil
 }
@@ -855,23 +855,23 @@ func (s *Service) workgroupInboxRepository(ctx context.Context, project config.P
 // ruleInbox records the owner's ruling on repository's own inbox entry
 // number.
 func (s *Service) ruleInbox(ctx context.Context, repository *trace.Repository, number int, text string, unknown *APIError) (AnswerResponse, *APIError) {
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
 	at := s.now()
 	entry, err := repository.Rule(ctx, number, text, ownerActor, at, AbandonedState)
 	switch {
 	case errors.Is(err, trace.ErrMemberRetired):
-		return AnswerResponse{}, &APIError{Conflict, err.Error()}
+		return AnswerResponse{}, &APIError{Code: Conflict, Message: err.Error()}
 	case entry.Hold != "" && err != nil:
-		return AnswerResponse{}, &APIError{Conflict, entry.Hold}
+		return AnswerResponse{}, &APIError{Code: Conflict, Message: entry.Hold}
 	case errors.Is(err, trace.ErrInboxEntry):
 		return AnswerResponse{}, unknown
 	case errors.Is(err, trace.ErrFeatureState):
-		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d belongs to abandoned workstream %s and takes no ruling", number, entry.Workstream)}
+		return AnswerResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("inbox entry %d belongs to abandoned workstream %s and takes no ruling", number, entry.Workstream)}
 	case errors.Is(err, trace.ErrRuled):
-		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d is already answered", number)}
+		return AnswerResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("inbox entry %d is already answered", number)}
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		s.log().Warn("inbox ruling interrupted", "project", repository.Project(), "number", number, "error", err.Error())
-		return AnswerResponse{}, &APIError{Unavailable, fmt.Sprintf("the ruling on inbox entry %d was interrupted; refresh the inbox and retry the same answer if it is still open", number)}
+		return AnswerResponse{}, &APIError{Code: Unavailable, Message: fmt.Sprintf("the ruling on inbox entry %d was interrupted; refresh the inbox and retry the same answer if it is still open", number)}
 	case err != nil:
 		s.log().Error("cannot record inbox ruling", "project", repository.Project(), "number", number, "error", err.Error())
 		return AnswerResponse{}, failed

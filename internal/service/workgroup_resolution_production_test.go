@@ -29,9 +29,9 @@ type resolutionPulls struct {
 func (p *resolutionPulls) Find(ctx context.Context, repository, head, branch string) ([]pulls.PullRequest, error) {
 	sink := p.sink.Load()
 	if p.fail.Load() && sink != nil && *sink == branch {
-		p.mu.Lock()
-		p.finds++
-		p.mu.Unlock()
+		p.Mu.Lock()
+		p.Finds++
+		p.Mu.Unlock()
 		return nil, errors.New("provider temporarily unavailable")
 	}
 	return p.fakePulls.Find(ctx, repository, head, branch)
@@ -53,8 +53,8 @@ func resolutionApprovedFixture(t *testing.T, configuration productionDesignConfi
 	for _, setup := range prepare {
 		setup(f)
 	}
-	f.engine.mu.Lock()
-	f.engine.turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		graph := []map[string]any{}
 		if edge != "" {
 			graph = append(graph, map[string]any{"from": string(f.stream1), "to": string(f.stream2), "type": edge})
@@ -69,7 +69,7 @@ func resolutionApprovedFixture(t *testing.T, configuration productionDesignConfi
 	}
 	if edge == "" {
 		for i := 1; i <= 2; i++ {
-			f.engine.turns[roundTurnID(1, committeeAgent(i), 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[roundTurnID(1, committeeAgent(i), 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				content, err := readTool(ctx, tools, "context.md")
 				if err != nil {
 					return nil, err
@@ -81,7 +81,7 @@ func resolutionApprovedFixture(t *testing.T, configuration productionDesignConfi
 			}
 		}
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
@@ -265,24 +265,24 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			}
 			awaitChecks("failed provider lookups", 1)
 			assertNoOutcomes()
-			host.mu.Lock()
+			host.Mu.Lock()
 			host.fail.Store(false)
 			for _, p := range publications {
-				host.prs = append(host.prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
+				host.Prs = append(host.Prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
 			}
-			host.mu.Unlock()
+			host.Mu.Unlock()
 			f.clock.Advance(10 * time.Minute)
 			awaitChecks("ready open provider lookups", 2)
 			assertNoOutcomes()
 			// Hold final resolution after every durable observation, then perform a real restart.
 			hold.Store(true)
-			host.mu.Lock()
-			for i := range host.prs {
-				host.prs[i].Merged = true
-				host.prs[i].State = "closed"
-				host.prs[i].MergeCommit = fmt.Sprintf("merged-%d", i)
+			host.Mu.Lock()
+			for i := range host.Prs {
+				host.Prs[i].Merged = true
+				host.Prs[i].State = "closed"
+				host.Prs[i].MergeCommit = fmt.Sprintf("merged-%d", i)
 			}
-			host.mu.Unlock()
+			host.Mu.Unlock()
 			f.clock.Advance(10 * time.Minute)
 			select {
 			case <-reached:
@@ -301,14 +301,14 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			resolutionGroupState(t, f, false)
 			f.stop(t)
 			hold.Store(false)
-			host.mu.Lock()
-			calls := host.finds
-			host.mu.Unlock()
+			host.Mu.Lock()
+			calls := host.Finds
+			host.Mu.Unlock()
 			f.start(t)
 			awaitMemberMergeResolution(t, f)
-			host.mu.Lock()
-			after := host.finds
-			host.mu.Unlock()
+			host.Mu.Lock()
+			after := host.Finds
+			host.Mu.Unlock()
 			if after != calls {
 				t.Fatalf("finished own PRs polled after restart: %d -> %d", calls, after)
 			}

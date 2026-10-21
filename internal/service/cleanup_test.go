@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/agentcore/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -57,12 +58,7 @@ func writeExport(t *testing.T, f *shedFixture, stream config.WorkstreamID, threa
 	return dir
 }
 
-func assertGone(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("%s is still there: %v", path, err)
-	}
-}
+var assertGone = fixturekit.AssertGone
 
 func assertThere(t *testing.T, path string) {
 	t.Helper()

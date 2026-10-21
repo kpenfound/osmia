@@ -61,13 +61,13 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	if api != nil {
 		return nil, api
 	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return nil, failed
 	}
 	if !slices.Contains(states, feature.Value) {
-		return nil, &APIError{Conflict, fmt.Sprintf("workstream %s is %s; the owner takes part in the shed while it is %s", stream, featureState(feature.Value), strings.Join(states, " or "))}
+		return nil, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; the owner takes part in the shed while it is %s", stream, featureState(feature.Value), strings.Join(states, " or "))}
 	}
 	state, err := repository.Workflow(stream, shedSubject)
 	if err != nil {
@@ -87,7 +87,7 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	}
 	pin, err := latestPin(repository, stream)
 	if err != nil {
-		return nil, &APIError{Conflict, fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
+		return nil, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
 	return &shedOwner{s: s, project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
 }
@@ -137,7 +137,7 @@ func (o *shedOwner) document(path string) (trace.Document, bool, error) {
 // readable, never a transition that names a file that is not there.
 func (o *shedOwner) record(ctx context.Context, id, path, content, value, reason string) *APIError {
 	latest, found, err := o.document(path)
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the owner's shed action on workstream %s; check the trace repository", o.stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the owner's shed action on workstream %s; check the trace repository", o.stream)}
 	if err != nil {
 		return failed
 	}
@@ -155,7 +155,7 @@ func (o *shedOwner) record(ctx context.Context, id, path, content, value, reason
 		Events:     []trace.Event{trace.Notice(transition, "owner", reason)}}
 	if _, err := o.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return &APIError{Conflict, fmt.Sprintf("workstream %s changed while recording the action; check osmia status and retry", o.stream)}
+			return &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while recording the action; check osmia status and retry", o.stream)}
 		}
 		return failed
 	}
@@ -172,14 +172,14 @@ func (s *Service) shedObject(ctx context.Context, raw string, req ShedObjectRequ
 	}
 	argument := strings.TrimSpace(req.Argument)
 	if argument == "" {
-		return ShedResponse{}, &APIError{Validation, "an objection requires an argument"}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "an objection requires an argument"}
 	}
 	if o.skipped {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("the owner skipped debate on workstream %s; nothing answers a new objection", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner skipped debate on workstream %s; nothing answers a new objection", o.stream)}
 	}
 	records, err := shed.Records(o.repository, o.stream)
 	if err != nil {
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the shed records of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed records of workstream %s; check the trace repository", o.stream)}
 	}
 	// A round's file keeps the revision it was opened against, as a member's
 	// record keeps the revision its round was pinned to.
@@ -193,7 +193,7 @@ func (s *Service) shedObject(ctx context.Context, raw string, req ShedObjectRequ
 	record.Objections = append(slices.Clone(record.Objections), objection)
 	content, err := shed.Encode(record)
 	if err != nil {
-		return ShedResponse{}, &APIError{Validation, "the objection cannot be recorded: " + err.Error()}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "the objection cannot be recorded: " + err.Error()}
 	}
 	reason := fmt.Sprintf("the owner objected to round %d against %s: %s", o.round, record.Revision, argument)
 	if api := o.record(ctx, shed.DocumentID(o.round, shed.OwnerMember), shed.Path(o.round, shed.OwnerMember), string(content), fmt.Sprintf("objected-%d", o.round), reason); api != nil {
@@ -212,7 +212,7 @@ func (s *Service) shedRule(ctx context.Context, raw string, req ShedRuleRequest)
 	}
 	disposition, ok := shed.ParseDisposition(req.Disposition)
 	if !ok {
-		return ShedResponse{}, &APIError{Validation, "a ruling is sustain or dismiss"}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "a ruling is sustain or dismiss"}
 	}
 	return s.dispose(ctx, o, req.Objection, disposition, req.Note, "ruled")
 }
@@ -235,15 +235,15 @@ func (s *Service) shedOverrule(ctx context.Context, raw string, req ShedOverrule
 func (s *Service) dispose(ctx context.Context, o *shedOwner, objection string, disposition shed.Disposition, note, action string) (ShedResponse, *APIError) {
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.stream)}
 	}
 	i := slices.IndexFunc(entries, func(e shed.Entry) bool { return e.ID == objection })
 	if i < 0 {
-		return ShedResponse{}, &APIError{NotFound, fmt.Sprintf("no objection %s stands in workstream %s; read the dissent record with osmia status", objection, o.stream)}
+		return ShedResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("no objection %s stands in workstream %s; read the dissent record with osmia status", objection, o.stream)}
 	}
 	rounds, err := shed.AllRulings(o.repository, o.stream)
 	if err != nil {
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the owner's rulings of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the owner's rulings of workstream %s; check the trace repository", o.stream)}
 	}
 	rulings := shed.Rulings{Version: shed.Version, Round: o.round, Revision: o.pin}
 	for _, r := range rounds {
@@ -255,7 +255,7 @@ func (s *Service) dispose(ctx context.Context, o *shedOwner, objection string, d
 	rulings.Rulings = append(slices.DeleteFunc(slices.Clone(rulings.Rulings), func(r shed.Ruling) bool { return r.Objection == ruling.Objection }), ruling)
 	content, err := shed.EncodeRulings(rulings)
 	if err != nil {
-		return ShedResponse{}, &APIError{Validation, "the ruling cannot be recorded: " + err.Error()}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "the ruling cannot be recorded: " + err.Error()}
 	}
 	reason := fmt.Sprintf("the owner %s objection %s of %s in round %d, against %s", disposition, ruling.Objection, entries[i].Member, o.round, rulings.Revision)
 	if ruling.Note != "" {
@@ -278,25 +278,25 @@ func (s *Service) shedRedraft(ctx context.Context, raw string, req ShedRedraftRe
 	}
 	note := strings.TrimSpace(req.Note)
 	if note == "" {
-		return ShedResponse{}, &APIError{Validation, "a redraft requires a note saying what to change"}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "a redraft requires a note saying what to change"}
 	}
 	if o.skipped {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("the owner skipped debate on workstream %s; no redraft is asked for and debated", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner skipped debate on workstream %s; no redraft is asked for and debated", o.stream)}
 	}
 	kind, n, ok := shedState(o.shed.Value)
 	if !ok || kind != "concluded" {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s has not concluded; ask for a redraft once it has", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("debate on workstream %s has not concluded; ask for a redraft once it has", o.stream)}
 	}
 	asked, err := shed.Redrafts(o.repository, o.stream)
 	if err != nil {
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the owner's requests of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the owner's requests of workstream %s; check the trace repository", o.stream)}
 	}
 	if slices.ContainsFunc(asked, func(r shed.Redraft) bool { return r.Round == n }) {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("a redraft after round %d of workstream %s is already asked for", n, o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("a redraft after round %d of workstream %s is already asked for", n, o.stream)}
 	}
 	content, err := shed.EncodeRedraft(shed.Redraft{Version: shed.Version, Round: n, Revision: o.pin, Note: note})
 	if err != nil {
-		return ShedResponse{}, &APIError{Validation, "the request cannot be recorded: " + err.Error()}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "the request cannot be recorded: " + err.Error()}
 	}
 	reason := fmt.Sprintf("the owner asked the architect for a redraft of %s after round %d: %s", o.pin, n, note)
 	if api := o.record(ctx, shed.RedraftDocumentID(n), shed.RedraftPath(n), string(content), fmt.Sprintf("redraft-%d", n), reason); api != nil {
@@ -314,7 +314,7 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 		return ShedResponse{}, api
 	}
 	if o.skipped {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s is already skipped", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("debate on workstream %s is already skipped", o.stream)}
 	}
 	// A turn already dispatched runs to its record whatever the owner does
 	// next, and a skipped debate runs no round for what it wrote, so the skip
@@ -326,11 +326,11 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 		if kind != "round" {
 			running = (roundInput{Round: n, Redraft: kind == "redraft"}).about()
 		}
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is running %s; skip debate once it is recorded", o.stream, running)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is running %s; skip debate once it is recorded", o.stream, running)}
 	}
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.stream)}
 	}
 	reason := "the owner skipped debate; the workstream still needs the owner's ratification of the spec and the plan"
 	tx := trace.Transaction{ExpectedVersion: o.owner.Version,
@@ -338,16 +338,16 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 		Events:     []trace.Event{trace.Notice(skipTransition, "owner", reason+".\n"+presentation(shed.Recommend(entries))+decideFirst(entries))}}
 	if _, err := o.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed while skipping debate; check osmia status and retry", o.stream)}
+			return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while skipping debate; check osmia status and retry", o.stream)}
 		}
-		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot record the skipped debate of workstream %s; check the trace repository", o.stream)}
+		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the skipped debate of workstream %s; check the trace repository", o.stream)}
 	}
 	// A sketched workstream enters the shed without a committee: a skipped
 	// debate runs no round, and ratification happens in the shed.
 	if o.feature == SketchedState {
 		h := ownerHeader(skipTransition+"-"+InShedState, o.project, o.stream, "owner-shed", o.now())
 		if _, err := o.repository.MoveFeatureState(ctx, h, SketchedState, InShedState, reason); err != nil && !errors.Is(err, trace.ErrConflict) {
-			return ShedResponse{}, &APIError{Internal, fmt.Sprintf("debate on workstream %s is skipped but it did not enter the shed; check the trace repository", o.stream)}
+			return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("debate on workstream %s is skipped but it did not enter the shed; check the trace repository", o.stream)}
 		}
 	}
 	return ShedResponse{Project: o.project, Workstream: o.stream, Round: o.round, Action: skippedValue, Detail: reason}, nil
@@ -362,18 +362,18 @@ func (s *Service) shedMore(ctx context.Context, raw string, req ShedMoreRequest)
 	}
 	limit := s.current().Shed.MaxRounds
 	if req.Rounds < 1 || req.Rounds > limit {
-		return ShedResponse{}, &APIError{Validation, fmt.Sprintf("ask for between 1 and shed.max_rounds (%d) further rounds", limit)}
+		return ShedResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("ask for between 1 and shed.max_rounds (%d) further rounds", limit)}
 	}
 	if o.skipped {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("the owner skipped debate on workstream %s; no further round runs", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner skipped debate on workstream %s; no further round runs", o.stream)}
 	}
 	kind, n, ok := shedState(o.shed.Value)
 	if !ok || kind != "concluded" {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s has not concluded; ask for further rounds once it has", o.stream)}
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("debate on workstream %s has not concluded; ask for further rounds once it has", o.stream)}
 	}
 	content, err := shed.EncodeMore(shed.More{Version: shed.Version, Round: n, Rounds: req.Rounds})
 	if err != nil {
-		return ShedResponse{}, &APIError{Validation, "the request cannot be recorded: " + err.Error()}
+		return ShedResponse{}, &APIError{Code: Validation, Message: "the request cannot be recorded: " + err.Error()}
 	}
 	reason := fmt.Sprintf("the owner asked for %s of debate after round %d", rounds(req.Rounds), n)
 	if api := o.record(ctx, shed.MoreDocumentID(n), shed.MorePath(n), string(content), fmt.Sprintf("more-%d", n), reason); api != nil {

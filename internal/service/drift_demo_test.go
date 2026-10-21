@@ -345,13 +345,13 @@ func TestDriftConflictDemonstration(t *testing.T) {
 		return nil
 	}
 	demo := &driftDemo{units: &landingDemo{reviews: map[string][]UnitReviewIdentity{}}, owner: f.c, project: f.project, clone: f.clone, resolving: make(chan struct{})}
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("audit")] = masons.turn
-	f.engine.turns[driftResolveTurnID(1, 1)] = demo.resolve
-	f.engine.turns[driftMasonAgent+"-recover-1"] = demo.recover
-	f.engine.turns[driftReviewTurnID(1, 1)] = demo.reviewDrift
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("audit")] = masons.turn
+	f.engine.Turns[driftResolveTurnID(1, 1)] = demo.resolve
+	f.engine.Turns[driftMasonAgent+"-recover-1"] = demo.recover
+	f.engine.Turns[driftReviewTurnID(1, 1)] = demo.reviewDrift
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, unit := range []string{"resume", "audit"} {
 			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
@@ -359,7 +359,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 		}
 		return chief(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	stream, _ := f.builtAs(t, "drift-demo")
 	demo.mu.Lock()

@@ -167,8 +167,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			buildReady := make(chan struct{})
 			var reviewCalls, answerCalls, finalCalls atomic.Int32
 			var stream config.WorkstreamID
-			f.engine.mu.Lock()
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				switch {
 				case strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-"):
 					if reviewCalls.Add(1) != 1 {
@@ -191,7 +191,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 				}
 				return questionResult(req, "session-"+req.Name, "Reviewed"), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 				<-buildReady
 				answerCalls.Add(1)

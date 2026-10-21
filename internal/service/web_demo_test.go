@@ -13,14 +13,13 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestBrowserOwnerWorkflowDemonstration takes one workstream from a hand-in
@@ -54,7 +53,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch}
 	f.opts.PullRequests = prs
 	// passed counts completed reconciliation passes, so the pause-while-
 	// delivering check below waits for the scheduler to have demonstrably
@@ -93,16 +92,16 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		return err
 	})
 
-	f.engine.mu.Lock()
+	f.engine.Mu.Lock()
 	// resume's mason asks question 1, and its answer turn asks question 2,
 	// which the chief of staff routes to an amendment.
-	f.engine.turns[masonTurnID("resume")] = masons.asking(faults, "", "1")
-	f.engine.turns[rulingTurn] = masons.turn
+	f.engine.Turns[masonTurnID("resume")] = masons.asking(faults, "", "1")
+	f.engine.Turns[rulingTurn] = masons.turn
 	for i := 1; i <= 3; i++ {
-		f.engine.turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
+		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
 	}
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
@@ -119,7 +118,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 
 	// entry waits until the inbox lists one entry of kind for the workstream
@@ -154,23 +153,23 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// The owner opens the page at phone width before anything is handed in,
 	// and keeps it open to the end.
 	p := openBrowser(t)
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`window.notReloaded = true`, nil)
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.Eval(`window.notReloaded = true`, nil)
 
 	// 1. The design is handed in through the API, the way osmia handin
 	// sends it; the workstream and its packet appear on the page, and the
 	// owner ratifies it there.
 	stream = f.shedAs(t, "web-release")
 	ws := `[data-workstream="` + string(stream) + `"] `
-	p.selectWorkstream(stream)
-	p.awaitText(ws+"[data-field=state]", InShedState)
+	p.SelectWorkstream(stream)
+	p.AwaitText(ws+"[data-field=state]", InShedState)
 	card := decisionCard(entry(InboxRatification))
-	p.awaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 1")
-	p.awaitGone("the ratified packet", card)
+	p.AwaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
+	p.Choose(card+"select", "ratify")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 1")
+	p.AwaitGone("the ratified packet", card)
 	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 {
 		t.Fatalf("the recorded ratification %+v", record)
 	}
@@ -178,16 +177,16 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		t.Fatalf("owner subject went %v", moves)
 	}
 	f.awaitFeature(t, stream, BuildingState)
-	p.awaitText(ws+"[data-field=state]", BuildingState)
+	p.AwaitText(ws+"[data-field=state]", BuildingState)
 
 	// 2. resume's mason asks a question, the chief of staff escalates it,
 	// and the owner writes the answer on the page.
 	card = decisionCard(entry(InboxEscalation))
-	p.awaitText(card+"[data-field=question]", "Is the store durable across restarts?")
-	p.typeInto(card+"textarea", ownerRuling)
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "Answered inbox entry")
-	p.awaitGone("the answered question", card)
+	p.AwaitText(card+"[data-field=question]", "Is the store durable across restarts?")
+	p.TypeInto(card+"textarea", ownerRuling)
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Answered inbox entry")
+	p.AwaitGone("the answered question", card)
 	// f.question's Ruling is the newest revision: by the time the page has
 	// cleared the card, the fake chief of staff's relay may already have
 	// recorded revision 2 over it. Find the owner's own revision (1) rather
@@ -209,12 +208,12 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// page.
 	f.awaitAmendment(t, stream, amendmentPresented)
 	card = decisionCard(entry(InboxAmendment))
-	p.awaitText(card+"[data-field=question]", "Change: Resume from a durable checkpoint")
-	p.choose(card+"select", AmendmentReject)
-	p.typeInto(card+"input[name=note]", "Keep the acknowledged-chunk contract.")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "Decided reject on amendment 1.")
-	p.awaitGone("the decided amendment", card)
+	p.AwaitText(card+"[data-field=question]", "Change: Resume from a durable checkpoint")
+	p.Choose(card+"select", AmendmentReject)
+	p.TypeInto(card+"input[name=note]", "Keep the acknowledged-chunk contract.")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
+	p.AwaitGone("the decided amendment", card)
 	f.awaitAmendment(t, stream, amendmentRuled)
 	var decided AmendmentDecision
 	must(t, json.Unmarshal([]byte(ownerDocument(amendmentDecisionID("1")).Content), &decided))
@@ -225,19 +224,19 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// The ruling reaches resume's mason, which reports; resume is reviewed
 	// and lands, and the page shows it merged.
 	f.awaitMerged(t, stream, "resume")
-	p.awaitText(ws+`[data-kind=transition][data-unit=resume][data-to=merged]`, "Unit resume: approved → merged")
+	p.AwaitText(ws+`[data-kind=transition][data-unit=resume][data-to=merged]`, "Unit resume: approved → merged")
 
 	// 4. dedupe's mason gives up and the unit is contested; the owner rules
 	// revise with a note on the page.
 	f.awaitUnit(t, stream, "dedupe", UnitContested)
 	raiseFixtureContest(t, f.repository(), stream, "dedupe")
 	card = decisionCard(entry(InboxContested))
-	p.awaitText(card+"[data-field=options]", "revise")
-	p.choose(card+"select", "revise")
-	p.typeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "Ruled revise on unit dedupe.")
-	p.awaitGone("the contested unit", card)
+	p.AwaitText(card+"[data-field=options]", "revise")
+	p.Choose(card+"select", "revise")
+	p.TypeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Ruled revise on unit dedupe.")
+	p.AwaitGone("the contested unit", card)
 	transitions := slices.DeleteFunc(f.transitions(t, stream), func(tr trace.Transition) bool {
 		return tr.Subject != trace.UnitSubject("dedupe") || tr.From != UnitContested
 	})
@@ -254,16 +253,16 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	must(t, err)
 	target := "workstream:" + string(stream)
 	shownPause := `[data-pause="` + target + `"] `
-	p.await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote(target)+`)`)
+	p.Await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote(target)+`)`)
 	// The workstream's menu opens the pauses with the workstream chosen.
-	p.click("#workstream-menu-button")
-	p.click(`[data-workstream-action="pause"]`)
-	p.await("the workstream chosen to pause", `document.getElementById('pause-popover').matches(':popover-open') && document.querySelector('#pause-form select[name=target]').value === `+quote(target))
-	p.choose("#pause-form select[name=mode]", "soft")
-	p.typeInto("#pause-form input[name=reason]", "Hold the delivery until I have read it.")
-	p.click("#pause-form button[type=submit]")
-	p.awaitText("#pause-result", "paused (soft)")
-	p.awaitText(shownPause+"[data-field=source]", "the owner")
+	p.Click("#workstream-menu-button")
+	p.Click(`[data-workstream-action="pause"]`)
+	p.Await("the workstream chosen to pause", `document.getElementById('pause-popover').matches(':popover-open') && document.querySelector('#pause-form select[name=target]').value === `+quote(target))
+	p.Choose("#pause-form select[name=mode]", "soft")
+	p.TypeInto("#pause-form input[name=reason]", "Hold the delivery until I have read it.")
+	p.Click("#pause-form button[type=submit]")
+	p.AwaitText("#pause-result", "paused (soft)")
+	p.AwaitText(shownPause+"[data-field=source]", "the owner")
 	rt, err := f.c.Runtime(ctx)
 	must(t, err)
 	paused := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
@@ -273,13 +272,13 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	// 6. The owner approves the drafted description on the page. Publication
 	// waits for the pause, and runs once the owner resumes the workstream.
-	p.closePopovers()
-	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
-	p.await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
-	p.await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
-	p.awaitGone("the approved delivery", card)
+	p.ClosePopovers()
+	p.AwaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
+	p.Await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
+	p.Await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitGone("the approved delivery", card)
 	var approval DeliveryApproval
 	must(t, json.Unmarshal([]byte(ownerDocument(deliveryDocument).Content), &approval))
 	if approval.Description != presented.Draft || approval.DraftHash != presented.DraftHash || approval.Commit != presented.Report.Commit || approval.ReviewRevision != presented.ReviewRevision {
@@ -292,39 +291,39 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
 		t.Fatalf("the paused workstream went on to %+v %v", feature, err)
 	}
-	prs.mu.Lock()
-	opened := len(prs.prs)
-	prs.mu.Unlock()
+	prs.Mu.Lock()
+	opened := len(prs.Prs)
+	prs.Mu.Unlock()
 	if opened != 0 {
 		t.Fatalf("pull requests opened while the workstream was paused: %d, want 0", opened)
 	}
-	p.openPauses()
-	p.click(shownPause + "[data-field=resume]")
-	p.awaitText("#pause-result", "resumed")
-	p.awaitGone("the resumed pause", shownPause)
+	p.OpenPauses()
+	p.Click(shownPause + "[data-field=resume]")
+	p.AwaitText("#pause-result", "resumed")
+	p.AwaitGone("the resumed pause", shownPause)
 	rt, err = f.c.Runtime(ctx)
 	must(t, err)
 	if _, ok := pauseOf(rt, paused); ok {
 		t.Fatal("the workstream is still paused after the owner resumed it")
 	}
 	f.awaitFeature(t, stream, DeliveredState)
-	p.awaitText(ws+"[data-field=state]", DeliveredState)
+	p.AwaitText(ws+"[data-field=state]", DeliveredState)
 
 	problems.check(t)
 	faults.check(t)
 	masons.check(t)
-	prs.mu.Lock()
-	if len(prs.prs) != 1 || prs.creates != 1 || prs.prs[0].Body != presented.Draft {
-		t.Fatalf("pull requests %+v", prs.prs)
+	prs.Mu.Lock()
+	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft {
+		t.Fatalf("pull requests %+v", prs.Prs)
 	}
-	prs.mu.Unlock()
+	prs.Mu.Unlock()
 	inbox, err := f.c.Inbox(ctx)
 	must(t, err)
 	if len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after delivery: %+v", inbox.Entries)
 	}
-	p.await("an empty inbox", `document.querySelector('[data-decision]') === null`)
+	p.Await("an empty inbox", `document.querySelector('[data-decision]') === null`)
 	// Every change reached the page through its event stream: it was never
 	// reloaded.
-	p.await("the same document", `window.notReloaded === true`)
+	p.Await("the same document", `window.notReloaded === true`)
 }

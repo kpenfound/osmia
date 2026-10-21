@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
@@ -24,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // handoverChief is the fake chief of staff for the hand-in demonstration. It
@@ -75,10 +74,10 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	root := opts.Config.Root
 	ref := issues.Ref{Owner: "owner", Repo: "repo", Number: 3}
 	const issueBody = "# Resumable uploads\r\n\nFrom the issue tracker.\n"
-	opts.Issues = &fakeIssues{token: "ghp_architect_secret", text: map[issues.Ref]string{ref: issueBody}}
+	opts.Issues = &fakeIssues{Token: "ghp_architect_secret", Text: map[issues.Ref]string{ref: issueBody}}
 
 	chief := &handoverChief{prompts: map[string][]string{}, written: map[string]string{}}
-	engine.turns["*"] = chief.turn
+	engine.Turns["*"] = chief.turn
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{trace.ChiefOfStaff: {Tools: []string{status.ToolName}}},
@@ -93,7 +92,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 				set, err := status.Tool(r, trace.ChiefOfStaff, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

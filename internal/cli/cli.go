@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/buildinfo"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
@@ -205,17 +206,17 @@ var enforcement = service.CoreEnforcement
 
 // build is the version and commit stamped into this binary. An unstamped
 // build reports version dev and an empty commit.
-func build() service.Identity {
+func build() wire.Identity {
 	version := buildinfo.Version
 	if version == "" {
 		version = "dev"
 	}
-	return service.Identity{Version: version, Commit: buildinfo.Commit}
+	return wire.Identity{Version: version, Commit: buildinfo.Commit}
 }
 
 // versionLine is what osmia --version prints: the version, followed by the
 // commit in parentheses when one was stamped.
-func versionLine(b service.Identity) string {
+func versionLine(b wire.Identity) string {
 	if b.Commit == "" {
 		return "osmia " + b.Version
 	}
@@ -353,7 +354,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runEdit(ctx, c, a[0], a[1], o.from, stdin, stdout, stderr)
 	}
 	if cmd == "stop" {
-		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
+		if err := c.Do(ctx, "POST", wire.Prefix+"/stop", nil, nil); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintln(stdout, "Service shutdown requested.")
@@ -367,11 +368,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	// configured, several are and the command names no workstream, or the
 	// workstream it names is in none of them.
 	refuse := func(err error) int {
-		var api *service.APIError
-		if errors.As(err, &api) && api.Code == service.NoProject {
+		var api *wire.APIError
+		if errors.As(err, &api) && api.Code == wire.NoProject {
 			return noProject()
 		}
-		if errors.As(err, &api) && (api.Code == service.Validation || api.Code == service.NotFound) {
+		if errors.As(err, &api) && (api.Code == wire.Validation || api.Code == wire.NotFound) {
 			fmt.Fprintf(stderr, "%s: %s\n", api.Code, api.Message)
 			return 4
 		}
@@ -431,14 +432,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return fail(err)
 		}
-		var found *service.ProjectView
+		var found *wire.ProjectView
 		for i := range cfg.Projects {
 			if cfg.Projects[i].ID == id {
 				found = &cfg.Projects[i]
 			}
 		}
 		if found == nil {
-			fmt.Fprintf(stderr, "%s: project %s is not active\n", service.Validation, id)
+			fmt.Fprintf(stderr, "%s: project %s is not active\n", wire.Validation, id)
 			return 4
 		}
 		if o.json {
@@ -458,8 +459,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		var out service.MemorySetup
-		if err := c.Do(ctx, http.MethodGet, service.Prefix+"/projects/memory/"+string(id), nil, &out); err != nil {
+		var out wire.MemorySetup
+		if err := c.Do(ctx, http.MethodGet, wire.Prefix+"/projects/memory/"+string(id), nil, &out); err != nil {
 			return fail(err)
 		}
 		return output(stdout, stderr, out)
@@ -497,7 +498,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		result, err := c.AddRepo(ctx, service.RepoAddRequest{Project: id, Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
+		result, err := c.AddRepo(ctx, wire.RepoAddRequest{Project: id, Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
 		if err != nil {
 			return fail(err)
 		}
@@ -515,13 +516,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 0
 	}
 	if cmd == "project" {
-		var result service.ProjectResponse
+		var result wire.ProjectResponse
 		if a[0] == "add" {
 			clone, err := filepath.Abs(o.clone)
 			if err != nil {
 				return invalid()
 			}
-			result, err = c.AddProject(ctx, service.ProjectAddRequest{Name: a[1], Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
+			result, err = c.AddProject(ctx, wire.ProjectAddRequest{Name: a[1], Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
 			if err != nil {
 				return fail(err)
 			}
@@ -555,7 +556,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "cannot generate a hand-in key")
 			return 1
 		}
-		req := service.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		req := wire.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
 		if o.base != "" {
 			req.Base, err = config.ParseWorkstreamID(o.base)
 			if err != nil {
@@ -703,7 +704,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		var result service.ShedResponse
+		var result wire.ShedResponse
 		switch a[0] {
 		case "object":
 			result, err = c.ShedObject(ctx, id, a[2])
@@ -802,7 +803,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			return 0
 		}
-		req := service.AmendmentDecisionRequest{Decision: a[2], Packet: view.Revision}
+		req := wire.AmendmentDecisionRequest{Decision: a[2], Packet: view.Revision}
 		if len(a) == 4 {
 			req.Note = a[3]
 		}
@@ -874,7 +875,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			return 0
 		}
-		decision := service.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash, AcceptBlocking: o.accept}
+		decision := wire.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash, AcceptBlocking: o.accept}
 		description := presentation.Draft
 		decision.Messages = slices.Clone(presentation.Messages)
 		if presentation.Approval != nil {
@@ -1006,11 +1007,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		var view service.CharterProposalView
+		var view wire.CharterProposalView
 		if len(a) == 2 {
 			view, err = c.CharterProposal(ctx, id, a[1])
 		} else {
-			req := service.CharterDecisionRequest{Decision: a[2]}
+			req := wire.CharterDecisionRequest{Decision: a[2]}
 			if len(a) == 4 {
 				req.Note = a[3]
 			}
@@ -1042,9 +1043,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil && o.accept {
 			return fail(err)
 		}
-		var matches []service.InboxEntry
+		var matches []wire.InboxEntry
 		for _, entry := range list.Entries {
-			if entry.Kind == service.InboxEscalation && entry.Number == number && (project == "" || entry.Project == project) {
+			if entry.Kind == wire.InboxEscalation && entry.Number == number && (project == "" || entry.Project == project) {
 				matches = append(matches, entry)
 			}
 		}
@@ -1154,7 +1155,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		result, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: id, Profile: o.profile, Title: o.title})
+		result, err := c.OpenSession(ctx, wire.SessionOpenRequest{Project: id, Profile: o.profile, Title: o.title})
 		if err != nil {
 			return fail(err)
 		}
@@ -1328,10 +1329,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		if o.json {
 			return output(stdout, stderr, struct {
-				Health        service.HealthResponse  `json:"health"`
-				Configuration service.ConfigResponse  `json:"configuration"`
-				Runtime       service.RuntimeResponse `json:"runtime"`
-				Status        service.StatusResponse  `json:"status"`
+				Health        wire.HealthResponse  `json:"health"`
+				Configuration wire.ConfigResponse  `json:"configuration"`
+				Runtime       wire.RuntimeResponse `json:"runtime"`
+				Status        wire.StatusResponse  `json:"status"`
 			}{h, cfg, rt, all})
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
@@ -1369,7 +1370,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	method, kind, scope := "PUT", "", ""
 	switch cmd {
 	case "pause", "resume":
-		target := service.ClearPauseRequest{Scope: "factory"}
+		target := wire.ClearPauseRequest{Scope: "factory"}
 		if a[0] != "all" {
 			if p, err := config.ParseProjectID(a[0]); err == nil {
 				target.Scope = "project"
@@ -1403,7 +1404,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if o.hard {
 				mode = "hard"
 			}
-			input = service.PauseRequest{Target: target, Mode: mode, Reason: o.reason, Source: "owner"}
+			input = wire.PauseRequest{Target: target, Mode: mode, Reason: o.reason, Source: "owner"}
 		}
 	case "priority":
 		ids := []config.WorkstreamID{}
@@ -1435,25 +1436,25 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		kind = "priority"
 		if a[0] == "clear" {
 			method = "DELETE"
-			input = service.ClearPriorityRequest{Project: project}
+			input = wire.ClearPriorityRequest{Project: project}
 		} else {
-			input = service.PriorityRequest{Project: project, Workstreams: ids}
+			input = wire.PriorityRequest{Project: project, Workstreams: ids}
 		}
 	case "profiles":
 		kind = "profile"
 		scope = a[1]
 		if a[0] == "clear-limit" {
 			kind, method = "provider-limit", "DELETE"
-			input = service.ClearProviderLimitRequest{Backend: a[1]}
+			input = wire.ClearProviderLimitRequest{Backend: a[1]}
 		} else if a[0] == "clear" {
 			method = "DELETE"
-			input = service.ClearProfileRequest{Role: a[1]}
+			input = wire.ClearProfileRequest{Role: a[1]}
 		} else {
-			input = service.ProfileRequest{Role: a[1], Profile: a[2]}
+			input = wire.ProfileRequest{Role: a[1], Profile: a[2]}
 		}
 	}
-	var ack service.MutationResponse
-	if err := c.Do(ctx, method, service.Prefix+"/runtime/"+kind, input, &ack); err != nil {
+	var ack wire.MutationResponse
+	if err := c.Do(ctx, method, wire.Prefix+"/runtime/"+kind, input, &ack); err != nil {
 		return fail(err)
 	}
 	rt, err := c.Runtime(ctx)
@@ -1463,8 +1464,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if o.json {
 		return output(stdout, stderr, struct {
-			Mutation service.MutationResponse `json:"mutation"`
-			Runtime  service.RuntimeResponse  `json:"runtime"`
+			Mutation wire.MutationResponse `json:"mutation"`
+			Runtime  wire.RuntimeResponse  `json:"runtime"`
 		}{ack, rt})
 	}
 	fmt.Fprintf(stdout, "%s %s: applied=%t\n", cmd, scope, ack.Applied)
@@ -1473,7 +1474,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 }
 
 // showPacket presents the packet and the exact pins needed for a cross-repo decision.
-func showPacket(w io.Writer, id config.WorkstreamID, packet service.PacketResponse) {
+func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse) {
 	fmt.Fprintf(w, "Packet revision %d of workstream %s: spec.md revision %d and plan.json revision %d\n", packet.Revision, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
 	fmt.Fprintf(w, "%s\n%s\n", packet.Packet.Conclusion, packet.Packet.Recommendation)
 	for _, entry := range packet.Packet.Dissent {
@@ -1508,18 +1509,18 @@ func output(w, stderr io.Writer, v any) int {
 // projectOf returns the project a command about stream acts on: the only
 // active project, or, while several are active, the project stream belongs
 // to. Without a stream several active projects are refused.
-func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigResponse, stream config.WorkstreamID) (config.ProjectID, error) {
+func projectOf(ctx context.Context, c *service.Client, cfg wire.ConfigResponse, stream config.WorkstreamID) (config.ProjectID, error) {
 	switch {
 	case cfg.Project != nil:
 		return cfg.Project.ID, nil
 	case len(cfg.Projects) == 0:
-		return "", &service.APIError{Code: service.NoProject, Message: "no project is configured; add one with osmia project add"}
+		return "", &wire.APIError{Code: wire.NoProject, Message: "no project is configured; add one with osmia project add"}
 	case stream == "":
 		ids := make([]string, len(cfg.Projects))
 		for i, p := range cfg.Projects {
 			ids[i] = string(p.ID)
 		}
-		return "", &service.APIError{Code: service.Validation, Message: "several projects are active (" + strings.Join(ids, ", ") + "); name a workstream of the project"}
+		return "", &wire.APIError{Code: wire.Validation, Message: "several projects are active (" + strings.Join(ids, ", ") + "); name a workstream of the project"}
 	}
 	st, err := c.Status(ctx, stream)
 	if err != nil {
@@ -1530,7 +1531,7 @@ func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigRespons
 
 // showSession prints a session's fixed profile, branch, base and state. The
 // chat itself is not shown here: it happens through the web page or the API.
-func showSession(w io.Writer, s service.SessionView) {
+func showSession(w io.Writer, s wire.SessionView) {
 	fmt.Fprintf(w, "Session %s project=%s profile=%s state=%s\n", s.Workstream, s.Project, s.Profile, s.State)
 	fmt.Fprintf(w, "Branch: %s base: %s\n", s.Branch, s.Base)
 	if s.Title != "" {
@@ -1538,7 +1539,7 @@ func showSession(w io.Writer, s service.SessionView) {
 	}
 }
 
-func showProject(w io.Writer, p *service.ProjectView) {
+func showProject(w io.Writer, p *wire.ProjectView) {
 	if p == nil {
 		fmt.Fprintln(w, "Project: none configured; add one with osmia project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH")
 		return
@@ -1562,12 +1563,12 @@ func showProject(w io.Writer, p *service.ProjectView) {
 		fmt.Fprintln(w, line)
 	}
 }
-func diagnostics(w io.Writer, ds []service.Diagnostic) {
+func diagnostics(w io.Writer, ds []wire.Diagnostic) {
 	for _, d := range ds {
 		fmt.Fprintf(w, "Diagnostic: %s: %s: %s\n", d.Field, d.Code, d.Message)
 	}
 }
-func showTailnet(w io.Writer, t *service.TailnetStatus) {
+func showTailnet(w io.Writer, t *wire.TailnetStatus) {
 	if t == nil {
 		return
 	}
@@ -1580,7 +1581,7 @@ func showTailnet(w io.Writer, t *service.TailnetStatus) {
 	}
 	fmt.Fprintln(w, line)
 }
-func showRuntime(w io.Writer, rt service.RuntimeResponse) {
+func showRuntime(w io.Writer, rt wire.RuntimeResponse) {
 	fmt.Fprintln(w, "Pauses (absent scopes are unpaused):")
 	for _, p := range rt.Effective.Pauses {
 		fmt.Fprintf(w, "  %s %s %s %s: %s source=%s reason=%q set_at=%s\n", p.Target.Scope, p.Target.Project, p.Target.Workstream, p.Target.Role, p.Mode, p.Source, p.Reason, p.SetAt.UTC().Format(time.RFC3339))
@@ -1622,7 +1623,7 @@ func showJev(w io.Writer, s jev.Status) {
 
 // showDailyBudget prints today's known spend against the daily budget, if
 // one is configured.
-func showDailyBudget(w io.Writer, b *service.DailyBudgetStatus) {
+func showDailyBudget(w io.Writer, b *wire.DailyBudgetStatus) {
 	if b == nil {
 		return
 	}
@@ -1635,7 +1636,7 @@ func showDailyBudget(w io.Writer, b *service.DailyBudgetStatus) {
 
 // showConfigDrift prints each configuration file's state against the loaded
 // configuration.
-func showConfigDrift(w io.Writer, d service.ConfigDrift) {
+func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 	for _, f := range d.Files {
 		line := "Config file: " + f.Path
 		if f.Project != "" {
@@ -1651,11 +1652,11 @@ func showConfigDrift(w io.Writer, d service.ConfigDrift) {
 
 // showProviderUsage prints today's known spend by provider, each provider's
 // usage limit and the roles it moved to a fallback profile or paused.
-func showProviderUsage(w io.Writer, u *service.ProviderUsageStatus) {
+func showProviderUsage(w io.Writer, u *wire.ProviderUsageStatus) {
 	if u == nil {
 		return
 	}
-	spend := func(s service.ProviderSpend) string {
+	spend := func(s wire.ProviderSpend) string {
 		line := "USD " + s.SpendUSD + " known spend"
 		if s.LowerBound {
 			line += fmt.Sprintf(" (at least; %d attempt(s) have unknown cost)", s.UnknownCosts)
@@ -1686,7 +1687,7 @@ func showProviderUsage(w io.Writer, u *service.ProviderUsageStatus) {
 
 // showCapacity prints the slots used of each shared role kind and the work
 // waiting for one.
-func showCapacity(w io.Writer, c *service.CapacityStatus) {
+func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 	if c == nil {
 		return
 	}
@@ -1709,7 +1710,7 @@ func showCapacity(w io.Writer, c *service.CapacityStatus) {
 
 // showFailureStreaks prints each role and profile whose latest turn attempts
 // failed with infrastructure failures.
-func showFailureStreaks(w io.Writer, streaks []service.FailureStreak) {
+func showFailureStreaks(w io.Writer, streaks []wire.FailureStreak) {
 	for _, f := range streaks {
 		fmt.Fprintf(w, "Infrastructure failures: %s on profile %s failed %d time(s) in a row; last at %s: %s\n", f.Role, f.Profile, f.Consecutive, f.LastAt.Format(time.RFC3339), f.LastFailure)
 	}
@@ -1718,7 +1719,7 @@ func showFailureStreaks(w io.Writer, streaks []service.FailureStreak) {
 // showWorkspaces prints the workspace backend new workstreams get, none
 // when workspaces = "jujutsu" finds no supported jj, which a diagnostic
 // then describes.
-func showWorkspaces(w io.Writer, ws service.WorkspacesStatus) {
+func showWorkspaces(w io.Writer, ws wire.WorkspacesStatus) {
 	backend := ws.Backend
 	if backend == "" {
 		backend = "none"
@@ -1732,7 +1733,7 @@ func showWorkspaces(w io.Writer, ws service.WorkspacesStatus) {
 
 // showWorkstreams prints each workstream's gates, overlap advisories, latest
 // drift rebase, goal and attention.
-func showWorkstreams(w io.Writer, all service.StatusResponse) {
+func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 	fmt.Fprintln(w, "Workstreams:")
 	if len(all.Workstreams) == 0 && len(all.Diagnostics) == 0 {
 		fmt.Fprintln(w, "  none")
@@ -1773,12 +1774,12 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 }
 
 // drift describes a workstream's latest drift rebase.
-func drift(d *service.DriftStatus) string {
+func drift(d *wire.DriftStatus) string {
 	return fmt.Sprintf("rebase %d %s at %s", d.Drift, d.Outcome, d.At.UTC().Format(time.RFC3339))
 }
 
 // showStatus prints one workstream's full status.
-func showStatus(w io.Writer, st service.WorkstreamStatus) {
+func showStatus(w io.Writer, st wire.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
 	for _, gate := range st.Gates {
 		fmt.Fprintf(w, "Gate: %s %s\n", gate.Kind, gate.Reference)
@@ -1832,7 +1833,7 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	fmt.Fprintf(w, "Updated: %s (revision %d)\n", s.UpdatedAt.Format(time.RFC3339), s.Revision)
 }
 
-func showAgentStatus(w io.Writer, agents []service.AgentStatus) {
+func showAgentStatus(w io.Writer, agents []wire.AgentStatus) {
 	if len(agents) == 0 {
 		return
 	}
@@ -1857,7 +1858,7 @@ func showAgentStatus(w io.Writer, agents []service.AgentStatus) {
 // its text indented. hint names the command that sends the next message
 // ("send" for an ordinary chief of staff, "design send" for a design
 // session), shown only when there is nothing to show yet.
-func showConversation(w io.Writer, list service.ConversationResponse, hint string) {
+func showConversation(w io.Writer, list wire.ConversationResponse, hint string) {
 	fmt.Fprintf(w, "Conversation: %s\n", list.Workstream)
 	if len(list.Entries) == 0 {
 		fmt.Fprintf(w, "  no messages yet; send one with osmia %s %s \"...\"\n", hint, list.Workstream)
@@ -1878,7 +1879,7 @@ func showConversation(w io.Writer, list service.ConversationResponse, hint strin
 // identifies it, then the question, what it blocks, the options, the
 // recommendation, an escalation's questions as asked, what the answer is
 // taken on and the command that answers it.
-func showInbox(w io.Writer, list service.InboxResponse) {
+func showInbox(w io.Writer, list wire.InboxResponse) {
 	if len(list.Entries) == 0 {
 		fmt.Fprintln(w, "Inbox: no decisions are waiting for you")
 		return
@@ -1894,18 +1895,18 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 	for _, e := range list.Entries {
 		stamp, stream := e.OpenedAt.Format(time.RFC3339), string(e.Workstream)
 		switch e.Kind {
-		case service.InboxEscalation:
+		case wire.InboxEscalation:
 			fmt.Fprintf(w, "\n[%d] %s %s (%s)\n", e.Number, stamp, stream, e.Batch)
-		case service.InboxContested:
+		case wire.InboxContested:
 			fmt.Fprintf(w, "\n[contested] %s %s unit %s\n", stamp, stream, e.Unit)
-		case service.InboxAmendment:
+		case wire.InboxAmendment:
 			fmt.Fprintf(w, "\n[amendment] %s %s amendment %s\n", stamp, stream, e.Amendment)
 		default:
 			fmt.Fprintf(w, "\n[%s] %s %s\n", e.Kind, stamp, stream)
 		}
 		block("Question", e.Question)
 		block("Blocked", e.Blocked)
-		if e.Kind == service.InboxEscalation {
+		if e.Kind == wire.InboxEscalation {
 			for i, option := range e.Options {
 				block(fmt.Sprintf("Option %d", i+1), option)
 			}
@@ -1914,7 +1915,7 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		} else {
 			block("Options", "none until what blocks it is resolved")
 		}
-		if e.Recommendation != "" && e.Kind == service.InboxContested {
+		if e.Recommendation != "" && e.Kind == wire.InboxContested {
 			block("Note", e.Recommendation)
 		} else if e.Recommendation != "" {
 			block("Recommendation", e.Recommendation)
@@ -1923,43 +1924,43 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 			block(fmt.Sprintf("Asked by %s as question %s", q.AskedBy, q.ID), q.Question)
 		}
 		switch e.Kind {
-		case service.InboxEscalation:
+		case wire.InboxEscalation:
 			block("Answer", fmt.Sprintf("osmia answer %d \"...\"", e.Number))
 			if e.QuickReply != "" {
 				block("Accept the recommendation", fmt.Sprintf("osmia answer %d --accept", e.Number))
 			}
-		case service.InboxRatification:
+		case wire.InboxRatification:
 			block("Decided on", fmt.Sprintf("spec.md revision %v and plan.json revision %v in packet revision %d", e.Answer.Body["spec"], e.Answer.Body["plan"], e.Revision))
 			block("Answer", "osmia ratify "+stream)
-		case service.InboxContested:
+		case wire.InboxContested:
 			block("Answer", fmt.Sprintf("osmia contested %s %s <%s> \"...\"", stream, e.Unit, strings.Join(e.Options, "|")))
-		case service.InboxAmendment:
+		case wire.InboxAmendment:
 			block("Decided on", fmt.Sprintf("packet revision %d", e.Revision))
 			block("Answer", fmt.Sprintf("osmia amendment %s %s <%s> [note]", stream, e.Amendment, strings.Join(e.Options, "|")))
-		case service.InboxDelivery:
+		case wire.InboxDelivery:
 			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
 			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
-		case service.InboxPublication:
+		case wire.InboxPublication:
 			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")
-		case service.InboxDrift:
+		case wire.InboxDrift:
 			block("Held", fmt.Sprintf("drift rebase %d", e.Revision))
 			block("Answer", fmt.Sprintf("osmia rebase %s asks for another drift rebase; osmia send %s \"...\" asks the chief of staff to hand it back with a note; or abandon the workstream", stream, stream))
-		case service.InboxBase:
+		case wire.InboxBase:
 			if len(e.Options) > 0 {
 				block("Answer", fmt.Sprintf("osmia upstream %s %v moves it onto upstream; or osmia abandon %s \"...\"", stream, e.Answer.Body["base"], stream))
 			} else {
 				block("Answer", fmt.Sprintf("none while its base is unavailable; or osmia abandon %s \"...\"", stream))
 			}
-		case service.InboxLoop:
+		case wire.InboxLoop:
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
-		case service.InboxNotices:
+		case wire.InboxNotices:
 			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the chief of staff's answer", stream))
 		}
 	}
 }
 
-func showCharterProposals(w io.Writer, list service.CharterProposalsResponse) {
+func showCharterProposals(w io.Writer, list wire.CharterProposalsResponse) {
 	if len(list.Proposals) == 0 {
 		fmt.Fprintln(w, "Charter: no proposed rules are waiting for you")
 		return
@@ -1971,7 +1972,7 @@ func showCharterProposals(w io.Writer, list service.CharterProposalsResponse) {
 	}
 }
 
-func showCharterProposal(w io.Writer, p service.CharterProposalView) {
+func showCharterProposal(w io.Writer, p wire.CharterProposalView) {
 	fmt.Fprintf(w, "Question %s of %s, proposed %s: %s\n", p.Question, p.Workstream, p.ProposedAt.Format(time.RFC3339), p.State)
 	number := "would be"
 	if p.State == trace.CharterChartered {
@@ -1998,7 +1999,7 @@ func showCharterProposal(w io.Writer, p service.CharterProposalView) {
 	}
 }
 
-func facts(st service.WorkstreamStatus) string {
+func facts(st wire.WorkstreamStatus) string {
 	state := "not recorded"
 	if st.State != nil {
 		state = *st.State
@@ -2031,35 +2032,35 @@ func handInKey() (string, error) {
 // compose their own messages from the caller's fields and identities, so those
 // are shown; other messages are fixed to keep raw file and parser text out.
 func report(w io.Writer, err error, project bool) int {
-	var api *service.APIError
+	var api *wire.APIError
 	if !errors.As(err, &api) {
 		fmt.Fprintln(w, "invalid service response or internal failure; check service and client versions")
 		return 1
 	}
 	code, msg := 5, "service operation failed; check service status"
 	switch api.Code {
-	case service.NoProject:
+	case wire.NoProject:
 		code, msg = 4, "no project is configured; add one with osmia project add"
-	case service.ProjectActive:
+	case wire.ProjectActive:
 		msg = "a project is already active; remove it before adding another"
-	case service.NotFound:
+	case wire.NotFound:
 		code, msg = 4, "project not found; check the project ID with status"
-	case service.CharterEmpty:
+	case wire.CharterEmpty:
 		code, msg = 4, "the project's charter has no rules; write it with osmia edit charter <project-id> before handing in work"
-	case service.Malformed:
+	case wire.Malformed:
 		code, msg = 4, "request rejected; check client and service API versions"
-	case service.Validation:
+	case wire.Validation:
 		code, msg = 4, "invalid override; check target, role, profile and workstream IDs with status"
-	case service.Conflict:
+	case wire.Conflict:
 		msg = "runtime conflict; restore externally edited state or restart the service"
-	case service.Unsupported:
+	case wire.Unsupported:
 		msg = "operation unavailable; use osmia --help for supported commands"
-	case service.RestartRequired:
+	case wire.RestartRequired:
 		msg = "restart required; stop the service and run osmia serve again"
-	case service.Unavailable:
+	case wire.Unavailable:
 		code, msg = 3, "cannot reach service; run osmia serve with the same --root and check --socket and permissions"
 	}
-	if project && api.Code != service.Unavailable && api.Code != service.Malformed && api.Message != "" {
+	if project && api.Code != wire.Unavailable && api.Code != wire.Malformed && api.Message != "" {
 		msg = api.Message
 	}
 	fmt.Fprintf(w, "%s: %s\n", api.Code, msg)

@@ -11,23 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type DraftEdit struct {
-	SpecRevision int    `json:"spec_revision"`
-	PlanRevision int    `json:"plan_revision"`
-	Spec         string `json:"spec"`
-	Plan         string `json:"plan"`
-}
-
-type CharterEdit struct {
-	Revision int    `json:"revision"`
-	Content  string `json:"content"`
-}
-
-type BaseEdit struct {
-	Base     config.WorkstreamID `json:"base"`
-	Revision int                 `json:"revision"`
-}
-
 func validDocument(content string) bool {
 	return len(content) <= MaxHandedBytes && utf8.ValidString(content) && !strings.ContainsRune(content, 0)
 }
@@ -35,11 +18,11 @@ func validDocument(content string) bool {
 func documentFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, trace.ErrConflict):
-		failWith(w, &APIError{Conflict, "the document changed or is no longer editable; read it again before saving"})
+		failWith(w, &APIError{Code: Conflict, Message: "the document changed or is no longer editable; read it again before saving"})
 	case errors.Is(err, trace.ErrInvalidEdit):
-		failWith(w, &APIError{Validation, err.Error()})
+		failWith(w, &APIError{Code: Validation, Message: err.Error()})
 	default:
-		failWith(w, &APIError{Internal, "cannot read or save the documents; check the project trace"})
+		failWith(w, &APIError{Code: Internal, Message: "cannot read or save the documents; check the project trace"})
 	}
 }
 
@@ -94,7 +77,7 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 			if errors.Is(err, trace.ErrConflict) {
 				documentFailure(w, err)
 			} else {
-				failWith(w, &APIError{Validation, "base must form an acyclic graph of available workstreams in this project"})
+				failWith(w, &APIError{Code: Validation, Message: "base must form an acyclic graph of available workstreams in this project"})
 			}
 		} else {
 			respond(w, 200, out)

@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/kpenfound/agentcore/vcs"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -109,7 +108,7 @@ func sessionIncomplete(id config.WorkstreamID, err error) *APIError {
 	case errors.Is(err, trace.ErrLocked):
 		reason = "trace locked"
 	}
-	return &APIError{Internal, fmt.Sprintf("opening session %s is incomplete (%s); restart the service to finish or discard it", id, reason)}
+	return &APIError{Code: Internal, Message: fmt.Sprintf("opening session %s is incomplete (%s); restart the service to finish or discard it", id, reason)}
 }
 
 // sameSession reports whether a pending open answers the given request.
@@ -128,18 +127,18 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	defer s.sessionMu.Unlock()
 	pending, err := s.readPendingSession()
 	if err != nil {
-		return SessionView{}, &APIError{Internal, "the session open journal is unreadable; inspect session-open.json under the root"}
+		return SessionView{}, &APIError{Code: Internal, Message: "the session open journal is unreadable; inspect session-open.json under the root"}
 	}
 	if pending != nil {
 		view, err := s.completeSessionOpen(ctx, *pending)
 		if errors.Is(err, errSessionDiscarded) {
-			return SessionView{}, &APIError{Conflict, fmt.Sprintf("an earlier session open for project %s could not be finished and was discarded; retry", pending.Project)}
+			return SessionView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("an earlier session open for project %s could not be finished and was discarded; retry", pending.Project)}
 		}
 		if err != nil {
 			return SessionView{}, sessionIncomplete(pending.Workstream, err)
 		}
 		if project, api := s.projectFor(req.Project); api != nil || !sameSession(*pending, project, req) {
-			return SessionView{}, &APIError{Conflict, fmt.Sprintf("an interrupted session open finished as %s; open another session with a new request", pending.Workstream)}
+			return SessionView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("an interrupted session open finished as %s; open another session with a new request", pending.Workstream)}
 		}
 		return view, nil
 	}
@@ -149,32 +148,32 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	}
 	cfg := s.current().For(project)
 	if _, _, err := cfg.Execution(masonRole, req.Profile); err != nil {
-		return SessionView{}, &APIError{Validation, fmt.Sprintf("profile %q is not one the service can run for mason turns in project %s: %v", req.Profile, project, err)}
+		return SessionView{}, &APIError{Code: Validation, Message: fmt.Sprintf("profile %q is not one the service can run for mason turns in project %s: %v", req.Profile, project, err)}
 	}
 	repository, err := s.repository(project)
 	if err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("project %s has no trace repository", project)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s has no trace repository", project)}
 	}
 	streams, err := repository.Workstreams()
 	if err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", project)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", project)}
 	}
 	stream, err := config.NewWorkstreamID(streams...)
 	if err != nil {
-		return SessionView{}, &APIError{Internal, "cannot generate a session identity"}
+		return SessionView{}, &APIError{Code: Internal, Message: "cannot generate a session identity"}
 	}
 	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
 	}
 	base, err := g.Fetch(ctx, remote, cfg.Project.BaseBranch)
 	if err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot fetch %s from %s: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
 	}
 	p := pendingSession{Version: 1, Project: project, Workstream: stream, Profile: req.Profile, Title: strings.TrimSpace(req.Title), BaseBranch: cfg.Project.BaseBranch, Base: base, Branch: sessionBranch(stream)}
 	if err := s.writePendingSession(p); err != nil {
-		return SessionView{}, &APIError{Internal, "cannot write the session open journal"}
+		return SessionView{}, &APIError{Code: Internal, Message: "cannot write the session open journal"}
 	}
 	if err := s.step("session-journal-written"); err != nil {
 		return SessionView{}, sessionIncomplete(stream, err)
@@ -323,7 +322,7 @@ func (s *Service) sessionList(rawProject string) (SessionsResponse, *APIError) {
 	if rawProject != "" {
 		id, err := config.ParseProjectID(rawProject)
 		if err != nil {
-			return SessionsResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+			return SessionsResponse{}, &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 		}
 		filter = id
 	}
@@ -335,7 +334,7 @@ func (s *Service) sessionList(rawProject string) (SessionsResponse, *APIError) {
 		}
 		list, err := active.repository.Statuses()
 		if err != nil {
-			return SessionsResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+			return SessionsResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 		}
 		for _, w := range list {
 			if w.Kind == trace.SessionKind {
@@ -358,7 +357,7 @@ func (s *Service) sessionList(rawProject string) (SessionsResponse, *APIError) {
 func (s *Service) sessionRead(raw string) (SessionView, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return SessionView{}, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return SessionView{}, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
 	cfg, projects := s.runtimes()
 	for _, active := range projects {
@@ -367,17 +366,17 @@ func (s *Service) sessionRead(raw string) (SessionView, *APIError) {
 		}
 		list, err := active.repository.Statuses()
 		if err != nil {
-			return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+			return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 		}
 		for _, w := range list {
 			if w.Workstream != id {
 				continue
 			}
 			if w.Kind != trace.SessionKind {
-				return SessionView{}, &APIError{NotFound, fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
+				return SessionView{}, &APIError{Code: NotFound, Message: fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
 			}
 			return sessionView(active.id, w), nil
 		}
 	}
-	return SessionView{}, &APIError{NotFound, fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
+	return SessionView{}, &APIError{Code: NotFound, Message: fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
 }

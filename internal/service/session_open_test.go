@@ -499,7 +499,7 @@ func TestBaseRefreshPassSkipsASessionAlongsideADependentWorkstream(t *testing.T)
 	must(t, err)
 	sealFixtureStream(t, repo, session)
 	before := captureSessionSnapshot(t, repo, session)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
 	b := &baseRefresher{s: s, repository: repo}
 	drivenPass(t, s, repo, func() error { return b.Pass(ctx) })
@@ -553,7 +553,7 @@ func TestDriftPassSkipsASessionAlongsideABuildingWorkstream(t *testing.T) {
 	sealFixtureStream(t, repo, session)
 	askDriftFixture(t, repo, session)
 	before := captureSessionSnapshot(t, repo, session)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, session}}})
 	must(t, err)
 	defer store.Close()

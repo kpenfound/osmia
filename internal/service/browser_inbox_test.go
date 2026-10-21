@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -30,60 +28,9 @@ import (
 // loopback port.
 const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
 
-// requestGate fails the page's requests of one kind while it is closed, so
-// the page keeps what it last read of them until the gate opens again.
-type requestGate struct {
-	mu     sync.Mutex
-	closed bool
-}
-
-func (g *requestGate) set(closed bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.closed = closed
-}
-
-// gate intercepts the page's requests whose URL matches pattern. A page has
-// one gate at a time.
-func (p *page) gate(pattern string) *requestGate {
-	p.t.Helper()
-	g := &requestGate{}
-	chromedp.ListenTarget(p.ctx, func(event any) {
-		e, ok := event.(*fetch.EventRequestPaused)
-		if !ok {
-			return
-		}
-		g.mu.Lock()
-		closed := g.closed
-		g.mu.Unlock()
-		go func() {
-			ctx := cdp.WithExecutor(p.ctx, chromedp.FromContext(p.ctx).Target)
-			if closed {
-				fetch.FailRequest(e.RequestID, network.ErrorReasonConnectionRefused).Do(ctx)
-			} else {
-				fetch.ContinueRequest(e.RequestID).Do(ctx)
-			}
-		}()
-	})
-	p.run(fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: pattern}}))
-	return g
-}
-
 // decisionCard is the selector of the page's card of an inbox entry.
 func decisionCard(e InboxEntry) string {
 	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
-}
-
-// awaitGone waits until the page shows no card for the entry.
-func (p *page) awaitGone(what, card string) {
-	p.t.Helper()
-	p.await(what+" to leave the inbox", `document.querySelector(`+quote(strings.TrimSpace(card))+`) === null`)
-}
-
-// setValue replaces the value of the first field selector matches.
-func (p *page) setValue(selector, value string) {
-	p.t.Helper()
-	p.eval(`document.querySelector(`+quote(selector)+`).value = `+quote(value), nil)
 }
 
 // entriesOf returns the listed inbox entries of one kind.
@@ -178,7 +125,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	// Hold inbox responses, including reads already in flight, while the
 	// server advances the packet. Submit releases them after the handler
 	// has copied the displayed revision into its request.
-	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`(() => {
 			const gate = window.inboxGate = { closed: false, waiting: [] };
 			const original = window.fetch;
@@ -202,14 +149,14 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		})()`).Do(ctx)
 		return err
 	}))
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.listener.Addr().String()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`window.notReloaded = true`, nil)
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.Listener.Addr().String()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.Eval(`window.notReloaded = true`, nil)
 	// The list counts what waits on each workstream; the entries show with
 	// their workstream.
-	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "4")
-	p.await("nothing waits on the quiet workstream", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=needs]`)+`) === null`)
-	p.selectWorkstream(stream)
+	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "4")
+	p.Await("nothing waits on the quiet workstream", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=needs]`)+`) === null`)
+	p.SelectWorkstream(stream)
 	for selector, want := range map[string]string{
 		accepted + "[data-field=kind]":            "Question",
 		accepted + "[data-field=question]":        "Where should upload state live?",
@@ -231,19 +178,19 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		amendment + "[data-field=recommendation]": "approve: no objection stands",
 		amendment + "[data-field=pins]":           "amendment 1 · packet revision 1",
 	} {
-		p.awaitText(selector, want)
+		p.AwaitText(selector, want)
 	}
 	// The card leads with the rephrasing; what the role asked in its own
 	// words starts collapsed.
 	var collapsed bool
-	p.eval(`document.querySelector(`+quote(accepted+"details.asked")+`)?.open === false`, &collapsed)
+	p.Eval(`document.querySelector(`+quote(accepted+"details.asked")+`)?.open === false`, &collapsed)
 	if !collapsed {
 		t.Fatal("the asked questions are not collapsed under the rephrasing")
 	}
 	// The API offers no quick reply on the second question, so the page
 	// offers no acceptance.
 	var acceptable bool
-	p.eval(`document.querySelector(`+quote(written+"[data-field=accept]")+`) !== null`, &acceptable)
+	p.Eval(`document.querySelector(`+quote(written+"[data-field=accept]")+`) !== null`, &acceptable)
 	if acceptable {
 		t.Fatal("the page offers to accept a recommendation the API withholds a quick reply for")
 	}
@@ -260,41 +207,41 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 
 	// An answer is written before it is sent.
-	p.click(written + "button[type=submit]")
-	p.awaitText("#inbox-result", "Write an answer first.")
+	p.Click(written + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Write an answer first.")
 	if r := ruling(second.ID); r != nil {
 		t.Fatalf("an empty answer was recorded: %+v", r)
 	}
-	p.typeInto(written+"textarea", "Keep the history; add a fixup commit.")
-	p.click(written + "button[type=submit]")
-	p.awaitText("#inbox-result", "Answered inbox entry 2.")
-	p.awaitGone("the written answer's entry", written)
-	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "3")
+	p.TypeInto(written+"textarea", "Keep the history; add a fixup commit.")
+	p.Click(written + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Answered inbox entry 2.")
+	p.AwaitGone("the written answer's entry", written)
+	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "3")
 	if r := ruling(second.ID); r == nil || r.OwnerResponse != "Keep the history; add a fixup commit." || r.Actor != ownerActor {
 		t.Fatalf("the written answer's ruling: %+v", r)
 	}
 
 	// An option fills the answer; the one-tap acceptance sends the quick
 	// reply itself.
-	p.click(accepted + "[data-field=option]:nth-of-type(2)")
-	p.await("the option in the answer", `document.querySelector(`+quote(accepted+"textarea")+`).value === 'A database'`)
-	p.click(accepted + "[data-field=accept]")
-	p.awaitText("#inbox-result", "Accepted the recommendation on inbox entry 1.")
-	p.awaitGone("the accepted entry", accepted)
+	p.Click(accepted + "[data-field=option]:nth-of-type(2)")
+	p.Await("the option in the answer", `document.querySelector(`+quote(accepted+"textarea")+`).value === 'A database'`)
+	p.Click(accepted + "[data-field=accept]")
+	p.AwaitText("#inbox-result", "Accepted the recommendation on inbox entry 1.")
+	p.AwaitGone("the accepted entry", accepted)
 	if r := ruling(first.ID); r == nil || r.OwnerResponse != "Keep it in files." || r.Actor != ownerActor {
 		t.Fatalf("the accepted ruling: %+v", r)
 	}
 
 	// A contested unit is ruled on with a decision and a note.
-	p.click(contest + "button[type=submit]")
-	p.awaitText("#inbox-result", "Choose a decision.")
-	p.choose(contest+"select", "review")
-	p.click(contest + "button[type=submit]")
-	p.awaitText("#inbox-result", "Give a note for the ruling.")
-	p.typeInto(contest+"input[name=note]", "The reviewer's sandbox failed; review it again.")
-	p.click(contest + "button[type=submit]")
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
-	p.awaitGone("the contested unit", contest)
+	p.Click(contest + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Choose a decision.")
+	p.Choose(contest+"select", "review")
+	p.Click(contest + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Give a note for the ruling.")
+	p.TypeInto(contest+"input[name=note]", "The reviewer's sandbox failed; review it again.")
+	p.Click(contest + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Ruled review on unit index.")
+	p.AwaitGone("the contested unit", contest)
 	if state, err := live.Workflow(stream, trace.UnitSubject("index")); err != nil || state.Value != UnitReviewing {
 		t.Fatalf("the ruled unit: %+v %v", state, err)
 	}
@@ -307,34 +254,34 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 
 	// The stream is held while the amendment's packet is presented again,
 	// so the page still shows the first revision when the owner decides.
-	gate := p.gate("*" + Prefix + "/events")
-	gate.set(true)
-	p.eval(`window.inboxGate.closed = true`, nil)
-	link.cut()
-	p.await("the lost connection", `document.body.dataset.connection === 'lost'`)
-	link.restore()
+	gate := p.Gate("*" + Prefix + "/events")
+	gate.Set(true)
+	p.Eval(`window.inboxGate.closed = true`, nil)
+	link.Cut()
+	p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
+	link.Restore()
 	must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "reject: the budget holds")}))
-	p.awaitText(amendment+"[data-field=pins]", "packet revision 1")
-	p.choose(amendment+"select", AmendmentReject)
-	p.click(amendment + "button[type=submit]")
-	p.awaitText("#inbox-result", "packet revision 1 of amendment 1 is not the latest; revision 2 is presented")
-	p.awaitText(amendment+"[data-field=pins]", "packet revision 2")
-	p.awaitText(amendment+"[data-field=recommendation]", "reject: the budget holds")
+	p.AwaitText(amendment+"[data-field=pins]", "packet revision 1")
+	p.Choose(amendment+"select", AmendmentReject)
+	p.Click(amendment + "button[type=submit]")
+	p.AwaitText("#inbox-result", "packet revision 1 of amendment 1 is not the latest; revision 2 is presented")
+	p.AwaitText(amendment+"[data-field=pins]", "packet revision 2")
+	p.AwaitText(amendment+"[data-field=recommendation]", "reject: the budget holds")
 	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.State != amendmentPresented || out.Decision != nil {
 		t.Fatalf("the refused decision: %+v %v", out, err)
 	}
-	gate.set(false)
-	p.await("the live connection again", `document.body.dataset.connection === 'live'`)
-	p.click(amendment + "button[type=submit]")
-	p.awaitText("#inbox-result", "Decided reject on amendment 1.")
-	p.awaitGone("the decided amendment", amendment)
+	gate.Set(false)
+	p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
+	p.Click(amendment + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
+	p.AwaitGone("the decided amendment", amendment)
 	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.Decision == nil || out.Decision.Decision != AmendmentReject || out.Decision.Packet != 2 {
 		t.Fatalf("the decided amendment: %+v %v", out, err)
 	}
-	p.await("the same document", `window.notReloaded === true`)
+	p.Await("the same document", `window.notReloaded === true`)
 	// The page sent the refused decision once and never again.
 	decisions := 0
-	for _, path := range p.paths() {
+	for _, path := range p.Paths() {
 		if path == Prefix+"/amendment/"+string(stream)+"/1" {
 			decisions++
 		}
@@ -380,37 +327,37 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	card := decisionCard(entries[0])
 	choices := func() []string {
 		var out []string
-		p.eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &out)
+		p.Eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &out)
 		return out
 	}
 
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`window.notReloaded = true`, nil)
-	p.selectWorkstream(ws)
-	p.awaitText(card+"[data-field=kind]", "Ratification")
-	p.awaitText(card+"[data-field=question]", "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1")
-	p.awaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 1 objection")
-	p.awaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
-	p.awaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 1")
-	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
-	p.awaitText(card+`[data-objection="`+veto+`"]`, "charter by "+committeeAgent(1)+" in round 1 on spec#2")
-	p.awaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
-	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.Eval(`window.notReloaded = true`, nil)
+	p.SelectWorkstream(ws)
+	p.AwaitText(card+"[data-field=kind]", "Ratification")
+	p.AwaitText(card+"[data-field=question]", "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1")
+	p.AwaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 1 objection")
+	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
+	p.AwaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 1")
+	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
+	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+committeeAgent(1)+" in round 1 on spec#2")
+	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
+	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
 	// Nothing blocked may be ratified.
 	if got := choices(); slices.Contains(got, "ratify") || !slices.Contains(got, "overrule "+veto) || !slices.Contains(got, "sustain "+size) || !slices.Contains(got, "redraft") {
 		t.Fatalf("the decisions offered while objections block: %v", got)
 	}
 
-	p.choose(card+"select", "overrule "+veto)
-	p.typeInto(card+"input[name=note]", "I accept the risk.")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "I accept the risk.")
-	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "advice, overruled")
-	p.choose(card+"select", "sustain "+size)
-	p.typeInto(card+"input[name=note]", "Split the resume unit.")
-	p.click(card + "button[type=submit]")
-	p.awaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")
+	p.Choose(card+"select", "overrule "+veto)
+	p.TypeInto(card+"input[name=note]", "I accept the risk.")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "I accept the risk.")
+	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "advice, overruled")
+	p.Choose(card+"select", "sustain "+size)
+	p.TypeInto(card+"input[name=note]", "Split the resume unit.")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")
 	entries = f.inboxEntries(t, ws, InboxRatification)
 	dissent := f.dissent(t, ws)
 	if len(entries) != 1 || len(entries[0].Options) != 0 || len(dissent) != 2 {
@@ -423,35 +370,35 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	}
 
 	// A redraft says what to change.
-	p.choose(card+"select", "redraft")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "Say what the redraft should change.")
+	p.Choose(card+"select", "redraft")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "Say what the redraft should change.")
 	if asked, err := shed.Redrafts(f.repository(), ws); err != nil || len(asked) != 0 {
 		t.Fatalf("a redraft without a note was recorded: %+v %v", asked, err)
 	}
-	p.typeInto(card+"input[name=note]", "Split the resume unit into what it addresses.")
-	p.click(card + "button[type=submit]")
+	p.TypeInto(card+"input[name=note]", "Split the resume unit into what it addresses.")
+	p.Click(card + "button[type=submit]")
 	// The redraft is debated, and the packet of the round that concludes it
 	// replaces the one the page showed.
-	p.awaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 2")
-	p.awaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
+	p.AwaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 2")
+	p.AwaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
 	asked, err := shed.Redrafts(f.repository(), ws)
 	must(t, err)
 	if len(asked) != 1 || asked[0].Round != 1 || asked[0].Note != "Split the resume unit into what it addresses." {
 		t.Fatalf("the recorded redraft %+v", asked)
 	}
 
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
-	p.awaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
-	p.awaitGone("the ratified packet", card)
+	p.Choose(card+"select", "ratify")
+	p.Click(card + "button[type=submit]")
+	p.AwaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
+	p.AwaitGone("the ratified packet", card)
 	if record := f.ratification(t, ws, 2); record.Revision != (shed.Pin{Spec: 1, Plan: 2}) || record.Round != 2 {
 		t.Fatalf("the recorded ratification %+v", record)
 	}
 	if moves := f.ownerMoves(t, ws); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "redraft-1", "ratified-2"}) {
 		t.Fatalf("owner subject went %v", moves)
 	}
-	p.await("the same document", `window.notReloaded === true`)
+	p.Await("the same document", `window.notReloaded === true`)
 	faults.check(t)
 }
 
@@ -481,15 +428,15 @@ func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	})
 	card := decisionCard(entries[0])
 
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.selectWorkstream(ws)
-	p.awaitText(card+"[data-field=kind]", "Ratification")
-	p.awaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Chief of staff: Splitting the unit is a judgement call.")
-	p.awaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
-	p.awaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.SelectWorkstream(ws)
+	p.AwaitText(card+"[data-field=kind]", "Ratification")
+	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Chief of staff: Splitting the unit is a judgement call.")
+	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
+	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
 	var choices []string
-	p.eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &choices)
+	p.Eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &choices)
 	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {
 		t.Fatalf("the decisions offered with the veto dismissed: %v", choices)
 	}
@@ -514,7 +461,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	// currently sends no SSE id, so retain the transport request and kind too.
 	var eventMu sync.Mutex
 	var deliveryEvents []string
-	chromedp.ListenTarget(p.ctx, func(event any) {
+	chromedp.ListenTarget(p.Ctx, func(event any) {
 		if e, ok := event.(*network.EventEventSourceMessageReceived); ok {
 			eventMu.Lock()
 			deliveryEvents = append(deliveryEvents, fmt.Sprintf("request=%s id=%q kind=%s data=%.300s", e.RequestID, e.EventID, e.EventName, e.Data))
@@ -544,7 +491,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		eventMu.Unlock()
 		t.Logf("delivery stream events since approval: %v", events)
 		var inboxReads any
-		p.eval(`window.deliveryInboxReads`, &inboxReads)
+		p.Eval(`window.deliveryInboxReads`, &inboxReads)
 		t.Logf("page inbox reads: %+v", inboxReads)
 	}()
 	// Publication waits while the workstream is paused.
@@ -582,13 +529,13 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	}
 	drafted := func(presented DeliveryPresentation) {
 		t.Helper()
-		p.await("the drafted description", `document.querySelector(`+quote(description)+`).value === `+quote(presented.Draft))
-		p.await("Approve enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
+		p.Await("the drafted description", `document.querySelector(`+quote(description)+`).value === `+quote(presented.Draft))
+		p.Await("Approve enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
 	}
 	disabled := func() {
 		t.Helper()
 		var off bool
-		p.eval(`document.querySelector(`+quote(approve)+`).disabled`, &off)
+		p.Eval(`document.querySelector(`+quote(approve)+`).disabled`, &off)
 		if !off {
 			t.Fatal("Approve is offered while the page does not show the draft it pins")
 		}
@@ -597,25 +544,25 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	link := newLinkProxy(t, f.s.WebAddr())
 	resync := func() {
 		t.Helper()
-		link.cut()
-		p.await("the lost connection", `document.body.dataset.connection === 'lost'`)
-		link.restore()
-		p.await("the live connection again", `document.body.dataset.connection === 'live'`)
+		link.Cut()
+		p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
+		link.Restore()
+		p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
 	}
 	// sent is the body of the page's last approval.
 	sent := func() map[string]any {
 		t.Helper()
 		var out map[string]any
-		p.eval(`window.approvals[window.approvals.length - 1]`, &out)
+		p.Eval(`window.approvals[window.approvals.length - 1]`, &out)
 		return out
 	}
 
 	// The presentation cannot be read at first.
-	gate := p.gate("*" + Prefix + "/delivery/*")
-	gate.set(true)
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.listener.Addr().String()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`(() => {
+	gate := p.Gate("*" + Prefix + "/delivery/*")
+	gate.Set(true)
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.Listener.Addr().String()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.Eval(`(() => {
 		window.notReloaded = true;
 		window.approvals = [];
 		const send = window.fetch;
@@ -635,46 +582,46 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 			});
 		};
 	})()`, nil)
-	p.selectWorkstream(ws)
-	p.awaitText(card+"[data-field=kind]", "Delivery")
-	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads? Final review 1 of commit "+report.Commit)
-	p.awaitText(card+"[data-field=options]", "Options: approve")
-	p.awaitText(card+"[data-field=pins]", pins(1, first))
-	p.awaitText(card+"[data-field=reading]", "The final report is unavailable.")
+	p.SelectWorkstream(ws)
+	p.AwaitText(card+"[data-field=kind]", "Delivery")
+	p.AwaitText(card+"[data-field=question]", "Deliver Resumable uploads? Final review 1 of commit "+report.Commit)
+	p.AwaitText(card+"[data-field=options]", "Options: approve")
+	p.AwaitText(card+"[data-field=pins]", pins(1, first))
+	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()
 	// The next read of the inbox reads the presentation again.
-	gate.set(false)
+	gate.Set(false)
 	resync()
-	p.awaitText(card+`[data-criterion="spec#2"]`, "dedupe.go and TestDedupe")
+	p.AwaitText(card+`[data-criterion="spec#2"]`, "dedupe.go and TestDedupe")
 	// The presentation shows the title to be published alongside the
 	// drafted body (spec#7).
-	p.awaitText(card+"[data-field=title]", "Pull request title: "+first.Title)
+	p.AwaitText(card+"[data-field=title]", "Pull request title: "+first.Title)
 	drafted(first)
 
 	// A new report is recorded while its presentation cannot be read: the
 	// entry pins its new review revision, and the page still holds the
 	// earlier one.
-	gate.set(true)
+	gate.Set(true)
 	second := recordReport(2)
 	if second.ReviewRevision != 2 || second.DraftHash != first.DraftHash {
 		t.Fatalf("report revision 2 presented %+v", second)
 	}
-	p.awaitText(card+"[data-field=pins]", pins(2, second))
-	p.awaitText(card+"[data-field=reading]", "The final report is unavailable.")
+	p.AwaitText(card+"[data-field=pins]", pins(2, second))
+	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()
 	var shown string
-	p.eval(`document.querySelector(`+quote(description)+`).value`, &shown)
+	p.Eval(`document.querySelector(`+quote(description)+`).value`, &shown)
 	if shown != first.Draft {
 		t.Fatalf("the description changed without a read of the new draft: %q", shown)
 	}
-	gate.set(false)
+	gate.Set(false)
 	resync()
 	drafted(second)
 
 	// The draft as it stands is approved as drafted.
-	p.click(approve)
-	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
-	p.awaitGone("the approved delivery", card)
+	p.Click(approve)
+	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitGone("the approved delivery", card)
 	if body := sent(); body["description"] != second.Draft || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
@@ -688,21 +635,21 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	// approval in the page's inbox before the fixture records another report
 	// with the same decision identity.
 	resync()
-	p.await("the processed approval in the live inbox", `window.deliveryInboxReads?.at(-1)?.entries &&
+	p.Await("the processed approval in the live inbox", `window.deliveryInboxReads?.at(-1)?.entries &&
 		!window.deliveryInboxReads.at(-1).entries.some(e => e.kind === 'delivery' && e.workstream === `+quote(string(ws))+`)`)
 	eventMu.Lock()
 	deliveryEvents = nil
 	eventMu.Unlock()
 	// A newer report asks for approval again; the owner edits its draft.
 	third := recordReport(3)
-	p.awaitText(card+"[data-field=pins]", pins(3, third))
+	p.AwaitText(card+"[data-field=pins]", pins(3, third))
 	drafted(third)
 	edited := third.Draft + "\nReviewed on the phone.\n"
-	p.setValue(description, edited)
-	p.setValue(card+`textarea[name="commit-message"]`, "Owner edited commit message")
-	p.click(approve)
-	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
-	p.awaitGone("the approved delivery", card)
+	p.SetValue(description, edited)
+	p.SetValue(card+`textarea[name="commit-message"]`, "Owner edited commit message")
+	p.Click(approve)
+	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitGone("the approved delivery", card)
 	if body := sent(); body["description"] != edited || body["review_revision"] != 3.0 {
 		t.Fatalf("the edited approval the page sent: %v", body)
 	}
@@ -711,7 +658,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Messages[0].Message != "Owner edited commit message" || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
 		t.Fatalf("the edited approval %+v", after.Approval)
 	}
-	p.await("the same document", `window.notReloaded === true`)
+	p.Await("the same document", `window.notReloaded === true`)
 }
 
 // The page lists a publication the host keeps refusing with its last
@@ -735,7 +682,7 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	demoGit(t, home, "init", "--quiet", "--bare", fork)
 	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	refusal := "GitHub answered 403: Resource not accessible by personal access token"
-	f.opts.PullRequests = &fakePulls{findErr: errors.New(refusal), fork: func() string { return "" }}
+	f.opts.PullRequests = &fakePulls{FindErr: errors.New(refusal), Fork: func() string { return "" }}
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	p := openBrowser(t)
@@ -750,16 +697,16 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 		}
 	}
 	card := decisionCard(entry)
-	p.run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.selectWorkstream(ws)
-	p.awaitText(card+"[data-field=kind]", "Publication failing")
-	p.awaitText(card+"[data-field=question]", "Last failure: Effect returned error: ")
-	p.awaitText(card+"[data-field=question]", refusal)
-	p.awaitText(card+"[data-field=blocked]", "Waiting on it: Publishing the pull request.")
-	p.awaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
+	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.SelectWorkstream(ws)
+	p.AwaitText(card+"[data-field=kind]", "Publication failing")
+	p.AwaitText(card+"[data-field=question]", "Last failure: Effect returned error: ")
+	p.AwaitText(card+"[data-field=question]", refusal)
+	p.AwaitText(card+"[data-field=blocked]", "Waiting on it: Publishing the pull request.")
+	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
 	var answerable bool
-	p.eval(`document.querySelector(`+quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+quote(card+"[data-field=pins]")+`) !== null`, &answerable)
+	p.Eval(`document.querySelector(`+quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+quote(card+"[data-field=pins]")+`) !== null`, &answerable)
 	if answerable {
 		t.Fatal("the page offers an answer to a failing publication")
 	}

@@ -52,8 +52,8 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 		t.Fatal(api)
 	}
 	var calls atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
 		assertAcceptanceDraftInstructions(t, req.Prompt)
 		text, err := readTool(ctx, tools, "before.json")
@@ -68,7 +68,7 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 		_, err = callTool(ctx, tools, deltaDraftTool, toolMap(after))
 		return questionResult(req, "session-delta-runner", "Checkpoint delta delivered"), err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	wt, g, _, close, err := f.s.changeContext(ctx, string(stream))
 	must(t, err)
 	defer close()
@@ -146,8 +146,8 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	defer f.stop(t)
 	// Include a repo-local criterion in each slice so the actual service
 	// amendment must distinguish contract rework from unaffected landed units.
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		spec, graph := crossSpec1, crossPlan1
 		number := 3
 		if strings.Contains(req.Workspace.Directory(), string(f.stream2)) {
@@ -171,7 +171,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		}
 		return questionResult(req, "session-draft", "Draft delivered"), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
@@ -214,8 +214,8 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	const key = "offset-delta"
 	var approvedRevision atomic.Int64
 	var approvals atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil {
 			return nil, err
@@ -274,7 +274,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		}
 		return questionResult(req, "session-chief", "Following the approved workgroup."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = f.c.Send(ctx, f.origin, "Amend the offset contract to string.")
 	must(t, err)
 	f.wait(t, "one impact summary in continued thread", func() bool { return currentChange(t, f.s, f.origin, key).State == "presented" })
@@ -445,37 +445,37 @@ type cancelPulls struct {
 }
 
 func (p *cancelPulls) Close(_ context.Context, _ string, n int) (pulls.PullRequest, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for i := range p.prs {
-		if p.prs[i].Number == n {
+	p.Mu.Lock()
+	defer p.Mu.Unlock()
+	for i := range p.Prs {
+		if p.Prs[i].Number == n {
 			if p.mergeOnDisposition {
-				p.prs[i].Merged = true
-				return p.prs[i], nil
+				p.Prs[i].Merged = true
+				return p.Prs[i], nil
 			}
 			p.closes++
-			if !p.prs[i].Merged {
-				p.prs[i].State = "closed"
+			if !p.Prs[i].Merged {
+				p.Prs[i].State = "closed"
 			}
-			return p.prs[i], nil
+			return p.Prs[i], nil
 		}
 	}
 	return pulls.PullRequest{}, os.ErrNotExist
 }
 func (p *cancelPulls) Draft(_ context.Context, _ string, n int) (pulls.PullRequest, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for i := range p.prs {
-		if p.prs[i].Number == n {
+	p.Mu.Lock()
+	defer p.Mu.Unlock()
+	for i := range p.Prs {
+		if p.Prs[i].Number == n {
 			if p.mergeOnDisposition {
-				p.prs[i].Merged = true
-				return p.prs[i], nil
+				p.Prs[i].Merged = true
+				return p.Prs[i], nil
 			}
 			p.drafts++
-			if !p.prs[i].Merged {
-				p.prs[i].Draft = true
+			if !p.Prs[i].Merged {
+				p.Prs[i].Draft = true
 			}
-			return p.prs[i], nil
+			return p.Prs[i], nil
 		}
 	}
 	return pulls.PullRequest{}, os.ErrNotExist
@@ -489,16 +489,16 @@ func TestCancelKeepsPullRequestThatMergesDuringDisposition(t *testing.T) {
 			defer repo.Close()
 			ctx := context.Background()
 			cfg := f.s.about(repo)
-			client := &cancelPulls{fakePulls: &fakePulls{prs: []pulls.PullRequest{{Number: 7, State: "open", Head: featureBranch(stream), HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}, mergeOnDisposition: true}
+			client := &cancelPulls{fakePulls: &fakePulls{Prs: []pulls.PullRequest{{Number: 7, State: "open", Head: featureBranch(stream), HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}, mergeOnDisposition: true}
 			f.s.options.PullRequests = client
-			must(t, (&publisher{s: f.s, repository: repo}).recordPublication(ctx, stream, DeliveryPublication{Operation: "fixture-publication", Status: publicationOpened, PullRequest: 7, URL: client.prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream)}))
+			must(t, (&publisher{s: f.s, repository: repo}).recordPublication(ctx, stream, DeliveryPublication{Operation: "fixture-publication", Status: publicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream)}))
 			before, err := repo.Workflow(stream, trace.FeatureSubject)
 			must(t, err)
 			c := WorkgroupChange{ID: "cancel-merge-race", Request: ChangeRequest{Kind: "cancel", Change: "Cancel"}, Decision: &ChangeDecision{Decision: "approve", PullRequests: choice}}
 			must(t, f.s.cancelChangeMember(ctx, repo, stream, c))
 			after, err := repo.Workflow(stream, trace.FeatureSubject)
 			must(t, err)
-			if before != after || client.prs[0].State != "open" || client.prs[0].Draft {
+			if before != after || client.Prs[0].State != "open" || client.Prs[0].Draft {
 				t.Fatal("a merge observed during PR disposition was cancelled")
 			}
 		})
@@ -515,10 +515,10 @@ func TestCancelOpenPullRequestDispositionAndMergedProtection(t *testing.T) {
 				ctx := context.Background()
 				cfg := f.s.about(repo)
 				branch := featureBranch(stream)
-				client := &cancelPulls{fakePulls: &fakePulls{prs: []pulls.PullRequest{{Number: 7, State: "open", Merged: merged, Head: branch, HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}}
+				client := &cancelPulls{fakePulls: &fakePulls{Prs: []pulls.PullRequest{{Number: 7, State: "open", Merged: merged, Head: branch, HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}}
 				f.s.options.PullRequests = client
 				p := &publisher{s: f.s, repository: repo}
-				must(t, p.recordPublication(ctx, stream, DeliveryPublication{Operation: "fixture-publication", Status: publicationOpened, PullRequest: 7, URL: client.prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: branch}))
+				must(t, p.recordPublication(ctx, stream, DeliveryPublication{Operation: "fixture-publication", Status: publicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: branch}))
 				c := WorkgroupChange{ID: "cancel-pr", Request: ChangeRequest{Kind: "cancel", Change: "Owner cancels"}, Decision: &ChangeDecision{Decision: "approve", PullRequests: choice}}
 				before, err := repo.Workflow(stream, trace.FeatureSubject)
 				must(t, err)
@@ -534,7 +534,7 @@ func TestCancelOpenPullRequestDispositionAndMergedProtection(t *testing.T) {
 					if after.Value != AbandonedState {
 						t.Fatal("PR-open member not cancelled")
 					}
-					if choice == "close" && client.prs[0].State != "closed" || choice == "draft" && !client.prs[0].Draft {
+					if choice == "close" && client.Prs[0].State != "closed" || choice == "draft" && !client.Prs[0].Draft {
 						t.Fatal("owner choice ignored")
 					}
 				}

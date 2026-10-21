@@ -12,55 +12,14 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-// sessionEngine is a fake execution engine for a session's turns. Unlike
-// demoEngine it needs no MCP tool session, because a session turn is never
-// given a custom or MCP tool; it answers CheckResume from a test-supplied
-// function, defaulting to unavailable so a test that never sets it gets a
-// fresh model session every turn.
-type sessionEngine struct {
-	mu     sync.Mutex
-	runs   []agent.Request
-	turn   func(ctx context.Context, req agent.Request) (*agent.Result, error)
-	resume func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error
-}
-
-func (e *sessionEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
-	return &enforcertest.Enforcer{Sandbox: s.Mode, Image: s.Image, Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
-		e.mu.Lock()
-		e.runs = append(e.runs, turn.Request)
-		run := e.turn
-		e.mu.Unlock()
-		if run == nil {
-			return &agent.Result{ClaudeID: "session", ResultText: "ok"}, nil
-		}
-		return run(ctx, turn.Request)
-	}}, nil
-}
-
-func (e *sessionEngine) CheckResume(_ context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
-	e.mu.Lock()
-	resume := e.resume
-	e.mu.Unlock()
-	if resume == nil {
-		return coreadapter.ErrResumeUnavailable
-	}
-	return resume(previous, next, session)
-}
-
-func (e *sessionEngine) Calls() []agent.Request {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return append([]agent.Request(nil), e.runs...)
-}
 
 // newSessionChatFixture registers a project with a real local upstream
 // remote and opens one session on it, with the production enforcement
@@ -92,21 +51,7 @@ func newSessionChatFixture(t *testing.T) (*Service, *Client, config.ProjectID, c
 }
 
 // awaitSession polls a session's view until done accepts it.
-func awaitSession(t *testing.T, c *Client, id config.WorkstreamID, done func(SessionView) bool) SessionView {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		resp, err := c.Session(context.Background(), id)
-		must(t, err)
-		if done(resp.Session) {
-			return resp.Session
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("session did not settle: %+v", resp.Session)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
+var awaitSession = fixturekit.AwaitSession
 
 // awaitConversationOn polls a named workstream's conversation until done
 // accepts it, the way awaitConversation does for the package's fixed stream.
@@ -133,7 +78,7 @@ func awaitConversationOn(t *testing.T, c *Client, id config.WorkstreamID, done f
 func TestSessionMessageStartsOneTurnAndRecordsTheReply(t *testing.T) {
 	t.Parallel()
 	s, c, _, stream, engine, _ := newSessionChatFixture(t)
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		// The backend prompt carries the (here, empty) owned-log replay
 		// context ahead of the owner's message; the durable record below
 		// keeps the message by itself.
@@ -171,7 +116,7 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
 	worktree := filepath.Join(s.cfg.Root.String(), sessionsDirectory, string(project), string(stream))
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if _, err := os.Lstat(filepath.Join(req.Workspace.Directory(), ".git")); err == nil {
 			t.Error("the turn's view exposes VCS metadata")
 		}
@@ -203,7 +148,7 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 		t.Fatalf("worktree file: %q", data)
 	}
 	sawFile := false
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		notes, readErr := os.ReadFile(filepath.Join(req.Workspace.Directory(), "notes.txt"))
 		sawFile = readErr == nil && string(notes) == "left by turn one\n"
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "still there"}, nil
@@ -224,8 +169,8 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "" {
 			t.Errorf("first turn asked to resume %q", req.ResumeID)
 		}
@@ -242,7 +187,7 @@ func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.
 	must(t, recordSessionEntry(context.Background(), repository, project, stream, "check-1", s.now(), "Checks passed."))
 
 	var secondPrompt, secondResume string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		secondPrompt, secondResume = req.Prompt, req.ResumeID
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "Second reply"}, nil
 	}
@@ -262,7 +207,7 @@ func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.
 
 	// A third turn must not see the first and second turns' entries again.
 	var thirdPrompt string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		thirdPrompt = req.Prompt
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "Third reply"}, nil
 	}
@@ -297,7 +242,7 @@ func TestSessionModelSessionDirectoryIsPerSessionUnderRootAndSurvivesRestart(t *
 		}
 	}
 	var sessionDir string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		sessionDir = req.SessionDir
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "First reply"}, nil
 	}
@@ -312,7 +257,7 @@ func TestSessionModelSessionDirectoryIsPerSessionUnderRootAndSurvivesRestart(t *
 	}
 	must(t, s.Close())
 	s2, c2 := start(t, Options{
-		Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, ShutdownTimeout: 100 * time.Millisecond,
+		Config: config.Options{Root: root}, Build: Identity{Version: "test", Commit: "abc"}, ShutdownTimeout: 100 * time.Millisecond,
 		Threads: s.options.Threads, controls: s.options.controls,
 	})
 	_ = s2
@@ -336,7 +281,7 @@ func TestSessionMessageWhileBusyIsRefused(t *testing.T) {
 	t.Parallel()
 	_, c, _, stream, engine, _ := newSessionChatFixture(t)
 	hold, entered := make(chan struct{}), make(chan struct{})
-	engine.turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-hold:
@@ -373,10 +318,10 @@ func TestSessionMessageWhileBusyIsRefused(t *testing.T) {
 func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	worktree := filepath.Join(s.cfg.Root.String(), sessionsDirectory, string(project), string(stream))
 	entered := make(chan struct{})
-	engine.turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "progress.txt"), []byte("partial work\n"), 0600); err != nil {
 			t.Error(err)
 		}
@@ -413,7 +358,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	}
 
 	var resumeID string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		resumeID = req.ResumeID
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "Resumed"}, nil
 	}
@@ -437,8 +382,8 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
 	root := s.cfg.Root.String()
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "First reply"}, nil
 	}
 	_, err := c.SessionMessage(context.Background(), stream, "first")
@@ -471,7 +416,7 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 	must(t, err)
 	must(t, repository.Close())
 
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "model-session-1" {
 			t.Errorf("recovered turn did not resume the interrupted turn's model session: %q", req.ResumeID)
 		}
@@ -482,7 +427,7 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 	}
 	enforced := Enforce(Options{Config: config.Options{Root: root}}, Enforcement{Engine: engine})
 	s2, c2 := start(t, Options{
-		Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, ShutdownTimeout: 100 * time.Millisecond,
+		Config: config.Options{Root: root}, Build: Identity{Version: "test", Commit: "abc"}, ShutdownTimeout: 100 * time.Millisecond,
 		Threads: enforced.Threads, controls: enforced.controls,
 	})
 	awaitSession(t, c2, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
@@ -510,7 +455,7 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 func TestSessionFallsBackToHistoryWhenModelSessionCannotBeResumed(t *testing.T) {
 	t.Parallel()
 	s, c, _, stream, engine, _ := newSessionChatFixture(t)
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "" {
 			t.Errorf("first turn asked to resume %q", req.ResumeID)
 		}
@@ -521,11 +466,11 @@ func TestSessionFallsBackToHistoryWhenModelSessionCannotBeResumed(t *testing.T) 
 	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
 
 	// The saved model session cannot be resumed.
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	var secondResume, secondHistory string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		secondResume, secondHistory = req.ResumeID, req.Prompt
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Second reply"}, nil
 	}
@@ -559,8 +504,8 @@ func TestSessionFallsBackToHistoryWhenModelSessionCannotBeResumed(t *testing.T) 
 
 	// The next turn resumes the newly recorded model session.
 	var thirdResume string
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		thirdResume = req.ResumeID
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Third reply"}, nil
 	}
@@ -651,7 +596,7 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testing.T) {
 	t.Parallel()
 	_, c, _, stream, engine, _ := newSessionChatFixture(t)
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "First reply"}, nil
 	}
 	_, err := c.SessionMessage(context.Background(), stream, "first")
@@ -660,10 +605,10 @@ func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testin
 
 	// The saved model session cannot be resumed, so this turn falls back
 	// and the relay records a context-rebuilt entry before returning to idle.
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Second reply"}, nil
 	}
 	_, err = c.SessionMessage(context.Background(), stream, "second")
@@ -672,10 +617,10 @@ func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testin
 
 	// The session can resume from here on, so no later turn falls back and
 	// records an entry of its own.
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
 	var thirdPrompt string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		thirdPrompt = req.Prompt
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Third reply"}, nil
 	}
@@ -690,7 +635,7 @@ func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testin
 	}
 
 	var fourthPrompt string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		fourthPrompt = req.Prompt
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Fourth reply"}, nil
 	}
@@ -783,9 +728,9 @@ func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *
 	must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	demoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
 	engine := &confinementEngine{}
-	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
+	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
 	opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
@@ -951,15 +896,15 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 	t.Helper()
 	f, masons := newLandingFixture(t, independentPlan)
 	defer f.stop(t)
-	f.engine.mu.Lock()
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		masonResume, masonPrompt = req.ResumeID, req.Prompt
 		return masons.turn(ctx, req, verified, tools)
 	}
-	chiefFallback := f.engine.turns["*"]
+	chiefFallback := f.engine.Turns["*"]
 	var sessionResumeIDs []string
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "message_") {
 			sessionResumeIDs = append(sessionResumeIDs, req.ResumeID)
 			return &agent.Result{ClaudeID: "fixture-session", ResultText: "OK", SessionDir: req.SessionDir, NumTurns: 1}, nil
@@ -969,7 +914,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		}
 		return chiefFallback(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	if withSession {
 		resp, err := f.c.OpenSession(context.Background(), SessionOpenRequest{Project: f.project, Profile: "default"})

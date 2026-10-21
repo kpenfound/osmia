@@ -14,12 +14,11 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // productionSliceFixture drafts before enabling the committee. Both members
@@ -103,8 +102,8 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 		t.Fatal("initial project spec missing")
 	}
 	f.opts.Committee = &Committee{Engine: f.engine, Hosts: f.opts.Architect.Hosts}
-	f.engine.mu.Lock()
-	f.engine.turns[roundTurnID(1, committeeAgent(1), 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[roundTurnID(1, committeeAgent(1), 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		i := 0
 		if strings.Contains(req.Workspace.Directory(), string(f.stream2)) {
 			i = 1
@@ -121,10 +120,10 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 		return &agent.Result{ClaudeID: "committee-" + req.Name, ResultText: "Review delivered", SessionDir: req.SessionDir, NumTurns: 1}, err
 	}
 	for attempt := 2; attempt <= 3; attempt++ {
-		f.engine.turns[roundTurnID(1, committeeAgent(1), attempt)] = f.engine.turns[roundTurnID(1, committeeAgent(1), 1)]
+		f.engine.Turns[roundTurnID(1, committeeAgent(1), attempt)] = f.engine.Turns[roundTurnID(1, committeeAgent(1), 1)]
 	}
 
-	f.engine.turns[replyTurnID(1, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[replyTurnID(1, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		i, spec, graph := 0, crossSpec1+"\nReport stored chunks.\n", crossPlan1+"\n"
 		if strings.Contains(req.Workspace.Directory(), string(f.stream2)) {
 			i, spec, graph = 1, crossSpec2+"\nReport upload progress.\n", crossPlan2+"\n"
@@ -151,7 +150,7 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 		}
 		return &agent.Result{ClaudeID: "reply-" + req.Name, ResultText: "Debate revision delivered", SessionDir: req.SessionDir, NumTurns: 2}, err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 	return f
 }

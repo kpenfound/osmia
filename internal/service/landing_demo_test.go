@@ -167,10 +167,10 @@ func TestLandingDemonstration(t *testing.T) {
 		}
 	}
 	demo := &landingDemo{reviews: map[string][]UnitReviewIdentity{}}
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("audit")] = masons.turn
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("audit")] = masons.turn
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range landingUnits {
 			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
@@ -181,7 +181,7 @@ func TestLandingDemonstration(t *testing.T) {
 		}
 		return chief(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	// The first landing is interrupted after its commit is made, until the
 	// service stops, so audit is approved on the base resume lands on.

@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // parallelPlan has resume and dedupe in internal.trace, and upload and audit
@@ -58,14 +57,14 @@ func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstre
 		mapping.Entities = append(mapping.Entities, kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}})
 	}
 	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), librarianActor, "fixture"))
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.turns[masonTurnID(unit)] = fake.turn
+		f.engine.Turns[masonTurnID(unit)] = fake.turn
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
 			fake.play[name] = failMasonTurn
-			f.engine.turns[name] = fake.turn
+			f.engine.Turns[name] = fake.turn
 		}
 	}
 	return f, fake
@@ -112,10 +111,10 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	f, masons := newParallelMasonFixture(t, 2, 2, parallelPlan)
 	defer f.stop(t)
 	chief := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = chief.turn
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = chief.turn
+	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "waiting", parallelPlan)
 	f.awaitMasonRan(t, stream, "audit")
 	f.awaitDeferral(t, stream, "dedupe", DeferEntangled)
@@ -161,14 +160,14 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 		}
 	}
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
 			return nil, err
 		}
 		return masons.turn(ctx, req, verified, tools)
 	}
-	f.engine.turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
 			return nil, err
 		}
@@ -179,7 +178,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 		}
 		return masons.turn(ctx, req, verified, tools)
 	}
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
@@ -189,7 +188,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 		}
 		return chief.turn(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "overlap", disjointPlan)
 	f.awaitMerged(t, stream, "resume")
 	th, err := f.repository().Thread(stream, masonAgent("upload"))

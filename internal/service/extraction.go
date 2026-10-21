@@ -241,13 +241,13 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	req.Project = id
 	cfg, active := s.runtimeOf(id)
 	if !cfg.HasProject() {
-		return ExtractionResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
+		return ExtractionResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	if active == nil {
-		return ExtractionResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+		return ExtractionResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
 	r := active.repository
-	internal := &APIError{Internal, fmt.Sprintf("cannot record the extraction request in the trace of project %s; check the trace repository", req.Project)}
+	internal := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the extraction request in the trace of project %s; check the trace repository", req.Project)}
 	at := s.now()
 	if _, err := ensureLibrarianThread(ctx, r, at, registrationActor); err != nil {
 		return ExtractionResponse{}, internal
@@ -259,7 +259,7 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	n := 1
 	if state != nil {
 		if state.State == "pending" || state.State == "running" {
-			return ExtractionResponse{}, &APIError{Conflict, fmt.Sprintf("extraction %d of project %s is still %s; wait for it to finish and check osmia status", state.Extraction, req.Project, state.State)}
+			return ExtractionResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("extraction %d of project %s is still %s; wait for it to finish and check osmia status", state.Extraction, req.Project, state.State)}
 		}
 		n = state.Extraction + 1
 	}

@@ -61,9 +61,9 @@ func newEdgeGraphFixture(t *testing.T, edgeType string) *edgeGraphFixture {
 // rather than skipping it as a too-recent repeat.
 func (f *edgeGraphFixture) resolvePasses(t *testing.T) {
 	t.Helper()
-	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(11 * time.Minute)
-	f.clock.mu.Unlock()
+	f.clock.Mu.Lock()
+	f.clock.At = f.clock.At.Add(11 * time.Minute)
+	f.clock.Mu.Unlock()
 	must(t, f.s.edgeResolverPass(context.Background(), f.repository))
 	must(t, f.s.edgeWaitPass(context.Background(), f.repository))
 }
@@ -139,8 +139,8 @@ func TestContractEdgeNeverGatesOrWaits(t *testing.T) {
 		t.Fatalf("contract edge showed a wait: %q, %v", wait, err)
 	}
 	f.resolvePasses(t)
-	if pull.finds != 0 {
-		t.Fatalf("edge reconciliation polled a published workstream without merge edges %d times", pull.finds)
+	if pull.Finds != 0 {
+		t.Fatalf("edge reconciliation polled a published workstream without merge edges %d times", pull.Finds)
 	}
 	if f.holdsMason(t, f.downstream) {
 		t.Fatal("a contract edge held the dependent's mason turn after resolution passes ran")
@@ -255,7 +255,7 @@ func TestEdgeResolverPassPollsGitHubAndNeverResolvesOnAnAgentOutcome(t *testing.
 	_, err = f.repository.SetFeatureState(ctx, deliver, DeliveredState, "fixture delivery")
 	must(t, err)
 
-	fake := &fakePulls{prs: []pulls.PullRequest{{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, MergeCommit: "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12", Base: "main"}}}
+	fake := &fakePulls{Prs: []pulls.PullRequest{{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, MergeCommit: "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12", Base: "main"}}}
 	f.s.mu.Lock()
 	f.s.options.PullRequests = fake
 	f.s.mu.Unlock()
@@ -267,16 +267,16 @@ func TestEdgeResolverPassPollsGitHubAndNeverResolvesOnAnAgentOutcome(t *testing.
 		t.Fatalf("unresolvedMergeOrderEdge with an open pull request = %q, %v, %v; want (\"owner/dagger#42\", true, nil)", reference, waiting, err)
 	}
 
-	fake.mu.Lock()
-	fake.prs[0].Merged = true
-	fake.mu.Unlock()
+	fake.Mu.Lock()
+	fake.Prs[0].Merged = true
+	fake.Mu.Unlock()
 	f.resolvePasses(t)
 	if reference, waiting, err := unresolvedMergeOrderEdge(f.repository, f.downstream); err != nil || waiting {
 		t.Fatalf("unresolvedMergeOrderEdge after the poll found it merged = %q, %v, %v; want resolved", reference, waiting, err)
 	}
 	observed, _, _, err := edgeObservationAt(f.repository, f.downstream)
 	must(t, err)
-	if observed.Edges[0].Commit != fake.prs[0].MergeCommit || observed.Edges[0].Commit == publication.Commit {
+	if observed.Edges[0].Commit != fake.Prs[0].MergeCommit || observed.Edges[0].Commit == publication.Commit {
 		t.Fatalf("dependency pins published head instead of merged commit: %+v", observed.Edges)
 	}
 }
@@ -323,7 +323,7 @@ func TestEdgeWaitIsStatusWithoutInboxOrWebhookNotification(t *testing.T) {
 	notifications := newNotifier(f.s, time.Second, nil)
 	notifications.pass(context.Background())
 	recordUpstreamOwnPullRequest(t, f.s, f.repository, f.upstream, DeliveryPublication{Status: publicationOpened, Upstream: "owner/repo-a", Fork: "owner/repo-a-fork", Branch: featureBranch(f.upstream), PullRequest: 123})
-	f.s.options.PullRequests = &fakePulls{prs: []pulls.PullRequest{{Number: 123, State: "open", HeadRepository: "owner/repo-a-fork", Head: featureBranch(f.upstream), Base: "main"}}}
+	f.s.options.PullRequests = &fakePulls{Prs: []pulls.PullRequest{{Number: 123, State: "open", HeadRepository: "owner/repo-a-fork", Head: featureBranch(f.upstream), Base: "main"}}}
 	f.resolvePasses(t)
 	statuses, _, api := f.s.statuses()
 	if api != nil {

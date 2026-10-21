@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/buildinfo"
 	"github.com/kpenfound/osmia/internal/service"
 )
@@ -45,7 +46,7 @@ func TestVersionWithoutService(t *testing.T) {
 // TestServeReportsStampedBuild shows osmia serve reporting the same stamped
 // identity in /v1/health that --version prints.
 func TestServeReportsStampedBuild(t *testing.T) {
-	for _, b := range []service.Identity{{Version: "v1.2.3", Commit: "0123abc"}, {Version: "dev"}} {
+	for _, b := range []wire.Identity{{Version: "v1.2.3", Commit: "0123abc"}, {Version: "dev"}} {
 		t.Run(b.Version, func(t *testing.T) {
 			stamp(t, b.Version, b.Commit)
 			opts, _ := emptyFixture(t)

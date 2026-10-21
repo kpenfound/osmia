@@ -24,34 +24,6 @@ var moveSources = []string{UnitImplementing, UnitChecking, UnitReviewing, UnitAp
 // moveTargets are the states a unit moves to.
 var moveTargets = []string{UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
 
-// UnitMoveRequest moves a unit to another state with a note for whoever
-// takes it from there.
-type UnitMoveRequest struct {
-	To   string `json:"to"`
-	Note string `json:"note"`
-}
-
-// UnitMove is the document units/<unit>/move-<version>.json: one move of a
-// unit, by the owner or by the chief of staff on the owner's behalf, out of
-// the state at version. ResetTurn is the mason turn a move to implementing
-// resumes after, and Candidate the recorded candidate a move to checking,
-// reviewing or approved takes forward.
-type UnitMove struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Note      string `json:"note"`
-	By        string `json:"by"`
-	Turn      string `json:"turn,omitempty"`
-	ResetTurn uint64 `json:"reset_turn,omitempty"`
-	Candidate string `json:"candidate,omitempty"`
-}
-
-type UnitMoveResponse struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Unit       string              `json:"unit"`
-	Move       UnitMove            `json:"move"`
-}
-
 func moveDocument(unit string, version uint64) string {
 	return fmt.Sprintf("%s-move-%d", trace.UnitSubject(unit), version)
 }
@@ -142,34 +114,34 @@ func unitOperation(repo *trace.Repository, stream config.WorkstreamID, unit stri
 func (s *Service) moveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn string) (UnitMoveResponse, *APIError) {
 	note := strings.TrimSpace(req.Note)
 	if !slices.Contains(moveTargets, req.To) || note == "" {
-		return UnitMoveResponse{}, &APIError{Validation, "a move requires a note and a state: " + strings.Join(moveTargets, ", ")}
+		return UnitMoveResponse{}, &APIError{Code: Validation, Message: "a move requires a note and a state: " + strings.Join(moveTargets, ", ")}
 	}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
-		return UnitMoveResponse{}, &APIError{Internal, "cannot read the workstream state"}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
-		return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the workstream is %s; units move while it is building or assembled", featureState(feature.Value))}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; units move while it is building or assembled", featureState(feature.Value))}
 	}
 	state, err := repo.Workflow(stream, trace.UnitSubject(unit))
 	if err != nil {
-		return UnitMoveResponse{}, &APIError{Internal, "cannot read the unit state"}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit state"}
 	}
 	if state.Value == "" {
-		return UnitMoveResponse{}, &APIError{NotFound, fmt.Sprintf("the workstream has no unit %s", unit)}
+		return UnitMoveResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("the workstream has no unit %s", unit)}
 	}
 	if !slices.Contains(moveSources, state.Value) {
-		return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s is %s; only a started unit that has not merged moves", unit, state.Value)}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s is %s; only a started unit that has not merged moves", unit, state.Value)}
 	}
 	if state.Value == req.To && (req.To == UnitApproved || req.To == UnitContested) {
-		return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s is already %s", unit, req.To)}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s is already %s", unit, req.To)}
 	}
 	if action, err := unitOperation(repo, stream, unit); err != nil {
-		return UnitMoveResponse{}, &APIError{Internal, "cannot read the unit's operations"}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's operations"}
 	} else if action == LandAction {
-		return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the foreman is landing unit %s; it moves once the landing ends", unit)}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the foreman is landing unit %s; it moves once the landing ends", unit)}
 	} else if action == RebaseAction {
-		return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the foreman is rebasing unit %s; it moves once the rebase ends", unit)}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the foreman is rebasing unit %s; it moves once the rebase ends", unit)}
 	}
 	// A move is caused by the chief-of-staff turn that made it, or else by
 	// the transition into the state it leaves.
@@ -177,7 +149,7 @@ func (s *Service) moveUnit(ctx context.Context, repo *trace.Repository, stream c
 	if cause == "" {
 		transitions, err := trace.Read[trace.Transition](repo, stream)
 		if err != nil {
-			return UnitMoveResponse{}, &APIError{Internal, "cannot read the unit's transitions"}
+			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's transitions"}
 		}
 		for _, t := range transitions {
 			if t.Subject == trace.UnitSubject(unit) {
@@ -195,17 +167,17 @@ func (s *Service) moveUnit(ctx context.Context, repo *trace.Repository, stream c
 	case UnitImplementing:
 		th, err := repo.Thread(stream, masonAgent(unit))
 		if err != nil || len(th.Turns) == 0 {
-			return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s has no mason thread to resume", unit)}
+			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no mason thread to resume", unit)}
 		}
 		move.ResetTurn = th.Turns[len(th.Turns)-1].Sequence
 		reason += "; its mason revises it with a fresh clean-turn allowance"
 	case UnitChecking, UnitReviewing:
 		report, revision, err := unitReport(repo, stream, unit)
 		if err != nil {
-			return UnitMoveResponse{}, &APIError{Internal, "cannot read the unit report"}
+			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit report"}
 		}
 		if revision == 0 || report.Candidate == "" {
-			return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s has no recorded candidate; move it to implementing", unit)}
+			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no recorded candidate; move it to implementing", unit)}
 		}
 		move.Candidate = report.Candidate
 		if req.To == UnitChecking {
@@ -218,14 +190,14 @@ func (s *Service) moveUnit(ctx context.Context, repo *trace.Repository, stream c
 		_, identity, err := m.candidateEvidence(ctx, stream, unit)
 		if err != nil {
 			if ctx.Err() != nil {
-				return UnitMoveResponse{}, &APIError{Internal, "the move was cancelled"}
+				return UnitMoveResponse{}, &APIError{Code: Internal, Message: "the move was cancelled"}
 			}
-			return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s has no candidate to approve: %v", unit, err)}
+			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no candidate to approve: %v", unit, err)}
 		}
 		move.Candidate = identity.Candidate.Revision
 		review, err := approvalRecord(repo, stream, unit, identity, id, by, note, actor, at)
 		if err != nil {
-			return UnitMoveResponse{}, &APIError{Internal, "cannot read the unit review"}
+			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit review"}
 		}
 		docs = append(docs, review)
 		reason += fmt.Sprintf("; the foreman lands candidate %s", identity.Candidate.Revision)
@@ -241,9 +213,9 @@ func (s *Service) moveUnit(ctx context.Context, repo *trace.Repository, stream c
 		Events: []trace.Event{trace.Notice(h.ID, "unit", fmt.Sprintf("Unit %s: %s.", unit, reason))}}
 	if _, err := repo.RecordDocumentsWith(ctx, docs, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return UnitMoveResponse{}, &APIError{Conflict, fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
+			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
 		}
-		return UnitMoveResponse{}, &APIError{Internal, "cannot record the move"}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
 	}
 	return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
 }
@@ -283,12 +255,12 @@ func (s *Service) ownerMove(ctx context.Context, raw, unit string, req UnitMoveR
 		return UnitMoveResponse{}, api
 	}
 	if unit == "" {
-		return UnitMoveResponse{}, &APIError{Validation, "a move requires a unit"}
+		return UnitMoveResponse{}, &APIError{Code: Validation, Message: "a move requires a unit"}
 	}
 	if gone, err := abandoned(repo, stream); err != nil {
-		return UnitMoveResponse{}, &APIError{Internal, "cannot read the workstream state"}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	} else if gone {
-		return UnitMoveResponse{}, &APIError{Conflict, "an abandoned workstream's units do not move"}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: "an abandoned workstream's units do not move"}
 	}
 	return s.moveUnit(ctx, repo, stream, unit, req, ownerActor, "")
 }

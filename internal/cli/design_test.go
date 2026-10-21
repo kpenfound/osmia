@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/service"
+	wire "github.com/kpenfound/osmia/internal/api"
 )
 
 // TestDesignCommands covers the command-line surface of spec#6 to spec#8:
@@ -18,7 +18,7 @@ import (
 func TestDesignCommands(t *testing.T) {
 	root, project, _ := handInFixture(t)
 
-	var opened service.DesignResponse
+	var opened wire.DesignResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "design", "open", string(project), "--json")), &opened))
 	id := opened.Design.Workstream
 	if opened.Design.Project != project {
@@ -32,7 +32,7 @@ func TestDesignCommands(t *testing.T) {
 	if text := successful(t, root, "design", "list"); !strings.Contains(text, string(id)) || !strings.Contains(text, "project "+string(project)) {
 		t.Fatalf("list text: %q", text)
 	}
-	var listed service.DesignsResponse
+	var listed wire.DesignsResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "design", "list", string(project), "--json")), &listed))
 	if len(listed.Designs) != 2 {
 		t.Fatalf("list json: %+v", listed.Designs)
@@ -48,7 +48,7 @@ func TestDesignCommands(t *testing.T) {
 		t.Fatalf("start before a draft: %d %q %q", code, out, diag)
 	}
 
-	var sent service.ConversationEntry
+	var sent wire.ConversationEntry
 	must(t, json.Unmarshal([]byte(successful(t, root, "design", "send", string(id), "What should we build?", "--json")), &sent))
 	if sent.Text != "What should we build?" {
 		t.Fatalf("sent: %+v", sent)

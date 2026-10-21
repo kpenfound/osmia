@@ -31,9 +31,9 @@ var sessionServiceActor = trace.Actor{Kind: "service", ID: "session"}
 func (s *Service) sessionTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return "", "", nil, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return "", "", nil, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	notFound := &APIError{NotFound, fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
+	notFound := &APIError{Code: NotFound, Message: fmt.Sprintf("session %s is not in an active project; list sessions with GET %s/sessions", id, Prefix)}
 	cfg, projects := s.runtimes()
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
@@ -41,14 +41,14 @@ func (s *Service) sessionTrace(raw string) (config.ProjectID, config.WorkstreamI
 		}
 		streams, err := active.repository.Workstreams()
 		if err != nil {
-			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+			return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
 		}
 		if !slices.Contains(streams, id) {
 			continue
 		}
 		kind, err := active.repository.Kind(id)
 		if err != nil {
-			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
+			return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
 		}
 		if kind != trace.SessionKind {
 			return "", "", nil, notFound
@@ -258,11 +258,11 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 		return ConversationEntry{}, api
 	}
 	if err := s.step("session-message-looked-up"); err != nil {
-		return ConversationEntry{}, &APIError{Internal, err.Error()}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
+		return ConversationEntry{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	view, api := s.sessionRead(string(stream))
 	if api != nil {
@@ -271,11 +271,11 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	cfg := s.current().For(project)
 	profile, _, err := cfg.Execution(masonRole, view.Profile)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Validation, fmt.Sprintf("profile %q is not one the service can run; open a new session: %v", view.Profile, err)}
+		return ConversationEntry{}, &APIError{Code: Validation, Message: fmt.Sprintf("profile %q is not one the service can run; open a new session: %v", view.Profile, err)}
 	}
 	mu := sessionLock(repository, stream)
 	if !mu.TryLock() {
-		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
+		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 	}
 	defer func() { mu.Unlock(); s.conversationSignal.wake() }()
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
@@ -283,25 +283,25 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	}
 	// End and destroy share this admission guard.
 	if ended, err := sessionEnded(repository, stream); err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {
-		return ConversationEntry{}, &APIError{Conflict, "the session has ended"}
+		return ConversationEntry{}, &APIError{Code: Conflict, Message: "the session has ended"}
 	}
 	at := s.now()
 	th, err := ensureSessionThread(ctx, repository, project, stream, at)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
 	}
 	if unfinishedSessionTurn(th) || view.State == trace.SessionWorking {
-		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
+		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 	}
 	entries, err := sessionEntriesSince(repository, stream, lastSessionRequestAt(th))
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the service entries of session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the service entries of session %s; check the trace repository", stream)}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return ConversationEntry{}, &APIError{Internal, "cannot generate a message ID"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot generate a message ID"}
 	}
 	id := hex.EncodeToString(nonce[:])
 	treq := trace.TurnRequest{
@@ -312,13 +312,13 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	}
 	q, err := repository.EnqueueTurn(ctx, treq)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
 	}
 	if err := setSessionState(ctx, repository, project, stream, at, "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record session %s as working; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record session %s as working; check the trace repository", stream)}
 	}
 	if err := dispatchSessionTurn(ctx, repository, project, stream, q.Request.TurnID, at); err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot dispatch the turn for session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot dispatch the turn for session %s; check the trace repository", stream)}
 	}
 	return sessionConversationEntry(q), nil
 }

@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kpenfound/osmia/internal/service"
+	wire "github.com/kpenfound/osmia/internal/api"
 )
 
-func traceRef(w io.Writer, label string, ref *service.TraceRef) {
+func traceRef(w io.Writer, label string, ref *wire.TraceRef) {
 	if ref == nil {
 		return
 	}
 	fmt.Fprintf(w, "%s: %s %s revision %d path=%s at=%s actor=%s/%s cause=%s\n", label, ref.Kind, ref.ID, ref.Revision, ref.Path, ref.At.Format("2006-01-02T15:04:05Z07:00"), ref.Actor.Kind, ref.Actor.ID, ref.Cause)
 }
 
-func traceGaps(w io.Writer, gaps []service.TraceGap) {
+func traceGaps(w io.Writer, gaps []wire.TraceGap) {
 	for _, gap := range gaps {
 		fmt.Fprintf(w, "  Gap: %s [%s] %s\n", gap.Link, gap.State, gap.Reason)
 	}
 }
 
-func traceUnit(w io.Writer, u service.UnitTrace) {
+func traceUnit(w io.Writer, u wire.UnitTrace) {
 	fmt.Fprintf(w, "Unit %s: %s state=%s source=%s complete=%t\n", u.Unit, u.Title, u.State, u.Source, u.Complete)
 	traceRef(w, "  Definition", u.Definition)
 	if u.Task != "" {
@@ -64,7 +64,7 @@ func traceUnit(w io.Writer, u service.UnitTrace) {
 	traceGaps(w, u.Gaps)
 }
 
-func traceDelivery(w io.Writer, d *service.TraceDelivery) {
+func traceDelivery(w io.Writer, d *wire.TraceDelivery) {
 	if d == nil {
 		return
 	}
@@ -81,7 +81,7 @@ func traceDelivery(w io.Writer, d *service.TraceDelivery) {
 
 func showTrace(w io.Writer, result any) {
 	switch v := result.(type) {
-	case service.TraceSummary:
+	case wire.TraceSummary:
 		fmt.Fprintf(w, "Workstream %s: state=%s complete=%t\n", v.Workstream, v.Feature, v.Complete)
 		if v.Seal != nil {
 			traceRef(w, "Seal", &v.Seal.Ref)
@@ -96,10 +96,10 @@ func showTrace(w io.Writer, result any) {
 		}
 		traceDelivery(w, v.Delivery)
 		traceGaps(w, v.Gaps)
-	case service.UnitTrace:
+	case wire.UnitTrace:
 		fmt.Fprintf(w, "Workstream %s: state=%s\n", v.Workstream, v.Feature)
 		traceUnit(w, v)
-	case service.CriterionTrace:
+	case wire.CriterionTrace:
 		fmt.Fprintf(w, "Criterion %s of %s: %s state=%s complete=%t\n", v.Criterion, v.Workstream, v.Text, v.Feature, v.Complete)
 		if v.Seal != nil {
 			traceRef(w, "Seal", &v.Seal.Ref)
@@ -118,7 +118,7 @@ func showTrace(w io.Writer, result any) {
 		}
 		traceDelivery(w, v.Delivery)
 		traceGaps(w, v.Gaps)
-	case service.CommitTrace:
+	case wire.CommitTrace:
 		fmt.Fprintf(w, "Commit %s of %s: state=%s operation=%s complete=%t\n", v.Commit, v.Workstream, v.Feature, v.Operation, v.Complete)
 		for _, r := range v.Records {
 			traceRef(w, "Record "+r.Role+" unit="+r.Unit, &r.Ref)

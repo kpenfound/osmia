@@ -51,7 +51,7 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 		t.Run(map[bool]string{false: "own-pr", true: "archive"}[archived], func(t *testing.T) {
 			ctx := context.Background()
 			opts, cfg := conversationFixture(t, "network-poll-")
-			clock := &fixedClock{now: demoStart}
+			clock := &fixedClock{At: demoStart}
 			opts.Reconciliation.Now = clock.Now
 			turns := &chiefTurns{}
 			runChief(&opts, cfg, turns)
@@ -209,7 +209,7 @@ func TestBaseRefreshBypassesOwnWorkflow(t *testing.T) {
 	defer attempt.Close()
 	sealStream(t, repo)
 	p := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "merged-tip", Head: p.Branch, HeadRepository: p.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "merged-tip", Head: p.Branch, HeadRepository: p.Fork}}
 	must(t, refresh.Pass(ctx))
 	controller, err := reconcile.New(repo, reconcile.Options{Worker: "poll-test", Now: refresh.s.now, Concurrent: concurrentOperation, Class: operationClass, Limit: refresh.s.gitOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: refresh}})
 	must(t, err)
@@ -226,7 +226,7 @@ func TestWorkgroupChangePollingKeepsSchedulingRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "change-network-")
-	opts.Reconciliation.Now = (&fixedClock{now: demoStart}).Now
+	opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
 	host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 	var exit sync.Once
 	opts.PullRequests = host
@@ -270,7 +270,7 @@ func TestWorkgroupChangePollingKeepsSchedulingRunning(t *testing.T) {
 func TestNetworkPollingStopsOnProjectRemoval(t *testing.T) {
 	t.Parallel()
 	opts, cfg := conversationFixture(t, "remove-network-")
-	opts.Reconciliation.Now = (&fixedClock{now: demoStart}).Now
+	opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
 	host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 	opts.PullRequests = host
 	s, client := start(t, opts)

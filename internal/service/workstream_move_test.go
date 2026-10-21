@@ -11,12 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // chiefMoveTool returns the move_workstream tool of a claimed chief-of-staff
@@ -227,7 +226,7 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 	if result := settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher()); result.Outcome != "succeeded" || p.feature(t) != DeliveredState {
 		t.Fatalf("the first publication %+v", result)
 	}
-	p.pulls.syncHead = true
+	p.pulls.SyncHead = true
 	before, _ := p.forkBranch(t)
 
 	out, api := p.s.ownerMoveWorkstream(ctx, string(p.stream), WorkstreamMoveRequest{To: BuildingState, Note: "Upstream broke resume; repair it on this pull request."})
@@ -282,8 +281,8 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 		t.Fatal(result)
 	}
 	tip, _ := p.forkBranch(t)
-	if tip == before || p.pulls.creates != 1 || p.pulls.updates == 0 || p.pulls.prs[0].Body != description || p.feature(t) != DeliveredState {
-		t.Fatalf("the repaired delivery: tip %s, creates %d, updates %d, body %q, state %s", tip, p.pulls.creates, p.pulls.updates, p.pulls.prs[0].Body, p.feature(t))
+	if tip == before || p.pulls.Creates != 1 || p.pulls.Updates == 0 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
+		t.Fatalf("the repaired delivery: tip %s, creates %d, updates %d, body %q, state %s", tip, p.pulls.Creates, p.pulls.Updates, p.pulls.Prs[0].Body, p.feature(t))
 	}
 }
 
@@ -315,7 +314,7 @@ func TestWorkstreamMoveRefusals(t *testing.T) {
 	if p.feature(t) != DeliveredState {
 		t.Fatalf("the workstream is %s", p.feature(t))
 	}
-	p.pulls.prs[0].State = "closed"
+	p.pulls.Prs[0].State = "closed"
 	fm := cadenceForeman(p.shedFixture, p.repository, "1m")
 	if _, api := p.s.rebaseWorkstream(ctx, string(p.stream)); api != nil {
 		t.Fatal(api.Message)

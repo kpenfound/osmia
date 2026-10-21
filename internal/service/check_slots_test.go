@@ -48,7 +48,7 @@ func (c *slotChecks) Check(ctx context.Context, _ string, _ []string) (CheckResu
 	c.entered <- time.Until(deadline)
 	select {
 	case o := <-c.release:
-		return o.result, o.err
+		return o.Result, o.Err
 	case <-ctx.Done():
 		return CheckResult{ExitCode: -1}, ctx.Err()
 	}
@@ -189,7 +189,7 @@ func TestUnitCheckSlotWaitPreservesTimeoutAndIncompleteCount(t *testing.T) {
 	if remaining := awaitCheck(t, checks.entered); remaining < 500*time.Millisecond {
 		t.Fatalf("timeout lost to wait: %s", remaining)
 	}
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	must(t, awaitCheck(t, finished))
 	run := onlyRun(t, repo, stream)
 	if run.Status != ChecksPassed {
@@ -237,11 +237,11 @@ func TestUnitCheckSlotsReleaseEveryOutcome(t *testing.T) {
 				awaitCheck(t, checks.entered)
 				switch outcome {
 				case ChecksPassed:
-					checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+					checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 				case ChecksFailed:
-					checks.release <- checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport("dag://test")}}
+					checks.release <- checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport("dag://test")}}
 				case ChecksIncomplete:
-					checks.release <- checkOutcome{result: CheckResult{ExitCode: -1}, err: errors.New("engine unavailable")}
+					checks.release <- checkOutcome{Result: CheckResult{ExitCode: -1}, Err: errors.New("engine unavailable")}
 				case "cancelled":
 					cancel()
 				}
@@ -346,11 +346,11 @@ func TestCheckSlotsSharedByUnitFinalAndSessionsAcrossProjects(t *testing.T) {
 	// Both executing runs keep the slots until their runner returns. Each
 	// return admits one waiter; all four entry points eventually complete.
 	for range 2 {
-		checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+		checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 		awaitCheck(t, checks.entered)
 	}
 	for range 2 {
-		checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+		checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	}
 	must(t, awaitCheck(t, unitDone))
 	must(t, awaitCheck(t, finalDone))
@@ -396,7 +396,7 @@ func TestSessionCheckSlotWaitRespectsRequestCancellation(t *testing.T) {
 	finished = make(chan error, 1)
 	go func() { _, err := client.SessionCheck(context.Background(), stream); finished <- err }()
 	awaitCheck(t, checks.entered)
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	must(t, awaitCheck(t, finished))
 	awaitCheckSlots(t, s, 0, 0)
 }
@@ -443,12 +443,12 @@ func TestHeldCheckSlotsAllowOtherMasonsAndReviewersAndRestartEmpty(t *testing.T)
 		return errFailTurn
 	}
 	reviewerEntered := make(chan struct{})
-	f.engine.mu.Lock()
-	f.engine.turns[review.TurnID] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[review.TurnID] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		close(reviewerEntered)
 		return &agent.Result{ResultText: "Reviewed", NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 	running := true
 	defer func() {
@@ -603,7 +603,7 @@ func TestDeliveryReviewWaitRunsBesidePassAndStartsOnce(t *testing.T) {
 		passAgain()
 	}
 	assertSingleReviewEffect(t, p.repository, p.stream, deliveryReviewAction)
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	soon(t, "delivery review completes", func() bool {
 		ops, err := p.repository.Operations(p.stream)
 		must(t, err)
@@ -802,7 +802,7 @@ func TestReviewCheckSlotWaitYieldsCommittee(t *testing.T) {
 			if len(starts) != startsBefore+1 || starts[len(starts)-1].Operation != op.ID {
 				t.Fatalf("check identity changed or duplicated: %+v", starts)
 			}
-			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			awaitCheck(t, readerEntered)
 			if got := f.s.pool.Slots(nil).Used[committeeRole]; got != 1 {
 				t.Fatalf("reader uses %d committee slots", got)
@@ -870,18 +870,18 @@ func TestFinalReviewSlotsReleaseEveryOutcome(t *testing.T) {
 			}
 			switch outcome {
 			case ChecksPassed:
-				checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+				checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			case ChecksFailed:
-				checks.release <- checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport("dag://test")}}
+				checks.release <- checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport("dag://test")}}
 			case ChecksIncomplete:
-				checks.release <- checkOutcome{result: CheckResult{ExitCode: -1}, err: errors.New("engine unavailable")}
+				checks.release <- checkOutcome{Result: CheckResult{ExitCode: -1}, Err: errors.New("engine unavailable")}
 			case "cancelled":
 				cancel()
 			case "superseded":
 				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede-final", Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: ownerActor, Cause: "supersede-final"}
 				_, err := repo.SetFeatureState(ctx, h, AbandonedState, "Replaced by another workstream")
 				must(t, err)
-				checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+				checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			}
 			must(t, c.Wait())
 			if outcome == "cancelled" {
@@ -990,7 +990,7 @@ func TestFinalReviewRestartDuringCapacityWaits(t *testing.T) {
 			resume.Store(true)
 			ticks <- f.s.now()
 			awaitCheck(t, checks.entered)
-			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			records := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, repo, stream) })
 			if len(records) != 1 || records[0].Operation.ID != op.ID || records[0].Result == nil || records[0].Result.Outcome != "succeeded" {
 				t.Fatalf("restarted review identity/result: %+v", records)

@@ -121,7 +121,7 @@ func testBaseResolver(t *testing.T, fork bool) {
 	if selected.Commit != "squashed-base" || selected.Workstream != stream {
 		t.Fatalf("squash base %+v", selected)
 	}
-	hosting.prs = []pulls.PullRequest{{Number: 5, Merged: true, Head: featureBranch(stream), Base: "main", HeadRepository: cfg.Project.PushRepository(), HeadCommit: "squashed-base"}}
+	hosting.Prs = []pulls.PullRequest{{Number: 5, Merged: true, Head: featureBranch(stream), Base: "main", HeadRepository: cfg.Project.PushRepository(), HeadCommit: "squashed-base"}}
 	selected, err = s.resolveBase(ctx, cfg, repo, quiet, g)
 	must(t, err)
 	if selected.Workstream != "" || selected.Commit != g.upstream {
@@ -133,13 +133,13 @@ func testBaseResolver(t *testing.T, fork bool) {
 	if selected.Workstream != "" {
 		t.Fatal("merged dependency required a deleted local branch")
 	}
-	hosting.prs[0].Base = "osmia/another-parent"
+	hosting.Prs[0].Base = "osmia/another-parent"
 	_, err = s.resolveBase(ctx, cfg, repo, quiet, g)
 	if !errors.Is(err, errBaseUnavailable) {
 		t.Fatalf("merge into another feature was mistaken for upstream integration: %v", err)
 	}
-	hosting.prs[0].Base = "main"
-	hosting.prs[0].Merged = false
+	hosting.Prs[0].Base = "main"
+	hosting.Prs[0].Merged = false
 	_, err = s.resolveBase(ctx, cfg, repo, quiet, g)
 	if !errors.Is(err, errBaseUnavailable) {
 		t.Fatalf("unmerged missing branch: %v", err)

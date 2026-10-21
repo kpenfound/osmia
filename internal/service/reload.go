@@ -105,9 +105,9 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.mu.Unlock()
 		s.hub.publish(Event{Kind: EventConfig})
 		s.log().Error("reload failed", "error", failed.Message)
-		return ReloadResponse{}, &APIError{Validation, failed.Message + "; the loaded configuration is unchanged"}
+		return ReloadResponse{}, &APIError{Code: Validation, Message: failed.Message + "; the loaded configuration is unchanged"}
 	}
-	unchanged := &APIError{Internal, "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
+	unchanged := &APIError{Code: Internal, Message: "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
 	failUnchanged := func() (ReloadResponse, *APIError) {
 		s.log().Error("reload failed", "error", unchanged.Message)
 		return ReloadResponse{}, unchanged
@@ -194,7 +194,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
 			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())
-			return ReloadResponse{}, &APIError{Internal, "configuration applied but a removed project could not finish draining; restart the service"}
+			return ReloadResponse{}, &APIError{Code: Internal, Message: "configuration applied but a removed project could not finish draining; restart the service"}
 		}
 		s.log().Info("project stopped", "project", string(p.id), "reason", "reload")
 	}

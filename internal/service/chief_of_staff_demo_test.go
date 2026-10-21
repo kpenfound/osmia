@@ -17,8 +17,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/envelope"
@@ -28,6 +26,7 @@ import (
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The chief-of-staff demonstration: on an onboarded project, the owner
@@ -86,17 +85,17 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	must(t, errors.Join(err, configFile.Close()))
 	// Every backend session can be resumed, so a thread's next turn names the
 	// session of its previous one.
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	seed, err := kb.Seed(lf.clone)
 	must(t, err)
 	lf.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n\nState lives in files.\n", "output/kb/entities.json": entitiesWith(t, seed, "history")}, nil)
 
 	// The clock stands still, so an event window closes only when the test
 	// advances it.
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
 	lives := make(chan *trace.Repository, 1)
-	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
+	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
 	production := opts.Threads
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		bound, err := production(r, cfg)
@@ -250,14 +249,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			return questionResult(req, "session-"+req.Name, "Built"), nil
 		}
 	}
-	engine.turns["build"] = worker("Where does state live?")
-	engine.turns["build2"] = worker("")
+	engine.Turns["build"] = worker("Where does state live?")
+	engine.Turns["build2"] = worker("")
 	masonAsked := make(chan struct{})
 	var masonAskedOnce sync.Once
 	releaseReviewer := func() { masonAskedOnce.Do(func() { close(masonAsked) }) }
 	t.Cleanup(releaseReviewer)
 	reviewerTurn := worker(chiefDemoQuestion)
-	engine.turns["review"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["review"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		select {
 		case <-masonAsked:
 		case <-ctx.Done():
@@ -274,7 +273,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 	var sent []ConversationEntry
 	events := map[string]int{}
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
@@ -316,12 +315,12 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		problem("unexpected chief-of-staff turn", req.Name, req.Prompt)
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
-	engine.turns["answer_1"], engine.turns["answer_2"] = resumed, resumed
+	engine.Turns["answer_1"], engine.Turns["answer_2"] = resumed, resumed
 	runs := func() map[string]int {
-		engine.mu.Lock()
-		defer engine.mu.Unlock()
+		engine.Mu.Lock()
+		defer engine.Mu.Unlock()
 		out := map[string]int{}
-		for _, name := range engine.runs {
+		for _, name := range engine.Runs {
 			switch {
 			case strings.HasPrefix(name, "events_"):
 				name = "events"

@@ -33,7 +33,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			if result.Outcome != "succeeded" {
 				t.Fatal(result)
 			}
-			p.pulls.syncHead = true
+			p.pulls.SyncHead = true
 			before, _ := p.forkBranch(t)
 			fm := cadenceForeman(p.shedFixture, p.repository, "1m")
 			files := map[string]string{"DRIFT.md": "new upstream content\n"}
@@ -41,12 +41,12 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				files["resume.go"] = "package demo\n// Upstream resume.\n"
 			}
 			advanceUpstream(t, p.shedFixture, files)
-			calls := p.pulls.finds
+			calls := p.pulls.Finds
 			if why, err := fm.driftDue(p.stream, p.s.now().Add(24*time.Hour)); err != nil || why != "" {
 				t.Fatalf("automatic drift: %q %v", why, err)
 			}
 			passDrifts(t, fm)
-			if p.pulls.finds != calls || len(driftOperations(t, p.repository, p.stream)) != 0 {
+			if p.pulls.Finds != calls || len(driftOperations(t, p.repository, p.stream)) != 0 {
 				t.Fatal("delivered branch was polled")
 			}
 			if tc.projectRequest {
@@ -116,7 +116,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			p.approve(t, &description)
 			must(t, p.publisher().Pass(ctx))
 			publish := actionOperation(t, p.repository, p.stream, publishUpstreamAction)
-			p.pulls.lose = true
+			p.pulls.Lose = true
 			if _, err := p.publisher().Apply(ctx, publish); err == nil {
 				t.Fatal("expected lost PR update response")
 			}
@@ -126,8 +126,8 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				t.Fatal(result)
 			}
 			tip, _ := p.forkBranch(t)
-			if tip == before || p.pulls.creates != 1 || p.pulls.prs[0].Body != description || p.feature(t) != DeliveredState {
-				t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.creates, p.feature(t))
+			if tip == before || p.pulls.Creates != 1 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
+				t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.Creates, p.feature(t))
 			}
 			pending, err = upstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
 			must(t, err)
@@ -149,7 +149,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 
 			result, err = p.publisher().Apply(ctx, publish)
 			must(t, err)
-			if result.Outcome != "succeeded" || p.pulls.creates != 1 {
+			if result.Outcome != "succeeded" || p.pulls.Creates != 1 {
 				t.Fatal("retry duplicated publication")
 			}
 		})
@@ -172,7 +172,7 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	p.pulls.syncHead = true
+	p.pulls.SyncHead = true
 	before, _ := p.forkBranch(t)
 	fm := cadenceForeman(p.shedFixture, p.repository, "1m")
 	moveFeature(t, p.shedFixture, p.stream, map[string]string{"shared.go": "package demo\n// Feature shared helper.\n"})
@@ -237,8 +237,8 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 		t.Fatal(result)
 	}
 	tip, _ := p.forkBranch(t)
-	if tip == before || p.pulls.creates != 1 || p.pulls.prs[0].Body != description || p.feature(t) != DeliveredState {
-		t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.creates, p.feature(t))
+	if tip == before || p.pulls.Creates != 1 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
+		t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.Creates, p.feature(t))
 	}
 }
 
@@ -251,8 +251,8 @@ func TestDeliveredDriftClosedPRStopsBeforeRebase(t *testing.T) {
 			settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher())
 			before := featureTip(t, p.shedFixture, p.stream)
 			advanceUpstream(t, p.shedFixture, map[string]string{"CLOSED.md": "upstream moved\n"})
-			p.pulls.prs[0].State = "closed"
-			p.pulls.prs[0].Merged = outcome == "merged"
+			p.pulls.Prs[0].State = "closed"
+			p.pulls.Prs[0].Merged = outcome == "merged"
 			fm := cadenceForeman(p.shedFixture, p.repository, "1m")
 			_, api := p.s.rebaseWorkstream(context.Background(), string(p.stream))
 			if api != nil {

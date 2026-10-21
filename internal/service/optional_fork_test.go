@@ -16,7 +16,7 @@ func useUpstreamForPush(t *testing.T, p *publicationFixture) {
 	t.Helper()
 	p.fork = strings.TrimSpace(demoGit(t, p.clone, "-C", p.clone, "remote", "get-url", "upstream"))
 	p.s.cfg.Project.Fork = ""
-	p.pulls.syncHead = true
+	p.pulls.SyncHead = true
 	p.s.options.PullRequests = p.pulls
 }
 
@@ -33,15 +33,15 @@ func TestPublicationWithoutForkReconcilesLostResponse(t *testing.T) {
 	if in.Fork != p.s.cfg.Project.Upstream || in.Upstream != in.Fork {
 		t.Fatal(in)
 	}
-	p.pulls.lose = true
+	p.pulls.Lose = true
 	if _, err := p.publisher().Apply(ctx, op); err == nil {
 		t.Fatal("expected lost response")
 	}
 	p.reopen(t)
 	result, err := p.publisher().Apply(ctx, op)
 	must(t, err)
-	if result.Outcome != "succeeded" || p.pulls.creates != 1 {
-		t.Fatalf("%+v creates=%d", result, p.pulls.creates)
+	if result.Outcome != "succeeded" || p.pulls.Creates != 1 {
+		t.Fatalf("%+v creates=%d", result, p.pulls.Creates)
 	}
 	if got := strings.TrimSpace(demoGit(t, p.clone, "-C", p.fork, "rev-parse", "main")); got != main {
 		t.Fatal("base branch changed")
@@ -61,9 +61,9 @@ func sameRepositoryMaintenance(t *testing.T) *publicationFixture {
 	prior.URL = "https://github.com/" + prior.Upstream + "/pull/100"
 	must(t, p.publisher().recordPublication(context.Background(), p.stream, prior))
 	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "push", "upstream", prior.Commit+":refs/heads/"+prior.Branch)
-	p.pulls.prs[0].HeadRepository = prior.Fork
-	p.pulls.prs[0].Base = prior.Base
-	p.pulls.prs[0].URL = prior.URL
+	p.pulls.Prs[0].HeadRepository = prior.Fork
+	p.pulls.Prs[0].Base = prior.Base
+	p.pulls.Prs[0].URL = prior.URL
 	return p
 }
 
@@ -110,7 +110,7 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 				t.Fatal(in)
 			}
 			if interruption == "lost-response" {
-				p.pulls.lose = true
+				p.pulls.Lose = true
 			} else {
 				p.s.boundary = func(step string) error {
 					if step == interruption {
@@ -126,8 +126,8 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 			p.reopen(t)
 			result, err := p.publisher().Apply(ctx, op)
 			must(t, err)
-			if result.Outcome != "succeeded" || p.pulls.creates != 1 || p.pulls.updates != 1 || p.feature(t) != DeliveredState {
-				t.Fatalf("%+v creates=%d updates=%d", result, p.pulls.creates, p.pulls.updates)
+			if result.Outcome != "succeeded" || p.pulls.Creates != 1 || p.pulls.Updates != 1 || p.feature(t) != DeliveredState {
+				t.Fatalf("%+v creates=%d updates=%d", result, p.pulls.Creates, p.pulls.Updates)
 			}
 			records, err := publications(p.repository, p.stream)
 			must(t, err)
@@ -142,7 +142,7 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 			}
 			_, err = p.publisher().Apply(ctx, op)
 			must(t, err)
-			if p.pulls.updates != 1 {
+			if p.pulls.Updates != 1 {
 				t.Fatal("retry repeated update")
 			}
 		})
@@ -158,20 +158,20 @@ func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
 			before, _ := p.forkBranch(t)
 			switch change {
 			case "body":
-				p.pulls.prs[0].Body = "external edit"
+				p.pulls.Prs[0].Body = "external edit"
 			case "base":
-				p.pulls.prs[0].Base = "another-branch"
+				p.pulls.Prs[0].Base = "another-branch"
 			case "closed":
-				p.pulls.prs[0].State = "closed"
+				p.pulls.Prs[0].State = "closed"
 			case "merged":
-				p.pulls.prs[0].State, p.pulls.prs[0].Merged = "closed", true
+				p.pulls.Prs[0].State, p.pulls.Prs[0].Merged = "closed", true
 			case "missing":
-				p.pulls.prs = []pulls.PullRequest{}
+				p.pulls.Prs = []pulls.PullRequest{}
 			}
 			result, err := p.publisher().Apply(context.Background(), actionOperation(t, p.repository, p.stream, publishUpstreamAction))
 			must(t, err)
 			after, _ := p.forkBranch(t)
-			if result.Outcome == "succeeded" || before != after || p.pulls.updates != 0 {
+			if result.Outcome == "succeeded" || before != after || p.pulls.Updates != 0 {
 				t.Fatalf("unsafe publication: %+v", result)
 			}
 			// This lookup of the workstream's own pull request, already made to

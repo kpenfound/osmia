@@ -64,12 +64,12 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 		t.Fatal("production slice has no protected contract criterion")
 	}
 	var routed atomic.Bool
-	f.engine.mu.Lock()
-	f.engine.turns["lifecycle-project-journal"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["lifecycle-project-journal"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the cross-repo acknowledgment contract change?"})
 		return questionResult(req, "session-journal-worker", "Asked the original shared chief."), err
 	}
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil || !slices.Contains(names, status.ToolName) {
 			return questionResult(req, "session-journal-worker", "Waiting for the project decision."), err
@@ -96,7 +96,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 		_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Preserve the pending project decision.", "note": "The contract request remains pending.", "agents": []string{}})
 		return questionResult(req, "session-journal-chief", "The pending request remains in the original authority."), err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	// Let the live builder and mason controller admit the real sealed unit.
 	lifecycleAwait(t, f, "production member admission", func() bool {
 		state, err := origin.Workflow(f.stream1, trace.UnitSubject("accept"))

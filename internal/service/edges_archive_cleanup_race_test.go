@@ -84,9 +84,9 @@ func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T
 	if !gone {
 		t.Fatal("authorized cleanup did not delete upstream history")
 	}
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: 70, Merged: true, MergeCommit: "stale-merge", HeadRepository: p.Fork, Head: p.Branch}, {Number: p.PullRequest, Merged: true, State: "closed", MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: 70, Merged: true, MergeCommit: "stale-merge", HeadRepository: p.Fork, Head: p.Branch}, {Number: p.PullRequest, Merged: true, State: "closed", MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
+	host.Mu.Unlock()
 	resume()
 	lifecycleAwait(t, f, "edge recovers from concurrent cleanup", func() bool {
 		obs, _, _, err := edgeObservationAt(down, f.stream2)
@@ -179,12 +179,12 @@ func TestArchivedUpstreamGoneTraceUsesOnlyPinnedPublication(t *testing.T) {
 			_, err = repo.MarkWorkstreamTraceForDeletion(stream)
 			must(t, err)
 			must(t, trace.FinishWorkstreamTraceDeletion(cfg.Root, cfg.Project.ID, stream))
-			host.prs = []pulls.PullRequest{{Number: 41, Merged: true, MergeCommit: "stale-merge", HeadRepository: p.Fork, Head: p.Branch}, {Number: 42, State: "closed", Merged: name == "merged", MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
+			host.Prs = []pulls.PullRequest{{Number: 41, Merged: true, MergeCommit: "stale-merge", HeadRepository: p.Fork, Head: p.Branch}, {Number: 42, State: "closed", Merged: name == "merged", MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
 			if name == "stale" {
-				host.prs = host.prs[:1]
+				host.Prs = host.Prs[:1]
 			}
 			if name == "lookup failure" {
-				host.findErr = errors.New("provider unavailable")
+				host.FindErr = errors.New("provider unavailable")
 			}
 			status, err := s.upstreamMergeStatus(context.Background(), repo, trace.Edge{From: stream, To: quiet, Type: trace.EdgeHardBlock})
 			if name == "lookup failure" {
@@ -199,7 +199,7 @@ func TestArchivedUpstreamGoneTraceUsesOnlyPinnedPublication(t *testing.T) {
 				if name == "merged" && (status.Commit != "current-merge" || status.Reference != p.Upstream+"#42") {
 					t.Fatalf("wrong merge identity: %+v", status)
 				}
-				if name == "no publication" && host.finds != 0 {
+				if name == "no publication" && host.Finds != 0 {
 					t.Fatal("missing publication caused an unpinned lookup")
 				}
 			}

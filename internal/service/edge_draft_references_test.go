@@ -44,7 +44,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	demoGit(t, home, "init", "--quiet", "--bare", fork)
 	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	pull := &fakePulls{syncHead: true, fork: func() string {
+	pull := &fakePulls{SyncHead: true, Fork: func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}}
 	f.s.mu.Lock()
@@ -52,10 +52,10 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	f.s.mu.Unlock()
 	publication := DeliveryPublication{Status: publicationOpened, Upstream: "owner/other", Fork: "owner/other-fork", Branch: featureBranch(upstream), Commit: "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2", PullRequest: 77, URL: "https://example.invalid/owner/other/pull/77"}
 	recordUpstreamOwnPullRequest(t, f.s, upstreamRepo, upstream, publication)
-	pull.prs = append(pull.prs, pulls.PullRequest{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, Base: "main"})
-	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(11 * time.Minute)
-	f.clock.mu.Unlock()
+	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, Base: "main"})
+	f.clock.Mu.Lock()
+	f.clock.At = f.clock.At.Add(11 * time.Minute)
+	f.clock.Mu.Unlock()
 	must(t, f.s.edgeResolverPass(ctx, repository))
 	assertBuildReference(publication.Fork+"@"+publication.Commit, "owner/other#77")
 
@@ -84,12 +84,12 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("draft publication: %+v, %v", result, err)
 	}
-	pull.mu.Lock()
-	defer pull.mu.Unlock()
-	if len(pull.prs) != 2 || pull.creates != 1 || pull.readies != 0 {
-		t.Fatalf("dependent publication: %+v; creates %d, ready calls %d", pull.prs, pull.creates, pull.readies)
+	pull.Mu.Lock()
+	defer pull.Mu.Unlock()
+	if len(pull.Prs) != 2 || pull.Creates != 1 || pull.Readies != 0 {
+		t.Fatalf("dependent publication: %+v; creates %d, ready calls %d", pull.Prs, pull.Creates, pull.Readies)
 	}
-	if pr := pull.prs[1]; !pr.Draft || pr.Body != approval.Description {
+	if pr := pull.Prs[1]; !pr.Draft || pr.Body != approval.Description {
 		t.Fatalf("published PR must be a draft with the approved dependency text: %+v", pr)
 	}
 }

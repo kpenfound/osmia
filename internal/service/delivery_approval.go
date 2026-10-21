@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
@@ -22,56 +21,6 @@ const deliveryPath = "final/delivery.json"
 const deliveryDocument = "final-delivery"
 const deliverySubject = "delivery-owner"
 
-// DeliveryPresentation is the final review and the title and description
-// presented to the owner. Criteria with a gap precede criteria with
-// evidence. A delivered workstream presents the report, approval and
-// publication it was delivered with, and no draft.
-type DeliveryPresentation struct {
-	Project        config.ProjectID            `json:"project"`
-	Workstream     config.WorkstreamID         `json:"workstream"`
-	Report         FinalReport                 `json:"report"`
-	ReviewRevision int                         `json:"review_revision"`
-	Title          string                      `json:"title,omitempty"`
-	Draft          string                      `json:"draft"`
-	DraftHash      string                      `json:"draft_hash"`
-	Messages       []workspace.DeliveryMessage `json:"messages"`
-	Style          string                      `json:"style"`
-	Approval       *DeliveryApproval           `json:"approval,omitempty"`
-	// Publication is the latest record of publishing an approval, Merge the
-	// owner's own merge of the branch into upstream that delivered it
-	// instead, and Delivered whether the workstream is delivered.
-	Publication *DeliveryPublication `json:"publication,omitempty"`
-	Merge       *DeliveryMerge       `json:"merge,omitempty"`
-	Delivered   bool                 `json:"delivered,omitempty"`
-	Maintenance bool                 `json:"maintenance,omitempty"`
-}
-
-// DeliveryApproval preserves the exact title and text and reviewed identity
-// the owner approved. Title is empty in an approval recorded before the
-// title became part of the draft; deliveryTitle(Description, stream) is
-// then used instead, as it was when that approval was recorded.
-// DescriptionHash allows publication to check the text it will send.
-type DeliveryApproval struct {
-	Review          int                         `json:"review"`
-	ReviewRevision  int                         `json:"review_revision"`
-	Commit          string                      `json:"commit"`
-	Seal            int                         `json:"seal"`
-	SpecHash        string                      `json:"spec_hash"`
-	Spec            int                         `json:"spec"`
-	Plan            int                         `json:"plan"`
-	Charter         int                         `json:"charter"`
-	DraftHash       string                      `json:"draft_hash"`
-	Title           string                      `json:"title,omitempty"`
-	Description     string                      `json:"description"`
-	DescriptionHash string                      `json:"description_hash"`
-	At              time.Time                   `json:"at"`
-	Messages        []workspace.DeliveryMessage `json:"messages"`
-	Style           string                      `json:"style"`
-	// AcceptedBlocking is what the final report found blocking that the
-	// owner accepted as it is by approving.
-	AcceptedBlocking []string `json:"accepted_blocking,omitempty"`
-}
-
 // publishedTitle is the title to publish for an approval: the title it
 // recorded, or, for an approval recorded before this field existed,
 // deliveryTitle(Description, stream), which is what was published for it
@@ -81,20 +30,6 @@ func publishedTitle(approval DeliveryApproval, stream config.WorkstreamID) strin
 		return approval.Title
 	}
 	return deliveryTitle(approval.Description, stream)
-}
-
-// DeliveryDecision approves the draft as shown, or supplies the owner's edit.
-// The review identity and draft hash are required even when the text is edited.
-type DeliveryDecision struct {
-	Review         int                         `json:"review"`
-	ReviewRevision int                         `json:"review_revision"`
-	Commit         string                      `json:"commit"`
-	DraftHash      string                      `json:"draft_hash"`
-	Description    *string                     `json:"description,omitempty"`
-	Messages       []workspace.DeliveryMessage `json:"messages,omitempty"`
-	// AcceptBlocking accepts what the final report found blocking as it is;
-	// a report with blocking findings is approved only with it.
-	AcceptBlocking bool `json:"accept_blocking,omitempty"`
 }
 
 func descriptionHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
@@ -296,18 +231,18 @@ func (s *Service) deliveryPresentation(ctx context.Context, raw string) (Deliver
 // presentDelivery builds the presentation of one workstream of the project.
 func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
 	if pending, err := unresolvedWork(repository, stream); err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read discovered work"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read discovered work"}
 	} else if pending {
-		return DeliveryPresentation{}, &APIError{Conflict, "necessary discovered work or a plan revision remains unresolved"}
+		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: "necessary discovered work or a plan revision remains unresolved"}
 	}
 
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read feature state"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read feature state"}
 	}
 	published, err := publications(repository, stream)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read publication records"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read publication records"}
 	}
 	var publication *DeliveryPublication
 	if len(published) > 0 {
@@ -317,47 +252,47 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	if feature.Value == DeliveredState {
 		maintenance, err = upstreamDeliveryPending(repository, s.about(repository), stream)
 		if err != nil {
-			return DeliveryPresentation{}, &APIError{Internal, "cannot read dependency integration"}
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read dependency integration"}
 		}
 	}
 	if feature.Value == DeliveredState && !maintenance {
 		report, _, err := latestFinalReport(repository, stream)
 		if err != nil {
-			return DeliveryPresentation{}, &APIError{Internal, "cannot read final review"}
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read final review"}
 		}
 		review, _, approval, err := deliveryDocuments(repository, stream)
 		if err != nil {
-			return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		}
 		var merge *DeliveryMerge
 		if m, merged, err := deliveryMerge(repository, stream); err != nil {
-			return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		} else if merged {
 			merge = &m
 		}
 		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}, nil
 	}
 	if feature.Value != AssembledState && !maintenance {
-		return DeliveryPresentation{}, &APIError{Conflict, "the workstream is not assembled"}
+		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: "the workstream is not assembled"}
 	}
 	if wait, err := edgePublicationWait(repository, stream); err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read dependency references"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read dependency references"}
 	} else if wait != "" {
-		return DeliveryPresentation{}, &APIError{Conflict, wait}
+		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: wait}
 	}
 	report, reason, err := (&finalReviewer{s: s, repository: repository}).finalGate(ctx, stream)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read final review"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read final review"}
 	}
 	if reason != "" {
-		return DeliveryPresentation{}, &APIError{Conflict, reason}
+		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: reason}
 	}
 	review, _, approval, err := deliveryDocuments(repository, stream)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 	}
 	if review.Revision == 0 {
-		return DeliveryPresentation{}, &APIError{Conflict, "no final review is recorded"}
+		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: "no final review is recorded"}
 	}
 	slices.SortStableFunc(report.Criteria, func(a, b FinalCriterion) int {
 		if (a.Gap != "") == (b.Gap != "") {
@@ -370,7 +305,7 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	})
 	title, draft, err := draftDelivery(s.about(repository), repository, stream, report)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot draft the title and description from trace records"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot draft the title and description from trace records"}
 	}
 	if approval != nil && (approval.Style != s.about(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || publishedTitle(*approval, stream) != title) {
 		approval = nil
@@ -378,7 +313,7 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	style := s.about(repository).Project.Landing
 	messages, err := deliveryMessages(ctx, s.about(repository), report, style)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery commit messages"}
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery commit messages"}
 	}
 	pinned, _ := json.Marshal(struct {
 		Title       string
@@ -395,23 +330,23 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 		return DeliveryApproval{}, api
 	}
 	if presented.Delivered && !presented.Maintenance {
-		return DeliveryApproval{}, &APIError{Conflict, "the workstream is delivered"}
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: "the workstream is delivered"}
 	}
 	if req.Review != presented.Report.Review || req.ReviewRevision != presented.ReviewRevision || req.Commit != presented.Report.Commit || req.DraftHash != presented.DraftHash {
-		return DeliveryApproval{}, &APIError{Conflict, "the final report or draft description changed; read the current presentation"}
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: "the final report or draft description changed; read the current presentation"}
 	}
 	project, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
 		return DeliveryApproval{}, api
 	}
 	if _, reason, err := (&finalReviewer{s: s, repository: repository}).finalGate(ctx, stream); err != nil {
-		return DeliveryApproval{}, &APIError{Internal, "cannot validate final review"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot validate final review"}
 	} else if reason != "" {
-		return DeliveryApproval{}, &APIError{Conflict, reason}
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: reason}
 	}
-	blocking := presented.Report.blocking()
+	blocking := reportBlocking(presented.Report)
 	if len(blocking) > 0 && !req.AcceptBlocking {
-		return DeliveryApproval{}, &APIError{Conflict, fmt.Sprintf("final review %d has blocking findings: %s; approve with accept_blocking to accept them as they are, or wait for the work that resolves them", presented.Report.Review, strings.Join(blocking, "; "))}
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: fmt.Sprintf("final review %d has blocking findings: %s; approve with accept_blocking to accept them as they are, or wait for the work that resolves them", presented.Report.Review, strings.Join(blocking, "; "))}
 	}
 	description := presented.Draft
 	if presented.Approval != nil {
@@ -421,15 +356,15 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 		description = *req.Description
 	}
 	if strings.TrimSpace(description) == "" {
-		return DeliveryApproval{}, &APIError{Validation, "description must not be empty"}
+		return DeliveryApproval{}, &APIError{Code: Validation, Message: "description must not be empty"}
 	}
 	references, err := pendingMergeOrderReferences(repository, stream)
 	if err != nil {
-		return DeliveryApproval{}, &APIError{Internal, "cannot read dependency references"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read dependency references"}
 	}
 	for _, reference := range references {
 		if !strings.Contains(description, reference) {
-			return DeliveryApproval{}, &APIError{Validation, "description must state the dependency on " + reference}
+			return DeliveryApproval{}, &APIError{Code: Validation, Message: "description must state the dependency on " + reference}
 		}
 	}
 	messages := slices.Clone(presented.Messages)
@@ -438,25 +373,25 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	}
 	if req.Messages != nil {
 		if len(req.Messages) != len(messages) {
-			return DeliveryApproval{}, &APIError{Validation, "supply every delivery commit message"}
+			return DeliveryApproval{}, &APIError{Code: Validation, Message: "supply every delivery commit message"}
 		}
 		for i, m := range req.Messages {
 			if m.Commit != messages[i].Commit || strings.TrimSpace(m.Message) == "" || strings.ContainsRune(m.Message, 0) {
-				return DeliveryApproval{}, &APIError{Validation, "delivery messages must name the presented commits and contain nonempty text"}
+				return DeliveryApproval{}, &APIError{Code: Validation, Message: "delivery messages must name the presented commits and contain nonempty text"}
 			}
 			messages[i].Message = m.Message
 		}
 	}
 	review, prior, existing, err := deliveryDocuments(repository, stream)
 	if err != nil {
-		return DeliveryApproval{}, &APIError{Internal, "cannot read delivery records"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 	}
 	// Approving again after a refused publication records a new approval,
 	// which asks for another publication.
 	if existing != nil {
 		refused, err := publicationRefused(repository, stream, prior.Revision)
 		if err != nil {
-			return DeliveryApproval{}, &APIError{Internal, "cannot read publication records"}
+			return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read publication records"}
 		}
 		if refused {
 			existing = nil
@@ -472,20 +407,20 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Title: presented.Title, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now(), AcceptedBlocking: blocking}
 	content, err := json.Marshal(approval)
 	if err != nil {
-		return DeliveryApproval{}, &APIError{Internal, "cannot encode delivery approval"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot encode delivery approval"}
 	}
 	state, err := repository.Workflow(stream, deliverySubject)
 	if err != nil {
-		return DeliveryApproval{}, &APIError{Internal, "cannot read delivery state"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read delivery state"}
 	}
 	id := fmt.Sprintf("delivery-owner-%d", prior.Revision+1)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: deliveryDocument, Revision: prior.Revision + 1, Project: project, Workstream: stream, At: approval.At, Actor: ownerActor, Cause: id}, Path: deliveryPath, Content: string(content)}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: ownerHeader(id, project, stream, "delivery-approval", approval.At), Subject: deliverySubject, From: state.Value, To: fmt.Sprintf("approved-%d", prior.Revision+1), Reason: fmt.Sprintf("the owner approved description %s for final review %d at %s", approval.DescriptionHash, approval.Review, approval.Commit)}}
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return DeliveryApproval{}, &APIError{Conflict, "delivery decision changed; read the current presentation"}
+			return DeliveryApproval{}, &APIError{Code: Conflict, Message: "delivery decision changed; read the current presentation"}
 		}
-		return DeliveryApproval{}, &APIError{Internal, "cannot record delivery approval"}
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot record delivery approval"}
 	}
 	return approval, nil
 }
@@ -531,7 +466,7 @@ func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository
 	if approval.DescriptionHash != descriptionHash(approval.Description) || approval.Description != description {
 		return *approval, "the description differs from what the owner approved", nil
 	}
-	if blocking := report.blocking(); !slices.Equal(blocking, approval.AcceptedBlocking) {
+	if blocking := reportBlocking(report); !slices.Equal(blocking, approval.AcceptedBlocking) {
 		return *approval, fmt.Sprintf("final review %d found blocking problems the owner approval does not accept", report.Review), nil
 	}
 	return *approval, "", nil

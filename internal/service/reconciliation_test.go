@@ -131,16 +131,6 @@ func (f forbiddenRunner) Apply(context.Context, coreadapter.Operation) (coreadap
 	return coreadapter.OperationResult{}, errors.New("forbidden")
 }
 
-type completedRunner struct{ inspections int }
-
-func (c *completedRunner) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
-	c.inspections++
-	return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "threads", Result: &coreadapter.OperationResult{Outcome: "from-threads", Evidence: "threads"}}, nil
-}
-func (c *completedRunner) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return coreadapter.OperationResult{}, errors.New("completed operations are not applied")
-}
-
 func runnerIntent(t *testing.T, opts Options) config.Root {
 	t.Helper()
 	cfg, err := config.Load(opts.Config)
@@ -215,8 +205,8 @@ func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
 	defer repository.Close()
 	records, err := repository.Operations(stream)
 	must(t, err)
-	if threads.inspections != 1 || len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil || records[0].Result.Outcome != "from-threads" {
-		t.Fatalf("threads adapter did not handle the operation: %d %+v", threads.inspections, records)
+	if threads.Inspections != 1 || len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil || records[0].Result.Outcome != "from-threads" {
+		t.Fatalf("threads adapter did not handle the operation: %d %+v", threads.Inspections, records)
 	}
 }
 

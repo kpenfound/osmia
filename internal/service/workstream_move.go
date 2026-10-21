@@ -33,37 +33,6 @@ var workstreamMoveTargets = []string{SketchedState, InShedState, RatifiedState, 
 // decision, which it only relays.
 var chiefMoveTargets = []string{BuildingState, AssembledState}
 
-// WorkstreamMoveRequest moves a workstream to another feature state with a
-// note for whoever takes it from there.
-type WorkstreamMoveRequest struct {
-	To   string `json:"to"`
-	Note string `json:"note"`
-}
-
-// WorkstreamMove is the document moves/move-<n>.json: one move of a
-// workstream to building, assembled or back to delivered, by the owner or by
-// the chief of staff. From is the feature state it left; a move into the
-// state the workstream is in restarts that stage.
-type WorkstreamMove struct {
-	Move int    `json:"move"`
-	From string `json:"from"`
-	To   string `json:"to"`
-	Note string `json:"note"`
-	By   string `json:"by"`
-	Turn string `json:"turn,omitempty"`
-}
-
-// WorkstreamMoveResponse reports a workstream move: the feature state the
-// workstream is in after it, what the move did, and the recorded move when
-// the move is not one of the owner's own shed, ratification or abandonment
-// actions, which record themselves.
-type WorkstreamMoveResponse struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	State      string              `json:"state"`
-	Detail     string              `json:"detail"`
-	Move       *WorkstreamMove     `json:"move,omitempty"`
-}
-
 func workstreamMovePath(n int) string     { return fmt.Sprintf("moves/move-%d.json", n) }
 func workstreamMoveDocument(n int) string { return fmt.Sprintf("%s%d", workstreamMovePrefix, n) }
 
@@ -142,26 +111,26 @@ func reopenHeld(repo *trace.Repository, stream config.WorkstreamID) (bool, error
 func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, req WorkstreamMoveRequest, actor trace.Actor, turn string) (WorkstreamMoveResponse, *APIError) {
 	note := strings.TrimSpace(req.Note)
 	if !slices.Contains(workstreamMoveTargets, req.To) || note == "" {
-		return WorkstreamMoveResponse{}, &APIError{Validation, "a workstream move requires a note and a state: " + strings.Join(workstreamMoveTargets, ", ")}
+		return WorkstreamMoveResponse{}, &APIError{Code: Validation, Message: "a workstream move requires a note and a state: " + strings.Join(workstreamMoveTargets, ", ")}
 	}
 	if session, err := isSession(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream kind"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream kind"}
 	} else if session {
-		return WorkstreamMoveResponse{}, &APIError{Conflict, "a session has no feature states to move"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "a session has no feature states to move"}
 	}
 	if held, err := changeHeld(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workgroup change"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workgroup change"}
 	} else if held {
-		return WorkstreamMoveResponse{}, &APIError{Conflict, "a workgroup change holds the workstream; it moves once the change is applied"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "a workgroup change holds the workstream; it moves once the change is applied"}
 	}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream state"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	}
 	respond := func(detail string) (WorkstreamMoveResponse, *APIError) {
 		after, err := repo.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
-			return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream state"}
+			return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 		}
 		return WorkstreamMoveResponse{Workstream: stream, State: after.Value, Detail: detail}, nil
 	}
@@ -182,10 +151,10 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 	case RatifiedState:
 		packet, _, found, err := shed.LatestPacket(repo, stream)
 		if err != nil {
-			return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the ratification packet"}
+			return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the ratification packet"}
 		}
 		if !found {
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s has no ratification packet to ratify", stream)}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no ratification packet to ratify", stream)}
 		}
 		out, api := s.ratify(ctx, raw, RatifyRequest{Spec: packet.Revision.Spec, Plan: packet.Revision.Plan})
 		if api != nil {
@@ -199,9 +168,9 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 		return respond("the owner abandoned the workstream: " + note)
 	}
 	if action, err := publicationInFlight(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream's operations"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's operations"}
 	} else if action != "" {
-		return WorkstreamMoveResponse{}, &APIError{Conflict, "the workstream's publication is in flight; it moves once the publication has an outcome"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "the workstream's publication is in flight; it moves once the publication has an outcome"}
 	}
 	by := "the " + rulerName(actor)
 	var reason string
@@ -217,9 +186,9 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 			}
 			reason = fmt.Sprintf("%s reopened the delivered workstream on %s, where pull request #%d stays open; it is updated only after a fresh final review and the owner's delivery approval", by, featureBranch(stream), pr.PullRequest)
 		case BuildingState:
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is already building", stream)}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is already building", stream)}
 		default:
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the workstream is %s; it moves to building once it is assembled or delivered with an open pull request", featureState(feature.Value))}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to building once it is assembled or delivered with an open pull request", featureState(feature.Value))}
 		}
 		reason += "; it stays building until a revision filed after this move is decided and its units land, or until it is moved to assembled, and its final review then runs again"
 	case AssembledState:
@@ -238,11 +207,11 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 			}
 			reason = fmt.Sprintf("%s moved the workstream from building to assembled for a fresh final review", by)
 		default:
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the workstream is %s; it moves to assembled once it is building, assembled or delivered with an open pull request", featureState(feature.Value))}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to assembled once it is building, assembled or delivered with an open pull request", featureState(feature.Value))}
 		}
 	case DeliveredState:
 		if feature.Value != BuildingState && feature.Value != AssembledState {
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("the workstream is %s; only a reopened workstream moves back to delivered", featureState(feature.Value))}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; only a reopened workstream moves back to delivered", featureState(feature.Value))}
 		}
 		pr, api := openPullRequest(repo, stream)
 		if api != nil {
@@ -256,24 +225,24 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 			return WorkstreamMoveResponse{}, api
 		}
 		if tip != pr.Reviewed && tip != pr.Commit {
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("feature branch %s moved to %s since pull request #%d was published; it is delivered through a fresh final review and the owner's delivery approval", featureBranch(stream), tip, pr.PullRequest)}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("feature branch %s moved to %s since pull request #%d was published; it is delivered through a fresh final review and the owner's delivery approval", featureBranch(stream), tip, pr.PullRequest)}
 		}
 		reason = fmt.Sprintf("%s returned the reopened workstream to delivered; feature branch %s is still what pull request #%d carries", by, featureBranch(stream), pr.PullRequest)
 	}
 	reason += ": " + note
 	moves, err := workstreamMoves(repo, stream)
 	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream's moves"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
 	}
 	subject, err := repo.Workflow(stream, workstreamMoveSubject)
 	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream's moves"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
 	}
 	n := len(moves) + 1
 	move := WorkstreamMove{Move: n, From: feature.Value, To: req.To, Note: note, By: rulerName(actor), Turn: turn}
 	data, err := json.MarshalIndent(move, "", "  ")
 	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, err.Error()}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	cause := turn
 	if cause == "" {
@@ -293,9 +262,9 @@ func (s *Service) moveWorkstream(ctx context.Context, repo *trace.Repository, st
 	}
 	if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return WorkstreamMoveResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
+			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
 		}
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot record the move"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
 	}
 	return WorkstreamMoveResponse{Workstream: stream, State: req.To, Detail: reason, Move: &move}, nil
 }
@@ -320,21 +289,21 @@ func publicationInFlight(repo *trace.Repository, stream config.WorkstreamID) (st
 // not delivered by an owner-recorded merge.
 func openPullRequest(repo *trace.Repository, stream config.WorkstreamID) (DeliveryPublication, *APIError) {
 	if _, merged, err := deliveryMerge(repo, stream); err != nil {
-		return DeliveryPublication{}, &APIError{Internal, "cannot read the workstream's delivery"}
+		return DeliveryPublication{}, &APIError{Code: Internal, Message: "cannot read the workstream's delivery"}
 	} else if merged {
-		return DeliveryPublication{}, &APIError{Conflict, "the owner recorded the workstream's branch merged upstream; it does not reopen"}
+		return DeliveryPublication{}, &APIError{Code: Conflict, Message: "the owner recorded the workstream's branch merged upstream; it does not reopen"}
 	}
 	pr, found, err := currentOwnPublication(repo, stream)
 	if err != nil {
-		return DeliveryPublication{}, &APIError{Internal, "cannot read the workstream's publications"}
+		return DeliveryPublication{}, &APIError{Code: Internal, Message: "cannot read the workstream's publications"}
 	}
 	if !found {
-		return DeliveryPublication{}, &APIError{Conflict, "the workstream has no pull request of its own; it is delivered through the owner's delivery approval"}
+		return DeliveryPublication{}, &APIError{Code: Conflict, Message: "the workstream has no pull request of its own; it is delivered through the owner's delivery approval"}
 	}
 	if finished, err := ownPullRequestFinished(repo, stream); err != nil {
-		return DeliveryPublication{}, &APIError{Internal, "cannot read the pull request outcome"}
+		return DeliveryPublication{}, &APIError{Code: Internal, Message: "cannot read the pull request outcome"}
 	} else if finished {
-		return DeliveryPublication{}, &APIError{Conflict, fmt.Sprintf("pull request #%d is merged or closed; the workstream does not reopen", pr.PullRequest)}
+		return DeliveryPublication{}, &APIError{Code: Conflict, Message: fmt.Sprintf("pull request #%d is merged or closed; the workstream does not reopen", pr.PullRequest)}
 	}
 	return pr, nil
 }
@@ -344,7 +313,7 @@ func openPullRequest(repo *trace.Repository, stream config.WorkstreamID) (Delive
 func (s *Service) assemblable(repo *trace.Repository, stream config.WorkstreamID) *APIError {
 	b, found, err := (&masons{s: s, cfg: s.about(repo), repository: repo}).readSealed(stream)
 	if err != nil {
-		return &APIError{Internal, "cannot read the sealed plan"}
+		return &APIError{Code: Internal, Message: "cannot read the sealed plan"}
 	}
 	if !found || !allMerged(b) {
 		var open []string
@@ -355,12 +324,12 @@ func (s *Service) assemblable(repo *trace.Repository, stream config.WorkstreamID
 				}
 			}
 		}
-		return &APIError{Conflict, fmt.Sprintf("units %s have not merged; move them, or wait for them to land", strings.Join(open, ", "))}
+		return &APIError{Code: Conflict, Message: fmt.Sprintf("units %s have not merged; move them, or wait for them to land", strings.Join(open, ", "))}
 	}
 	if pending, err := unresolvedWork(repo, stream); err != nil {
-		return &APIError{Internal, "cannot read the workstream's discoveries and revisions"}
+		return &APIError{Code: Internal, Message: "cannot read the workstream's discoveries and revisions"}
 	} else if pending {
-		return &APIError{Conflict, "an open discovery or a pending revision prevents assembly"}
+		return &APIError{Code: Conflict, Message: "an open discovery or a pending revision prevents assembly"}
 	}
 	return nil
 }
@@ -369,14 +338,14 @@ func (s *Service) assemblable(repo *trace.Repository, stream config.WorkstreamID
 func (s *Service) featureTip(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) (string, *APIError) {
 	g, err := featureWorkspaces(s.about(repo), repo).of(stream)
 	if err != nil {
-		return "", &APIError{Internal, "cannot open the workstream's feature branch"}
+		return "", &APIError{Code: Internal, Message: "cannot open the workstream's feature branch"}
 	}
 	tip, exists, err := g.Branch(ctx, featureBranch(stream))
 	if err != nil {
-		return "", &APIError{Internal, "cannot read the workstream's feature branch"}
+		return "", &APIError{Code: Internal, Message: "cannot read the workstream's feature branch"}
 	}
 	if !exists {
-		return "", &APIError{Conflict, fmt.Sprintf("the clone has no feature branch %s", featureBranch(stream))}
+		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the clone has no feature branch %s", featureBranch(stream))}
 	}
 	return tip, nil
 }
@@ -388,9 +357,9 @@ func (s *Service) ownerMoveWorkstream(ctx context.Context, raw string, req Works
 		return WorkstreamMoveResponse{}, api
 	}
 	if gone, err := abandoned(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Internal, "cannot read the workstream state"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	} else if gone {
-		return WorkstreamMoveResponse{}, &APIError{Conflict, "an abandoned workstream does not move"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "an abandoned workstream does not move"}
 	}
 	return s.moveWorkstream(ctx, repo, stream, req, ownerActor, "")
 }

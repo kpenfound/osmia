@@ -41,13 +41,13 @@ type objectionDecisionRequest struct {
 // concluded or was skipped, for the owner's own objections, for an objection
 // the owner already ruled on and for one the chief of staff already decided.
 func (s *Service) decideObjection(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, req objectionDecisionRequest) (shed.Entry, *APIError) {
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return shed.Entry{}, failed
 	}
 	if feature.Value != InShedState {
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s; objections are decided in the shed", stream, featureState(feature.Value))}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; objections are decided in the shed", stream, featureState(feature.Value))}
 	}
 	state, err := repository.Workflow(stream, shedSubject)
 	if err != nil {
@@ -62,7 +62,7 @@ func (s *Service) decideObjection(ctx context.Context, repository *trace.Reposit
 		round = 1
 	}
 	if !skipped && kind != "concluded" {
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s has not concluded; decide its objections once the ratification packet is presented", stream)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("debate on workstream %s has not concluded; decide its objections once the ratification packet is presented", stream)}
 	}
 	entries, err := Dissent(repository, stream)
 	if err != nil {
@@ -71,17 +71,17 @@ func (s *Service) decideObjection(ctx context.Context, repository *trace.Reposit
 	i := slices.IndexFunc(entries, func(e shed.Entry) bool { return e.ID == req.Objection })
 	switch {
 	case i < 0:
-		return shed.Entry{}, &APIError{NotFound, fmt.Sprintf("no objection %s stands in workstream %s", req.Objection, stream)}
+		return shed.Entry{}, &APIError{Code: NotFound, Message: fmt.Sprintf("no objection %s stands in workstream %s", req.Objection, stream)}
 	case entries[i].Member == shed.OwnerMember:
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("objection %s is the owner's own; the owner decides it", req.Objection)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s is the owner's own; the owner decides it", req.Objection)}
 	case entries[i].By == shed.ChiefOfStaff || entries[i].Escalated:
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("you already decided objection %s; the owner rules on it now", req.Objection)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("you already decided objection %s; the owner rules on it now", req.Objection)}
 	case entries[i].Disposition != "":
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("the owner already ruled %s on objection %s", entries[i].Disposition, req.Objection)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner already ruled %s on objection %s", entries[i].Disposition, req.Objection)}
 	}
 	pin, err := latestPin(repository, stream)
 	if err != nil {
-		return shed.Entry{}, &APIError{Conflict, fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
 	rounds, err := shed.AllChiefDecisions(repository, stream)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *Service) decideObjection(ctx context.Context, repository *trace.Reposit
 	decisions.Decisions = append(slices.Clone(decisions.Decisions), shed.ChiefDecision{Objection: req.Objection, Decision: req.Decision, Note: req.Note, Turn: req.Turn})
 	content, err := shed.EncodeChiefDecisions(decisions)
 	if err != nil {
-		return shed.Entry{}, &APIError{Validation, "the decision cannot be recorded: " + err.Error()}
+		return shed.Entry{}, &APIError{Code: Validation, Message: "the decision cannot be recorded: " + err.Error()}
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *Service) decideObjection(ctx context.Context, repository *trace.Reposit
 	}
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ChiefDocumentID(round), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.now(), Actor: chiefActor, Cause: req.Objection}
 	if err := repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: shed.ChiefPath(round), Content: string(content)}}); err != nil {
-		return shed.Entry{}, &APIError{Internal, fmt.Sprintf("cannot record the decision on objection %s of workstream %s; check the trace repository", req.Objection, stream)}
+		return shed.Entry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on objection %s of workstream %s; check the trace repository", req.Objection, stream)}
 	}
 	entries, err = Dissent(repository, stream)
 	if err != nil {

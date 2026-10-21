@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -18,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // amendedIndependentPlan changes the footprint of unit dedupe of

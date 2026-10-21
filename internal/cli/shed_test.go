@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/service"
@@ -73,7 +74,7 @@ func TestShedCommands(t *testing.T) {
 	if want := "Shed of workstream " + stream + ": objected\nthe owner objected to round 1 against spec.md revision 1 and plan.json revision 1: The plan never names the retry budget.\n"; text != want {
 		t.Fatalf("object output %q, want %q", text, want)
 	}
-	var ruled service.ShedResponse
+	var ruled wire.ShedResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "shed", "rule", stream, objection, "dismiss", "I accept the risk.", "--json")), &ruled))
 	if ruled.Action != string(shed.Dismissed) || ruled.Objection != objection || ruled.Round != 1 || !strings.Contains(ruled.Detail, "I accept the risk.") {
 		t.Fatalf("rule --json %+v", ruled)
@@ -97,7 +98,7 @@ func TestShedCommands(t *testing.T) {
 	if code != 5 || out != "" || !strings.Contains(diag, "blocks and is sustained and is not conceded") {
 		t.Fatalf("ratifying over a sustained objection: %d %q %q", code, out, diag)
 	}
-	var overruled service.ShedResponse
+	var overruled wire.ShedResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "shed", "overrule", stream, "owner-r1-1", "I accept the risk.", "--json")), &overruled))
 	if overruled.Action != string(shed.Overruled) || overruled.Objection != "owner-r1-1" || !strings.Contains(overruled.Detail, "I accept the risk.") {
 		t.Fatalf("overrule --json %+v", overruled)
@@ -109,7 +110,7 @@ func TestShedCommands(t *testing.T) {
 	// ratify pins the revisions it read from the packet and asks for the
 	// sealing. This fixture's clone is no Git repository, so the sealing
 	// never completes and the workstream stays in the shed.
-	var ratified service.RatifyResponse
+	var ratified wire.RatifyResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "ratify", stream, "--json")), &ratified))
 	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream || !strings.HasSuffix(ratified.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratify --json %+v", ratified)

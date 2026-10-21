@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -24,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newDesignFixture starts a service with an active project whose charter
@@ -356,12 +355,12 @@ func newDesignEnforcementFixture(t *testing.T, web ...bool) (*Service, *Client, 
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "README.md")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
-	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
+	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
 	opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
@@ -407,7 +406,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.SystemPrompt, "1. Keep changes small.") {
 			fail("missing project charter in design context")
 		}
@@ -513,7 +512,7 @@ func TestDraftBriefRefusesAnIncompleteBriefAndRecordsTheLatest(t *testing.T) {
 
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		out, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": "We will build the thing."})
 		if err != nil {
 			fail("incomplete brief call failed outright: %v", err)
@@ -583,17 +582,17 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*Service, *Client, con
 	demoGit(t, home, "-C", clone, "add", "README.md")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Ticks = ticks
 
-	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
+	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
 	opts.controls = enforced.controls
 	production := enforced.Threads
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
@@ -731,14 +730,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 
 	const designMessage = "Keep the module name stable."
 	const designReply = "Decisions: retain the module name.\nIntent and tradeoffs: compatibility over flexibility.\nRejected options: renaming the module.\n"
-	engine.mu.Lock()
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Mu.Lock()
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if out, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": designReply}); err != nil || !strings.Contains(out, `"recorded":true`) {
 			return nil, fmt.Errorf("draft brief: %s %v", out, err)
 		}
 		return questionResult(req, "session-design", designReply), nil
 	}
-	engine.mu.Unlock()
+	engine.Mu.Unlock()
 	sent, err := c.DesignMessage(ctx, stream, designMessage)
 	must(t, err)
 	waitCompleted("design reply", 1, 0, "")
@@ -785,14 +784,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	const statusGoal = "Scoping the rename."
 	const escalationQuestion = "Should the module be renamed?"
 
-	engine.mu.Lock()
-	engine.turns["ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Mu.Lock()
+	engine.Turns["ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question}); err != nil || !strings.Contains(out, `"recorded":true`) {
 			problem("ask: %s %v", out, err)
 		}
 		return questionResult(req, "session-ask", "Asked"), nil
 	}
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, "asked by the mason: "+question) {
 			problem("unexpected chief-of-staff turn: %s", req.Prompt)
 			return questionResult(req, "session-chief", "Nothing to do"), nil
@@ -821,7 +820,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		mu.Unlock()
 		return questionResult(req, "session-chief", "Handled"), nil
 	}
-	engine.mu.Unlock()
+	engine.Mu.Unlock()
 
 	settle()
 	clock.Advance(time.Minute)
@@ -948,8 +947,8 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}
 	const ownerRuling = "Keep the module name stable."
 	var resumed int
-	engine.mu.Lock()
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Mu.Lock()
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, ownerRuling) {
 			problem("chief ruling prompt lacks the owner's decision: %s", req.Prompt)
 		}
@@ -958,7 +957,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		}
 		return questionResult(req, "session-chief", ownerRuling), nil
 	}
-	engine.turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, ownerRuling) {
 			problem("resumed worker lacks the owner's ruling: %s", req.Prompt)
 		}
@@ -967,7 +966,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		mu.Unlock()
 		return questionResult(req, "session-ask", "Continuing with the stable module name."), nil
 	}
-	engine.mu.Unlock()
+	engine.Mu.Unlock()
 	answer, err := c.Answer(ctx, recoveredInbox.Entries[0].Number, ownerRuling, "")
 	must(t, err)
 	wantEntries := append(slices.Clone(conversation.Entries), ConversationEntry{Turn: "ruling_" + answer.Batch, Kind: "action", Text: "You ruled: " + ownerRuling, At: answer.At, State: TurnDone})

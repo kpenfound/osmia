@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -25,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -67,7 +66,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -78,16 +77,16 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	queueChiefTurn(t, repo, "status", clock.Now())
 	must(t, repo.Close())
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	startTurn := make(chan struct{})
 	views := filepath.Join(cfg.Root.String(), "views")
 	must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
+		turns := &isolation.Turns{Workspaces: &demoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{"notes_read", status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
@@ -100,7 +99,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 				set, err := status.Tool(r, chiefAgent, scope, clock.Now)
 				return append(tools, set), err
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(ctx context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -120,7 +119,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	release, finished := make(chan struct{}), make(chan struct{})
 	var results []string
 	var mu sync.Mutex
-	engine.turns["status"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["status"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		defer close(finished)
 		<-release
 		listed, err := tools.ListTools(ctx, nil)
@@ -220,10 +219,10 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
 		t.Fatalf("no-status JSON: %v", raw)
 	}
-	engine.mu.Lock()
-	defer engine.mu.Unlock()
-	if len(engine.runs) != 1 {
-		t.Fatalf("turn runs: %v", engine.runs)
+	engine.Mu.Lock()
+	defer engine.Mu.Unlock()
+	if len(engine.Runs) != 1 {
+		t.Fatalf("turn runs: %v", engine.Runs)
 	}
 }
 
@@ -301,10 +300,10 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", project)
 	// The capacity reads no trace, and failure streaks read only the thread
 	// records, so a damaged status record hides neither.
-	if want := []Diagnostic{{"provider_usage", Internal, usage}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
+	if want := []Diagnostic{{Field: "provider_usage", Code: Internal, Message: usage}, {Field: "workstreams", Code: Internal, Message: message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
-	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, message}) {
+	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Code: Internal, Message: message}) {
 		t.Fatalf("damaged trace: %v", api)
 	}
 }

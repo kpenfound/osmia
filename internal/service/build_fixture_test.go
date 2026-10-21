@@ -7,13 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -54,65 +50,9 @@ func (f *shedFixture) seedBuildingPaused(t *testing.T, target runtime.Target, gr
 // running controllers only see a complete build fixture.
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
-	ctx := context.Background()
-	stream, err := config.NewWorkstreamID()
+	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)
 	must(t, err)
-	at := f.s.now()
-	must(t, repository.CreateWorkstreamOn(ctx, stream, backend, at, ownerActor))
-	must(t, recordFactoryPolicy(ctx, repository, stream, at, false))
-	w, err := workspaces(f.s.cfg, branchesDirectory, backend).Acquire(ctx, vcs.Request{
-		Name: string(stream), Ref: base, Branch: featureBranch(stream),
-	})
-	must(t, err)
-	p, err := plan.Parse([]byte(graph))
-	must(t, err)
-	entities, err := kb.Load(repository)
-	must(t, err)
-	footprints, unresolved := seal.Take(p, entities)
-	if len(unresolved) != 0 {
-		t.Fatalf("fixture has unresolved footprints: %v", unresolved)
-	}
-	pin := shed.Pin{Spec: 1, Plan: 1}
-	sealed, err := seal.Encode(seal.Seal{
-		Version: seal.Version, Seal: 1, Round: 1, Revision: pin, SpecHash: seal.SpecHash(validSpec),
-		Base:   seal.Base{Remote: "upstream", Branch: f.s.cfg.Project.BaseBranch, Commit: base},
-		Branch: featureBranch(stream), Workspace: w.Directory(), Footprints: footprints,
-	})
-	must(t, err)
-	ratification, err := shed.EncodeRatification(shed.Ratify(1, pin, nil))
-	must(t, err)
-	header := func(schema, id string) trace.Header {
-		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1,
-			Project: repository.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture-" + key}
-	}
-	document := func(id, path, content string) trace.Document {
-		return trace.Document{Header: header("osmia.trace.document", id), Path: path, Content: content}
-	}
-	txs := []trace.Transaction{{Transition: trace.Transition{
-		Header: header("osmia.trace.transition", "fixture-building"), Subject: trace.FeatureSubject,
-		To: BuildingState, Reason: "fixture with a sealed build",
-	}}}
-	for _, unit := range p.Units {
-		subject := trace.UnitSubject(unit.ID)
-		txs = append(txs, trace.Transaction{Transition: trace.Transition{
-			Header: header("osmia.trace.transition", subject+"-planned"), Subject: subject,
-			To: UnitPlanned, Reason: "unit in the fixture plan",
-		}})
-		if len(unit.DependsOn) == 0 {
-			txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{
-				Header: header("osmia.trace.transition", subject+"-ready"), Subject: subject,
-				From: UnitPlanned, To: UnitReady, Reason: "fixture unit with no dependencies",
-			}})
-		}
-	}
-	_, err = repository.RecordDocumentsWith(ctx, []trace.Document{
-		document(plan.SpecDocument, plan.SpecPath, validSpec),
-		document(plan.PlanDocument, plan.PlanPath, graph),
-		document(shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratification)),
-		document(seal.DocumentID, seal.Path, string(sealed)),
-	}, txs...)
-	must(t, err)
-	return stream
+	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: validSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
 
 // newReviewFixture creates a unit whose completed report and candidate await review.

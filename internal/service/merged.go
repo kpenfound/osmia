@@ -25,15 +25,6 @@ const (
 	mergeCause = "owner-merge"
 )
 
-// DeliveryMerge records a feature branch the owner merged into upstream
-// outside the factory: the branch, its tip, and the upstream commit found
-// holding that tip's changes.
-type DeliveryMerge struct {
-	Branch   string    `json:"branch"`
-	Commit   string    `json:"commit"`
-	Upstream seal.Base `json:"upstream"`
-}
-
 // recordMerge records the assembled workstream named by raw delivered by
 // the owner's own merge of its feature branch into upstream.
 func (s *Service) recordMerge(ctx context.Context, raw string) (MergeResponse, *APIError) {
@@ -56,13 +47,13 @@ func (s *Service) recordMerge(ctx context.Context, raw string) (MergeResponse, *
 func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (MergeResponse, *APIError) {
 	project := repository.Project()
 	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(project), Workstream: string(stream)})
-	failed := &APIError{Internal, fmt.Sprintf("cannot record workstream %s merged; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record workstream %s merged; check the trace repository", stream)}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return MergeResponse{}, failed
 	}
 	if feature.Value != AssembledState {
-		return MergeResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s; only an assembled workstream is recorded merged", stream, featureState(feature.Value))}
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; only an assembled workstream is recorded merged", stream, featureState(feature.Value))}
 	}
 	publication, err := repository.Workflow(stream, publicationSubject)
 	if err != nil {
@@ -71,7 +62,7 @@ func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repositor
 	waiting := 0
 	if k, ok := strings.CutPrefix(publication.Value, "requested-"); ok {
 		if pulls.Credentialed(s.options.PullRequests) {
-			return MergeResponse{}, &APIError{Conflict, fmt.Sprintf("the publication of owner approval %s of workstream %s may still open a pull request; record the merge once osmia delivery shows its outcome", k, stream)}
+			return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the publication of owner approval %s of workstream %s may still open a pull request; record the merge once osmia delivery shows its outcome", k, stream)}
 		}
 		if waiting, err = strconv.Atoi(k); err != nil {
 			return MergeResponse{}, failed
@@ -80,17 +71,17 @@ func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repositor
 	cfg := s.about(repository)
 	g, err := featureWorkspaces(cfg, repository).of(stream)
 	if err != nil {
-		return MergeResponse{}, &APIError{Internal, fmt.Sprintf("cannot open the workspaces of workstream %s; check the clone", stream)}
+		return MergeResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open the workspaces of workstream %s; check the clone", stream)}
 	}
 	branch := featureBranch(stream)
 	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
-		return MergeResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the branches of workstream %s; check the clone", stream)}
+		return MergeResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branches of workstream %s; check the clone", stream)}
 	}
 	if !exists {
-		return MergeResponse{}, &APIError{Conflict, fmt.Sprintf("the clone has no feature branch %s to compare with upstream", branch)}
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the clone has no feature branch %s to compare with upstream", branch)}
 	}
-	unreadable := &APIError{Internal, fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes", cfg.Project.BaseBranch, cfg.Project.Upstream)}
+	unreadable := &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes", cfg.Project.BaseBranch, cfg.Project.Upstream)}
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
 		return MergeResponse{}, unreadable
@@ -103,10 +94,10 @@ func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repositor
 	onto := fmt.Sprintf("%s/%s at %s", remote, upstream.Branch, commit)
 	integrated, err := g.Integrated(ctx, tip, commit)
 	if err != nil {
-		return MergeResponse{}, &APIError{Internal, fmt.Sprintf("cannot compare %s with %s; check the clone", tip, onto)}
+		return MergeResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot compare %s with %s; check the clone", tip, onto)}
 	}
 	if !integrated {
-		return MergeResponse{}, &APIError{Conflict, fmt.Sprintf("%s does not hold the changes of %s at %s; merge the branch into %s first", onto, branch, tip, upstream.Branch)}
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("%s does not hold the changes of %s at %s; merge the branch into %s first", onto, branch, tip, upstream.Branch)}
 	}
 	record := DeliveryMerge{Branch: branch, Commit: tip, Upstream: upstream}
 	data, err := json.Marshal(record)
@@ -127,7 +118,7 @@ func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repositor
 			Transition: trace.Transition{Header: h, Subject: publicationSubject, From: publication.Value, To: fmt.Sprintf("refused-%d", waiting), Reason: fmt.Sprintf("owner approval %d was not published: the owner merged the branch into upstream outside the factory", waiting)}})
 	}
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); errors.Is(err, trace.ErrConflict) {
-		return MergeResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed while recording its merge; check osmia status and retry", stream)}
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while recording its merge; check osmia status and retry", stream)}
 	} else if err != nil {
 		return MergeResponse{}, failed
 	}

@@ -26,7 +26,7 @@ func stopFixture(t *testing.T) (*config.Config, *trace.Repository, *fakePulls, *
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	host := &fakePulls{}
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{PullRequests: host, Reconciliation: reconcile.Options{Now: clock.Now}}}
 	return cfg, repo, host, &baseRefresher{s: s, repository: repo}, clock
 }
@@ -73,8 +73,8 @@ func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDepend
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 0 {
-		t.Fatalf("an undelivered workstream made %d own-PR lookups", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("an undelivered workstream made %d own-PR lookups", host.Finds)
 	}
 	// The dependency has not integrated, so once the check's cooldown has
 	// elapsed the next Pass asks for another refresh.
@@ -106,8 +106,8 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 0 {
-		t.Fatalf("a workstream delivered without a pull request made %d own-PR lookups", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("a workstream delivered without a pull request made %d own-PR lookups", host.Finds)
 	}
 	jump(clock, refresh.s.now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
@@ -120,8 +120,8 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 0 {
-		t.Fatalf("a later refresh made an own-PR lookup for a workstream without a pull request: %d", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("a later refresh made an own-PR lookup for a workstream without a pull request: %d", host.Finds)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 	ctx := context.Background()
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, State: "open", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(ctx))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	result, err := refresh.Apply(ctx, op)
@@ -144,8 +144,8 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 1 {
-		t.Fatalf("own-PR lookup calls: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("own-PR lookup calls: %d", host.Finds)
 	}
 	if finished, err := ownPullRequestFinished(repo, stream); err != nil || finished {
 		t.Fatalf("an open own pull request reported finished: %v err %v", finished, err)
@@ -161,8 +161,8 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 2 {
-		t.Fatalf("a later refresh did not look up the open own pull request again: %d", host.finds)
+	if host.Finds != 2 {
+		t.Fatalf("a later refresh did not look up the open own pull request again: %d", host.Finds)
 	}
 }
 
@@ -187,8 +187,8 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 			t.Fatalf("pass %d scheduled a base-refresh after integration was recorded: %d operations", i, n)
 		}
 	}
-	if host.finds != 0 {
-		t.Fatalf("Pass made %d pull-request lookups", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("Pass made %d pull-request lookups", host.Finds)
 	}
 
 	// A restart loses nothing: the stopping fact is durable (spec#7).
@@ -222,8 +222,8 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	if g.remotes != 0 || g.fetches != 0 {
 		t.Fatalf("resolveBase fetched upstream after integration was recorded: remotes=%d fetches=%d", g.remotes, g.fetches)
 	}
-	if host.finds != 0 {
-		t.Fatalf("resolveBase looked up a pull request after integration was recorded: %d", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("resolveBase looked up a pull request after integration was recorded: %d", host.Finds)
 	}
 }
 
@@ -242,7 +242,7 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 	if merged {
 		pr.Merged = true
 	}
-	host.prs = []pulls.PullRequest{pr}
+	host.Prs = []pulls.PullRequest{pr}
 	must(t, refresh.Pass(ctx))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	result, err := refresh.Apply(ctx, op)
@@ -250,8 +250,8 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 1 {
-		t.Fatalf("own-PR lookup calls: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("own-PR lookup calls: %d", host.Finds)
 	}
 	finished, err := ownPullRequestFinished(repo, stream)
 	must(t, err)
@@ -265,8 +265,8 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 			t.Fatalf("pass %d scheduled a base-refresh for a finished workstream: %d operations", i, n)
 		}
 	}
-	if host.finds != 1 {
-		t.Fatalf("a later pass made an own-PR lookup for a finished workstream: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("a later pass made an own-PR lookup for a finished workstream: %d", host.Finds)
 	}
 
 	// A restart loses nothing: the recorded outcome is durable (spec#7).
@@ -281,8 +281,8 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 			t.Fatalf("pass %d after a restart scheduled a base-refresh: %d operations", i, n)
 		}
 	}
-	if host.finds != 1 {
-		t.Fatalf("a pass after a restart made an own-PR lookup: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("a pass after a restart made an own-PR lookup: %d", host.Finds)
 	}
 
 	// The dependency never integrated, and its declared record is untouched
@@ -333,8 +333,8 @@ func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration
 					t.Fatalf("pass %d scheduled a base-refresh for an abandoned workstream: %d operations", i, n)
 				}
 			}
-			if host.finds != 0 {
-				t.Fatalf("Pass made %d pull-request lookups for an abandoned workstream", host.finds)
+			if host.Finds != 0 {
+				t.Fatalf("Pass made %d pull-request lookups for an abandoned workstream", host.Finds)
 			}
 		})
 	}

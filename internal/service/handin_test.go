@@ -11,7 +11,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,40 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// fakeIssues is a fake remote issue tracker: it serves issue text from
-// memory and counts fetches, standing in for the real network call and the
-// GitHub issues API's own authentication, rate limiting and formatting,
-// which this leaves unverified. Its token stands in for a credential that
-// must never leave the service.
-type fakeIssues struct {
-	mu      sync.Mutex
-	token   string
-	text    map[issues.Ref]string
-	fetches int
-	// block, when set, holds the first fetch until it is closed; started
-	// is signalled when that fetch begins.
-	block, started chan struct{}
-}
-
-func (f *fakeIssues) Fetch(_ context.Context, ref issues.Ref) (string, error) {
-	f.mu.Lock()
-	block, started := f.block, f.started
-	f.block = nil
-	f.mu.Unlock()
-	if block != nil {
-		close(started)
-		<-block
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.fetches++
-	text, ok := f.text[ref]
-	if !ok {
-		return "", errors.New("not found with token " + f.token)
-	}
-	return text, nil
-}
 
 type handInFixture struct {
 	s       *Service
@@ -71,7 +36,7 @@ type handInFixture struct {
 func newHandInFixture(t *testing.T) *handInFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
-	fake := &fakeIssues{token: "ghp_handin_secret", text: map[issues.Ref]string{{Owner: "owner", Repo: "repo", Number: 12}: "# Issue title\n\nIssue body\n"}}
+	fake := &fakeIssues{Token: "ghp_handin_secret", Text: map[issues.Ref]string{{Owner: "owner", Repo: "repo", Number: 12}: "# Issue title\n\nIssue body\n"}}
 	opts.Issues = fake
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
@@ -249,8 +214,8 @@ func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 
 	url := "https://github.com/owner/repo/issues/12"
 	first = f.handIn(t, HandInRequest{Key: "issue", URL: url})
-	if again := f.handIn(t, HandInRequest{Key: "issue", URL: url}); again != first || f.issues.fetches != 1 {
-		t.Fatalf("retry %+v fetched %d times", again, f.issues.fetches)
+	if again := f.handIn(t, HandInRequest{Key: "issue", URL: url}); again != first || f.issues.Fetches != 1 {
+		t.Fatalf("retry %+v fetched %d times", again, f.issues.Fetches)
 	}
 	text := "text"
 	first = f.handIn(t, HandInRequest{Key: "text", Stdin: &text})
@@ -434,7 +399,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 		{HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/13"}, Internal, "cannot fetch https://github.com/owner/repo/issues/13"},
 	} {
 		api := handInError(t, f.c, c.req)
-		if api.Code != c.code || !strings.Contains(api.Message, c.text) || strings.Contains(api.Message, f.issues.token) {
+		if api.Code != c.code || !strings.Contains(api.Message, c.text) || strings.Contains(api.Message, f.issues.Token) {
 			t.Errorf("%+.80v: %+v", c.req, api)
 		}
 	}
@@ -443,14 +408,14 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 	}
 
 	// The charter gate comes before the input is read or fetched.
-	fetches := f.issues.fetches
+	fetches := f.issues.Fetches
 	writeCharter(t, f.c, f.project, "# Charter\n")
 	_, _, err := f.s.loadCharter(context.Background(), f.project)
 	must(t, err)
 	head = f.head(t)
 	api := handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/12"})
-	if api.Code != CharterEmpty || !strings.Contains(api.Message, "osmia edit charter "+string(f.project)) || f.issues.fetches != fetches {
-		t.Fatalf("empty charter: %+v, %d fetches", api, f.issues.fetches-fetches)
+	if api.Code != CharterEmpty || !strings.Contains(api.Message, "osmia edit charter "+string(f.project)) || f.issues.Fetches != fetches {
+		t.Fatalf("empty charter: %+v, %d fetches", api, f.issues.Fetches-fetches)
 	}
 	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {
 		t.Fatal("an empty charter hand-in wrote to the trace")
@@ -497,13 +462,13 @@ func TestHandInCredentialsStayInTheService(t *testing.T) {
 			return err
 		}
 		data, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(data), f.issues.token) {
+		if err == nil && strings.Contains(string(data), f.issues.Token) {
 			t.Errorf("%s contains the issue client's token", path)
 		}
 		return err
 	}))
 	// A session environment admits no credential variable.
-	if err := coreadapter.PublicEnvironment(map[string]string{"GITHUB_TOKEN": f.issues.token}); err == nil {
+	if err := coreadapter.PublicEnvironment(map[string]string{"GITHUB_TOKEN": f.issues.Token}); err == nil {
 		t.Fatal("session environment admits GITHUB_TOKEN")
 	}
 
@@ -545,10 +510,10 @@ func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
 	f := newHandInFixture(t)
 	url := "https://github.com/owner/repo/issues/12"
 	release := make(chan struct{})
-	f.issues.mu.Lock()
-	f.issues.block, f.issues.started = release, make(chan struct{})
-	started := f.issues.started
-	f.issues.mu.Unlock()
+	f.issues.Mu.Lock()
+	f.issues.Block, f.issues.Started = release, make(chan struct{})
+	started := f.issues.Started
+	f.issues.Mu.Unlock()
 	slow := make(chan HandInResponse, 1)
 	go func() {
 		out, err := f.c.HandIn(context.Background(), HandInRequest{Project: f.project, Key: "issue", URL: url})

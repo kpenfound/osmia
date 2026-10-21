@@ -66,24 +66,24 @@ func (s *Service) sessionChanges(ctx context.Context, raw string) (SessionChange
 	g := sessionGit(cfg)
 	head, exists, err := g.Branch(ctx, sessionBranch(stream))
 	if err != nil {
-		return SessionChangesResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
+		return SessionChangesResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
 	if !exists {
-		return SessionChangesResponse{}, &APIError{Internal, fmt.Sprintf("session %s has no branch", stream)}
+		return SessionChangesResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session %s has no branch", stream)}
 	}
 	changes := ""
 	if wt, found, err := g.Workspace(ctx, string(stream)); err != nil {
-		return SessionChangesResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
+		return SessionChangesResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
 	} else if found {
 		diff, err := g.WorktreeDiff(ctx, wt)
 		if err != nil {
-			return SessionChangesResponse{}, &APIError{Internal, fmt.Sprintf("cannot diff the worktree of session %s: %v", stream, err)}
+			return SessionChangesResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot diff the worktree of session %s: %v", stream, err)}
 		}
 		changes = diff
 	}
 	messages, err := g.Log(ctx, view.Base, head)
 	if err != nil {
-		return SessionChangesResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the commits of session %s: %v", stream, err)}
+		return SessionChangesResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the commits of session %s: %v", stream, err)}
 	}
 	commits := make([]SessionCommitSummary, len(messages))
 	for i, m := range messages {
@@ -150,15 +150,15 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 		return SessionCommitResponse{}, api
 	}
 	if err := s.step("session-commit-looked-up"); err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, err.Error()}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	message := strings.TrimSpace(req.Message)
 	if message == "" {
-		return SessionCommitResponse{}, &APIError{Validation, "message must not be empty"}
+		return SessionCommitResponse{}, &APIError{Code: Validation, Message: "message must not be empty"}
 	}
 	key := strings.TrimSpace(req.RequestKey)
 	if key == "" {
-		return SessionCommitResponse{}, &APIError{Validation, "request_key must not be empty"}
+		return SessionCommitResponse{}, &APIError{Code: Validation, Message: "request_key must not be empty"}
 	}
 	// sessionMessage and sessionEnd hold this same lock, from their own busy
 	// check through recording what they do, so a commit cannot observe
@@ -167,7 +167,7 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	// the worktree, slips in between the check and the write.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
-		return SessionCommitResponse{}, &APIError{Conflict, "a message is being started for this session; try again once it finishes"}
+		return SessionCommitResponse{}, &APIError{Code: Conflict, Message: "a message is being started for this session; try again once it finishes"}
 	}
 	defer lock.Unlock()
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
@@ -175,14 +175,14 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	}
 	// State and existence are checked under the same guard as end and destroy.
 	if ended, err := sessionEnded(repository, stream); err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {
-		return SessionCommitResponse{}, &APIError{Conflict, "the session has ended"}
+		return SessionCommitResponse{}, &APIError{Code: Conflict, Message: "the session has ended"}
 	}
 	if busy, err := sessionThreadBusy(repository, stream); err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the thread of session %s; check the trace repository", stream)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the thread of session %s; check the trace repository", stream)}
 	} else if busy {
-		return SessionCommitResponse{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
+		return SessionCommitResponse{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 	}
 	mu := sessionCommitLock(repository, stream)
 	mu.Lock()
@@ -192,30 +192,30 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	branch := sessionBranch(stream)
 	head, exists, err := g.Branch(ctx, branch)
 	if err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
 	if !exists {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("session %s has no branch", stream)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session %s has no branch", stream)}
 	}
 	c, err := g.Commit(ctx, head)
 	if err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the head commit of session %s: %v", stream, err)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the head commit of session %s: %v", stream, err)}
 	}
 	commit := head
 	if sessionCommitKey(c.Message) != key {
 		wt, found, err := g.Workspace(ctx, string(stream))
 		if err != nil {
-			return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
+			return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
 		}
 		if !found {
-			return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("session %s has no worktree", stream)}
+			return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session %s has no worktree", stream)}
 		}
 		changed := false
 		if commit, changed, err = g.CommitChanges(ctx, wt, sessionCommitMessage(message, key), s.now()); err != nil {
-			return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot commit the worktree of session %s: %v", stream, err)}
+			return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot commit the worktree of session %s: %v", stream, err)}
 		}
 		if !changed {
-			return SessionCommitResponse{}, &APIError{Validation, "the worktree has no changes to commit"}
+			return SessionCommitResponse{}, &APIError{Code: Validation, Message: "the worktree has no changes to commit"}
 		}
 	}
 	// A retry whose commit was already made, including one across a restart
@@ -224,7 +224,7 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	// detection still lets land call record (landing.go).
 	summary := fmt.Sprintf("Committed %s: %s", commit, strings.SplitN(message, "\n", 2)[0])
 	if err := recordSessionEntry(ctx, repository, project, stream, "commit-"+key, s.now(), summary); err != nil {
-		return SessionCommitResponse{}, &APIError{Internal, fmt.Sprintf("cannot record the commit entry of session %s; check the trace repository", stream)}
+		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the commit entry of session %s; check the trace repository", stream)}
 	}
 	return SessionCommitResponse{Commit: commit}, nil
 }
@@ -338,18 +338,18 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 		return SessionCheckRun{}, api
 	}
 	if err := s.step("session-check-looked-up"); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	mu := sessionCheckLock(repository, stream)
 	if !mu.TryLock() {
-		return SessionCheckRun{}, &APIError{Conflict, "a check is already running for this session; try again once it finishes"}
+		return SessionCheckRun{}, &APIError{Code: Conflict, Message: "a check is already running for this session; try again once it finishes"}
 	}
 	defer mu.Unlock()
 	// Register the control under the admission lock and retain its lease
 	// through the external checker and the final trace writes.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
-		return SessionCheckRun{}, &APIError{Conflict, "the session is ending; try again once it finishes"}
+		return SessionCheckRun{}, &APIError{Code: Conflict, Message: "the session is ending; try again once it finishes"}
 	}
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
 		lock.Unlock()
@@ -360,10 +360,10 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	ended, err := sessionEnded(repository, stream)
 	lock.Unlock()
 	if err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	}
 	if ended {
-		return SessionCheckRun{}, &APIError{Conflict, "the session has ended"}
+		return SessionCheckRun{}, &APIError{Code: Conflict, Message: "the session has ended"}
 	}
 	view, api := s.sessionRead(string(stream))
 	if api != nil {
@@ -373,36 +373,36 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	g := sessionGit(cfg)
 	head, exists, err := g.Branch(ctx, sessionBranch(stream))
 	if err != nil || !exists {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
 	checks := s.options.reviewChecks
 	if checks == nil {
-		return SessionCheckRun{}, &APIError{Internal, "the candidate check runner is unavailable"}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: "the candidate check runner is unavailable"}
 	}
 	diff, err := g.Diff(ctx, view.Base, head)
 	if err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot diff the session's base and head: %v", err)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot diff the session's base and head: %v", err)}
 	}
 	base := filepath.Join(cfg.Root.String(), "checks")
 	if err := os.MkdirAll(base, 0700); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	dir, err := os.MkdirTemp(base, "session-")
 	if err != nil {
-		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	defer os.RemoveAll(dir)
 	if err := g.Export(ctx, head, dir); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot export the session's head: %v", err)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot export the session's head: %v", err)}
 	}
 	release, err := s.checkSlots.acquire(ctx, CheckSlotRun{Project: project, Workstream: stream, Session: true})
 	if err != nil {
-		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	defer release()
 	run, err := nextSessionCheckRun(repository, stream)
 	if err != nil {
-		return SessionCheckRun{}, &APIError{Internal, err.Error()}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	cause := sessionCheckDocumentID(run)
 	startedAt := s.now()
@@ -433,11 +433,11 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	sr.OutputRevision = 1
 	sr.FinishedAt = s.now()
 	if err := recordSessionCheckRun(ctx, repository, project, stream, sr, result.Output); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot record the check run of session %s; check the trace repository: %v", stream, err)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check run of session %s; check the trace repository: %v", stream, err)}
 	}
-	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, selection.describe())
+	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, describeSelection(selection))
 	if err := recordSessionEntry(ctx, repository, project, stream, cause+"-entry", sr.FinishedAt, summary); err != nil {
-		return SessionCheckRun{}, &APIError{Internal, fmt.Sprintf("cannot record the check entry of session %s; check the trace repository", stream)}
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check entry of session %s; check the trace repository", stream)}
 	}
 	return sr, nil
 }
@@ -452,12 +452,12 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 		return SessionPushResponse{}, api
 	}
 	if err := s.step("session-push-looked-up"); err != nil {
-		return SessionPushResponse{}, &APIError{Internal, err.Error()}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	// The lease covers every remote phase after admission.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
-		return SessionPushResponse{}, &APIError{Conflict, "the session is ending; try again once it finishes"}
+		return SessionPushResponse{}, &APIError{Code: Conflict, Message: "the session is ending; try again once it finishes"}
 	}
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
 		lock.Unlock()
@@ -468,31 +468,31 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	ended, err := sessionEnded(repository, stream)
 	lock.Unlock()
 	if err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	}
 	if ended {
-		return SessionPushResponse{}, &APIError{Conflict, "the session has ended"}
+		return SessionPushResponse{}, &APIError{Code: Conflict, Message: "the session has ended"}
 	}
 	if err := s.step("session-push-admitted"); err != nil {
-		return SessionPushResponse{}, &APIError{Internal, err.Error()}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	cfg := s.current().For(project)
 	g := sessionGit(cfg)
 	branch := sessionBranch(stream)
 	head, exists, err := g.Branch(ctx, branch)
 	if err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
 	if !exists {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("session %s has no branch", stream)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session %s has no branch", stream)}
 	}
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot find the clone's remote for %s: %v", cfg.Project.Upstream, err)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot find the clone's remote for %s: %v", cfg.Project.Upstream, err)}
 	}
 	remoteCommit, remoteExists, err := g.RemoteBranch(ctx, remote, branch)
 	if err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the remote branch %s: %v", branch, err)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the remote branch %s: %v", branch, err)}
 	}
 	expected := ""
 	if remoteExists {
@@ -504,21 +504,21 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 		// known commit merge-base reports is not an ancestor.
 		known, err := g.Known(ctx, remoteCommit)
 		if err != nil {
-			return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot check whether the remote branch %s is known locally: %v", branch, err)}
+			return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot check whether the remote branch %s is known locally: %v", branch, err)}
 		}
 		ancestor := false
 		if known {
 			if ancestor, err = g.Ancestor(ctx, remoteCommit, head); err != nil {
-				return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot compare the remote branch %s with the session branch: %v", branch, err)}
+				return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot compare the remote branch %s with the session branch: %v", branch, err)}
 			}
 		}
 		if !ancestor {
-			return SessionPushResponse{}, &APIError{Conflict, fmt.Sprintf("the remote branch %s has commits not on the session branch; push refused", branch)}
+			return SessionPushResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the remote branch %s has commits not on the session branch; push refused", branch)}
 		}
 		expected = remoteCommit
 	}
 	if err := g.Push(ctx, remote, head, branch, expected); err != nil {
-		return SessionPushResponse{}, &APIError{Internal, fmt.Sprintf("cannot push %s to %s: %v", branch, remote, err)}
+		return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot push %s to %s: %v", branch, remote, err)}
 	}
 	return SessionPushResponse{Remote: remote, Branch: branch, Commit: head}, nil
 }
@@ -544,11 +544,11 @@ func (s *Service) sessionEnd(ctx context.Context, raw string) (SessionView, *API
 		return SessionView{}, api
 	}
 	if err := s.step("session-end-looked-up"); err != nil {
-		return SessionView{}, &APIError{Internal, err.Error()}
+		return SessionView{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
-		return SessionView{}, &APIError{Conflict, "a message is being started for this session; try again once it finishes"}
+		return SessionView{}, &APIError{Code: Conflict, Message: "a message is being started for this session; try again once it finishes"}
 	}
 	defer lock.Unlock()
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
@@ -556,29 +556,29 @@ func (s *Service) sessionEnd(ctx context.Context, raw string) (SessionView, *API
 	}
 	ended, err := sessionEnded(repository, stream)
 	if err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	}
 	if !ended {
 		if busy, err := sessionThreadBusy(repository, stream); err != nil {
-			return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the thread of session %s; check the trace repository", stream)}
+			return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the thread of session %s; check the trace repository", stream)}
 		} else if busy {
-			return SessionView{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
+			return SessionView{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 		}
 		if err := setSessionState(ctx, repository, project, stream, s.now(), "session-ended-"+string(stream), "owner-end", trace.SessionEnded); err != nil {
-			return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot record session %s as ended; check the trace repository", stream)}
+			return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record session %s as ended; check the trace repository", stream)}
 		}
 	}
 	cfg := s.current().For(project)
 	g := sessionGit(cfg)
 	if wt, found, err := g.Workspace(ctx, string(stream)); err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the worktree of session %s; check the workspace directory", stream)}
 	} else if found {
 		if err := g.Release(ctx, wt); err != nil {
-			return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot release the worktree of session %s: %v", stream, err)}
+			return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot release the worktree of session %s: %v", stream, err)}
 		}
 	}
 	if err := os.RemoveAll(runtime.ModelSessionDirectory(cfg.Root.String(), project, stream)); err != nil {
-		return SessionView{}, &APIError{Internal, fmt.Sprintf("cannot release the model-session state of session %s: %v", stream, err)}
+		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot release the model-session state of session %s: %v", stream, err)}
 	}
 	return s.sessionRead(string(stream))
 }

@@ -41,7 +41,7 @@ func (c *heldChecks) Check(ctx context.Context, _ string, links []string) (Check
 	c.entered <- slices.Clone(links)
 	select {
 	case o := <-c.release:
-		return o.result, o.err
+		return o.Result, o.Err
 	case <-ctx.Done():
 		return CheckResult{ExitCode: -1}, ctx.Err()
 	}
@@ -121,7 +121,7 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 			if state.Value != "requested-1" || unitState(t, repo, stream, "resume") != UnitChecking {
 				t.Fatalf("start changed workflow: %+v", state)
 			}
-			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			must(t, awaitCheck(t, finished))
 			run := onlyRun(t, repo, stream)
 			if run.Status != ChecksPassed || !reflect.DeepEqual(*run.Selection, selection) || !run.StartedAt.Equal(start.StartedAt) {
@@ -180,7 +180,7 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			if links := awaitCheck(t, checks.entered); !slices.Equal(firstLinks, links) {
 				t.Fatalf("restart changed check links: %v, originally %v", links, firstLinks)
 			}
-			checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+			checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 			must(t, awaitCheck(t, finished))
 			if got := streamDocuments(t, reopened, stream, checkSelectionDocument("resume", 1)); !reflect.DeepEqual(before, got) {
 				t.Fatalf("restart duplicated or rewrote selection: %+v", got)
@@ -278,7 +278,7 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 
 func TestLegacyUnitCheckSelectionStillMovesToReview(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newChecksFixture(t, "legacy-selection", &fakeChecks{outcomes: passing()})
+	f, stream, repo := newChecksFixture(t, "legacy-selection", &fakeChecks{Outcomes: passing()})
 	c := &checkers{masons: newMasonController(f.s, repo)}
 	ctx := context.Background()
 	must(t, c.Pass(ctx))
@@ -320,7 +320,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	clock := &fixedClock{now: f.clock.Now()}
+	clock := &fixedClock{At: f.clock.Now()}
 	f.s.options.Reconciliation.Now = clock.Now
 	checks := newHeldChecks()
 	checks.links = []string{"dag+check://go/test"}
@@ -374,7 +374,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	if docs := streamDocuments(t, repo, stream, finalChecksDocument(1)); len(docs) != 0 {
 		t.Fatalf("held checks already have a result: %+v", docs)
 	}
-	checks.release <- checkOutcome{result: CheckResult{ExitCode: -1}, err: errors.New("engine unreachable")}
+	checks.release <- checkOutcome{Result: CheckResult{ExitCode: -1}, Err: errors.New("engine unreachable")}
 	if err := awaitCheck(t, finished); err == nil {
 		t.Fatal("incomplete check attempt succeeded")
 	}
@@ -449,7 +449,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	if len(restartedProvider.Requests()) != 0 || !reflect.DeepEqual(starts[0].Selection, starts[2].Selection) {
 		t.Fatalf("restart asked Jev again or changed selection: %d requests, starts %+v", len(restartedProvider.Requests()), starts)
 	}
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	must(t, awaitCheck(t, finished))
 	docs = streamDocuments(t, reopened, stream, finalChecksDocument(1))
 	var passed FinalCheckRun

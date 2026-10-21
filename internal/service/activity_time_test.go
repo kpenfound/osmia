@@ -2,44 +2,22 @@ package service
 
 import (
 	"context"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// recordActivity commits a transition record for the workstream at the given
-// time. Its subject is unique to the record so it never conflicts with an
-// earlier one.
-func recordActivity(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string, at time.Time) {
-	t.Helper()
-	_, err := repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: ownerActor, Cause: "test-activity"},
-		Subject: id, To: "done", Reason: "test activity",
-	}})
-	must(t, err)
-}
 
 // activityFixture opens a fresh project trace under its own home directory,
 // without starting a service, so the caller can seed workstreams and
 // activity before the first start.
 func activityFixture(t *testing.T) (Options, *config.Config, *trace.Repository) {
 	t.Helper()
-	ctx := context.Background()
-	home, err := os.MkdirTemp("", "activity-")
-	must(t, err)
-	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
-	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
-	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, ownerActor)
-	must(t, err)
-	return opts, cfg, repo
+	opts, cfg, repo := fixturekit.Activity(t)
+	return testOptions(opts), cfg, repo
 }
 
 // workstreamOrder returns the order in which ids of interest appear in list,

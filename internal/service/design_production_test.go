@@ -104,7 +104,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 	must(t, err)
 	_, err = file.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 2\n[shed]\nmax_rounds = 1\n")
 	must(t, errors.Join(err, file.Close()))
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
 	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
 	opts = enforced
@@ -235,8 +235,8 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 	f.scriptDrafts(t)
 	for i := 1; i <= 2; i++ {
 		turn := roundTurnID(1, committeeAgent(i), 1)
-		engine.mu.Lock()
-		engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		engine.Mu.Lock()
+		engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			if f.stream1 == f.origin {
 				return questionResult(req, "session-committee-"+req.Name, "The single-repo draft fits the charter."), nil
 			}
@@ -249,11 +249,11 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 			}
 			return questionResult(req, "session-committee-"+req.Name, "The proposed contract and slice fit the charter."), nil
 		}
-		engine.mu.Unlock()
+		engine.Mu.Unlock()
 	}
 	af.script(replyTurnID(1, 1), nil, nil)
-	engine.mu.Lock()
-	engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Mu.Lock()
+	engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if verified.VCS || req.Grants.VCS || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 {
 			return nil, errors.New("architect has mutation or VCS authority")
 		}
@@ -279,7 +279,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		}
 		return questionResult(req, "session-selection", "Both repos are affected."), nil
 	}
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil {
 			return nil, err
@@ -290,7 +290,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		}
 		return questionResult(req, "session-chief", "The service is following the agreed design."), nil
 	}
-	engine.mu.Unlock()
+	engine.Mu.Unlock()
 	if configuration.handIn {
 		return f
 	}
@@ -444,13 +444,13 @@ func (f *productionDesignFixture) ownerSummary(t *testing.T) {
 	f.dispatch.mu.Lock()
 	t.Logf("OWNER dispatch-bindings=%d prepared=%+v preparation-error=%s scope=%+v selection-error=%s tools-error=%s engine-name=%s handler=%s", f.dispatch.bindings, f.dispatch.prepared, f.dispatch.prepareError, f.dispatch.scope, f.dispatch.selectionError, f.dispatch.toolsError, f.dispatch.engineName, f.dispatch.handler)
 	f.dispatch.mu.Unlock()
-	f.engine.mu.Lock()
-	engineRan := slices.Contains(f.engine.runs, sent.Turn)
+	f.engine.Mu.Lock()
+	engineRan := slices.Contains(f.engine.Runs, sent.Turn)
 	handler := "fallback"
-	if f.engine.turns[sent.Turn] != nil {
+	if f.engine.Turns[sent.Turn] != nil {
 		handler = "named"
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	t.Logf("OWNER sent-engine-ran=%v selected-handler=%s", engineRan, handler)
 	repo, err := f.s.repository(f.project)
 	if err != nil {
@@ -1206,14 +1206,14 @@ func TestDesignProductionSelectionRefusesInvalidReposBeforeAllocation(t *testing
 			if kind == "outside" {
 				selected = []string{"p_000000000000000000000000000000ff"}
 			}
-			f.engine.mu.Lock()
-			f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if _, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": selected}); err == nil {
 					return nil, errors.New("invalid selection accepted")
 				}
 				return questionResult(req, "session-refused", "Selection refused."), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			f.startOwner(t)
 			f.wait(t, "invalid selection completed", func() bool {
 				repo, err := f.s.repository(f.project)
@@ -1266,8 +1266,8 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	const escalation = "May both repos change the offset contract?"
 	var escalated, relayed atomic.Bool
 	var unaffectedRuns atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		f.recordEngine(req, "fallback")
 		names, err := toolNames(ctx, tools)
 		if err != nil {
@@ -1289,7 +1289,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		}
 		return questionResult(req, "session-chief", "The service is following the agreed design."), err
 	}
-	f.engine.turns["affected-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["affected-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		question := "affected-one: may the offset contract change?"
 		if strings.Contains(req.SessionDir, "worker_second") {
 			question = "affected-two: may the offset contract change?"
@@ -1297,17 +1297,17 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 		return questionResult(req, "session-worker", "Asked the chief."), err
 	}
-	f.engine.turns["unaffected-work"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["unaffected-work"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		unaffectedRuns.Add(1)
 		return questionResult(req, "session-unaffected", "Completed independent work."), nil
 	}
-	f.engine.turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, ruling) {
 			return nil, errors.New("origin resumed without its owner ruling")
 		}
 		return questionResult(req, "session-worker", "Resumed within the stable contract."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.stream2, "What is the current status of both repos?")
 	must(t, err)
 	f.owner, f.ownerAddress = sent, f.stream2
@@ -1489,12 +1489,12 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 	f := newProductionDesignFixture(t)
 	defer f.stop(t)
 	f.stream1 = f.origin
-	f.engine.mu.Lock()
-	f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
 		return questionResult(req, "session-selection", "Only the server needs a change."), err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.startOwner(t)
 	var packet PacketResponse
 	f.wait(t, "single-repo packet", func() bool {
@@ -1548,8 +1548,8 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	reached := make(chan agent.Request, 1)
 	var hit atomic.Bool
 	const message = "Give the owner the current upload status after restart."
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		f.recordEngine(req, "fallback")
 		if strings.Contains(req.Prompt, message) && hit.CompareAndSwap(false, true) {
 			reached <- req
@@ -1558,7 +1558,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 		}
 		return questionResult(req, "session-chief", "Following the approved contract."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.origin, message)
 	must(t, err)
 	f.owner, f.ownerAddress = sent, f.origin
@@ -1581,8 +1581,8 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	}
 	f.stop(t)
 	var replayed atomic.Bool
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, message) {
 			replayed.Store(true)
 			_, err := callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue resumable uploads.", "note": "Restart retained the owner status request.", "agents": []string{}})
@@ -1590,7 +1590,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 		}
 		return questionResult(req, "session-chief", "Following the approved contract."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 	f.wait(t, "pending owner turn replay", func() bool { return replayed.Load() })
 	repo, err = f.s.repository(f.project)

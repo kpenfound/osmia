@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/service"
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
@@ -23,19 +23,19 @@ func TestApproveCommitMessageFiles(t *testing.T) {
 			if multiple {
 				messages = append(messages, workspace.DeliveryMessage{Commit: "def", Message: "Second draft"})
 			}
-			sent := make(chan service.DeliveryDecision, 1)
+			sent := make(chan wire.DeliveryDecision, 1)
 			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if r.Method == http.MethodGet {
-					json.NewEncoder(w).Encode(service.DeliveryPresentation{Report: service.FinalReport{Review: 1, Commit: "abc"}, ReviewRevision: 2, DraftHash: "hash", Draft: "Presented description", Messages: messages})
+					json.NewEncoder(w).Encode(wire.DeliveryPresentation{Report: wire.FinalReport{Review: 1, Commit: "abc"}, ReviewRevision: 2, DraftHash: "hash", Draft: "Presented description", Messages: messages})
 				} else {
-					var decision service.DeliveryDecision
+					var decision wire.DeliveryDecision
 					if err := json.NewDecoder(r.Body).Decode(&decision); err != nil {
 						http.Error(w, err.Error(), 400)
 						return
 					}
 					sent <- decision
-					json.NewEncoder(w).Encode(service.DeliveryApproval{Review: 1, Commit: "abc", Messages: decision.Messages})
+					json.NewEncoder(w).Encode(wire.DeliveryApproval{Review: 1, Commit: "abc", Messages: decision.Messages})
 				}
 			})}
 			go server.Serve(ln)

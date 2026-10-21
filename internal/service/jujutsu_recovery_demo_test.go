@@ -15,11 +15,10 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // recoveryPlan has resume, and dedupe and audit, which depend on it and are
@@ -241,7 +240,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch}
 	f.opts.PullRequests = prs
 	var passed atomic.Int64
 	f.opts.schedulePassed = func() { passed.Add(1) }
@@ -255,20 +254,20 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		resolvedAudit  = "package audit\n\n// audit, beside upstream's\n"
 	)
 	resolutions := map[string]string{"dedupe": resolvedDedupe, "audit": resolvedAudit}
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = demo.interrupted
-	f.engine.turns[masonAgent("resume")+"-recover-1"] = demo.continued
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = demo.interrupted
+	f.engine.Turns[masonAgent("resume")+"-recover-1"] = demo.continued
 	for unit, resolved := range resolutions {
-		f.engine.turns[masonTurnID(unit)] = demo.build(unit)
-		f.engine.turns[resolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
+		f.engine.Turns[masonTurnID(unit)] = demo.build(unit)
+		f.engine.Turns[resolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
 	}
 	for i := 1; i <= 3; i++ {
-		f.engine.turns[fmt.Sprintf("%s-clarify-%d", masonAgent("audit"), i)] = clarified
+		f.engine.Turns[fmt.Sprintf("%s-clarify-%d", masonAgent("audit"), i)] = clarified
 	}
-	f.engine.turns[driftResolveTurnID(1, 1)] = demo.resolve(trackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
-	f.engine.turns[driftReviewTurnID(1, 1)] = reviewDrift
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[driftResolveTurnID(1, 1)] = demo.resolve(trackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
+	f.engine.Turns[driftReviewTurnID(1, 1)] = reviewDrift
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range recoveryReports {
 			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
@@ -283,7 +282,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		}
 		return chief(ctx, req, turn, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 
 	// The first landing's service dies once the feature branch moved,
@@ -503,10 +502,10 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	must(t, err)
 	f.awaitFeature(t, stream, DeliveredState)
 	demo.check(t)
-	prs.mu.Lock()
-	defer prs.mu.Unlock()
-	if len(prs.prs) != 1 || prs.creates != 1 || prs.prs[0].Body != presented.Draft || prs.prs[0].HeadCommit != forkBranch() {
-		t.Fatalf("pull requests %+v", prs.prs)
+	prs.Mu.Lock()
+	defer prs.Mu.Unlock()
+	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft || prs.Prs[0].HeadCommit != forkBranch() {
+		t.Fatalf("pull requests %+v", prs.Prs)
 	}
 	for name, content := range map[string]string{trackedFile: resolvedGit, recoveryFiles["dedupe"]: resolvedDedupe, recoveryFiles["audit"]: resolvedAudit, "internal/trace/kept.go": interruptedEdits["internal/trace/kept.go"]} {
 		if got := fileAt(t, f, forkBranch(), name); got != content {

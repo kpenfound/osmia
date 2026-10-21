@@ -90,33 +90,33 @@ func (s *Service) openDesign(ctx context.Context, req DesignOpenRequest) (Design
 	}
 	repository, err := s.repository(project)
 	if err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("project %s has no trace repository", project)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s has no trace repository", project)}
 	}
 	streams, err := repository.Workstreams()
 	if err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", project)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", project)}
 	}
 	stream, err := config.NewWorkstreamID(streams...)
 	if err != nil {
-		return DesignView{}, &APIError{Internal, "cannot generate a design session identity"}
+		return DesignView{}, &APIError{Code: Internal, Message: "cannot generate a design session identity"}
 	}
 	now := s.now()
 	if err := repository.CreateWorkstream(ctx, stream, now, ownerActor); err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot open design session %s; check the trace repository", stream)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open design session %s; check the trace repository", stream)}
 	}
 	if _, err := repository.EnsureChiefOfStaff(ctx, stream, now, ownerActor); err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot prepare the thread of design session %s; check the trace repository", stream)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot prepare the thread of design session %s; check the trace repository", stream)}
 	}
 	if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, ownerActor, designOpenTransition); err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot record the workgroup of design session %s; check the trace repository", stream)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the workgroup of design session %s; check the trace repository", stream)}
 	}
 	openHeader := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: designOpenTransition, Revision: 1,
 		Project: project, Workstream: stream, At: now, Actor: ownerActor, Cause: designOpenTransition}
 	if _, err := repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: openHeader, Subject: designSessionSubject, To: designOpenValue, Reason: "the owner opened a design session"}}); err != nil {
-		return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot record the design session marker of %s; check the trace repository", stream)}
+		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the design session marker of %s; check the trace repository", stream)}
 	}
 	if err := s.refreshRuntime(); err != nil {
-		return DesignView{}, &APIError{Internal, "cannot resolve the runtime workstreams of the new design session"}
+		return DesignView{}, &APIError{Code: Internal, Message: "cannot resolve the runtime workstreams of the new design session"}
 	}
 	return s.designRead(string(stream))
 }
@@ -128,7 +128,7 @@ func (s *Service) designList(rawProject string) (DesignsResponse, *APIError) {
 	if rawProject != "" {
 		id, err := config.ParseProjectID(rawProject)
 		if err != nil {
-			return DesignsResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+			return DesignsResponse{}, &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 		}
 		filter = id
 	}
@@ -140,12 +140,12 @@ func (s *Service) designList(rawProject string) (DesignsResponse, *APIError) {
 		}
 		list, err := active.repository.Statuses()
 		if err != nil {
-			return DesignsResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+			return DesignsResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 		}
 		for _, w := range list {
 			design, err := isDesignWorkstream(active.repository, w.Workstream)
 			if err != nil {
-				return DesignsResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
+				return DesignsResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
 			}
 			if design {
 				out = append(out, designView(active.id, w))
@@ -168,9 +168,9 @@ func (s *Service) designList(rawProject string) (DesignsResponse, *APIError) {
 func (s *Service) designRead(raw string) (DesignView, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return DesignView{}, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return DesignView{}, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	notFound := &APIError{NotFound, fmt.Sprintf("design session %s is not in an active project; list design sessions with GET %s/design", id, Prefix)}
+	notFound := &APIError{Code: NotFound, Message: fmt.Sprintf("design session %s is not in an active project; list design sessions with GET %s/design", id, Prefix)}
 	cfg, projects := s.runtimes()
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
@@ -178,7 +178,7 @@ func (s *Service) designRead(raw string) (DesignView, *APIError) {
 		}
 		list, err := active.repository.Statuses()
 		if err != nil {
-			return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+			return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 		}
 		for _, w := range list {
 			if w.Workstream != id {
@@ -186,7 +186,7 @@ func (s *Service) designRead(raw string) (DesignView, *APIError) {
 			}
 			design, err := isDesignWorkstream(active.repository, id)
 			if err != nil {
-				return DesignView{}, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
+				return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
 			}
 			if !design {
 				return DesignView{}, notFound
@@ -202,9 +202,9 @@ func (s *Service) designRead(raw string) (DesignView, *APIError) {
 func (s *Service) designTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return "", "", nil, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return "", "", nil, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	notFound := &APIError{NotFound, fmt.Sprintf("design session %s is not in an active project; list design sessions with GET %s/design", id, Prefix)}
+	notFound := &APIError{Code: NotFound, Message: fmt.Sprintf("design session %s is not in an active project; list design sessions with GET %s/design", id, Prefix)}
 	cfg, projects := s.runtimes()
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
@@ -212,14 +212,14 @@ func (s *Service) designTrace(raw string) (config.ProjectID, config.WorkstreamID
 		}
 		streams, err := active.repository.Workstreams()
 		if err != nil {
-			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+			return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
 		}
 		if !slices.Contains(streams, id) {
 			continue
 		}
 		design, err := isDesignWorkstream(active.repository, id)
 		if err != nil {
-			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
+			return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", id)}
 		}
 		if !design {
 			return "", "", nil, notFound
@@ -351,16 +351,16 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
+		return ConversationEntry{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	cfg := s.current().For(project)
 	_, profile, err := s.chiefOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, "the chief-of-staff role has no usable profile; check osmia profiles"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "the chief-of-staff role has no usable profile; check osmia profiles"}
 	}
 	mu := designLock(repository, stream)
 	if !mu.TryLock() {
-		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this design session; try again once it finishes"}
+		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	defer mu.Unlock()
 	if _, _, _, api := s.designTrace(raw); api != nil {
@@ -368,28 +368,28 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 	}
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, "cannot read the design session's documents"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot read the design session's documents"}
 	}
 	for _, document := range documents {
 		if document.ID == handedDocument {
-			return ConversationEntry{}, &APIError{Conflict, "a workgroup start is pending; retry starting the workgroup before sending more messages"}
+			return ConversationEntry{}, &APIError{Code: Conflict, Message: "a workgroup start is pending; retry starting the workgroup before sending more messages"}
 		}
 	}
 	at := s.now()
 	th, err := repository.EnsureChiefOfStaff(ctx, stream, at, ownerActor)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}
 	}
 	if unfinishedSessionTurn(th) {
-		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this design session; try again once it finishes"}
+		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	prompt, err := s.designSystemPrompt(ctx, cfg, repository, at)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot assemble the context of design session %s; check the charter and the knowledge base of every repo in the project", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the charter and the knowledge base of every repo in the project", stream)}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return ConversationEntry{}, &APIError{Internal, "cannot generate a message ID"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot generate a message ID"}
 	}
 	id := hex.EncodeToString(nonce[:])
 	q, err := repository.EnqueueTurn(ctx, trace.TurnRequest{
@@ -399,7 +399,7 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 		Profile: profile, SystemPrompt: prompt, Prompt: text,
 	})
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}
 	}
 	return conversation(q)[0], nil
 }
@@ -635,7 +635,7 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 	}
 	mu := designLock(repository, stream)
 	if !mu.TryLock() {
-		return DesignStartResponse{}, &APIError{Conflict, "a turn is running for this design session; try again once it finishes"}
+		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	defer mu.Unlock()
 	if _, _, _, api := s.designTrace(raw); api != nil {
@@ -643,14 +643,14 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 	}
 	th, err := repository.ChiefOfStaffThread(stream)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the thread of design session %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the thread of design session %s; check the trace repository", stream)}
 	}
 	if unfinishedSessionTurn(th) {
-		return DesignStartResponse{}, &APIError{Conflict, "a turn is running for this design session; try again once it finishes"}
+		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the documents of design session %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the documents of design session %s; check the trace repository", stream)}
 	}
 	var draft trace.Document
 	for _, d := range docs {
@@ -659,15 +659,15 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 		}
 	}
 	if draft.Revision == 0 {
-		return DesignStartResponse{}, &APIError{Validation, "the design agent has not drafted a brief yet; keep talking to it until it records one"}
+		return DesignStartResponse{}, &APIError{Code: Validation, Message: "the design agent has not drafted a brief yet; keep talking to it until it records one"}
 	}
 	transcript, err := designTranscript(repository, stream)
 	if err != nil {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of design session %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of design session %s; check the trace repository", stream)}
 	}
 	var brief designBriefRecord
 	if err := json.Unmarshal([]byte(draft.Content), &brief); err != nil || strings.TrimSpace(brief.Content) == "" {
-		return DesignStartResponse{}, &APIError{Internal, "cannot read the drafted brief; check the trace repository"}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot read the drafted brief; check the trace repository"}
 	}
 	content := strings.TrimRight(brief.Content, "\n") + "\n" + designTranscriptHeading + transcript
 	now := s.now()
@@ -679,25 +679,25 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 	for _, document := range docs {
 		if document.ID == handedDocument {
 			if document.Source != source || document.Path != designBriefPath {
-				return DesignStartResponse{}, &APIError{Conflict, "the design session already has a different handed input"}
+				return DesignStartResponse{}, &APIError{Code: Conflict, Message: "the design session already has a different handed input"}
 			}
 			handed, alreadyHanded = document, true
 		}
 	}
 	if !alreadyHanded {
 		if err := repository.Append(ctx, handed); err != nil {
-			return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot hand off design session %s; check the trace repository", stream)}
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot hand off design session %s; check the trace repository", stream)}
 		}
 	}
 	if err := s.step("design-brief-handed"); err != nil {
-		return DesignStartResponse{}, &APIError{Internal, err.Error()}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := recordFactoryPolicy(ctx, repository, stream, now, false); err != nil {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot record factory authority for %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record factory authority for %s; check the trace repository", stream)}
 	}
 	designState, err := repository.Workflow(stream, designSessionSubject)
 	if err != nil {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the design session marker of %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the design session marker of %s; check the trace repository", stream)}
 	}
 	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: designStartTransition, Revision: 1,
 		Project: project, Workstream: stream, At: now, Actor: ownerActor, Cause: designStartTransition}
@@ -714,10 +714,10 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 	// other path between the read above and this commit.
 	state, err := repository.MoveFeatureStateWith(ctx, header, "", HandedState, "the owner started a workgroup from the design session's brief", closeTx)
 	if err != nil {
-		return DesignStartResponse{}, &APIError{Internal, fmt.Sprintf("cannot record the handed state of %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the handed state of %s; check the trace repository", stream)}
 	}
 	if err := s.refreshRuntime(); err != nil {
-		return DesignStartResponse{}, &APIError{Internal, "cannot resolve the runtime workstreams after starting the workgroup"}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot resolve the runtime workstreams after starting the workgroup"}
 	}
 	return DesignStartResponse{Project: project, Workstream: stream, State: state.Value, Handed: handed.Path, Source: source}, nil
 }

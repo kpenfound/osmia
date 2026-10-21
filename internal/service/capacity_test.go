@@ -18,18 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// queueRoleTurn creates the agent's thread in stream with the role and queues
-// one turn on it, for unit.
-func queueRoleTurn(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, agent, role, unit string, at time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agent, Project: project, Workstream: stream, At: at, Actor: owner, Cause: "workstream_created"}, Role: role, ThreadID: agent}))
-	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + agent, Project: project, Workstream: stream, Unit: unit, At: at, Actor: owner, Cause: "message_" + agent, Depth: 1},
-		AgentID: agent, ThreadID: agent, TurnID: agent + "-turn", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work"})
-	must(t, err)
-}
-
 // roleCapacity returns the role's entry of the capacity view.
 func roleCapacity(t *testing.T, c *CapacityStatus, role string) RoleCapacity {
 	t.Helper()
@@ -271,7 +259,7 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 		return nil
 	}
 	got = s.statusList()
-	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{"provider_usage", Internal, "cannot read today's costs or turn attempts in project " + string(project) + "; check the trace repository"}) {
+	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(project) + "; check the trace repository"}) {
 		t.Fatalf("unreadable provider usage: %+v %+v", got.ProviderUsage, got.Diagnostics)
 	}
 }

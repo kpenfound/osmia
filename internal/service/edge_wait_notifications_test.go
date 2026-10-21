@@ -70,7 +70,7 @@ func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
 				Status: publicationOpened, Upstream: "owner/repo-a", Fork: "owner/repo-a-fork",
 				Branch: featureBranch(f.upstream), PullRequest: 123,
 			})
-			provider := &fakePulls{prs: []pulls.PullRequest{{
+			provider := &fakePulls{Prs: []pulls.PullRequest{{
 				Number: 123, State: "open", HeadRepository: "owner/repo-a-fork", Head: featureBranch(f.upstream), Base: "main",
 			}}}
 			f.s.options.PullRequests = provider
@@ -82,10 +82,10 @@ func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
 				assertStatusAndSilence("waiting on owner: owner/repo-a#123 merge")
 			}
 
-			provider.mu.Lock()
-			provider.prs[0].Merged = true
-			provider.prs[0].MergeCommit = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-			provider.mu.Unlock()
+			provider.Mu.Lock()
+			provider.Prs[0].Merged = true
+			provider.Prs[0].MergeCommit = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+			provider.Mu.Unlock()
 			f.resolvePasses(t)
 			assertStatusAndSilence("")
 			f.resolvePasses(t)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/service"
@@ -46,7 +47,7 @@ func handInFixture(t *testing.T) (string, config.ProjectID, string) {
 	resolved, err := config.ResolveRoot(opts.Config.Root, "")
 	must(t, err)
 	root := resolved.String()
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 	return root, added.Project.ID, filepath.Dir(clone)
@@ -89,7 +90,7 @@ func TestHandInCommand(t *testing.T) {
 	must(t, err)
 	relative, err := filepath.Rel(wd, design)
 	must(t, err)
-	var result service.HandInResponse
+	var result wire.HandInResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), relative, "--json")), &result))
 	if result.Project != project || result.State != "handed" || result.Source != "file:"+design || config.CheckWorkstreamIDs(result.Workstream) != nil {
 		t.Fatalf("file hand-in %+v", result)
@@ -198,13 +199,13 @@ func TestHandInSkipDebate(t *testing.T) {
 		t.Fatalf("skip transitions %+v", got)
 	}
 
-	var result service.HandInResponse
+	var result wire.HandInResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--skip-debate", "--json")), &result))
 	if !result.SkipDebate || result.State != "handed" || len(skips(string(result.Workstream))) != 1 {
 		t.Fatalf("JSON hand-in %+v", result)
 	}
 	// Without the flag nothing is skipped and the output is unchanged.
-	var debated service.HandInResponse
+	var debated wire.HandInResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--json")), &debated))
 	if debated.SkipDebate || debated.Workstream == result.Workstream || len(skips(string(debated.Workstream))) != 0 {
 		t.Fatalf("hand-in without the flag %+v", debated)

@@ -32,8 +32,8 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	masons.mu.Lock()
 	masons.play[masonTurnID("upload")] = reportDone("Chunks are sent")
 	masons.mu.Unlock()
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		select {
 		case <-release:
 		case <-ctx.Done():
@@ -45,7 +45,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 		}
 		return result, err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream, _ := f.builtAs(t, "budget-admission")
 	f.awaitUnit(t, stream, "upload", UnitImplementing)
 

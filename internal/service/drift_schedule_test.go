@@ -23,9 +23,9 @@ const idleStream config.WorkstreamID = "w_0000000000000000000000000000d1f7"
 
 // setClock sets the fixture's clock, which advances a second on every read.
 func setClock(f *shedFixture, at time.Time) {
-	f.clock.mu.Lock()
-	defer f.clock.mu.Unlock()
-	f.clock.now = at
+	f.clock.Mu.Lock()
+	defer f.clock.Mu.Unlock()
+	f.clock.At = at
 }
 
 // cadenceForeman returns a foreman over repository whose project schedules

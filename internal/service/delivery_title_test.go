@@ -224,8 +224,8 @@ func TestPublicationOpensThePullRequestWithTheStatusGoalAsItsTitle(t *testing.T)
 	if runes := []rune(want); len(runes) != subjectLength || len(runes) >= len([]rune(long)) {
 		t.Fatalf("fixture goal %q was not long enough to exercise the bound", long)
 	}
-	if len(p.pulls.prs) != 1 || p.pulls.prs[0].Title != want {
-		t.Fatalf("pull request title %q, want the bounded status goal %q, not the final review summary %q", p.pulls.prs[0].Title, want, p.report.Summary)
+	if len(p.pulls.Prs) != 1 || p.pulls.Prs[0].Title != want {
+		t.Fatalf("pull request title %q, want the bounded status goal %q, not the final review summary %q", p.pulls.Prs[0].Title, want, p.report.Summary)
 	}
 }
 
@@ -247,8 +247,8 @@ func TestPublicationUsesTheApprovedTitleDespiteALaterStatusGoalChange(t *testing
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
-	if len(p.pulls.prs) != 1 || p.pulls.prs[0].Title != "Resumable uploads" {
-		t.Fatalf("pull request %+v, want the approved title unaffected by the later status goal", p.pulls.prs)
+	if len(p.pulls.Prs) != 1 || p.pulls.Prs[0].Title != "Resumable uploads" {
+		t.Fatalf("pull request %+v, want the approved title unaffected by the later status goal", p.pulls.Prs)
 	}
 }
 
@@ -260,14 +260,14 @@ func TestPublicationUsesTheApprovedTitleDespiteALaterStatusGoalChange(t *testing
 func TestSameRepositoryMaintenanceUpdatesAnExistingPullRequestsTitle(t *testing.T) {
 	t.Parallel()
 	p := sameRepositoryMaintenance(t)
-	before := p.pulls.prs[0].Title
+	before := p.pulls.Prs[0].Title
 	setStatusGoal(t, p.repository, p.stream, "A refreshed delivery title", p.s.now())
 	approveMaintenance(t, p)
 	if before == "A refreshed delivery title" {
 		t.Fatal("fixture already used the new title")
 	}
-	if p.pulls.prs[0].Title != before {
-		t.Fatalf("the live pull request's title moved before publication: %q", p.pulls.prs[0].Title)
+	if p.pulls.Prs[0].Title != before {
+		t.Fatalf("the live pull request's title moved before publication: %q", p.pulls.Prs[0].Title)
 	}
 	op := actionOperation(t, p.repository, p.stream, publishUpstreamAction)
 	in, err := decodePublish(op)
@@ -277,11 +277,11 @@ func TestSameRepositoryMaintenanceUpdatesAnExistingPullRequestsTitle(t *testing.
 	}
 	result, err := p.publisher().Apply(context.Background(), op)
 	must(t, err)
-	if result.Outcome != "succeeded" || p.pulls.updates != 1 {
-		t.Fatalf("publication %+v, updates %d", result, p.pulls.updates)
+	if result.Outcome != "succeeded" || p.pulls.Updates != 1 {
+		t.Fatalf("publication %+v, updates %d", result, p.pulls.Updates)
 	}
-	if p.pulls.prs[0].Title != "A refreshed delivery title" {
-		t.Fatalf("pull request title %q, want it updated to the approved title", p.pulls.prs[0].Title)
+	if p.pulls.Prs[0].Title != "A refreshed delivery title" {
+		t.Fatalf("pull request title %q, want it updated to the approved title", p.pulls.Prs[0].Title)
 	}
 }
 
@@ -328,8 +328,8 @@ func TestPublicationPublishesALegacyApprovalWithTheDerivedTitle(t *testing.T) {
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication of a legacy approval %+v: %v", result, err)
 	}
-	if len(p.pulls.prs) != 1 || p.pulls.prs[0].Title != wantTitle {
-		t.Fatalf("pull request %+v, want the title derived from the legacy approval's description", p.pulls.prs)
+	if len(p.pulls.Prs) != 1 || p.pulls.Prs[0].Title != wantTitle {
+		t.Fatalf("pull request %+v, want the title derived from the legacy approval's description", p.pulls.Prs)
 	}
 	records, err := publications(p.repository, p.stream)
 	must(t, err)
@@ -339,8 +339,8 @@ func TestPublicationPublishesALegacyApprovalWithTheDerivedTitle(t *testing.T) {
 	// A retry still matches the pull request it already opened with that
 	// derived title: it is not treated as mismatched and recreated.
 	again, err := p.publisher().Apply(ctx, op)
-	if err != nil || again.Outcome != "succeeded" || p.pulls.creates != 1 {
-		t.Fatalf("retry of a legacy publication %+v, %v, %d pull requests", again, err, p.pulls.creates)
+	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 {
+		t.Fatalf("retry of a legacy publication %+v, %v, %d pull requests", again, err, p.pulls.Creates)
 	}
 }
 

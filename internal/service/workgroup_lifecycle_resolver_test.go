@@ -72,12 +72,12 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 	if !found || !approval.Complete {
 		t.Fatal("production group seals are not effective")
 	}
-	f.engine.mu.Lock()
-	f.engine.turns["resolver-survivor-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["resolver-survivor-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-resolver-cleanup"})
 		return questionResult(req, "session-worker", "Asked the original chief."), err
 	}
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil || !slices.Contains(names, status.ToolName) {
 			return questionResult(req, "session-worker", "Continued the original asking turn."), err
@@ -101,7 +101,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Shared authority remains available.", "agents": []string{}})
 		return questionResult(req, "session-chief", "Read original authority."), err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = f.c.Abandon(ctx, f.stream1, "The owner cancelled the source member.")
 	must(t, err)
 	step := fmt.Sprintf("workgroup-member-resolution-read:%s:%s", f.project2, f.stream1)

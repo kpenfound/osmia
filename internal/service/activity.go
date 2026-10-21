@@ -13,20 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/thread"
 )
 
-// ActivityKind names the long-running backend operation an activity entry
-// reports.
-type ActivityKind string
-
-const (
-	ActivityArchiveCleanup ActivityKind = "archive_cleanup"
-	// ActivityGit covers Git and workspace operations the reconcile
-	// controller runs: seal, build, land, rebase, drift and publish.
-	ActivityGit       ActivityKind = "git"
-	ActivityCheck     ActivityKind = "check"
-	ActivityAgentTurn ActivityKind = "turn"
-	ActivityRecovery  ActivityKind = "recovery"
-)
-
 // ActivityStallThreshold is how long an activity entry's last progress may go
 // unchanged before health reports the backend degraded on its account.
 const ActivityStallThreshold = 30 * time.Second
@@ -44,36 +30,9 @@ const ActivityStallThreshold = 30 * time.Second
 // stops degrading health and drops out of the record shortly after.
 const ActivityFailureExpiry = 10 * time.Minute
 
-// ActivityEntry is one backend operation the activity record holds: either
-// in flight, or terminally failed and not yet superseded by a fresh start of
-// the same operation or expired under ActivityFailureExpiry. Progress is nil
-// when the operation's completion cannot be measured.
-type ActivityEntry struct {
-	ID           string              `json:"id"`
-	Kind         ActivityKind        `json:"kind"`
-	Project      config.ProjectID    `json:"project,omitempty"`
-	Workstream   config.WorkstreamID `json:"workstream,omitempty"`
-	Phase        string              `json:"phase"`
-	Progress     *float64            `json:"progress,omitempty"`
-	StartedAt    time.Time           `json:"started_at"`
-	LastProgress time.Time           `json:"last_progress"`
-	Failure      string              `json:"failure,omitempty"`
-	// reported is true once Progress has been called at least once for this
-	// entry. It is unexported: it only gates backendStatus's no-progress
-	// rule (below) and is never serialized, so it needs no OpenAPI change.
-	// Ordinary Git and workspace operations are reconciled as one Apply call
-	// with no progress in between (activityOf), so without this gate the
-	// no-progress rule would call any Git operation that simply runs longer
-	// than ActivityStallThreshold "degraded", even though nothing is stuck.
-	// archive cleanup and recovery report real progress and so stay subject
-	// to the rule once they are stalled, not merely busy.
+type activityRecord struct {
+	ActivityEntry
 	reported bool
-}
-
-// ActivityResponse lists the backend operations the activity record holds,
-// oldest first.
-type ActivityResponse struct {
-	Activity []ActivityEntry `json:"activity"`
 }
 
 // activityRegistry is the service's in-process record of long-running
@@ -96,11 +55,11 @@ type activityRegistry struct {
 	notify func()
 
 	mu      sync.Mutex
-	entries map[string]*ActivityEntry
+	entries map[string]*activityRecord
 }
 
 func newActivityRegistry(now func() time.Time) *activityRegistry {
-	return &activityRegistry{now: now, entries: map[string]*ActivityEntry{}}
+	return &activityRegistry{now: now, entries: map[string]*activityRecord{}}
 }
 
 // ActivityHandle reports the progress and outcome of one backend operation
@@ -111,7 +70,7 @@ func newActivityRegistry(now func() time.Time) *activityRegistry {
 type ActivityHandle struct {
 	r     *activityRegistry
 	key   string
-	entry *ActivityEntry
+	entry *activityRecord
 }
 
 // StartActivity records the start of a long-running backend operation in the
@@ -132,7 +91,7 @@ func (r *activityRegistry) start(key string, kind ActivityKind, project config.P
 	}
 	r.mu.Lock()
 	now := r.now()
-	e := &ActivityEntry{ID: key, Kind: kind, Project: project, Workstream: stream, Phase: phase, StartedAt: now, LastProgress: now}
+	e := &activityRecord{ActivityEntry: ActivityEntry{ID: key, Kind: kind, Project: project, Workstream: stream, Phase: phase, StartedAt: now, LastProgress: now}}
 	r.entries[key] = e
 	r.mu.Unlock()
 	r.changed()
@@ -141,7 +100,7 @@ func (r *activityRegistry) start(key string, kind ActivityKind, project config.P
 
 // live reports whether h's entry is still the one the registry holds under
 // its key, and runs update on it, under the registry's lock, when it is.
-func (h *ActivityHandle) live(update func(*ActivityEntry)) bool {
+func (h *ActivityHandle) live(update func(*activityRecord)) bool {
 	h.r.mu.Lock()
 	ok := h.r.entries[h.key] == h.entry
 	if ok {
@@ -159,7 +118,7 @@ func (h *ActivityHandle) Progress(phase string, progress *float64) {
 		return
 	}
 	now := h.r.now()
-	if h.live(func(e *ActivityEntry) { e.Phase, e.Progress, e.LastProgress, e.reported = phase, progress, now, true }) {
+	if h.live(func(e *activityRecord) { e.Phase, e.Progress, e.LastProgress, e.reported = phase, progress, now, true }) {
 		h.r.changed()
 	}
 }
@@ -173,7 +132,7 @@ func (h *ActivityHandle) Finish(err error) {
 		return
 	}
 	now := h.r.now()
-	if h.live(func(e *ActivityEntry) {
+	if h.live(func(e *activityRecord) {
 		if err != nil {
 			e.Failure, e.LastProgress = err.Error(), now
 		}
@@ -197,14 +156,14 @@ func (r *activityRegistry) changed() {
 // without the registry's lock. A failed entry older than ActivityFailureExpiry
 // is dropped from the record as it is read, so a failure nothing retries
 // stops being reported, by this call or any later one, once it expires.
-func (r *activityRegistry) snapshot() []ActivityEntry {
+func (r *activityRegistry) snapshot() []activityRecord {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	out := make([]ActivityEntry, 0, len(r.entries))
+	out := make([]activityRecord, 0, len(r.entries))
 	for key, e := range r.entries {
 		if e.Failure != "" && now.Sub(e.LastProgress) >= ActivityFailureExpiry {
 			delete(r.entries, key)
@@ -224,9 +183,13 @@ func (r *activityRegistry) snapshot() []ActivityEntry {
 // activityView answers GET /v1/activity: a snapshot of the activity record,
 // read without touching the trace mutex or operationMu.
 func (s *Service) activityView() ActivityResponse {
-	activity := s.activity.snapshot()
-	if activity == nil {
-		activity = []ActivityEntry{}
+	entries := s.activity.snapshot()
+	var activity []ActivityEntry
+	if entries != nil {
+		activity = make([]ActivityEntry, len(entries))
+		for i, entry := range entries {
+			activity[i] = entry.ActivityEntry
+		}
 	}
 	return ActivityResponse{Activity: activity}
 }
@@ -249,7 +212,7 @@ func (s *Service) healthView(ctx context.Context) HealthResponse {
 //
 // "No progress for ActivityStallThreshold" only counts against an entry
 // whose kind is stall-tracked (stallTracked) and that has reported progress
-// at least once (ActivityEntry.reported): an entry's own reporting has
+// at least once (activityRecord.reported): an entry's own reporting has
 // demonstrably started moving, so a later gap of ActivityStallThreshold with
 // no further report means it has stopped, not merely that it has not begun.
 // Ordinary Git and workspace operations are reconciled as one Apply call
@@ -296,7 +259,7 @@ func stallTracked(kind ActivityKind) bool {
 	return kind != ActivityAgentTurn && kind != ActivityCheck
 }
 
-func activityCause(e ActivityEntry) string {
+func activityCause(e activityRecord) string {
 	if e.Workstream != "" {
 		return string(e.Kind) + " (" + string(e.Workstream) + "): " + e.Phase
 	}

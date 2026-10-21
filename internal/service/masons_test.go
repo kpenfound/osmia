@@ -30,9 +30,6 @@ import (
 // sandbox the fake engine's boundary check accepts.
 const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
-// masonWrote is the file every fake mason writes into its view.
-const masonWrote = "internal/trace/built.go"
-
 // fakeMasons is a fake model session standing in for the real mason's model
 // backend: it never calls out to a live model, so a mason's own reasoning,
 // cost and latency are left unverified. Each turn checks that it holds its
@@ -206,18 +203,18 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier st
 	f.upstream(t)
 	fake := &fakeMasons{runs: map[string][]agent.Request{}, play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
 	fake.chief = &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns["*"] = fake.chief.turn
-	f.engine.turns[masonTurnID("resume")] = fake.turn
-	f.engine.turns[masonTurnID("dedupe")] = fake.turn
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns["*"] = fake.chief.turn
+	f.engine.Turns[masonTurnID("resume")] = fake.turn
+	f.engine.Turns[masonTurnID("dedupe")] = fake.turn
 	// Most controller fixtures inspect the first turn. A failed follow-up
 	// keeps that unit implementing without starting another clean-turn cycle.
 	for _, unit := range []string{"resume", "dedupe"} {
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
 			fake.play[name] = failMasonTurn
-			f.engine.turns[name] = fake.turn
+			f.engine.Turns[name] = fake.turn
 		}
 	}
 	return f, fake
@@ -686,7 +683,8 @@ func plantImplementing(t *testing.T, f *shedFixture, repo *trace.Repository, str
 type stoppedAfter struct{ context.Context }
 
 func (stoppedAfter) Done() <-chan struct{} { return nil }
-func (stoppedAfter) Err() error            { return context.Canceled }
+
+func (stoppedAfter) Err() error { return context.Canceled }
 
 // A stop that arrives while a pass opens a unit's workspace ends the pass as
 // a cancellation, even when the workspace cannot be opened, and records no

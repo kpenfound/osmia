@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -41,64 +40,6 @@ func runChecks(t *testing.T, s *Service, repository *trace.Repository, stream co
 		must(t, err)
 	}
 }
-
-// checkOutcome is one scripted check result. Cancel, when set, is called
-// before the check returns, as a service stopping mid-run does. Block waits
-// for the check's context to end, as a run that never finishes does.
-type checkOutcome struct {
-	result CheckResult
-	err    error
-	cancel context.CancelFunc
-	block  bool
-}
-
-// fakeChecks lists links and returns its scripted outcomes in order,
-// repeating the last, recording the links of each run and the candidate file
-// it saw. It stands in for the real dagger check execution boundary,
-// leaving the real CLI's link discovery, exit codes and output unverified.
-type fakeChecks struct {
-	links    []string
-	listErr  error
-	outcomes []checkOutcome
-
-	mu    sync.Mutex
-	ran   [][]string
-	dirs  []string
-	files []string
-}
-
-func (f *fakeChecks) List(context.Context, string) ([]string, error) { return f.links, f.listErr }
-
-func (f *fakeChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	data, _ := os.ReadFile(filepath.Join(dir, masonWrote))
-	f.ran, f.dirs, f.files = append(f.ran, links), append(f.dirs, dir), append(f.files, string(data))
-	o := f.outcomes[min(len(f.ran), len(f.outcomes))-1]
-	if o.block {
-		<-ctx.Done()
-		return CheckResult{ExitCode: -1}, ctx.Err()
-	}
-	if o.cancel != nil {
-		o.cancel()
-		return CheckResult{ExitCode: -1}, ctx.Err()
-	}
-	return o.result, o.err
-}
-
-func (f *fakeChecks) runs() [][]string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.ran)
-}
-
-const passedReport = "== CHECKS ==  ✔ 2 passed\n✔ dag://go/packages/tests/test 2.0s OK\n✔ dag://release/version-round-trip 1.0s OK\n"
-
-func failedReport(link string) string {
-	return fmt.Sprintf("== TRACE ==  ✘ FAILED\n\n== CHECKS ==  ✘ 1 failed\n✘ %s 1.0s ERROR\n    ✘ TestBuilt FAIL\n        built_test.go:9: wrong chunk\n", link)
-}
-
-func passing() []checkOutcome { return []checkOutcome{{result: CheckResult{Output: passedReport}}} }
 
 // newChecksFixture builds a workstream whose unit resume is checking, with
 // checks as the service's check runner.
@@ -163,7 +104,7 @@ func reviewTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stre
 
 func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{outcomes: passing()}
+	checks := &fakeChecks{Outcomes: passing()}
 	f, stream, repository := newChecksFixture(t, "checks-pass", checks)
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
@@ -176,10 +117,10 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	// The boost is off: every check runs on the exact candidate, in an
 	// export removed afterwards, and nothing is asked of Jev.
-	if ran := checks.runs(); len(ran) != 1 || ran[0] != nil || checks.files[0] != "package trace\n" {
-		t.Fatalf("checks ran %q on %q", ran, checks.files)
+	if ran := checks.Runs(); len(ran) != 1 || ran[0] != nil || checks.Files[0] != "package trace\n" {
+		t.Fatalf("checks ran %q on %q", ran, checks.Files)
 	}
-	if _, err := os.Stat(checks.dirs[0]); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(checks.Dirs[0]); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("check export was kept: %v", err)
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -210,7 +151,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		"dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestBuilt",
 		"dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestChunks",
 	}
-	checks := &fakeChecks{links: links, outcomes: passing()}
+	checks := &fakeChecks{Links: links, Outcomes: passing()}
 	f, stream, repository := newChecksFixture(t, "checks-jev", checks)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.55), "check-2": jevtest.Noul(0.45), "check-3": jevtest.Noul(0.02)}}}}}
@@ -220,7 +161,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("unit is %s, want reviewing", got)
 	}
 	selected := []string{links[2], links[3]}
-	if ran := checks.runs(); len(ran) != 1 || !slices.Equal(ran[0], selected) {
+	if ran := checks.Runs(); len(ran) != 1 || !slices.Equal(ran[0], selected) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
@@ -268,15 +209,15 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 		reason string
 		asked  bool
 	}{
-		{"rate limited", &fakeChecks{links: []string{link, "dag+check://release/version"}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, string(jev.ReasonRateLimited), true},
-		{"no check likely", &fakeChecks{links: []string{link, "dag+check://release/version"}}, jevtest.Result{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1), "check-1": jevtest.Noul(0.05)}}}, string(jev.ReasonDeclined), true},
+		{"rate limited", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, string(jev.ReasonRateLimited), true},
+		{"no check likely", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1), "check-1": jevtest.Noul(0.05)}}}, string(jev.ReasonDeclined), true},
 		{"no checks", &fakeChecks{}, jevtest.Result{}, selectionNoChecks, false},
-		{"unlisted", &fakeChecks{listErr: errors.New("engine unreachable")}, jevtest.Result{}, selectionUnlisted, false},
-		{"too many checks", &fakeChecks{links: many}, jevtest.Result{}, selectionTooMany, false},
+		{"unlisted", &fakeChecks{ListErr: errors.New("engine unreachable")}, jevtest.Result{}, selectionUnlisted, false},
+		{"too many checks", &fakeChecks{Links: many}, jevtest.Result{}, selectionTooMany, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			c.checks.outcomes = passing()
+			c.checks.Outcomes = passing()
 			f, stream, repository := newChecksFixture(t, "fallback", c.checks)
 			p := &jevtest.Provider{Results: []jevtest.Result{c.result}}
 			boostJev(f.s, p)
@@ -285,14 +226,14 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 				t.Fatalf("unit is %s, want reviewing", got)
 			}
 			run := onlyRun(t, repository, stream)
-			if ran := c.checks.runs(); len(ran) != 1 || ran[0] != nil || run.Selection.Mode != selectionFull || run.Selection.Reason != c.reason {
+			if ran := c.checks.Runs(); len(ran) != 1 || ran[0] != nil || run.Selection.Mode != selectionFull || run.Selection.Reason != c.reason {
 				t.Fatalf("checks ran %q with selection %+v, want every check for %s", ran, run.Selection, c.reason)
 			}
-			if c.checks.listErr != nil {
+			if c.checks.ListErr != nil {
 				if run.Selection.Listed != nil {
 					t.Fatalf("failed listing has a total: %+v", run.Selection)
 				}
-			} else if run.Selection.Listed == nil || *run.Selection.Listed != len(c.checks.links) {
+			} else if run.Selection.Listed == nil || *run.Selection.Listed != len(c.checks.Links) {
 				t.Fatalf("fallback lost listed total: %+v", run.Selection)
 			}
 			if asked := len(p.Requests()) > 0; asked != c.asked {
@@ -306,7 +247,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	t.Parallel()
 	failing := "dag://go/packages/tests/test?go-package=internal/trace"
 	rawOutput := failedReport(failing) + "✔ dag://passing 1s OK\n" + strings.Repeat("    passing detail\n", 5000) + "RUN LOCALLY\n" + strings.Repeat("rerun command ", 10000)
-	checks := &fakeChecks{outcomes: []checkOutcome{{result: CheckResult{ExitCode: 1, Output: rawOutput}}, {result: CheckResult{Output: passedReport}}}}
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Result: CheckResult{ExitCode: 1, Output: rawOutput}}, {Result: CheckResult{Output: passedReport}}}}
 	f, stream, repository := newChecksFixture(t, "checks-fail", checks)
 	failed := currentReport(t, repository, stream, "resume")
 	runChecks(t, f.s, repository, stream)
@@ -358,7 +299,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	runs, err := checkRuns(repository, stream)
 	must(t, err)
 	revised := currentReport(t, repository, stream, "resume")
-	if len(runs) != 2 || runs[1].Run != 2 || runs[1].Status != ChecksPassed || runs[1].Candidate != revised.Candidate || revised.Candidate == failed.Candidate || checks.files[1] != "package trace\n\n// Fixed.\n" {
+	if len(runs) != 2 || runs[1].Run != 2 || runs[1].Status != ChecksPassed || runs[1].Candidate != revised.Candidate || revised.Candidate == failed.Candidate || checks.Files[1] != "package trace\n\n// Fixed.\n" {
 		t.Fatalf("check runs %+v", runs)
 	}
 }
@@ -366,7 +307,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 func TestRepeatedCheckFailuresContestTheUnit(t *testing.T) {
 	t.Parallel()
 	failing := "dag://go/packages/tests/test?go-package=internal/trace"
-	checks := &fakeChecks{outcomes: []checkOutcome{{result: CheckResult{ExitCode: 1, Output: failedReport(failing)}}}}
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Result: CheckResult{ExitCode: 1, Output: failedReport(failing)}}}}
 	f, stream, repository := newChecksFixture(t, "checks-contest", checks)
 	f.s.cfg.Shed.MaxBounces = 1
 	runChecks(t, f.s, repository, stream)
@@ -393,14 +334,14 @@ func TestRepeatedCheckFailuresContestTheUnit(t *testing.T) {
 	if !strings.Contains(req.Prompt, "Check run 1 failed") || !strings.Contains(req.Prompt, "Failed: "+failing) || !strings.Contains(req.Prompt, "known flake") {
 		t.Fatalf("review prompt:\n%s", req.Prompt)
 	}
-	if ran := checks.runs(); len(ran) != 1 {
+	if ran := checks.Runs(); len(ran) != 1 {
 		t.Fatalf("the ruling ran the checks again: %q", ran)
 	}
 }
 
 func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{outcomes: []checkOutcome{{err: errors.New("engine unreachable")}, {result: CheckResult{ExitCode: 1, Output: "Error: no checks matched\n"}}, {result: CheckResult{Output: passedReport}}}}
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Err: errors.New("engine unreachable")}, {Result: CheckResult{ExitCode: 1, Output: "Error: no checks matched\n"}}, {Result: CheckResult{Output: passedReport}}}}
 	f, stream, repository := newChecksFixture(t, "checks-incomplete", checks)
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitChecking {
@@ -426,13 +367,13 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 
 	// The checks wait before they run again.
 	runChecks(t, f.s, repository, stream)
-	if ran := checks.runs(); len(ran) != 1 {
+	if ran := checks.Runs(); len(ran) != 1 {
 		t.Fatalf("checks ran again at once: %q", ran)
 	}
 	advance := func() {
-		f.clock.mu.Lock()
-		f.clock.now = f.clock.now.Add(checkRetryDelay + time.Minute)
-		f.clock.mu.Unlock()
+		f.clock.Mu.Lock()
+		f.clock.At = f.clock.At.Add(checkRetryDelay + time.Minute)
+		f.clock.Mu.Unlock()
 	}
 	// A run that exits without reporting a failed check did not complete.
 	advance()
@@ -451,7 +392,7 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 
 func TestChecksOutlastingTheirTimeoutAreIncomplete(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{outcomes: []checkOutcome{{block: true}}}
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Block: true}}}
 	f, stream, repository := newChecksFixture(t, "checks-timeout", checks)
 	f.s.cfg.Project.ChecksTimeout = "50ms"
 	runChecks(t, f.s, repository, stream)
@@ -464,7 +405,7 @@ func TestChecksOutlastingTheirTimeoutAreIncomplete(t *testing.T) {
 func TestStoppedChecksRunAgain(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
-	checks := &fakeChecks{outcomes: []checkOutcome{{cancel: cancel}, {result: CheckResult{Output: passedReport}}}}
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Cancel: cancel}, {Result: CheckResult{Output: passedReport}}}}
 	f, stream, repository := newChecksFixture(t, "checks-stopped", checks)
 	c := &checkers{masons: newMasonController(f.s, repository)}
 	must(t, c.Pass(context.Background()))
@@ -485,7 +426,7 @@ func TestStoppedChecksRunAgain(t *testing.T) {
 
 func TestChecksOfAReplacedCandidateDoNotRun(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{outcomes: passing()}
+	checks := &fakeChecks{Outcomes: passing()}
 	f, stream, repository := newChecksFixture(t, "checks-superseded", checks)
 	c := &checkers{masons: newMasonController(f.s, repository)}
 	must(t, c.Pass(context.Background()))
@@ -495,14 +436,14 @@ func TestChecksOfAReplacedCandidateDoNotRun(t *testing.T) {
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject("resume"), From: UnitChecking, To: UnitImplementing, Reason: "returned to its mason"}})
 	must(t, err)
 	runChecks(t, f.s, repository, stream)
-	if run := onlyRun(t, repository, stream); run.Status != ChecksSuperseded || len(checks.runs()) != 0 {
-		t.Fatalf("check run %+v after %d runs", run, len(checks.runs()))
+	if run := onlyRun(t, repository, stream); run.Status != ChecksSuperseded || len(checks.Runs()) != 0 {
+		t.Fatalf("check run %+v after %d runs", run, len(checks.Runs()))
 	}
 }
 
 func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{outcomes: passing()}
+	checks := &fakeChecks{Outcomes: passing()}
 	f, stream, repository := newChecksFixture(t, "checks-recheck", checks)
 	runChecks(t, f.s, repository, stream)
 	// The recorded run no longer matches the unit's candidate.
@@ -527,8 +468,8 @@ func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 		t.Fatalf("a review turn was queued without a check run: %v", err)
 	}
 	runChecks(t, f.s, repository, stream)
-	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing || len(checks.runs()) != 2 {
-		t.Fatalf("unit is %s after %d check runs", got, len(checks.runs()))
+	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing || len(checks.Runs()) != 2 {
+		t.Fatalf("unit is %s after %d check runs", got, len(checks.Runs()))
 	}
 }
 
@@ -539,15 +480,15 @@ func TestIncompleteChecksAreBoundedAndContestTheUnit(t *testing.T) {
 	t.Parallel()
 	var outcomes []checkOutcome
 	for range maxIncompleteChecks {
-		outcomes = append(outcomes, checkOutcome{err: errors.New("engine unreachable")})
+		outcomes = append(outcomes, checkOutcome{Err: errors.New("engine unreachable")})
 	}
-	checks := &fakeChecks{outcomes: append(outcomes, checkOutcome{result: CheckResult{Output: passedReport}})}
+	checks := &fakeChecks{Outcomes: append(outcomes, checkOutcome{Result: CheckResult{Output: passedReport}})}
 	f, stream, repository := newChecksFixture(t, "checks-bounded", checks)
 	ctx := context.Background()
 	advance := func() {
-		f.clock.mu.Lock()
-		f.clock.now = f.clock.now.Add(checkRetryDelay + time.Minute)
-		f.clock.mu.Unlock()
+		f.clock.Mu.Lock()
+		f.clock.At = f.clock.At.Add(checkRetryDelay + time.Minute)
+		f.clock.Mu.Unlock()
 	}
 	for range maxIncompleteChecks {
 		runChecks(t, f.s, repository, stream)
@@ -557,7 +498,7 @@ func TestIncompleteChecksAreBoundedAndContestTheUnit(t *testing.T) {
 	if got := unitState(t, repository, stream, "resume"); got != UnitContested {
 		t.Fatalf("unit is %s after %d incomplete runs", got, maxIncompleteChecks)
 	}
-	if ran := checks.runs(); len(ran) != maxIncompleteChecks {
+	if ran := checks.Runs(); len(ran) != maxIncompleteChecks {
 		t.Fatalf("checks ran %d times", len(ran))
 	}
 	contest := transitionByID(t, repository, stream, checkDocumentID("resume", maxIncompleteChecks)+"-contested")
@@ -566,7 +507,7 @@ func TestIncompleteChecksAreBoundedAndContestTheUnit(t *testing.T) {
 	}
 	advance()
 	runChecks(t, f.s, repository, stream)
-	if ran := checks.runs(); len(ran) != maxIncompleteChecks {
+	if ran := checks.Runs(); len(ran) != maxIncompleteChecks {
 		t.Fatalf("a contested unit's checks ran again: %d runs", len(ran))
 	}
 

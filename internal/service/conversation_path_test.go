@@ -202,20 +202,20 @@ func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T)
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "conversation-order-")
-	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	runChief(&opts, cfg, turns)
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	opts.conversationTicks = make(chan time.Time)
 	s, client := start(t, opts)
 	var release sync.Once
-	t.Cleanup(func() { release.Do(func() { close(turns.hold) }) })
+	t.Cleanup(func() { release.Do(func() { close(turns.Hold) }) })
 	repo := s.sole().repository
 	profile, err := cfg.NamedProfile("default")
 	must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_background", Project: cfg.Project.ID, Workstream: stream, At: s.now(), Actor: serviceActor, Cause: "event"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_background", Profile: profile, Prompt: "Background"})
 	must(t, err)
 	select {
-	case <-turns.entered:
+	case <-turns.Entered:
 	case <-time.After(demoTimeout):
 		t.Fatal("enqueue did not wake path")
 	}
@@ -232,7 +232,7 @@ func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T)
 	if calls := turns.Calls(); len(calls) != 1 || calls[0].Prompt != "Background" {
 		t.Fatalf("owner jumped queue: %+v", calls)
 	}
-	release.Do(func() { close(turns.hold) })
+	release.Do(func() { close(turns.Hold) })
 	awaitConversation(t, client, func(r ConversationResponse) bool { return len(r.Entries) == 2 && r.Entries[0].State == TurnDone })
 	if calls := turns.Calls(); len(calls) != 2 || calls[1].Prompt != "Owner" {
 		t.Fatalf("turn order: %+v", calls)
@@ -248,7 +248,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 		t.Run(map[bool]string{false: "retry", true: "restart"}[restart], func(t *testing.T) {
 			ctx := context.Background()
 			opts, cfg := conversationFixture(t, "conversation-hook-")
-			clock := &demoClock{now: demoStart}
+			clock := &demoClock{At: demoStart}
 			opts.Reconciliation.Now = clock.Now
 			opts.Reconciliation.RetryDelay = time.Hour
 			var calls, relays atomic.Int32
@@ -617,9 +617,9 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Response.Result.FinalResponse != result.FinalResponse || len(th.Turns[0].Attempts) != 1 {
 				t.Fatalf("shared recovery: %+v", th)
 			}
-			f.engine.mu.Lock()
-			calls := len(f.engine.runs)
-			f.engine.mu.Unlock()
+			f.engine.Mu.Lock()
+			calls := len(f.engine.Runs)
+			f.engine.Mu.Unlock()
 			if calls != 0 {
 				t.Fatalf("captured shared reply made %d backend calls", calls)
 			}

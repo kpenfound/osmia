@@ -125,7 +125,7 @@ func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *te
 // ActivityStallThreshold.
 func TestHealthReportsBackendAvailabilityFromTheActivityRecord(t *testing.T) {
 	t.Parallel()
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts := fixture(t)
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)
@@ -194,7 +194,7 @@ func TestHealthReportsBackendAvailabilityFromTheActivityRecord(t *testing.T) {
 // no progress report yet says nothing about whether the operation is stuck.
 func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.T) {
 	t.Parallel()
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts := fixture(t)
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)
@@ -230,7 +230,7 @@ func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.
 // is expected to keep moving, not to a turn or a check that is merely busy.
 func TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks(t *testing.T) {
 	t.Parallel()
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts := fixture(t)
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)
@@ -260,7 +260,7 @@ func TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks(t *testing.T) {
 // caller is still retrying under a fresh key is unaffected.
 func TestHealthStopsDegradingOnAFailureNothingRetries(t *testing.T) {
 	t.Parallel()
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts := fixture(t)
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)

@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -40,40 +41,15 @@ type twoProjectFixture struct {
 
 func newTwoProjectFixture(t *testing.T) *twoProjectFixture {
 	t.Helper()
-	ctx := context.Background()
-	home, err := os.MkdirTemp("", "mp-")
-	must(t, err)
-	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	root := opts.Config.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	listed := strings.Replace(string(top), fmt.Sprintf("active_projects = [%q]", project), fmt.Sprintf("active_projects = [%q, %q]", project, otherProject), 1)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(listed+"[capacity]\nmasons = 1\n"), 0600))
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(otherProject)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(otherProject), "config.toml"), []byte(`version = 1
-upstream = "upstream/other"
-fork = "owner/other"
-clone = "`+filepath.Join(home, "other")+`"
-`), 0600))
+	data := fixturekit.TwoProjects(t)
+	opts := testOptions(data.Config)
 	opts.Workstreams = nil
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	f := &twoProjectFixture{opts: opts, cfg: cfg, clock: &demoClock{now: demoStart}, live: map[config.ProjectID]*trace.Repository{},
-		streams: map[config.ProjectID]config.WorkstreamID{project: stream, otherProject: otherStream}}
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	for _, p := range cfg.Projects {
-		must(t, os.MkdirAll(p.Clone, 0700))
-		repo, err := trace.Create(ctx, cfg.Root, p, f.clock.Now(), owner)
-		must(t, err)
-		ws := f.streams[p.ID]
-		must(t, repo.CreateWorkstream(ctx, ws, f.clock.Now(), owner))
-		must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: p.ID, Workstream: ws, At: f.clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}))
-		f.queue(t, repo, p.ID, "first")
-		must(t, repo.Close())
-	}
+	cfg := data.Loaded
+	root := opts.Config.Root
+	f := &twoProjectFixture{opts: opts, cfg: cfg, clock: data.Clock, streams: data.Streams, live: map[config.ProjectID]*trace.Repository{}}
+
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Done"}}
-	f.turns = &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply, reply, reply, reply)}, hooks: map[string]func(context.Context){}}
+	f.turns = &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply, reply, reply, reply)}, Hooks: map[string]func(context.Context){}}
 	f.opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		if cfg.Project.ID != r.Project() {
 			return nil, fmt.Errorf("project %s bound with the configuration of %q", r.Project(), cfg.Project.ID)
@@ -107,15 +83,15 @@ func turn(id config.ProjectID, name string) string { return string(id[len(id)-4:
 // context to end.
 func (f *twoProjectFixture) block(id config.ProjectID, name string) (entered, release chan struct{}) {
 	entered, release = make(chan struct{}), make(chan struct{})
-	f.turns.mu.Lock()
-	f.turns.hooks[turn(id, name)] = func(ctx context.Context) {
+	f.turns.Mu.Lock()
+	f.turns.Hooks[turn(id, name)] = func(ctx context.Context) {
 		close(entered)
 		select {
 		case <-release:
 		case <-ctx.Done():
 		}
 	}
-	f.turns.mu.Unlock()
+	f.turns.Mu.Unlock()
 	return entered, release
 }
 

@@ -33,9 +33,9 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons)
 	f, masons := newMasonFixture(t, 1, drafted)
 	masons.play[masonTurnID("resume")] = reportDone("Built")
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {

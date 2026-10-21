@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/agent"
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
@@ -32,8 +33,8 @@ func (fakeSessionEngine) Enforcer(coreadapter.ExecutionSettings) (agent.Enforcer
 type fakeSessionChecks struct{}
 
 func (fakeSessionChecks) List(context.Context, string) ([]string, error) { return nil, nil }
-func (fakeSessionChecks) Check(context.Context, string, []string) (service.CheckResult, error) {
-	return service.CheckResult{ExitCode: 0, Output: "CHECKS all passed\n"}, nil
+func (fakeSessionChecks) Check(context.Context, string, []string) (wire.CheckResult, error) {
+	return wire.CheckResult{ExitCode: 0, Output: "CHECKS all passed\n"}, nil
 }
 
 // gitIn runs git against home's isolated configuration, the same way the
@@ -79,7 +80,7 @@ func sessionFixtureWithChecks(t *testing.T, checks service.ReviewChecks) (string
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 	return root, added.Project.ID, bare
 }
@@ -99,7 +100,7 @@ func TestSessionCommands(t *testing.T) {
 	if code != 4 || out != "" || !strings.Contains(diag, "validation") || !strings.Contains(diag, `profile "nonexistent"`) {
 		t.Fatalf("unknown profile: %d %s %s", code, out, diag)
 	}
-	var opened service.SessionResponse
+	var opened wire.SessionResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "session", "open", string(project), "--profile", "default", "--title", "exploring", "--json")), &opened))
 	session := opened.Session
 	if session.Project != project || session.Profile != "default" || session.Title != "exploring" || session.State != "idle" || session.Branch == "" || session.Base == "" || session.Workstream == "" {
@@ -116,7 +117,7 @@ func TestSessionCommands(t *testing.T) {
 	// commit it onto the session branch.
 	worktree := sessionWorktree(root, project, session.Workstream)
 	must(t, os.WriteFile(filepath.Join(worktree, "notes.md"), []byte("# Notes\n"), 0600))
-	var committed service.SessionCommitResponse
+	var committed wire.SessionCommitResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "session", "commit", string(session.Workstream), "Add notes", "--json")), &committed))
 	if committed.Commit == "" || committed.Commit == session.Base {
 		t.Fatalf("commit response: %+v", committed)
@@ -133,14 +134,14 @@ func TestSessionCommands(t *testing.T) {
 	if !strings.Contains(checkText, "Check run 1 on commit "+committed.Commit) || !strings.Contains(checkText, "passed") || !strings.Contains(checkText, "full check") {
 		t.Fatalf("check text output:\n%s", checkText)
 	}
-	var checked service.SessionCheckRun
+	var checked wire.SessionCheckRun
 	must(t, json.Unmarshal([]byte(successful(t, root, "session", "check", string(session.Workstream), "--json")), &checked))
 	if checked.Run != 2 || checked.Commit != committed.Commit || checked.Kind != "full" || checked.Status != "passed" || checked.ExitCode != 0 {
 		t.Fatalf("check JSON output: %+v", checked)
 	}
 
 	// Push lands the session branch on the local bare remote.
-	var pushed service.SessionPushResponse
+	var pushed wire.SessionPushResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "session", "push", string(session.Workstream), "--json")), &pushed))
 	if pushed.Branch != session.Branch || pushed.Commit != committed.Commit {
 		t.Fatalf("push response: %+v", pushed)
@@ -151,7 +152,7 @@ func TestSessionCommands(t *testing.T) {
 	}
 
 	// End releases the worktree; the session is listed as ended.
-	var ended service.SessionResponse
+	var ended wire.SessionResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "session", "end", string(session.Workstream), "--json")), &ended))
 	if ended.Session.State != "ended" {
 		t.Fatalf("ended session: %+v", ended.Session)

@@ -479,25 +479,25 @@ func (s *Service) designMemberTrace(raw string) (config.ProjectID, config.Workst
 	}
 	id, err := repo.CrossRepoWorkgroupOf(stream)
 	if err != nil {
-		return "", "", nil, &APIError{Internal, err.Error()}
+		return "", "", nil, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if id == "" {
 		return project, stream, repo, nil
 	}
 	_, g, _, err := repo.CrossRepoProjectSpec(id)
 	if err != nil {
-		return "", "", nil, &APIError{Internal, err.Error()}
+		return "", "", nil, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if g.Conversation != nil && g.Conversation.Workstream == stream && len(g.Members) > 1 {
 		if _, err := s.crossRepoMemberRepos(context.Background(), g); err != nil {
-			return "", "", nil, &APIError{Conflict, "the workgroup is still joining its members"}
+			return "", "", nil, &APIError{Code: Conflict, Message: "the workgroup is still joining its members"}
 		}
 		leader, err := s.firstLiveWorkgroupMember(g)
 		if err != nil {
-			return "", "", nil, &APIError{Conflict, err.Error()}
+			return "", "", nil, &APIError{Code: Conflict, Message: err.Error()}
 		}
 		if leader == "" {
-			return "", "", nil, &APIError{Conflict, "the workgroup has no live member"}
+			return "", "", nil, &APIError{Code: Conflict, Message: "the workgroup has no live member"}
 		}
 		return s.conversationTrace(string(leader))
 	}

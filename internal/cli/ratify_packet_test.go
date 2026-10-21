@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -98,7 +99,7 @@ func TestPacketReadBindsCLIRatificationAcrossOtherMemberRefresh(t *testing.T) {
 		}
 	}
 	oldCommand := packetRatifyCommand(t, first)
-	var old service.PacketResponse
+	var old wire.PacketResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "packet", stream, "--json")), &old))
 	if old.ProjectSpecRevision != 1 || old.Packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) {
 		t.Fatalf("first packet: %+v", old)
@@ -111,7 +112,7 @@ func TestPacketReadBindsCLIRatificationAcrossOtherMemberRefresh(t *testing.T) {
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
 	deadline := time.Now().Add(30 * time.Second)
-	var refreshed service.PacketResponse
+	var refreshed wire.PacketResponse
 	for {
 		refreshed, err = c.Packet(ctx, stream)
 		must(t, err)

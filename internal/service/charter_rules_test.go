@@ -50,7 +50,7 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	home, err := os.MkdirTemp("", "cr-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	f := &charterFixture{opts: fixtureAt(t, home), clock: &fixedClock{now: demoStart}, ticks: make(chan time.Time)}
+	f := &charterFixture{opts: fixtureAt(t, home), clock: &fixedClock{At: demoStart}, ticks: make(chan time.Time)}
 	f.opts.Reconciliation.Now, f.opts.Reconciliation.Ticks = f.clock.Now, f.ticks
 	f.cfg, err = config.Load(f.opts.Config)
 	must(t, err)

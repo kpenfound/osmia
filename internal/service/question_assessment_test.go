@@ -14,13 +14,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newAssessingFixture is a mason fixture whose resume mason asks question 1.
@@ -38,9 +37,9 @@ func newAssessingFixture(t *testing.T, p *jevtest.Provider, faults *faults) (*sh
 		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
 		must(t, errors.Join(err, configFile.Close()))
 	})
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = fake.asking(faults, "", "1")
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = fake.asking(faults, "", "1")
+	f.engine.Mu.Unlock()
 	return f, fake
 }
 
@@ -132,8 +131,8 @@ func TestChiefQuestionSignals(t *testing.T) {
 	var mu sync.Mutex
 	failing := ""
 	prompts := map[string][]string{}
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, id := range []string{"1", "2"} {
 			if !strings.Contains(req.Prompt, "Question "+id+" is open") {
 				continue
@@ -151,7 +150,7 @@ func TestChiefQuestionSignals(t *testing.T) {
 		}
 		return fake.chief.turn(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "assessed", validPlan)
 	f.awaitEscalated(t, stream, "1")
 

@@ -9,7 +9,6 @@ import (
 	"io"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
@@ -25,39 +24,6 @@ var charterActor = trace.Actor{Kind: "service", ID: "charter"}
 // the owner's concurrent edit took the revision a ratified rule was written
 // against.
 const charterWriteAttempts = 3
-
-// CharterDecisionRequest is the owner's decision on a charter proposal:
-// ratify or decline, with an optional note.
-type CharterDecisionRequest struct {
-	Decision string `json:"decision"`
-	Note     string `json:"note,omitempty"`
-}
-
-// CharterProposalView is one charter proposal. Number is the number the rule
-// would take when it was proposed, and the number it took once State is
-// chartered; Charter is then the charter.md revision that records it. Ruling
-// and RulingRevision name the owner's ruling it comes from.
-type CharterProposalView struct {
-	Workstream     config.WorkstreamID `json:"workstream"`
-	Question       string              `json:"question"`
-	State          string              `json:"state"`
-	Rule           string              `json:"rule"`
-	Number         int                 `json:"number"`
-	Ruling         string              `json:"ruling"`
-	RulingRevision int                 `json:"ruling_revision"`
-	OwnerResponse  string              `json:"owner_response"`
-	ProposedAt     time.Time           `json:"proposed_at"`
-	Decision       string              `json:"decision,omitempty"`
-	Note           string              `json:"note,omitempty"`
-	Charter        int                 `json:"charter,omitempty"`
-	Detail         string              `json:"detail,omitempty"`
-}
-
-// CharterProposalsResponse lists the charter proposals waiting for the
-// owner's decision, oldest first.
-type CharterProposalsResponse struct {
-	Proposals []CharterProposalView `json:"proposals"`
-}
 
 func charterProposalView(p trace.CharterProposalState, detail string) CharterProposalView {
 	return CharterProposalView{Workstream: p.Workstream, Question: p.Proposal.Question, State: p.State.Value, Rule: p.Proposal.Rule, Number: p.Proposal.Number,
@@ -90,7 +56,7 @@ func (s *Service) charterProposals() (CharterProposalsResponse, *APIError) {
 		if !cfg.Active(active.id) {
 			continue
 		}
-		failed := &APIError{Internal, fmt.Sprintf("cannot read the charter proposals of project %s; check the trace repository", active.id)}
+		failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter proposals of project %s; check the trace repository", active.id)}
 		proposals, err := active.repository.CharterProposals()
 		if err != nil {
 			return CharterProposalsResponse{}, failed
@@ -120,10 +86,10 @@ func (s *Service) charterProposal(raw, question string) (CharterProposalView, *A
 	}
 	p, found, err := findCharterProposal(repository, stream, question)
 	if err != nil {
-		return CharterProposalView{}, &APIError{Internal, fmt.Sprintf("cannot read the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
+		return CharterProposalView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
 	}
 	if !found {
-		return CharterProposalView{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no charter proposal for question %s", stream, question)}
+		return CharterProposalView{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no charter proposal for question %s", stream, question)}
 	}
 	return charterProposalView(p, ""), nil
 }
@@ -145,30 +111,30 @@ func (s *Service) decideCharter(ctx context.Context, raw, question string, req C
 // records nothing; deciding it the other way is refused. Proposals of
 // abandoned workstreams take no decision.
 func (s *Service) recordCharterDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string) (CharterProposalView, *APIError) {
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the decision on the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if decision != trace.CharterRatify && decision != trace.CharterDecline {
-		return CharterProposalView{}, &APIError{Validation, "a charter decision is ratify or decline"}
+		return CharterProposalView{}, &APIError{Code: Validation, Message: "a charter decision is ratify or decline"}
 	}
 	gone, err := abandoned(repository, stream)
 	if err != nil {
 		return CharterProposalView{}, failed
 	}
 	if gone {
-		return CharterProposalView{}, &APIError{Conflict, fmt.Sprintf("workstream %s is abandoned and its charter proposals take no decision", stream)}
+		return CharterProposalView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is abandoned and its charter proposals take no decision", stream)}
 	}
 	p, found, err := findCharterProposal(repository, stream, question)
 	if err != nil {
 		return CharterProposalView{}, failed
 	}
 	if !found {
-		return CharterProposalView{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no charter proposal for question %s", stream, question)}
+		return CharterProposalView{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no charter proposal for question %s", stream, question)}
 	}
 	if p.State.Value != trace.CharterProposed {
 		if p.Proposal.Decision == decision {
 			return charterProposalView(p, fmt.Sprintf("the owner's decision to %s the charter proposal of question %s is already recorded", decision, question)), nil
 		}
-		return CharterProposalView{}, &APIError{Conflict, fmt.Sprintf("the charter proposal of question %s is already decided: %s", question, featureState(p.Proposal.Decision))}
+		return CharterProposalView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the charter proposal of question %s is already decided: %s", question, featureState(p.Proposal.Decision))}
 	}
 	next := p.Proposal
 	next.Decision, next.Note = decision, strings.TrimSpace(req.Note)
@@ -197,7 +163,7 @@ func (s *Service) recordCharterDecision(ctx context.Context, project config.Proj
 	}
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return CharterProposalView{}, &APIError{Conflict, fmt.Sprintf("the charter proposal of question %s changed while the decision was recorded; read it again with osmia charter and retry", question)}
+			return CharterProposalView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the charter proposal of question %s changed while the decision was recorded; read it again with osmia charter and retry", question)}
 		}
 		return CharterProposalView{}, failed
 	}

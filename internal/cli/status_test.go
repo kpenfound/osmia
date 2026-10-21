@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -22,9 +23,9 @@ import (
 
 func TestStatusShowsLiveAgentFactsBelowNarrative(t *testing.T) {
 	started := time.Date(2026, 9, 16, 10, 0, 0, 123000000, time.UTC)
-	st := service.WorkstreamStatus{Workstream: stream, Project: project,
-		Status: &service.StatusView{Goal: "Ship uploads.", Agents: []string{"The mason is building uploads."}, UpdatedAt: started, Revision: 1},
-		Agents: []service.AgentStatus{{Role: "mason", Unit: "resume", State: "waiting", StartedAt: started, Elapsed: 7, Profile: "mason-default", Attempt: 2, Path: "replay", QuestionID: "3"}}}
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project,
+		Status: &wire.StatusView{Goal: "Ship uploads.", Agents: []string{"The mason is building uploads."}, UpdatedAt: started, Revision: 1},
+		Agents: []wire.AgentStatus{{Role: "mason", Unit: "resume", State: "waiting", StartedAt: started, Elapsed: 7, Profile: "mason-default", Attempt: 2, Path: "replay", QuestionID: "3"}}}
 	var out bytes.Buffer
 	showStatus(&out, st)
 	want := "Agents:\n  The mason is building uploads.\nLive agents:\n  mason unit=resume state=waiting started_at=2026-09-16T10:00:00.123Z elapsed=7s profile=mason-default attempt=2 path=replay question_id=3\nUpdated:"
@@ -112,10 +113,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 
 	var all struct {
-		Health        service.HealthResponse
-		Configuration service.ConfigResponse
-		Runtime       service.RuntimeResponse
-		Status        service.StatusResponse
+		Health        wire.HealthResponse
+		Configuration wire.ConfigResponse
+		Runtime       wire.RuntimeResponse
+		Status        wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	cfg, err := config.Load(opts.Config)
@@ -124,26 +125,26 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Workgroups []trace.Workgroup `json:"workgroups"`
 	}
 	must(t, json.Unmarshal([]byte(latestDocument(t, projectDatabase(t, root, cfg.Project.ID), "documents.jsonl", trace.WorkgroupsPath).Content), &recorded))
-	workgroup := func(w config.WorkstreamID) *service.WorkgroupView {
+	workgroup := func(w config.WorkstreamID) *wire.WorkgroupView {
 		group, ok := trace.WorkgroupOf(recorded.Workgroups, w)
 		if !ok {
 			t.Fatalf("workstream %s has no recorded workgroup", w)
 		}
 		must(t, config.CheckWorkgroupIDs(group.ID))
-		return &service.WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}
+		return &wire.WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}
 	}
 	// Handed and not-yet-started workstreams are both planning; the CLI's
 	// text output retains their underlying recorded states.
 	handed := "handed"
-	full := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
+	full := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
-	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}, {Role: "architect", Waiting: []service.SlotWait{}}, {Role: "librarian", Waiting: []service.SlotWait{}}, {Role: "checks", Limit: 2, Waiting: []service.SlotWait{}}}}
+	none := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
+	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []wire.SlotWait{}}, {Role: "architect", Waiting: []wire.SlotWait{}}, {Role: "librarian", Waiting: []wire.SlotWait{}}, {Role: "checks", Limit: 2, Waiting: []wire.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
-	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Capacity: capacity, ProviderUsage: all.Status.ProviderUsage, Diagnostics: []service.Diagnostic{}, Workspaces: all.Status.Workspaces}) {
+	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Capacity: capacity, ProviderUsage: all.Status.ProviderUsage, Diagnostics: []wire.Diagnostic{}, Workspaces: all.Status.Workspaces}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}
 	if ws := all.Status.Workspaces; ws.Setting != "auto" || ws.Backend != "git" && ws.Backend != "jujutsu" || ws.Problem != "" {
@@ -161,7 +162,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		"Updated: 2026-09-16T10:00:00Z (revision 1)\n"; one != want {
 		t.Fatalf("status <workstream>:\n%s\nwant:\n%s", one, want)
 	}
-	var got service.WorkstreamStatus
+	var got wire.WorkstreamStatus
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &got))
 	if !reflect.DeepEqual(got, full) {
 		t.Fatalf("status <workstream> --json: %+v", got)
@@ -224,12 +225,12 @@ func TestStatusWithoutWorkstreams(t *testing.T) {
 // jujutsu finds no supported jj) and the jj found.
 func TestStatusTextShowsWorkspaces(t *testing.T) {
 	for _, c := range []struct {
-		ws   service.WorkspacesStatus
+		ws   wire.WorkspacesStatus
 		want string
 	}{
-		{service.WorkspacesStatus{Setting: "jujutsu", JJ: "0.44.0", Problem: "jj is too old"}, "Workspaces: setting=jujutsu new_workstreams=none jj=0.44.0\n"},
-		{service.WorkspacesStatus{Setting: "git", Backend: "git"}, "Workspaces: setting=git new_workstreams=git\n"},
-		{service.WorkspacesStatus{Setting: "auto", Backend: "jujutsu", JJ: "0.45.1"}, "Workspaces: setting=auto new_workstreams=jujutsu jj=0.45.1\n"},
+		{wire.WorkspacesStatus{Setting: "jujutsu", JJ: "0.44.0", Problem: "jj is too old"}, "Workspaces: setting=jujutsu new_workstreams=none jj=0.44.0\n"},
+		{wire.WorkspacesStatus{Setting: "git", Backend: "git"}, "Workspaces: setting=git new_workstreams=git\n"},
+		{wire.WorkspacesStatus{Setting: "auto", Backend: "jujutsu", JJ: "0.45.1"}, "Workspaces: setting=auto new_workstreams=jujutsu jj=0.45.1\n"},
 	} {
 		var out strings.Builder
 		showWorkspaces(&out, c.ws)
@@ -240,7 +241,7 @@ func TestStatusTextShowsWorkspaces(t *testing.T) {
 }
 
 func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
 		Goal: "Ship resumable uploads.", Note: "Work is starting.", Agents: []string{}, Revision: 3, UpdatedAt: written}}
 	var one strings.Builder
 	showStatus(&one, st)
@@ -250,7 +251,7 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
 	}
 	building := "building"
-	st.State, st.Units = &building, []service.UnitStatus{{Unit: "parser", State: "ready"}, {Unit: "validator", State: "planned"}}
+	st.State, st.Units = &building, []wire.UnitStatus{{Unit: "parser", State: "ready"}, {Unit: "validator", State: "planned"}}
 	one.Reset()
 	showStatus(&one, st)
 	if want := "Workstream: " + stream + " state=building open_questions=2 context_mode=file workspaces=git\n" +
@@ -261,13 +262,13 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	}
 	st.State, st.Units = nil, nil
 	var all strings.Builder
-	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}, Diagnostics: []service.Diagnostic{{Field: "workstreams", Code: service.Internal, Message: "cannot read"}}})
+	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{st}, Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
 	if want := "Workstreams:\n  " + stream + " state=not recorded open_questions=2 context_mode=file workspaces=git\n" +
 		"    Goal: Ship resumable uploads.\n    Attention: none\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
 	}
 	all.Reset()
-	showWorkstreams(&all, service.StatusResponse{Diagnostics: []service.Diagnostic{{Field: "workstreams", Code: service.Internal, Message: "cannot read"}}})
+	showWorkstreams(&all, wire.StatusResponse{Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
 	if want := "Workstreams:\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
 	}
@@ -276,8 +277,8 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 func TestStatusPrintsTheDailyBudget(t *testing.T) {
 	var out strings.Builder
 	showDailyBudget(&out, nil)
-	showDailyBudget(&out, &service.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "12.5", LimitUSD: "150.00"})
-	showDailyBudget(&out, &service.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "150", LimitUSD: "150.00", UnknownCosts: 2, LowerBound: true})
+	showDailyBudget(&out, &wire.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "12.5", LimitUSD: "150.00"})
+	showDailyBudget(&out, &wire.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "150", LimitUSD: "150.00", UnknownCosts: 2, LowerBound: true})
 	if want := "Daily budget: USD 12.5 of USD 150.00 spent on 2026-09-24\n" +
 		"Daily budget: USD 150 of USD 150.00 spent on 2026-09-24 (at least; 2 attempt(s) have unknown cost)\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
@@ -288,7 +289,7 @@ func TestStatusPrintsFailureStreaks(t *testing.T) {
 	var out strings.Builder
 	showFailureStreaks(&out, nil)
 	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	showFailureStreaks(&out, []service.FailureStreak{{Role: "mason", Profile: "default", Consecutive: 3, LastFailure: "the agent exited with code 1", LastAt: at}, {Role: "reviewer", Profile: "backup", Consecutive: 1, LastFailure: "timed out", LastAt: at.Add(time.Minute)}})
+	showFailureStreaks(&out, []wire.FailureStreak{{Role: "mason", Profile: "default", Consecutive: 3, LastFailure: "the agent exited with code 1", LastAt: at}, {Role: "reviewer", Profile: "backup", Consecutive: 1, LastFailure: "timed out", LastAt: at.Add(time.Minute)}})
 	if want := "Infrastructure failures: mason on profile default failed 3 time(s) in a row; last at 2026-09-24T12:00:00Z: the agent exited with code 1\n" +
 		"Infrastructure failures: reviewer on profile backup failed 1 time(s) in a row; last at 2026-09-24T12:01:00Z: timed out\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
@@ -296,10 +297,10 @@ func TestStatusPrintsFailureStreaks(t *testing.T) {
 }
 
 func TestStatusPrintsOwnerGates(t *testing.T) {
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Gates: []trace.OwnerGate{{Kind: "escalation", Reference: "12"}, {Kind: "contested", Reference: "upload-index"}}}
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Gates: []trace.OwnerGate{{Kind: "escalation", Reference: "12"}, {Kind: "contested", Reference: "upload-index"}}}
 	var one, all strings.Builder
 	showStatus(&one, st)
-	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}})
+	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{st}})
 	for _, pair := range [][2]string{{one.String(), "Gate: escalation 12\nGate: contested upload-index\n"}, {all.String(), "    Gate: escalation 12\n    Gate: contested upload-index\n"}} {
 		if !strings.Contains(pair[0], pair[1]) {
 			t.Fatalf("status lacks gates:\n%s", pair[0])
@@ -308,7 +309,7 @@ func TestStatusPrintsOwnerGates(t *testing.T) {
 }
 
 func TestStatusPrintsLatestUnitCard(t *testing.T) {
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []wire.UnitStatus{
 		{Unit: "parser", State: "reviewing", Card: &coreadapter.Card{Headline: "Parser is ready", Happened: "The parser accepts resumed chunks.", NeedsYou: "Review the candidate."}},
 		{Unit: "validator", State: "ready"},
 	}}
@@ -323,9 +324,9 @@ func TestStatusPrintsLatestUnitCard(t *testing.T) {
 
 func TestStatusPrintsWhyAReadyUnitWaits(t *testing.T) {
 	waits := "Waits for units in flight it is entangled with: parser (their footprints overlap)."
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []wire.UnitStatus{
 		{Unit: "parser", State: "implementing"},
-		{Unit: "validator", State: "ready", Reason: waits, Deferral: &service.UnitDispatch{Unit: "validator", Version: 1, Decision: service.DispatchDeferred, Reason: service.DeferEntangled,
+		{Unit: "validator", State: "ready", Reason: waits, Deferral: &wire.UnitDispatch{Unit: "validator", Version: 1, Decision: service.DispatchDeferred, Reason: service.DeferEntangled,
 			Blockers: []plan.StartBlocker{{Unit: "parser", Reason: plan.OverlapReason}}, Message: waits}},
 	}}
 	var out strings.Builder
@@ -336,8 +337,8 @@ func TestStatusPrintsWhyAReadyUnitWaits(t *testing.T) {
 }
 
 func TestStatusPrintsUnitLanding(t *testing.T) {
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
-		{Unit: "parser", State: "merged", Landing: &service.UnitLanding{Unit: "parser", Approval: "units/parser/review.json revision 2", Candidate: "c0ffee", Base: "ba5e", Criteria: []string{"spec#1", "spec#3"}, Branch: "osmia/feature", Commit: "1a4d3d"}},
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []wire.UnitStatus{
+		{Unit: "parser", State: "merged", Landing: &wire.UnitLanding{Unit: "parser", Approval: "units/parser/review.json revision 2", Candidate: "c0ffee", Base: "ba5e", Criteria: []string{"spec#1", "spec#3"}, Branch: "osmia/feature", Commit: "1a4d3d"}},
 		{Unit: "validator", State: "ready"},
 	}}
 	var out strings.Builder
@@ -350,10 +351,10 @@ func TestStatusPrintsUnitLanding(t *testing.T) {
 
 func TestStatusPrintsOverlapAdvisories(t *testing.T) {
 	warning := "Workstream w_00000000000000000000000000000002 of this project builds in subsystem internal: both sealed footprints cover internal.trace (seal 1 of this workstream, seal 1 of that one)."
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Advisories: []service.OverlapAdvisory{{Workstream: "w_00000000000000000000000000000002", Seal: 1, OtherSeal: 1, Subsystems: []string{"internal"}, Entities: []string{"internal.trace"}, Paths: []string{"internal/trace"}, Message: warning}}}
+	st := wire.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Advisories: []wire.OverlapAdvisory{{Workstream: "w_00000000000000000000000000000002", Seal: 1, OtherSeal: 1, Subsystems: []string{"internal"}, Entities: []string{"internal.trace"}, Paths: []string{"internal/trace"}, Message: warning}}}
 	var one, all strings.Builder
 	showStatus(&one, st)
-	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}})
+	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{st}})
 	for _, pair := range [][2]string{{one.String(), "\nOverlap: " + warning + "\n"}, {all.String(), "\n    Overlap: " + warning + "\n"}} {
 		if !strings.Contains(pair[0], pair[1]) {
 			t.Fatalf("status lacks the advisory:\n%s", pair[0])
@@ -386,19 +387,19 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 	if out := successful(t, root, "status", stream); !strings.Contains(out, "\nDrift: rebase 1 skipped at 2026-09-16T10:00:00Z\n  Reason: "+reason+"\n") {
 		t.Fatalf("status <workstream> lacks the drift rebase:\n%s", out)
 	}
-	var one service.WorkstreamStatus
+	var one wire.WorkstreamStatus
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &one))
-	if want := (&service.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
+	if want := (&wire.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", one.Drift, want)
 	}
 
-	skipped := []service.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building, assembled or delivered with a pull request"}, {Workstream: quiet, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}}
+	skipped := []wire.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building, assembled or delivered with a pull request"}, {Workstream: quiet, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}}
 	if out := successful(t, root, "project", "rebase", project); out != "Drift rebase requested for project "+project+"\nCovered: none\nSkipped: "+stream+": "+skipped[0].Reason+"\nSkipped: "+quiet+": "+skipped[1].Reason+"\n" {
 		t.Fatalf("project rebase:\n%s", out)
 	}
-	var got service.ProjectRebaseResponse
+	var got wire.ProjectRebaseResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "rebase", project, "--json")), &got))
-	if want := (service.ProjectRebaseResponse{Project: project, Covered: []service.DriftCoverage{}, Skipped: skipped}); !reflect.DeepEqual(got, want) {
+	if want := (wire.ProjectRebaseResponse{Project: project, Covered: []wire.DriftCoverage{}, Skipped: skipped}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("project rebase --json: %+v", got)
 	}
 	other := "p_ffffffffffffffffffffffffffffffff"
@@ -410,9 +411,9 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 func TestStatusShowsTheTailnetListener(t *testing.T) {
 	var out bytes.Buffer
 	showTailnet(&out, nil)
-	showTailnet(&out, &service.TailnetStatus{State: service.TailnetUp})
-	showTailnet(&out, &service.TailnetStatus{State: service.TailnetNeedsLogin, LoginURL: "https://login.example/a/1"})
-	showTailnet(&out, &service.TailnetStatus{State: service.TailnetDown, Reason: "control unreachable"})
+	showTailnet(&out, &wire.TailnetStatus{State: wire.TailnetUp})
+	showTailnet(&out, &wire.TailnetStatus{State: wire.TailnetNeedsLogin, LoginURL: "https://login.example/a/1"})
+	showTailnet(&out, &wire.TailnetStatus{State: wire.TailnetDown, Reason: "control unreachable"})
 	if want := "Tailnet: up\nTailnet: needs_login login=https://login.example/a/1\nTailnet: down (control unreachable)\n"; out.String() != want {
 		t.Fatalf("tailnet lines:\n%s", out.String())
 	}
@@ -439,12 +440,12 @@ func TestStatusShowsTheTailnetListener(t *testing.T) {
 func TestStatusPrintsCapacity(t *testing.T) {
 	var out strings.Builder
 	showCapacity(&out, nil)
-	showCapacity(&out, &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{
-		{Role: "mason", Used: 1, Limit: 1, Waiting: []service.SlotWait{
+	showCapacity(&out, &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{
+		{Role: "mason", Used: 1, Limit: 1, Waiting: []wire.SlotWait{
 			{Workstream: stream, Unit: "parser", Agent: "mason-parser", Turn: "mason-parser-1", Reason: "capacity"},
 			{Workstream: quiet, Unit: "validator", Reason: "priority"}}},
-		{Role: "reviewer", Used: 0, Limit: 2, Waiting: []service.SlotWait{}},
-		{Role: "checks", Used: 2, Limit: 2, Waiting: []service.SlotWait{
+		{Role: "reviewer", Used: 0, Limit: 2, Waiting: []wire.SlotWait{}},
+		{Role: "checks", Used: 2, Limit: 2, Waiting: []wire.SlotWait{
 			{Workstream: stream, Unit: "parser", Reason: "capacity"},
 			{Workstream: stream, Review: 3, Reason: "capacity"},
 			{Workstream: quiet, Session: true, Reason: "capacity"},
@@ -467,11 +468,11 @@ func TestStatusPrintsProviderUsage(t *testing.T) {
 	var out strings.Builder
 	showProviderUsage(&out, nil)
 	resets := time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC)
-	showProviderUsage(&out, &service.ProviderUsageStatus{Day: "2026-09-24", Providers: []service.ProviderUsage{
-		{Provider: "claude", ProviderSpend: service.ProviderSpend{SpendUSD: "3.5"}, Limit: &runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", ResetsAt: resets},
-			Fallbacks: []service.RoleFallback{{Role: "mason", Configured: "claude", Profile: "codex-fast"}}, PausedRoles: []string{"reviewer"}},
-		{Provider: "codex", ProviderSpend: service.ProviderSpend{SpendUSD: "1", UnknownCosts: 2, LowerBound: true}, Limit: &runtime.ProviderLimit{Backend: "codex", Status: "rejected"}},
-	}, Unattributed: &service.ProviderSpend{SpendUSD: "0.25"}})
+	showProviderUsage(&out, &wire.ProviderUsageStatus{Day: "2026-09-24", Providers: []wire.ProviderUsage{
+		{Provider: "claude", ProviderSpend: wire.ProviderSpend{SpendUSD: "3.5"}, Limit: &runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", ResetsAt: resets},
+			Fallbacks: []wire.RoleFallback{{Role: "mason", Configured: "claude", Profile: "codex-fast"}}, PausedRoles: []string{"reviewer"}},
+		{Provider: "codex", ProviderSpend: wire.ProviderSpend{SpendUSD: "1", UnknownCosts: 2, LowerBound: true}, Limit: &runtime.ProviderLimit{Backend: "codex", Status: "rejected"}},
+	}, Unattributed: &wire.ProviderSpend{SpendUSD: "0.25"}})
 	if want := "Provider usage on 2026-09-24:\n" +
 		"  claude: USD 3.5 known spend\n" +
 		"    Limit: rejected kind=five_hour until 2026-09-24T17:00:00Z\n" +
@@ -490,7 +491,7 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
-	var loaded service.ConfigResponse
+	var loaded wire.ConfigResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &loaded))
 	top, proj := loaded.Drift.Files[0].Path, loaded.Drift.Files[1].Path
 	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\nConfig file: " + proj + " (project " + project + "): unchanged\n"; successful(t, root, "config") != want {
@@ -508,9 +509,9 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 		t.Fatalf("status with an invalid file:\n%s", status)
 	}
 	must(t, os.WriteFile(top, append(append([]byte{}, original...), "[capacity]\nmasons = 7\n"...), 0600))
-	var drift service.ConfigResponse
+	var drift wire.ConfigResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &drift))
-	if !drift.Drift.Differs || drift.Drift.Files[0].State != service.ConfigChanged || drift.Digest != loaded.Digest {
+	if !drift.Drift.Differs || drift.Drift.Files[0].State != wire.ConfigChanged || drift.Digest != loaded.Digest {
 		t.Fatalf("config with an edited file: %+v", drift)
 	}
 	if code, out, diag := invoke(t, root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {

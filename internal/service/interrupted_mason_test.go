@@ -13,14 +13,13 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // interruptedEdits are what a mason turn does in its view before it is cut
@@ -124,9 +123,9 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			var mu sync.Mutex
 			var continuation, resumed string
 			var sawEdits bool
-			f.engine.mu.Lock()
-			f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-			f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+			f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				if err := writeEdits(req.Workspace.Directory()); err != nil {
 					return nil, err
 				}
@@ -134,7 +133,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 				<-ctx.Done()
 				return &agent.Result{ClaudeID: "session-stopped", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 			}
-			f.engine.turns[recoverTurn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[recoverTurn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				mu.Lock()
 				continuation, resumed, sawEdits = req.Prompt, req.ResumeID, holdsEdits(inDirectory(req.Workspace.Directory()))
 				mu.Unlock()
@@ -143,7 +142,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 				}
 				return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Continued", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 
 			stream := f.seedBuilding(t, "stopped-"+backend, validPlan)
 			if got := backendOf(t, f, stream); got != backend {
@@ -180,9 +179,9 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 					t.Fatal("the continuation was dispatched under the hard pause")
 				}
 			}
-			f.engine.mu.Lock()
-			ran := slices.Contains(f.engine.runs, recoverTurn)
-			f.engine.mu.Unlock()
+			f.engine.Mu.Lock()
+			ran := slices.Contains(f.engine.Runs, recoverTurn)
+			f.engine.Mu.Unlock()
 			if ran {
 				t.Fatal("the continuation ran under the hard pause")
 			}
@@ -223,8 +222,8 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 			var mu sync.Mutex
 			var prompts []string
 			var sawEdits bool
-			f.engine.mu.Lock()
-			f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				mu.Lock()
 				prompts = append(prompts, req.Prompt)
 				first := len(prompts) == 1
@@ -243,7 +242,7 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 				}
 				return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 
 			stream := f.seedBuilding(t, "timed-out-"+backend, validPlan)
 			if got := backendOf(t, f, stream); got != backend {
@@ -352,8 +351,8 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	})
 	defer func() { f.stop(t) }()
 	entered := make(chan struct{})
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if err := writeEdits(req.Workspace.Directory()); err != nil {
 			return nil, err
 		}
@@ -361,7 +360,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 		<-ctx.Done()
 		return &agent.Result{ClaudeID: "session-stopped", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "stopped-rebase", validPlan)
 	select {
 	case <-entered:

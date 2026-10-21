@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -21,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const pauseNote = "A hard pause stopped your last turn."
@@ -165,9 +164,9 @@ func newShedFixtureCounting(t *testing.T, members int) (*shedFixture, *atomic.In
 // session is stopped.
 func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp.ClientSession) error) chan struct{} {
 	entered := make(chan struct{})
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := work(ctx, tools); err != nil {
 			return nil, err
 		}
@@ -182,9 +181,9 @@ func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp
 // prompt names the stop, runs work, and ends normally.
 func continueTurn(f *architectFixture, stopped trace.QueuedTurn, work func(context.Context, *mcp.ClientSession) error) string {
 	turn := fmt.Sprintf("%s-continue-%d", stopped.Request.TurnID, stopped.Sequence)
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, stopped.Request.Prompt) || !strings.Contains(req.Prompt, pauseNote) {
 			return nil, fmt.Errorf("continuation prompt %q", req.Prompt)
 		}
@@ -242,8 +241,8 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	defer f.stop(t)
 	entered := make(chan struct{})
 	var runs atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if runs.Add(1) > 1 {
 			for path, content := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan} {
 				if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
@@ -259,7 +258,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	paused := f.handIn(t, "paused", handedDesign)
 	select {
 	case <-entered:
@@ -317,8 +316,8 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 	defer f.stop(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() {
 			close(entered)
 			<-release
@@ -330,7 +329,7 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-draft", ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	running := f.handIn(t, "running", handedDesign)
 	select {
 	case <-entered:

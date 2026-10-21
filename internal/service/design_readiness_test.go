@@ -29,7 +29,7 @@ func TestDesignReadinessOwnerOverridesAssumptionBeforeBriefHandoff(t *testing.T)
 		"Intent: add resumable uploads without breaking existing clients.\n" +
 		"Tradeoffs: accept a narrower interface in exchange for compatibility.\n" +
 		"Rejected options: replacing the endpoint and using the inferred upload name."
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, instruction := range []string{
 			"expensive to undo", "contracts, data", "models, migrations, public APIs",
 			"genuine forks with no clear signal", "tension with the owner's stated intent",

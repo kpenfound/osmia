@@ -119,9 +119,9 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		must(t, err)
 		_, revision, _, err := edgeObservationAt(down, f.stream2)
 		must(t, err)
-		host.mu.Lock()
-		host.prs = []pulls.PullRequest{candidate}
-		host.mu.Unlock()
+		host.Mu.Lock()
+		host.Prs = []pulls.PullRequest{candidate}
+		host.Mu.Unlock()
 		// Two subsequent receipts also exclude a lookup already in flight
 		// when the provider response changed. Only the live controller polls.
 		lifecycleAwait(t, f, "non-merge provider observation", func() bool {
@@ -137,9 +137,9 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		f.start(t)
 		check(false, false)
 	}
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: "upstream-merge", Head: p.Branch, HeadRepository: p.Fork}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: "upstream-merge", Head: p.Branch, HeadRepository: p.Fork}}
+	host.Mu.Unlock()
 	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "pane archived member merged", func() bool {
 		a, ok := archiveRecord(t, f.s.store, f.stream1)
@@ -154,9 +154,9 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 	f.start(t)
 	check(true, false)
 	sink := publications[1]
-	host.mu.Lock()
-	host.prs = append(host.prs, pulls.PullRequest{Number: sink.PullRequest, State: "closed", Merged: true, MergeCommit: "sink-merge", Head: sink.Branch, HeadRepository: sink.Fork})
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = append(host.Prs, pulls.PullRequest{Number: sink.PullRequest, State: "closed", Merged: true, MergeCommit: "sink-merge", Head: sink.Branch, HeadRepository: sink.Fork})
+	host.Mu.Unlock()
 	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "last pane member merged and group resolved", func() bool {
 		_, revision, _ := groupResolution()

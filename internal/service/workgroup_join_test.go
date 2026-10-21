@@ -75,7 +75,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	defer joining.release()
 	defer transferred.release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) {
-		opts.Reconciliation.Now = (&fixedClock{now: demoStart}).Now
+		opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
 		cfg, err := config.Load(opts.Config)
 		must(t, err)
 		runChief(opts, cfg, &chiefTurns{})

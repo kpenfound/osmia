@@ -348,9 +348,9 @@ func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 	landing, workers := newPathGate(t), newPathGate(t)
 	entered := make(chan struct{}, 2)
 	var active, peak atomic.Int32
-	f.engine.mu.Lock()
+	f.engine.Mu.Lock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.turns[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Turns[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 			n := active.Add(1)
 			defer active.Add(-1)
 			for old := peak.Load(); n > old; old = peak.Load() {
@@ -365,7 +365,7 @@ func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Built", SessionDir: req.SessionDir}, nil
 		}
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	var allowWorkers atomic.Bool
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 		if conversationOperation(op) || op.Action == LandAction {
@@ -650,10 +650,10 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 			if len(updates) != 1 || updates[0] != pushed {
 				t.Fatalf("push effects: %v", updates)
 			}
-			p.pulls.mu.Lock()
-			defer p.pulls.mu.Unlock()
-			if p.pulls.creates != 1 || len(p.pulls.prs) != 1 {
-				t.Fatalf("PR effects creates=%d PRs=%d", p.pulls.creates, len(p.pulls.prs))
+			p.pulls.Mu.Lock()
+			defer p.pulls.Mu.Unlock()
+			if p.pulls.Creates != 1 || len(p.pulls.Prs) != 1 {
+				t.Fatalf("PR effects creates=%d PRs=%d", p.pulls.Creates, len(p.pulls.Prs))
 			}
 			repo, err := trace.Open(p.s.cfg.Root, p.s.cfg.Project)
 			must(t, err)
@@ -883,7 +883,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	must(t, os.WriteFile(path, append(data, []byte("\n[roles.chief_of_staff]\nevents_profile = \"other\"\n")...), 0600))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
 	var passes atomic.Int32
 	opts.schedulePassed = func() { passes.Add(1) }

@@ -27,9 +27,9 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 	const shared = "Reuse the established offset retry policy."
 	const client = "Use the client's existing retry backoff."
 	const marker = "Record the agreed retry judgments."
-	f.engine.mu.Lock()
-	fallback := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	fallback := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		// Background turns replay history containing the owner's marker.
 		// Only the requested owner turn makes these new judgment calls.
 		if !strings.HasPrefix(req.Name, "message_") || !strings.HasSuffix(strings.TrimSpace(req.Prompt), marker) {
@@ -52,7 +52,7 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 		}
 		return questionResult(req, "session-chief", "Retry judgments recorded."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.stream2, marker)
 	must(t, err)
 	f.wait(t, "shared assumption turn completion", func() bool {

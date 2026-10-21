@@ -23,26 +23,26 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 	}
 	state, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
-		return ArchiveResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the state of workstream %s; check the trace repository", stream)}
+		return ArchiveResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of workstream %s; check the trace repository", stream)}
 	}
 	if state.Value != DeliveredState && state.Value != AbandonedState {
 		current := state.Value
 		if current == "" {
 			current = "handed"
 		}
-		return ArchiveResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s; only a delivered or abandoned workstream can be archived, so abandon it first", stream, current)}
+		return ArchiveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; only a delivered or abandoned workstream can be archived, so abandon it first", stream, current)}
 	}
 	a, err := archiveTitle(repository, stream)
 	if err != nil {
-		return ArchiveResponse{}, &APIError{Internal, err.Error()}
+		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := s.archiveLifecycle(repository, &a); err != nil {
-		return ArchiveResponse{}, &APIError{Internal, err.Error()}
+		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	a.ArchivedAt = s.now()
 	a.DeliveryLink, err = deliveryLinkFor(repository, stream)
 	if err != nil {
-		return ArchiveResponse{}, &APIError{Internal, err.Error()}
+		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if a.Workgroup != "" {
 		release, api := s.changeArchiveGuard(a.Workgroup)
@@ -59,12 +59,12 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 			if authority != nil {
 				authority.Close()
 			}
-			return ArchiveResponse{}, &APIError{Internal, err.Error()}
+			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		defer authority.Close()
 		groups, _, readErr := trace.Workgroups(authority)
 		if readErr != nil {
-			return ArchiveResponse{}, &APIError{Internal, readErr.Error()}
+			return ArchiveResponse{}, &APIError{Code: Internal, Message: readErr.Error()}
 		}
 		for _, g := range groups {
 			if g.ID == a.Workgroup {
@@ -126,7 +126,7 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 		return s.step("member-archive-recorded")
 	})
 	if errors.Is(err, trace.ErrFeatureState) || errors.Is(err, trace.ErrConflict) {
-		return ArchiveResponse{}, &APIError{Conflict, "workstream changed while archiving; check its state and retry"}
+		return ArchiveResponse{}, &APIError{Code: Conflict, Message: "workstream changed while archiving; check its state and retry"}
 	}
 	if api := archiveError(err); api != nil {
 		return ArchiveResponse{}, api
@@ -156,7 +156,7 @@ func deliveryLinkFor(repository *trace.Repository, stream config.WorkstreamID) (
 // unarchive refuses to reverse an archive, including one awaiting cleanup.
 func (s *Service) unarchive(raw string) (ArchiveResponse, *APIError) {
 	if _, ok := s.archivedWorkstream(raw); ok {
-		return ArchiveResponse{}, &APIError{Conflict, "archive is permanent; the workstream cannot be restored"}
+		return ArchiveResponse{}, &APIError{Code: Conflict, Message: "archive is permanent; the workstream cannot be restored"}
 	}
 	project, stream, _, api := s.conversationTrace(raw)
 	if api != nil {
@@ -201,11 +201,11 @@ func archiveError(err error) *APIError {
 	case err == nil:
 		return nil
 	case errors.Is(err, runtime.ErrValidation):
-		return &APIError{Validation, "the runtime settings refused the change: " + err.Error()}
+		return &APIError{Code: Validation, Message: "the runtime settings refused the change: " + err.Error()}
 	case errors.Is(err, runtime.ErrConflict):
-		return &APIError{Conflict, "runtime file changed externally; restore it or restart the service"}
+		return &APIError{Code: Conflict, Message: "runtime file changed externally; restore it or restart the service"}
 	}
-	return &APIError{Internal, "cannot write the runtime settings; check the root's runtime.json"}
+	return &APIError{Code: Internal, Message: "cannot write the runtime settings; check the root's runtime.json"}
 }
 
 // archivedIn reports whether the runtime state in force archives stream.

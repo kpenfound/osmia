@@ -20,7 +20,7 @@ import (
 // engineeringRevision checks the mechanical boundaries of delegated plan decisions.
 // Whether an approach fulfills intent remains a recorded engineering judgment.
 func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amendmentCase, current seal.Seal, dissent []shed.Entry, note string) *APIError {
-	refuse := func(s string) *APIError { return &APIError{Conflict, s} }
+	refuse := func(s string) *APIError { return &APIError{Code: Conflict, Message: s} }
 	if strings.TrimSpace(note) == "" {
 		return refuse("an engineering decision requires its reasoning against approved intent")
 	}
@@ -28,14 +28,14 @@ func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amen
 	// bounds revisions of an assembled workstream and of one reopened from it.
 	rounds, err := finalRoundsWithBlocking(r, stream)
 	if err != nil {
-		return &APIError{Internal, err.Error()}
+		return &APIError{Code: Internal, Message: err.Error()}
 	}
 	if rounds >= maxFinalRounds {
 		return refuse(fmt.Sprintf("final reviews have found blocking problems %d times; further revisions of the assembled plan require an owner decision", rounds))
 	}
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
-		return &APIError{Internal, err.Error()}
+		return &APIError{Code: Internal, Message: err.Error()}
 	}
 	var spec, graph string
 	for _, d := range docs {
@@ -56,7 +56,7 @@ func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amen
 	}
 	before, err := plan.Parse([]byte(graph))
 	if err != nil {
-		return &APIError{Internal, err.Error()}
+		return &APIError{Code: Internal, Message: err.Error()}
 	}
 	after, err := plan.Parse([]byte(c.plan.Content))
 	if err != nil {
@@ -69,7 +69,7 @@ func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amen
 		}
 		st, err := r.Workflow(stream, trace.UnitSubject(old.ID))
 		if err != nil {
-			return &APIError{Internal, err.Error()}
+			return &APIError{Code: Internal, Message: err.Error()}
 		}
 		if st.Value == UnitMerged {
 			return refuse("merged work is immutable; add a follow-up unit")

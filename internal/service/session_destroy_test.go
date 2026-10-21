@@ -556,7 +556,7 @@ func TestDestroySessionRefusesRunningTurn(t *testing.T) {
 	t.Parallel()
 	s, c, _, project, stream, engine, _ := newSessionControlsFixture(t)
 	entered, release := make(chan struct{}), make(chan struct{})
-	engine.turn = func(ctx context.Context, _ agent.Request) (*agent.Result, error) {
+	engine.Turn = func(ctx context.Context, _ agent.Request) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-release:

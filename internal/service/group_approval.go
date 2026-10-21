@@ -140,23 +140,23 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 	lock.Lock()
 	defer lock.Unlock()
 	if err := s.step("group-approval-retry-locked"); err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 
 	wt, g, err := s.approvalTrace(ctx, repo, id)
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	defer wt.Close()
 	decision, _, found, err := trace.ReadGroupApproval(wt, g.Members[0])
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if !found {
 		return RatifyResponse{}, false, nil
 	}
 	if decision.ProjectSpecRevision > 0 && projectSpecRevision != decision.ProjectSpecRevision {
-		return RatifyResponse{}, true, &APIError{Conflict, projectSpecCatchingUp}
+		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: projectSpecCatchingUp}
 	}
 	matched := false
 	for _, member := range decision.Members {
@@ -165,17 +165,17 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 		}
 	}
 	if !matched {
-		return RatifyResponse{}, true, &APIError{Conflict, "the request differs from the immutable workgroup approval"}
+		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: "the request differs from the immutable workgroup approval"}
 	}
 	if !decision.Complete {
 		if err := s.prepareGroupApproval(ctx, decision); err != nil {
-			return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+			return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
 	out := groupApprovalResponse(repo.Project(), stream, decision)
 	out.Sealing, out.Detail, err = s.groupApprovalDetail(decision)
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	return out, true, nil
 }

@@ -37,9 +37,9 @@ func TestDeliveryDemonstration(t *testing.T) {
 		}
 		return nil
 	}
-	f.engine.mu.Lock()
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			if _, err := reviewIdentityInPrompt(req.Prompt); err != nil {
@@ -64,7 +64,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	stream := f.builtPaused(t, factory, "delivery")[0]
 	// Move upstream after the seal. The final reviewer must inspect the
@@ -106,7 +106,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	demoGit(t, home, "init", "--quiet", "--bare", fork)
 	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork}
-	p.pulls = &fakePulls{fork: func() string { commit, _ := p.forkBranch(t); return commit }}
+	p.pulls = &fakePulls{Fork: func() string { commit, _ := p.forkBranch(t); return commit }}
 	f.s.options.PullRequests = p.pulls
 	edited := presented.Draft + "\nOwner's delivery note.\n"
 	approval := p.approve(t, &edited)
@@ -118,7 +118,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
-	if len(p.pulls.prs) != 1 || p.pulls.creates != 1 || p.feature(t) != DeliveredState {
+	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("duplicate delivery: %+v", p.pulls)
 	}
 	tip, _ := p.forkBranch(t)
@@ -127,15 +127,15 @@ func TestDeliveryDemonstration(t *testing.T) {
 	must(t, err)
 	delivered, err := g.Commit(ctx, tip)
 	must(t, err)
-	if delivered.Tree != reviewed.Tree || p.pulls.prs[0].Body != edited {
-		t.Fatalf("wrong delivered tree or description: %s, %+v", tip, p.pulls.prs[0])
+	if delivered.Tree != reviewed.Tree || p.pulls.Prs[0].Body != edited {
+		t.Fatalf("wrong delivered tree or description: %s, %+v", tip, p.pulls.Prs[0])
 	}
 	if tip == approval.Commit {
 		t.Fatalf("commit-per-unit tip %s, reviewed %s", tip, approval.Commit)
 	}
 	records, err := publications(p.repository, stream)
 	must(t, err)
-	if len(records) != 2 || records[1].Approval != 1 || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].DescriptionHash != approval.DescriptionHash || records[1].PullRequest != p.pulls.prs[0].Number {
+	if len(records) != 2 || records[1].Approval != 1 || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].DescriptionHash != approval.DescriptionHash || records[1].PullRequest != p.pulls.Prs[0].Number {
 		t.Fatalf("publication provenance %+v", records)
 	}
 	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 1 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {

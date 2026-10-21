@@ -18,6 +18,7 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -193,7 +194,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 			must(t, errors.Join(err, f.Close()))
 			serve(t, root)
 
-			var added service.ProjectResponse
+			var added wire.ProjectResponse
 			must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 			extraction := awaitExtraction(t, root)
 			if sandbox == agent.SandboxNone {
@@ -205,11 +206,11 @@ func TestServeRunsRoleTurns(t *testing.T) {
 			setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 			design := filepath.Join(filepath.Dir(clone), "design.md")
 			must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
-			var handed service.HandInResponse
+			var handed wire.HandInResponse
 			must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(added.Project.ID), design, "--json")), &handed))
 			launches.await(t, "draft-1-1")
 
-			var sent service.ConversationEntry
+			var sent wire.ConversationEntry
 			must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
 			c := service.NewClient(filepath.Join(root, "osmia.sock"))
 			defer c.Close()
@@ -221,7 +222,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 			for {
 				conversation, err := c.Conversation(context.Background(), handed.Workstream)
 				must(t, err)
-				var messages, responses []service.ConversationEntry
+				var messages, responses []wire.ConversationEntry
 				for _, entry := range conversation.Entries {
 					if entry.Turn != sent.Turn {
 						continue
@@ -234,7 +235,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 					}
 				}
 				if len(responses) > 0 {
-					if len(messages) != 1 || len(responses) != 1 || messages[0].State != service.TurnDone || responses[0].State != service.TurnDone || responses[0].Text != "Noted" {
+					if len(messages) != 1 || len(responses) != 1 || messages[0].State != wire.TurnDone || responses[0].State != wire.TurnDone || responses[0].Text != "Noted" {
 						diagnostics()
 						t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
 					}
@@ -262,8 +263,8 @@ func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, proj
 	}
 	conversation, err := c.Conversation(ctx, stream)
 	logView("conversation", conversation, err)
-	var feed service.FeedResponse
-	err = c.Do(ctx, "GET", service.Prefix+"/feed/"+string(stream), nil, &feed)
+	var feed wire.FeedResponse
+	err = c.Do(ctx, "GET", wire.Prefix+"/feed/"+string(stream), nil, &feed)
 	logView("feed", feed, err)
 	state, err := c.Status(ctx, stream)
 	logView("status", state, err)

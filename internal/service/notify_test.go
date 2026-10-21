@@ -131,7 +131,7 @@ func (f *fakeInbox) read(context.Context) (InboxResponse, *APIError) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.broken {
-		return InboxResponse{}, &APIError{Internal, "cannot read the inbox"}
+		return InboxResponse{}, &APIError{Code: Internal, Message: "cannot read the inbox"}
 	}
 	return InboxResponse{Entries: slices.Clone(f.entries)}, nil
 }
@@ -476,7 +476,7 @@ func TestNotifyFailingWebhookRetriesThenGivesUp(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < 600*time.Millisecond {
 		t.Fatalf("retries without backoff: %d attempts in %s", notifyAttempts, elapsed)
 	}
-	want := Diagnostic{"notify", Unavailable, ""}
+	want := Diagnostic{Field: "notify", Code: Unavailable, Message: ""}
 	soon(t, "a gave-up diagnostic", func() bool {
 		st, cf := notifyDiagnostics(t, c)
 		return len(st) == 1 && len(cf) == 1 && st[0] == cf[0] && strings.HasPrefix(st[0].Message, "gave up notifying the owner of the escalation decision in workstream "+string(stream))
@@ -604,7 +604,7 @@ func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
 		t.Helper()
 		soon(t, message, func() bool {
 			st, cf := notifyDiagnostics(t, c)
-			want := Diagnostic{"notify", Internal, message}
+			want := Diagnostic{Field: "notify", Code: Internal, Message: message}
 			return len(st) == 1 && len(cf) == 1 && st[0] == want && cf[0] == want
 		})
 	}

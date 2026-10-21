@@ -41,31 +41,31 @@ func driftHandbackDocument(k int) string { return fmt.Sprintf("%s%d", driftHandb
 func (s *Service) handBackDrift(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, note string, actor trace.Actor, turn string, at time.Time) (int, *APIError) {
 	note = strings.TrimSpace(note)
 	if note == "" {
-		return 0, &APIError{Validation, "a handback requires a note for the drift mason and reviewer"}
+		return 0, &APIError{Code: Validation, Message: "a handback requires a note for the drift mason and reviewer"}
 	}
 	states, err := repo.WorkflowStates(stream)
 	if err != nil {
-		return 0, &APIError{Internal, "cannot read the workstream's drift rebases"}
+		return 0, &APIError{Code: Internal, Message: "cannot read the workstream's drift rebases"}
 	}
 	value := states[driftSubject].Value
 	if !strings.HasPrefix(value, driftHeld+"-") {
-		return 0, &APIError{Conflict, "the workstream's latest drift rebase is not held"}
+		return 0, &APIError{Code: Conflict, Message: "the workstream's latest drift rebase is not held"}
 	}
 	held, err := driftNumber(value)
 	if err != nil {
-		return 0, &APIError{Internal, err.Error()}
+		return 0, &APIError{Code: Internal, Message: err.Error()}
 	}
 	k := held + 1
 	current := states[driftRequestSubject]
 	if requested, err := driftNumber(current.Value); err != nil {
-		return 0, &APIError{Internal, err.Error()}
+		return 0, &APIError{Code: Internal, Message: err.Error()}
 	} else if requested >= k {
-		return 0, &APIError{Conflict, fmt.Sprintf("drift rebase %d is already asked for", k)}
+		return 0, &APIError{Code: Conflict, Message: fmt.Sprintf("drift rebase %d is already asked for", k)}
 	}
 	by := rulerName(actor)
 	data, err := json.MarshalIndent(DriftHandback{Drift: k, Held: held, Note: note, By: by}, "", "  ")
 	if err != nil {
-		return 0, &APIError{Internal, err.Error()}
+		return 0, &APIError{Code: Internal, Message: err.Error()}
 	}
 	cause := turn
 	if cause == "" {
@@ -78,9 +78,9 @@ func (s *Service) handBackDrift(ctx context.Context, repo *trace.Repository, str
 	tx := trace.Transaction{ExpectedVersion: current.Version, Transition: trace.Transition{Header: h, Subject: driftRequestSubject, From: current.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason}}
 	if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return 0, &APIError{Conflict, "the workstream's drift rebases changed since they were read; read them again"}
+			return 0, &APIError{Code: Conflict, Message: "the workstream's drift rebases changed since they were read; read them again"}
 		}
-		return 0, &APIError{Internal, "cannot record the handback"}
+		return 0, &APIError{Code: Internal, Message: "cannot record the handback"}
 	}
 	s.driftAsked.Store(true)
 	return k, nil

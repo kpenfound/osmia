@@ -57,8 +57,8 @@ func testAmendOpenPullRequest(t *testing.T, changeDescription bool) {
 	if result.Outcome != "succeeded" {
 		t.Fatalf("initial publication: %+v", result)
 	}
-	p.pulls.syncHead = true
-	oldPR := p.pulls.prs[0]
+	p.pulls.SyncHead = true
+	oldPR := p.pulls.Prs[0]
 	oldTip, _ := p.forkBranch(t)
 	c := presentDeliveryDelta(t, p)
 	if c.Impact.Streams[0].Action != amendment.Rework {
@@ -131,8 +131,8 @@ func testAmendOpenPullRequest(t *testing.T, changeDescription bool) {
 	if result.Outcome != "succeeded" {
 		t.Fatalf("PR rework: %+v", result)
 	}
-	if p.pulls.creates != 1 || p.pulls.updates != expectedUpdates || p.pulls.prs[0].Number != oldPR.Number || p.pulls.prs[0].Head != oldPR.Head || p.pulls.prs[0].Body != approval.Description {
-		t.Fatalf("rework did not update the same PR with fresh approved text: creates=%d updates=%d expected updates=%d old=%+v current=%+v approved description=%q", p.pulls.creates, p.pulls.updates, expectedUpdates, oldPR, p.pulls.prs[0], approval.Description)
+	if p.pulls.Creates != 1 || p.pulls.Updates != expectedUpdates || p.pulls.Prs[0].Number != oldPR.Number || p.pulls.Prs[0].Head != oldPR.Head || p.pulls.Prs[0].Body != approval.Description {
+		t.Fatalf("rework did not update the same PR with fresh approved text: creates=%d updates=%d expected updates=%d old=%+v current=%+v approved description=%q", p.pulls.Creates, p.pulls.Updates, expectedUpdates, oldPR, p.pulls.Prs[0], approval.Description)
 	}
 	tip, _ := p.forkBranch(t)
 	if tip == oldTip {
@@ -153,7 +153,7 @@ func TestAmendMergedWorkCreatesOneFollowupAndKeepsMerge(t *testing.T) {
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	pr := p.pulls.prs[0]
+	pr := p.pulls.Prs[0]
 	must(t, recordOwnPullRequestOutcome(ctx, p.repository, p.s.now(), p.stream, "owner", pr.Number, ownPullRequestOutcomeMerged))
 	beforeState, err := p.repository.Workflow(p.stream, trace.FeatureSubject)
 	must(t, err)

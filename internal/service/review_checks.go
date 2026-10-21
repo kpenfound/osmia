@@ -22,14 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// CheckResult records the exit status and complete combined stdout/stderr
-// emitted by a candidate check. Truncated indicates an incomplete capture.
-type CheckResult struct {
-	ExitCode  int    `json:"exit_code"`
-	Output    string `json:"output"`
-	Truncated bool   `json:"truncated"`
-}
-
 // ReviewChecks lists and runs the project's checks in a disposable export of
 // a candidate. Implementations must not inherit delivery or provider
 // credentials.

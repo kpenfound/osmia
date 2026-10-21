@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // overlapWait bounds how long a test waits for work that runs at once to be

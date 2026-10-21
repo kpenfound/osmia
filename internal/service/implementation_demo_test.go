@@ -25,9 +25,9 @@ func TestSequentialImplementation(t *testing.T) {
 	f, fake, _ := newAskingMasonFixture(t, 1, validPlan, p)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = fake.asking(p, "", "1")
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = fake.asking(p, "", "1")
+	f.engine.Mu.Unlock()
 	stream := f.builtPaused(t, factory, "sequential")[0]
 	f.awaitDispatches(t, stream, "resume", 1)
 	f.checkUnits(t, stream, []UnitStatus{f.deferred(t, stream, "resume", factoryPaused), {Unit: "dedupe", State: UnitPlanned}})

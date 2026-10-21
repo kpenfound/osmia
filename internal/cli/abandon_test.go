@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/service"
 )
 
 func TestAbandonCommand(t *testing.T) {
@@ -38,7 +38,7 @@ func TestAbandonCommand(t *testing.T) {
 	}
 
 	other := handInStdin(t, root, project, "other")
-	var result service.AbandonResponse
+	var result wire.AbandonResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "abandon", other, "Not needed.", "--json")), &result))
 	if string(result.Workstream) != other || result.Project != project || result.State != "abandoned" || result.Reason != "Not needed." {
 		t.Fatalf("json %+v", result)
@@ -57,7 +57,7 @@ func handInStdin(t *testing.T, root string, project config.ProjectID, text strin
 	if code != 0 || diag != "" {
 		t.Fatalf("handin: %d %s %s", code, out, diag)
 	}
-	var handed service.HandInResponse
+	var handed wire.HandInResponse
 	must(t, json.Unmarshal([]byte(out), &handed))
 	return string(handed.Workstream)
 }

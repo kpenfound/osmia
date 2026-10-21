@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart builds a
@@ -65,8 +64,8 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			return questionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
-	engine.turns["build"] = ask(question1)
-	engine.turns["build2"] = ask(question2)
+	engine.Turns["build"] = ask(question1)
+	engine.Turns["build2"] = ask(question2)
 
 	// The chief's prompt replays the thread's earlier turns (as
 	// TestOwnerRulingResumesTheAskersAcrossRestarts notes), so a turn
@@ -85,7 +84,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		defer flagMu.Unlock()
 		return answered1, escalated2, relayed
 	}
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		flagMu.Lock()
 		needRelay := !relayed && strings.Contains(req.Prompt, ownersRuling)
 		needEscalate := !escalated2 && strings.Contains(req.Prompt, "asked by the mason: "+question2)
@@ -140,7 +139,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
-	engine.turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return questionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 

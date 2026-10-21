@@ -7,9 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -23,38 +21,6 @@ func providerOf(t *testing.T, w streamWorkspaces, stream config.WorkstreamID) wo
 		t.Fatal(err)
 	}
 	return g
-}
-
-// fakeJJ stands in for the check of the jj on PATH: it reports version, and
-// err when set. It leaves the real jj binary's actual version output and
-// startup behaviour unverified.
-type fakeJJ struct {
-	mu      sync.Mutex
-	version string
-	err     error
-	bounded bool
-}
-
-func (j *fakeJJ) set(version string, err error) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.version, j.err = version, err
-}
-
-func (j *fakeJJ) check(ctx context.Context) (string, error) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	deadline, ok := ctx.Deadline()
-	j.bounded = ok && time.Until(deadline) <= jjCheckTimeout
-	return j.version, j.err
-}
-
-// lastBounded reports whether the latest check had a deadline no later than
-// jjCheckTimeout from when it ran.
-func (j *fakeJJ) lastBounded() bool {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.bounded
 }
 
 var (
@@ -74,8 +40,8 @@ type workspacesFixture struct {
 func newWorkspacesFixture(t *testing.T, setting string) *workspacesFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
-	jj := &fakeJJ{version: "0.45.1"}
-	opts.checkJJ = jj.check
+	jj := &fakeJJ{Version: "0.45.1"}
+	opts.checkJJ = jj.Check
 	top := filepath.Join(opts.Config.Root, "config.toml")
 	f := &workspacesFixture{opts: opts, jj: jj, top: top}
 	f.setting(t, setting)
@@ -161,7 +127,7 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			f := newWorkspacesFixture(t, c.setting)
-			f.jj.set(c.version, c.jj)
+			f.jj.Set(c.version, c.jj)
 			ctx := context.Background()
 			all, err := f.c.Statuses(ctx)
 			must(t, err)
@@ -228,7 +194,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 	}
 
 	must(t, f.s.Close())
-	f.jj.set("", errJJMissing)
+	f.jj.Set("", errJJMissing)
 	f.setting(t, config.WorkspacesAuto)
 	s, c := start(t, f.opts)
 	f.s, f.c = s, c
@@ -251,7 +217,7 @@ func TestStatusChecksJJWithADeadline(t *testing.T) {
 	f := newWorkspacesFixture(t, config.WorkspacesAuto)
 	_, err := f.c.Statuses(context.Background())
 	must(t, err)
-	if !f.jj.lastBounded() {
+	if !f.jj.LastBounded() {
 		t.Fatal("status checked jj without a deadline")
 	}
 }

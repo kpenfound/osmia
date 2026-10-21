@@ -15,13 +15,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // requireJJ skips the test when jj is not on PATH, and fails it there when
@@ -657,9 +656,9 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 	var mu sync.Mutex
 	var problems []string
 	release := make(chan struct{})
-	f.engine.mu.Lock()
+	f.engine.Mu.Lock()
 	for unit, files := range resolutions {
-		f.engine.turns[resolveTurnID(unit, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Turns[resolveTurnID(unit, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			view := req.Workspace.Directory()
 			for name := range files {
 				if data, err := os.ReadFile(filepath.Join(view, name)); err != nil || !strings.Contains(string(data), "\n||||||| ") {
@@ -686,7 +685,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Resolved", SessionDir: req.SessionDir, NumTurns: 2}, nil
 		}
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	f.start(t)
 	var masons RoleCapacity

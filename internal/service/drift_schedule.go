@@ -206,12 +206,12 @@ func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (
 	req.Project = id
 	cfg, active := s.runtimeOf(id)
 	if !cfg.HasProject() {
-		return ProjectRebaseResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
+		return ProjectRebaseResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	if active == nil {
-		return ProjectRebaseResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+		return ProjectRebaseResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the drift rebase request in the trace of project %s; check the trace repository", req.Project)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the drift rebase request in the trace of project %s; check the trace repository", req.Project)}
 	streams, err := active.repository.Workstreams()
 	if err != nil {
 		return ProjectRebaseResponse{}, failed
@@ -254,14 +254,14 @@ func (s *Service) rebaseWorkstream(ctx context.Context, raw string) (WorkstreamR
 	if api != nil {
 		return WorkstreamRebaseResponse{}, api
 	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the drift rebase request in the trace of workstream %s; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the drift rebase request in the trace of workstream %s; check the trace repository", stream)}
 	d := drifter{&foreman{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}}
 	reason, err := d.eligible(stream)
 	if err != nil {
 		return WorkstreamRebaseResponse{}, failed
 	}
 	if reason != "" {
-		return WorkstreamRebaseResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s takes no drift rebase: %s", stream, reason)}
+		return WorkstreamRebaseResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s takes no drift rebase: %s", stream, reason)}
 	}
 	k, err := d.askDrift(ctx, stream, s.now())
 	if err != nil {

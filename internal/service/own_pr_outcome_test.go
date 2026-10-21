@@ -22,15 +22,15 @@ func TestWorkgroupOwnPullRequestObservationWithRecordedBaseIntegration(t *testin
 	must(t, err)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
 	resolutionDocument(t, repo, stream, baseObservationDocument, "base-observation.json", baseObservation{Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "integrated"}})
-	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(context.Background()))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	_, err = refresh.Apply(context.Background(), op)
 	must(t, err)
 	outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
 	must(t, err)
-	if host.finds != 1 || revision != 1 || outcome.PullRequest != 42 || outcome.Outcome != ownPullRequestOutcomeMerged {
-		t.Fatalf("integrated base prevented own observation: finds=%d outcome=%+v revision=%d", host.finds, outcome, revision)
+	if host.Finds != 1 || revision != 1 || outcome.PullRequest != 42 || outcome.Outcome != ownPullRequestOutcomeMerged {
+		t.Fatalf("integrated base prevented own observation: finds=%d outcome=%+v revision=%d", host.Finds, outcome, revision)
 	}
 	_, revision, err = baseObservationAt(repo, stream)
 	must(t, err)
@@ -46,12 +46,12 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 			if based {
 				sealStream(t, repo)
 			}
-			clock := &fixedClock{now: demoStart}
+			clock := &fixedClock{At: demoStart}
 			refresh.s.options.Reconciliation.Now = clock.Now
 			_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
 			must(t, err)
 			publication := deliverWithPullRequest(t, repo, cfg, 42)
-			host.findErr = errors.New("provider unavailable")
+			host.FindErr = errors.New("provider unavailable")
 			ctx := context.Background()
 			must(t, refresh.Pass(ctx))
 			op := actionOperation(t, repo, stream, baseRefreshAction)
@@ -68,16 +68,16 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 				t.Fatal("own lookup retried before the polling interval")
 			}
 			clock.Advance(time.Nanosecond)
-			host.findErr = nil
-			host.prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+			host.FindErr = nil
+			host.Prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 			must(t, refresh.Pass(ctx))
 			op = actionOperation(t, repo, stream, baseRefreshAction)
 			_, err = refresh.Apply(ctx, op)
 			must(t, err)
 			outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
 			must(t, err)
-			if host.finds != 2 || revision != 1 || outcome.Outcome != ownPullRequestOutcomeClosed {
-				t.Fatalf("next cadence did not observe closure: finds=%d outcome=%+v revision=%d", host.finds, outcome, revision)
+			if host.Finds != 2 || revision != 1 || outcome.Outcome != ownPullRequestOutcomeClosed {
+				t.Fatalf("next cadence did not observe closure: finds=%d outcome=%+v revision=%d", host.Finds, outcome, revision)
 			}
 			clock.Advance(10 * time.Minute)
 			must(t, refresh.Pass(ctx))
@@ -143,7 +143,7 @@ func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(context.Background()))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	result, err := refresh.Apply(context.Background(), op)
@@ -151,8 +151,8 @@ func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 1 {
-		t.Fatalf("own-PR lookup calls: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("own-PR lookup calls: %d", host.Finds)
 	}
 	outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
 	must(t, err)
@@ -179,7 +179,7 @@ func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(context.Background()))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	result, err := refresh.Apply(context.Background(), op)
@@ -187,8 +187,8 @@ func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 1 {
-		t.Fatalf("own-PR lookup calls: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("own-PR lookup calls: %d", host.Finds)
 	}
 	outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
 	must(t, err)
@@ -210,7 +210,7 @@ func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, State: "open", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(context.Background()))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	result, err := refresh.Apply(context.Background(), op)
@@ -218,8 +218,8 @@ func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 1 {
-		t.Fatalf("own-PR lookup calls: %d", host.finds)
+	if host.Finds != 1 {
+		t.Fatalf("own-PR lookup calls: %d", host.Finds)
 	}
 	if _, revision, err := ownPullRequestOutcomeAt(repo, stream); err != nil || revision != 0 {
 		t.Fatalf("an open pull request recorded an outcome: revision %d err %v", revision, err)
@@ -246,8 +246,8 @@ func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
 	if result.Outcome != "succeeded" {
 		t.Fatalf("base-refresh apply: %+v", result)
 	}
-	if host.finds != 0 {
-		t.Fatalf("a workstream delivered without a pull request made %d own-PR lookups", host.finds)
+	if host.Finds != 0 {
+		t.Fatalf("a workstream delivered without a pull request made %d own-PR lookups", host.Finds)
 	}
 	if _, revision, err := baseObservationAt(repo, stream); err != nil || revision != 1 {
 		t.Fatalf("the refresh did not continue: base-observation revision %d err %v", revision, err)
@@ -271,7 +271,7 @@ func TestBaseRefreshRestartBetweenOwnPullRequestLookupAndRecordYieldsOneOutcome(
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	must(t, refresh.Pass(context.Background()))
 	op := actionOperation(t, repo, stream, baseRefreshAction)
 	refresh.s.boundary = func(step string) error {
@@ -299,8 +299,8 @@ func TestBaseRefreshRestartBetweenOwnPullRequestLookupAndRecordYieldsOneOutcome(
 	if result.Outcome != "succeeded" {
 		t.Fatalf("retry after restart: %+v", result)
 	}
-	if host.finds != 2 {
-		t.Fatalf("restart did not re-look-up the pull request: %d calls", host.finds)
+	if host.Finds != 2 {
+		t.Fatalf("restart did not re-look-up the pull request: %d calls", host.Finds)
 	}
 	outcome, revision, err := ownPullRequestOutcomeAt(reopened, stream)
 	must(t, err)

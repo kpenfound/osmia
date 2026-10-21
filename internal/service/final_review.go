@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/kpenfound/agentcore/vcs"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -97,48 +96,6 @@ type FinalRebase struct {
 	Commit    string    `json:"commit"`
 }
 
-// FinalReport is the document final/report.json: one final review of an
-// assembled workstream. A reviewed report names the exact branch commit the
-// committee member read, the governing seal, spec hash, spec, plan and
-// charter revisions, the coverage of every criterion of the sealed spec by
-// merged units, and the reader's findings on the branch as a whole. A failed
-// report says why no such report exists; it never authorises approval or
-// delivery.
-type FinalReport struct {
-	Maintenance  bool             `json:"maintenance,omitempty"`
-	BaseCheck    int              `json:"base_check,omitempty"`
-	EdgeResolved string           `json:"edge_resolved,omitempty"`
-	Move         int              `json:"move,omitempty"`
-	Review       int              `json:"review"`
-	Operation    string           `json:"operation"`
-	Outcome      string           `json:"outcome"`
-	Failure      string           `json:"failure,omitempty"`
-	Branch       string           `json:"branch"`
-	Before       string           `json:"before"`
-	Commit       string           `json:"commit,omitempty"`
-	Upstream     *seal.Base       `json:"upstream,omitempty"`
-	Conflicts    []string         `json:"conflicts,omitempty"`
-	Seal         int              `json:"seal"`
-	SpecHash     string           `json:"spec_hash"`
-	Spec         int              `json:"spec"`
-	Plan         int              `json:"plan"`
-	Charter      int              `json:"charter"`
-	Reader       string           `json:"reader,omitempty"`
-	Turn         string           `json:"turn,omitempty"`
-	Summary      string           `json:"summary,omitempty"`
-	Criteria     []FinalCriterion `json:"criteria"`
-	Findings     []FinalFinding   `json:"findings,omitempty"`
-}
-
-// FinalCriterion is one sealed criterion's coverage: Evidence names the
-// merged units that serve it, or Gap says that none does.
-type FinalCriterion struct {
-	Criterion string `json:"criterion"`
-	Text      string `json:"text"`
-	Evidence  string `json:"evidence,omitempty"`
-	Gap       string `json:"gap,omitempty"`
-}
-
 // The severities of a final finding. A blocking finding stops delivery until
 // work resolves it or the owner accepts it; an advisory one is shown to the
 // owner and stops nothing.
@@ -147,23 +104,14 @@ const (
 	FindingAdvisory = "advisory"
 )
 
-// FinalFinding is one problem the final reader found with the branch as a
-// whole, the criteria it concerns, and the action it asks for.
-type FinalFinding struct {
-	Severity string   `json:"severity"`
-	Criteria []string `json:"criteria,omitempty"`
-	Finding  string   `json:"finding"`
-	Action   string   `json:"action,omitempty"`
-}
-
 // maxFinalRounds is how many final reviews of one workstream may find
 // blocking problems before further revisions of its assembled plan are the
 // owner's decision rather than the chief of staff's.
 const maxFinalRounds = 3
 
-// blocking returns what stops the reviewed report from authorising delivery
+// reportBlocking returns what stops the reviewed report from authorising delivery
 // on its own: each criterion no merged unit serves and each blocking finding.
-func (r FinalReport) blocking() []string {
+func reportBlocking(r FinalReport) []string {
 	var out []string
 	for _, c := range r.Criteria {
 		if c.Gap != "" {
@@ -174,18 +122,6 @@ func (r FinalReport) blocking() []string {
 		if f.Severity == FindingBlocking {
 			out = append(out, f.Describe())
 		}
-	}
-	return out
-}
-
-// Describe is the finding on one line with the criteria it concerns.
-func (f FinalFinding) Describe() string {
-	out := f.Finding
-	if len(f.Criteria) > 0 {
-		out = strings.Join(f.Criteria, ", ") + ": " + out
-	}
-	if f.Action != "" {
-		out += " Action: " + f.Action
 	}
 	return out
 }
@@ -387,7 +323,7 @@ func (in finalReviewInput) reads(now finalReviewInput) bool {
 	return in == now
 }
 
-func (r FinalReport) input() finalReviewInput {
+func reportInput(r FinalReport) finalReviewInput {
 	return finalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
@@ -462,7 +398,7 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if (!found || baseCurrent) && slices.ContainsFunc(asked, func(in finalReviewInput) bool { return in.reads(now) }) {
 		return nil
 	}
-	if baseCurrent && report.Outcome == finalReviewed && report.input().reads(now) {
+	if baseCurrent && report.Outcome == finalReviewed && reportInput(report).reads(now) {
 		return nil
 	}
 	subject, err := a.repository.Workflow(stream, finalReviewSubject)
@@ -1303,7 +1239,7 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 	var reason, body string
 	if report.Outcome == finalReviewed {
 		outcome.Outcome = "succeeded"
-		blocking := report.blocking()
+		blocking := reportBlocking(report)
 		reason = fmt.Sprintf("final review %d read %s at %s against seal %d (spec revision %d, plan revision %d, charter revision %d): %d blocking and %d advisory; report %s revision %d",
 			report.Review, report.Branch, report.Commit, report.Seal, report.Spec, report.Plan, report.Charter, len(blocking), len(report.Findings)-countSeverity(report.Findings, FindingBlocking), finalReportPath, revision)
 		rounds, err := finalRoundsWithBlocking(a.repository, stream)
@@ -1411,7 +1347,7 @@ func finalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 // the units serving the criteria they concern, or of every unit when they
 // name none, and whether there are any.
 func (a *finalReviewer) followup(stream config.WorkstreamID, report FinalReport, revision int) (followup.Unit, bool, error) {
-	blocking := report.blocking()
+	blocking := reportBlocking(report)
 	if len(blocking) == 0 {
 		return followup.Unit{}, false, nil
 	}
@@ -1524,7 +1460,7 @@ func finalRoundsWithBlocking(repository *trace.Repository, stream config.Workstr
 	}
 	n := 0
 	for _, r := range reports {
-		if r.Outcome == finalReviewed && !r.Maintenance && len(r.blocking()) > 0 {
+		if r.Outcome == finalReviewed && !r.Maintenance && len(reportBlocking(r)) > 0 {
 			n++
 		}
 	}
@@ -1720,7 +1656,7 @@ func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff. The change since includes whatever upstream changed in between, which a rebase brought in: that is upstream's change, not the feature's, so judge it only where it breaks the feature.", workstreamDiffTool, previous.Review)
 		var b strings.Builder
 		fmt.Fprintf(&b, "\nFinal review %d read %s and found:\n", previous.Review, previous.Commit)
-		blocking := previous.blocking()
+		blocking := reportBlocking(previous)
 		for _, item := range blocking {
 			b.WriteString("- blocking: " + item + "\n")
 		}

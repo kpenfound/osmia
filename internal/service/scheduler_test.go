@@ -21,26 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// blockingTurns delegates to scripted fake agent results, first calling the
-// per-turn hook with the turn's context. Its fake, adaptertest.Turns, stands
-// in for a real model session; it leaves the real agent backend's actual
-// behaviour, timing and output unverified.
-type blockingTurns struct {
-	fake  *adaptertest.Turns
-	mu    sync.Mutex
-	hooks map[string]func(context.Context)
-}
-
-func (b *blockingTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-	b.mu.Lock()
-	hook := b.hooks[p.Scope.Turn]
-	b.mu.Unlock()
-	if hook != nil {
-		hook(ctx)
-	}
-	return b.fake.Run(context.WithoutCancel(ctx), p)
-}
-
 // queueTurn accepts an owner message without publishing any intent to run it.
 func queueTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
 	t.Helper()
@@ -74,7 +54,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -87,7 +67,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	reply := func(turn string) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer " + turn}}
 	}
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first"), reply("second"))}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first"), reply("second"))}, Hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -105,7 +85,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 
 	entered := make(chan struct{})
-	turns.hooks["first"] = func(ctx context.Context) {
+	turns.Hooks["first"] = func(ctx context.Context) {
 		close(entered)
 		<-ctx.Done()
 	}
@@ -163,7 +143,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	calls := turns.fake.Calls()
+	calls := turns.Fake.Calls()
 	var ran []string
 	for _, call := range calls {
 		ran = append(ran, call.Scope.Turn)
@@ -206,7 +186,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -312,7 +292,7 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -415,7 +395,7 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 	}
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -438,9 +418,9 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		case <-ctx.Done():
 		}
 	}
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
 	for _, id := range []string{"mason1", "mason2"} {
-		turns.hooks[id] = func(ctx context.Context) { started <- id; block(ctx) }
+		turns.Hooks[id] = func(ctx context.Context) { started <- id; block(ctx) }
 	}
 	lives := make(chan *trace.Repository, 1)
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -502,7 +482,7 @@ func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 	// The second workstream sorts after the first by ID but comes first in the
 	// project's priority order.
 	const second config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -523,9 +503,9 @@ func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	started := make(chan string, 2)
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
 	for _, ws := range []config.WorkstreamID{stream, second} {
-		turns.hooks[string(ws)] = func(context.Context) { started <- string(ws) }
+		turns.Hooks[string(ws)] = func(context.Context) { started <- string(ws) }
 	}
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},

@@ -29,8 +29,8 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 			f.awaitApproved(t)
 			var escalated, relay atomic.Bool
 			const text = "Keep the acknowledged offset contract."
-			f.engine.mu.Lock()
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				names, err := toolNames(ctx, tools)
 				if err != nil || !slices.Contains(names, status.ToolName) {
 					return questionResult(req, "session-worker", "Continued the original asking turn."), err
@@ -70,7 +70,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority and eligible origins remain active.", "agents": []string{}})
 				return questionResult(req, "session-chief", "Original origins reconciled."), err
 			}
-			f.engine.turns["lifecycle-batch"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["lifecycle-batch"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				question := "Second original contract question."
 				if strings.Contains(req.SessionDir, "worker_first") {
 					question = "First original contract question."
@@ -78,7 +78,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 				return questionResult(req, "session-worker", "Asked the shared chief."), err
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "lifecycle-batch", "First original contract question.")
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "lifecycle-batch", "Second original contract question.")
 			var original InboxEntry

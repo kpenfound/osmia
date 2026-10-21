@@ -271,7 +271,7 @@ func incompleteFinalChecks(repository *trace.Repository, stream config.Workstrea
 func finalCheckEvidence(run FinalCheckRun) string {
 	out := fmt.Sprintf("The service ran checks on this exact commit before your read, recorded in %s; you do not run them. The run %s.", finalChecksPath(run.Review), run.Status)
 	if run.Selection != nil {
-		out += "\n" + run.Selection.describe() + "."
+		out += "\n" + describeSelection(*run.Selection) + "."
 	}
 	if len(run.Command) > 0 {
 		out += "\nCommand: " + checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)

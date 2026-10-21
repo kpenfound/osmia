@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Members take committee.perspectives and committee.profiles in turn by

@@ -94,9 +94,9 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 		{"PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft"}},
 		{"DELETE", "pause", ClearPauseRequest{Scope: "factory"}},
 		{"PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}}},
-		{"DELETE", "priority", ClearPriorityRequest{project}},
-		{"PUT", "profile", ProfileRequest{"mason", "other"}},
-		{"DELETE", "profile", ClearProfileRequest{"mason"}},
+		{"DELETE", "priority", ClearPriorityRequest{Project: project}},
+		{"PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"}},
+		{"DELETE", "profile", ClearProfileRequest{Role: "mason"}},
 	} {
 		mutation(t, c, m.method, m.kind, m.input)
 		if e := nextEvent(t, events); e != (Event{Kind: EventRuntime}) {
@@ -334,7 +334,7 @@ func TestEventStreamOutlivesTheRequestTimeouts(t *testing.T) {
 	events, done := eventStream(t, c)
 	nextEvent(t, events)
 	time.Sleep(time.Second)
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	if e := nextEvent(t, events); e != (Event{Kind: EventRuntime}) {
 		t.Fatalf("event after idling past the timeouts: %+v", e)
 	}

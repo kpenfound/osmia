@@ -272,8 +272,8 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 	masons.play[masonTurnID("resume")] = reportDone("Built")
 	entered := make(chan struct{})
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			close(entered)
 			<-ctx.Done()
@@ -281,7 +281,7 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 		}
 		return chief.turn(ctx, req, turn, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "interrupted-review", independentPlan)
 	select {
 	case <-entered:
@@ -332,8 +332,8 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 					close(release)
 				}
 			}()
-			f.engine.mu.Lock()
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 					if reviews.Add(1) > 1 {
 						close(started)
@@ -358,7 +358,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 				}
 				return chief.turn(ctx, req, turn, tools)
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 				if !strings.Contains(req.Prompt, relayedRuling) {
 					return fmt.Errorf("missing ruling: %s", req.Prompt)
@@ -434,8 +434,8 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	f.s.cfg.Shed.MaxBounces = 1
 	masons.play[masonTurnID("resume")] = reportDone("Built")
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "material_findings", "summary": reviewSummary, "findings": []ReviewFinding{{Severity: "material", Evidence: "Retry fails", Action: "Handle retry"}}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
@@ -445,7 +445,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 		}
 		return chief.turn(ctx, req, turn, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "contested", independentPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 	r := &reviewers{masons: newMasonController(f.s, f.repository())}

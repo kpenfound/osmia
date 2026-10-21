@@ -26,22 +26,8 @@ const (
 	selectionFull     = "full"
 )
 
-// CheckSelection is which checks a run ran and why. A selected run ran Links,
-// chosen by Jev judgment Judgment from Candidates check links. A full run ran
-// every check, because of Reason, with Detail. Listed is the number of links
-// the project listed, before narrowing, or nil when listing did not complete.
-type CheckSelection struct {
-	Mode       string   `json:"mode"`
-	Links      []string `json:"links,omitempty"`
-	Candidates int      `json:"candidates,omitempty"`
-	Listed     *int     `json:"listed,omitempty"`
-	Judgment   string   `json:"judgment,omitempty"`
-	Reason     string   `json:"reason,omitempty"`
-	Detail     string   `json:"detail,omitempty"`
-}
-
-// describe says in a sentence which checks ran.
-func (s CheckSelection) describe() string {
+// describeSelection says in a sentence which checks ran.
+func describeSelection(s CheckSelection) string {
 	if s.Mode == selectionSelected {
 		return fmt.Sprintf("Jev selected %d of %d check links for the changed files in judgment %s", len(s.Links), s.Candidates, s.Judgment)
 	}

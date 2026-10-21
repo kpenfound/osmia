@@ -14,20 +14,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// SessionDestroyResponse confirms permanent removal without retaining history.
-type SessionDestroyResponse struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Destroyed  bool                `json:"destroyed"`
-}
-
 func (s *Service) destroySession(ctx context.Context, raw string, design bool) (SessionDestroyResponse, *APIError) {
 	if _, err := config.ParseWorkgroupID(raw); err == nil {
-		return SessionDestroyResponse{}, &APIError{Conflict, "workgroups cannot be destroyed; only sessions can be destroyed"}
+		return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "workgroups cannot be destroyed; only sessions can be destroyed"}
 	}
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return SessionDestroyResponse{}, &APIError{Validation, "workstream must be a workstream ID"}
+		return SessionDestroyResponse{}, &APIError{Code: Validation, Message: "workstream must be a workstream ID"}
 	}
 	cfg, projects := s.runtimes()
 	for _, p := range projects {
@@ -36,7 +29,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		}
 		streams, err := p.repository.Workstreams()
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if !slices.Contains(streams, id) {
 			continue
@@ -47,34 +40,34 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 			lock = designLock(p.repository, id)
 		}
 		if !lock.TryLock() {
-			return SessionDestroyResponse{}, &APIError{Conflict, "the session is busy; try again once it finishes"}
+			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "the session is busy; try again once it finishes"}
 		}
 		defer lock.Unlock()
 		// Re-resolve under the same lock every writer takes at admission.
 		streams, err = p.repository.Workstreams()
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if !slices.Contains(streams, id) {
 			break
 		}
 		kind, err := p.repository.Kind(id)
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		allowed := kind == trace.SessionKind && !design
 		if design && kind == "" {
 			allowed, err = isDesignWorkstream(p.repository, id)
 		}
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if !allowed || id == librarianWorkstream(p.id) {
-			return SessionDestroyResponse{}, &APIError{Conflict, "only an open design session or an exploratory session can be destroyed"}
+			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "only an open design session or an exploratory session can be destroyed"}
 		}
 		threads, err := p.repository.Threads(id)
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		busy := gate.controls.Load() != 0
 		for _, th := range threads {
@@ -84,7 +77,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		// operation, which can outlive the thread's completion timestamp.
 		operations, err := p.repository.Operations(id)
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		for _, op := range operations {
 			busy = busy || !op.Acknowledged
@@ -93,17 +86,17 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		busy = busy || len(s.turns.streams[id]) != 0
 		s.turns.mu.Unlock()
 		if busy {
-			return SessionDestroyResponse{}, &APIError{Conflict, "a turn or control is running for this session; try again once it finishes"}
+			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "a turn or control is running for this session; try again once it finishes"}
 		}
 		intent := trace.SessionDestroy{Project: cfg.For(p.id).Project, Workstream: id, Kind: trace.SessionKind}
 		if design {
 			intent.Kind = "design"
 			groups, _, err := trace.Workgroups(p.repository)
 			if err != nil {
-				return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+				return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 			}
 			if g, ok := trace.WorkgroupOf(groups, id); ok && len(g.Members) != 1 {
-				return SessionDestroyResponse{}, &APIError{Conflict, "the design session belongs to a started workgroup"}
+				return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "the design session belongs to a started workgroup"}
 			}
 		}
 
@@ -118,16 +111,16 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 			return s.finishSessionDestroy(context.WithoutCancel(ctx), cfg, p.repository, s.store, intent)
 		})
 		if err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, fmt.Sprintf("session destroy is pending recovery: %v", err)}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session destroy is pending recovery: %v", err)}
 		}
 
 		if err := s.refreshRuntime(); err != nil {
-			return SessionDestroyResponse{}, &APIError{Internal, err.Error()}
+			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		s.hub.publish(Event{Kind: EventRuntime})
 		return SessionDestroyResponse{Project: p.id, Workstream: id, Destroyed: true}, nil
 	}
-	return SessionDestroyResponse{}, &APIError{NotFound, "session not found"}
+	return SessionDestroyResponse{}, &APIError{Code: NotFound, Message: "session not found"}
 }
 
 func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, repository *trace.Repository, store *runtime.Store, intent trace.SessionDestroy) error {

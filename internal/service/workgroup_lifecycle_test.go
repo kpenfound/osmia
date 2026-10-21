@@ -233,8 +233,8 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			var batchEscalated bool
 			var held chan struct{}
 			var entered chan struct{}
-			f.engine.mu.Lock()
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				names, err := toolNames(ctx, tools)
 				if err != nil {
 					return nil, err
@@ -319,7 +319,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue the surviving slice.", "note": "The project contract is active.", "agents": []string{}})
 				return questionResult(req, "session-chief", "The survivor keeps its original conversation."), err
 			}
-			f.engine.turns["lifecycle-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["lifecycle-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				question := "consolidated-survivor"
 				if strings.Contains(req.SessionDir, retiredWorker) {
 					question = "consolidated-origin"
@@ -334,22 +334,22 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					if kind == "escalate" {
 						question = "escalate-" + boundary
 					}
-					f.engine.turns[kind+"-"+boundary] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+					f.engine.Turns[kind+"-"+boundary] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 						_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 						return questionResult(req, "session-worker", "Asked the shared chief."), err
 					}
 				}
 			}
-			primaryDraft := f.engine.turns["draft-1-1"]
-			primarySelection := f.engine.turns["select-repos-1"]
-			f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			primaryDraft := f.engine.Turns["draft-1-1"]
+			primarySelection := f.engine.Turns["select-repos-1"]
+			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if !strings.Contains(req.Workspace.Directory(), string(unrelated)) {
 					return primarySelection(ctx, req, turn, tools)
 				}
 				_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
 				return questionResult(req, "session-unrelated-selection", "Only the independent request's repo is affected."), err
 			}
-			f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if !strings.Contains(req.Workspace.Directory(), string(unrelated)) {
 					return primaryDraft(ctx, req, turn, tools)
 				}
@@ -360,7 +360,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				}
 				return questionResult(req, "session-unrelated-architect", "Independent draft delivered."), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			brief := "Build independent chunk storage."
 			other, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "lifecycle-unrelated", Stdin: &brief, SkipDebate: true})
 			must(t, err)

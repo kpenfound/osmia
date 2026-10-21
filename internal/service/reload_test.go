@@ -177,7 +177,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	_, c := start(t, opts)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
 	stored, err := os.ReadFile(filepath.Join(opts.Config.Root, "runtime.json"))
@@ -233,7 +233,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "rl-")
 	files := configFiles(t, opts)
-	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	var (
 		mu       sync.Mutex
 		bound    []*config.Config
@@ -256,7 +256,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	first, err := c.Send(ctx, stream, "first")
 	must(t, err)
 	select {
-	case <-turns.entered:
+	case <-turns.Entered:
 	case <-time.After(demoTimeout):
 		t.Fatal("the first message did not run")
 	}
@@ -266,7 +266,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	must(t, err)
 	second, err := c.Send(ctx, stream, "second")
 	must(t, err)
-	close(turns.hold)
+	close(turns.Hold)
 	awaitConversation(t, c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 4 && l.Entries[3].State == TurnDone
 	})

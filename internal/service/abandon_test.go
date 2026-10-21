@@ -169,7 +169,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -184,7 +184,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Partial answer", Cancelled: true}}
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply)}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply)}, Hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -200,7 +200,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 
 	entered, stopped := make(chan struct{}), make(chan struct{})
-	turns.hooks["first"] = func(ctx context.Context) {
+	turns.Hooks["first"] = func(ctx context.Context) {
 		close(entered)
 		<-ctx.Done()
 		close(stopped)
@@ -273,7 +273,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 		t.Fatalf("queued turn after restart: %+v", third)
 	}
 	var ran []string
-	for _, call := range turns.fake.Calls() {
+	for _, call := range turns.Fake.Calls() {
 		ran = append(ran, call.Scope.Turn)
 	}
 	if !slices.Equal(ran, []string{"first"}) {
@@ -295,7 +295,7 @@ func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	cfg, err := config.Load(fixtureAt(t, home).Config)
 	must(t, err)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)

@@ -34,15 +34,15 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 			f.awaitApproved(t)
 			const answer = "Keep the acknowledged offset contract stable."
 			var escalated, relay atomic.Bool
-			f.engine.mu.Lock()
-			f.engine.turns["web-ruling-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["web-ruling-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
 				return questionResult(req, "web-worker", "Asked the chief."), err
 			}
-			f.engine.turns[questions.TurnID("1")] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[questions.TurnID("1")] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				return questionResult(req, "web-worker", "Continued the original asking turn."), nil
 			}
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if strings.Contains(req.Prompt, "Present the shared decision") && escalated.CompareAndSwap(false, true) {
 					_, err := callTool(ctx, tools, questions.EscalateTool, map[string]any{
 						"questions":  []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
@@ -57,7 +57,7 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 				}
 				return questionResult(req, "web-chief", "Following the agreed contract."), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "web-ruling-ask", "Check the contract.")
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "web-ruling-ask", "Check the contract.")
 			f.wait(t, "both original questions", func() bool {

@@ -49,8 +49,8 @@ func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 	t.Cleanup(func() { f.stop(t) })
 	cancelled := make(chan error, 1)
 	var deliveries atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		first := strings.Contains(req.Prompt, "Question 1 is open") && deliveries.Add(1) == 1
 		result, err := chief.turn(ctx, req, turn, tools)
 		if first {
@@ -58,7 +58,7 @@ func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 		}
 		return result, err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	asking := f.member(1, 1, 1, asks(p, "1"))
 	stream := f.handIn(t, "cancelled-chief", handedDesign)
 	awaitStart(t, gate.entered)

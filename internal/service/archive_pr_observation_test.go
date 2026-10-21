@@ -58,10 +58,10 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 				}
 			}
 			merge := func(i int) {
-				host.mu.Lock()
-				defer host.mu.Unlock()
+				host.Mu.Lock()
+				defer host.Mu.Unlock()
 				p := publications[i]
-				host.prs = append(host.prs, pulls.PullRequest{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: fmt.Sprintf("merged-%d", i), Head: p.Branch, HeadRepository: p.Fork})
+				host.Prs = append(host.Prs, pulls.PullRequest{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: fmt.Sprintf("merged-%d", i), Head: p.Branch, HeadRepository: p.Fork})
 				f.clock.Advance(10 * time.Minute)
 			}
 			awaitFirstMerge := func() {
@@ -140,9 +140,9 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			})
 			checkGroup(true)
 			f.stop(t)
-			host.mu.Lock()
-			calls := host.finds
-			host.mu.Unlock()
+			host.Mu.Lock()
+			calls := host.Finds
+			host.Mu.Unlock()
 			f.start(t)
 			checkGroup(true)
 			for _, m := range archived {
@@ -157,9 +157,9 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 					t.Fatal("archived observation recreated deleted history")
 				}
 			}
-			host.mu.Lock()
-			after := host.finds
-			host.mu.Unlock()
+			host.Mu.Lock()
+			after := host.Finds
+			host.Mu.Unlock()
 			if after != calls {
 				t.Fatalf("merged archives polled again: %d -> %d", calls, after)
 			}
@@ -170,7 +170,7 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 	ctx := context.Background()
 	cfg, repo, host, refresh := ownPRFixture(t)
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	refresh.s.options.Reconciliation.Now = clock.Now
 	p := deliverWithPullRequest(t, repo, cfg, 42)
 	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
@@ -184,12 +184,12 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	must(t, err)
 	for i, scenario := range []string{"failure", "earlier PR", "open", "closed", "missing", "merged"} {
-		host.findErr = nil
-		host.prs = nil
+		host.FindErr = nil
+		host.Prs = nil
 		pr := pulls.PullRequest{Number: 42, Head: p.Branch, HeadRepository: p.Fork}
 		switch scenario {
 		case "failure":
-			host.findErr = errors.New("provider unavailable")
+			host.FindErr = errors.New("provider unavailable")
 		case "earlier PR":
 			pr.Number, pr.Merged = 41, true
 		case "open":
@@ -200,16 +200,16 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 			pr.Merged, pr.MergeCommit = true, "merged-tip"
 		}
 		if scenario != "missing" {
-			host.prs = []pulls.PullRequest{pr}
+			host.Prs = []pulls.PullRequest{pr}
 		}
 		must(t, refresh.Pass(ctx))
 		got, _ := archiveRecord(t, store, stream)
-		if archiveResolved(got) != (scenario == "merged") || host.finds != i+1 {
-			t.Fatalf("%s: archive=%+v finds=%d", scenario, got, host.finds)
+		if archiveResolved(got) != (scenario == "merged") || host.Finds != i+1 {
+			t.Fatalf("%s: archive=%+v finds=%d", scenario, got, host.Finds)
 		}
 		clock.Advance(10*time.Minute - time.Nanosecond)
 		must(t, refresh.Pass(ctx))
-		if host.finds != i+1 {
+		if host.Finds != i+1 {
 			t.Fatalf("%s retried before cadence", scenario)
 		}
 		clock.Advance(time.Nanosecond)
@@ -231,7 +231,7 @@ func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) 
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	host := &fakePulls{}
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	opts.PullRequests = host
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)
@@ -272,9 +272,9 @@ func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) 
 		t.Fatal("archive or cleanup supplied a merge")
 	}
 	must(t, s.Close())
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "single-merge", State: "closed", Head: p.Branch, HeadRepository: p.Fork}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "single-merge", State: "closed", Head: p.Branch, HeadRepository: p.Fork}}
+	host.Mu.Unlock()
 	s, c = start(t, opts)
 	await("single archived merge and resolution", func() bool {
 		a, _ := archiveRecord(t, s.store, member)

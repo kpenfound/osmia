@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
@@ -111,7 +110,7 @@ func TestSessionCommitCommitsAndThreadEntryReachesNextTurn(t *testing.T) {
 		t.Fatalf("session head is %s, want %s", tip, resp.Commit)
 	}
 	var prompt string
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		prompt = req.Prompt
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "ok"}, nil
 	}
@@ -149,7 +148,7 @@ func TestSessionCommitRefusalsRecordNothing(t *testing.T) {
 		home := filepath.Dir(clone)
 		worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
 		hold, entered := make(chan struct{}), make(chan struct{})
-		engine.turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
+		engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 			close(entered)
 			select {
 			case <-hold:
@@ -412,7 +411,7 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	// The head still exports, but its base tree is unavailable for selection.
 	must(t, os.Remove(filepath.Join(clone, ".git", "objects", baseTree[:2], baseTree[2:])))
 	must(t, sessionGit(s.current().For(project)).Export(context.Background(), commit.Commit, t.TempDir()))
-	checks := &fakeChecks{links: []string{"dag+check://go/test"}, outcomes: passing()}
+	checks := &fakeChecks{Links: []string{"dag+check://go/test"}, Outcomes: passing()}
 	s.options.reviewChecks = checks
 	provider := &jevtest.Provider{}
 	boostJev(s, provider)
@@ -421,7 +420,7 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	if !strings.Contains(err.Error(), "cannot diff the session's base and head") {
 		t.Fatalf("diff failure: %v", err)
 	}
-	if len(checks.runs()) != 0 || len(provider.Requests()) != 0 {
+	if len(checks.Runs()) != 0 || len(provider.Requests()) != 0 {
 		t.Fatal("unreadable change reached selection or the check runner")
 	}
 	runs, err := sessionCheckRuns(s.sole().repository, stream)
@@ -548,7 +547,7 @@ func TestSessionEndRefusesWhileRunningThenReleasesStateAndRefusesControls(t *tes
 	modelDir := runtime.ModelSessionDirectory(s.cfg.Root.String(), project, stream)
 
 	hold, entered := make(chan struct{}), make(chan struct{})
-	engine.turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
+	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-hold:

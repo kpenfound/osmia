@@ -45,14 +45,14 @@ func prepareBounceFixture(t *testing.T, history string, build bool, configure ..
 	t.Helper()
 	graph := `{"version":1,"units":[{"id":"` + bounceUnit + `","title":"Prove the retry","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestRetry"}},{"criterion":"spec#2","proof":{"kind":"reviewer-judgement","name":"no duplicates"}}],"depends_on":[],"footprint":["internal.trace"]}]}`
 	outcomes := passing()
-	failed := checkOutcome{result: CheckResult{ExitCode: 1, Output: failedReport(bounceCheck)}}
+	failed := checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport(bounceCheck)}}
 	if history == "checks" {
 		outcomes = []checkOutcome{failed}
 	}
 	if history == "mixed" {
-		outcomes = []checkOutcome{failed, {result: CheckResult{Output: passedReport}}, failed}
+		outcomes = []checkOutcome{failed, {Result: CheckResult{Output: passedReport}}, failed}
 	}
-	checks := &fakeChecks{outcomes: outcomes}
+	checks := &fakeChecks{Outcomes: outcomes}
 	passed, prepare := countingSchedule()
 	f, _ := newMasonFixturePrepared(t, 1, graph, func(o *Options) {
 		prepare(o)
@@ -64,8 +64,8 @@ func prepareBounceFixture(t *testing.T, history string, build bool, configure ..
 	b := &bounceFixture{f: f, graph: graph, passed: passed, delivered: make(chan agent.Request, 8), resolved: make(chan error, 8)}
 	var builds atomic.Int32
 	var commanded, escalated atomic.Bool
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result := &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Recorded", SessionDir: req.SessionDir, NumTurns: 1}
 		if strings.HasPrefix(req.Name, masonAgent(bounceUnit)+"-") || strings.HasPrefix(req.Name, reviewerAgent(bounceUnit)+"-") {
 			if strings.Contains(req.Prompt, bounceNote) {
@@ -117,7 +117,7 @@ func prepareBounceFixture(t *testing.T, history string, build bool, configure ..
 		}
 		return result, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	if !build {
 		return b
 	}
@@ -269,7 +269,7 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 					if entry == "chief" {
 						by = "chief of staff"
 					}
-					if !found || ruling.ruler() != by {
+					if !found || contestRuler(ruling) != by {
 						t.Fatalf("ruling attribution: %+v", ruling)
 					}
 					if entry != "owner" {
@@ -756,9 +756,9 @@ func TestOrdinarySendBackRecoversFindingsAfterRestart(t *testing.T) {
 					}
 				})
 				defer b.stop(t)
-				b.f.engine.mu.Lock()
-				original := b.f.engine.turns["*"]
-				b.f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+				b.f.engine.Mu.Lock()
+				original := b.f.engine.Turns["*"]
+				b.f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 					if strings.HasPrefix(req.Name, masonAgent(bounceUnit)+"-revise-") {
 						b.delivered <- req
 						_, err := callTool(ctx, tools, "ask", map[string]any{"question": "Please confirm the send-back evidence."})
@@ -770,7 +770,7 @@ func TestOrdinarySendBackRecoversFindingsAfterRestart(t *testing.T) {
 					}
 					return result, err
 				}
-				b.f.engine.mu.Unlock()
+				b.f.engine.Mu.Unlock()
 				b.stream = b.f.seedBuilding(t, "ordinary-"+history+"-"+recoverer, b.graph)
 				awaitCheck(t, reached)
 				state, err := b.f.repository().Workflow(b.stream, trace.UnitSubject(bounceUnit))

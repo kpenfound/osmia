@@ -32,16 +32,16 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			must(t, err)
 			f.awaitApproved(t)
 			var escalated atomic.Bool
-			f.engine.mu.Lock()
-			f.engine.turns["lifecycle-read-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["lifecycle-read-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": req.Prompt})
 				return questionResult(req, "session-worker", "Asked the shared chief."), err
 			}
-			f.engine.turns["lifecycle-read-next"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["lifecycle-read-next"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-read-cleanup"})
 				return questionResult(req, "session-worker", "Asked the shared chief."), err
 			}
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				names, err := toolNames(ctx, tools)
 				if err != nil || !slices.Contains(names, status.ToolName) {
 					return questionResult(req, "session-worker", "Continued the original asking turn."), err
@@ -81,7 +81,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority remains available.", "agents": []string{}})
 				return questionResult(req, "session-chief", "Read original authority."), err
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "lifecycle-read-ask", "first-read-origin")
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "lifecycle-read-ask", "second-read-origin")
 			rightRepo, err := f.s.repository(f.project2)

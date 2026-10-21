@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
@@ -25,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The plan ratification demonstration: on an onboarded project, the owner hands in four
@@ -332,11 +331,11 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	must(t, errors.Join(err, configFile.Close()))
 	// Every backend session can be resumed, so a turn's prompt holds only
 	// what is new to its thread.
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
 	// Production wiring: one engine runs the librarian, the architect, the
 	// committee and the chief of staff.
-	hosts := &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}
+	hosts := &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}
 	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: hosts})
 	f := &shedFixture{architectFixture: &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}, members: 2}
 
@@ -380,10 +379,10 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	d.plays[exitTitle(exitAbandoned)] = map[string]demoTurn{"draft-1-1": d.drafts(map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)}
 	for _, plays := range d.plays {
 		for name := range plays {
-			engine.turns[name] = d.route
+			engine.Turns[name] = d.route
 		}
 	}
-	engine.turns["*"] = d.chief
+	engine.Turns["*"] = d.chief
 	seed, err := kb.Seed(clone)
 	must(t, err)
 	var librarian []error

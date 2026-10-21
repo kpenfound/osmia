@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -24,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const shedCharter = "1. Keep changes small.\n2. Every change has a test.\n"
@@ -99,9 +98,9 @@ func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepa
 // fail the turn, so checks collect theirs for the test to read.
 func (f *shedFixture) member(round, i, attempt int, run func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) string {
 	turn := roundTurnID(round, committeeAgent(i), attempt)
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := run(ctx, req, verified, tools); err != nil {
 			return nil, err
 		}

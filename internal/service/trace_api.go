@@ -8,25 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 )
-
-// TraceSummary identifies the sealed revisions, criteria and units of a
-// workstream. Unit walks retain their evidence and explicit missing links.
-type TraceSummary struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Feature    string              `json:"feature"`
-	Seal       *TraceSeal          `json:"seal,omitempty"`
-	Spec       *TraceRef           `json:"spec,omitempty"`
-	Plan       *TraceRef           `json:"plan,omitempty"`
-	Criteria   []TraceCriterion    `json:"criteria"`
-	Units      []UnitTrace         `json:"units"`
-	Delivery   *TraceDelivery      `json:"delivery,omitempty"`
-	Gaps       []TraceGap          `json:"gaps"`
-	Complete   bool                `json:"complete"`
-}
 
 // changeReadTimeout bounds the read of a commit's change ID in a trace walk.
 const changeReadTimeout = 5 * time.Second
@@ -37,7 +20,7 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		return nil, api
 	}
 	if kind != "" && selector == "" {
-		return nil, &APIError{Validation, "trace selector must not be empty"}
+		return nil, &APIError{Code: Validation, Message: "trace selector must not be empty"}
 	}
 	var out any
 	var err error
@@ -86,12 +69,12 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		out, err = traceUnit(repository, stream, selector)
 	case "criterion":
 		if _, ok := plan.ParseCitation(selector); !ok {
-			return nil, &APIError{Validation, "criterion must be cited as spec#<n>"}
+			return nil, &APIError{Code: Validation, Message: "criterion must be cited as spec#<n>"}
 		}
 		out, err = traceCriterion(repository, stream, selector)
 	case "commit":
 		if !commitPattern.MatchString(selector) {
-			return nil, &APIError{Validation, "commit must be a full lowercase commit ID"}
+			return nil, &APIError{Code: Validation, Message: "commit must be a full lowercase commit ID"}
 		}
 		// A rebased or squashed commit can be found by its operation trailer.
 		// A recorded commit may no longer be present in the clone, so the
@@ -114,13 +97,13 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		}
 		out, err = traceCommit(repository, stream, selector, message, change)
 	default:
-		return nil, &APIError{Validation, "trace selector must be unit, criterion or commit"}
+		return nil, &APIError{Code: Validation, Message: "trace selector must be unit, criterion or commit"}
 	}
 	if errors.Is(err, errTraceNotFound) {
-		return nil, &APIError{NotFound, fmt.Sprintf("%s %s is not in the workstream trace", kind, selector)}
+		return nil, &APIError{Code: NotFound, Message: fmt.Sprintf("%s %s is not in the workstream trace", kind, selector)}
 	}
 	if err != nil {
-		return nil, &APIError{Internal, fmt.Sprintf("cannot read trace of workstream %s; check the trace repository", stream)}
+		return nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read trace of workstream %s; check the trace repository", stream)}
 	}
 	return out, nil
 }

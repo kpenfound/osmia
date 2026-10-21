@@ -243,7 +243,7 @@ func (s *Service) changeApplicationLock(group config.WorkgroupID) *sync.RWMutex 
 func (s *Service) changeArchiveGuard(group config.WorkgroupID) (func(), *APIError) {
 	lock := s.changeApplicationLock(group)
 	if !lock.TryRLock() {
-		return func() {}, &APIError{Conflict, "an approved change is being applied to this workgroup; retry"}
+		return func() {}, &APIError{Code: Conflict, Message: "an approved change is being applied to this workgroup; retry"}
 	}
 	return lock.RUnlock, nil
 }
@@ -331,16 +331,16 @@ func (s *Service) snapshotChange(g trace.Workgroup, repo *trace.Repository) (tra
 
 func (s *Service) requestChange(ctx context.Context, raw string, req ChangeRequest) (WorkgroupChange, *APIError) {
 	if !handInKey.MatchString(req.Key) || strings.TrimSpace(req.Change) == "" || (req.Kind != "amend" && req.Kind != "cancel") || (req.Scope != "workgroup" && req.Scope != "workstream") {
-		return WorkgroupChange{}, &APIError{Validation, "key, amend or cancel kind, workgroup or workstream scope, and change are required"}
+		return WorkgroupChange{}, &APIError{Code: Validation, Message: "key, amend or cancel kind, workgroup or workstream scope, and change are required"}
 	}
 	wt, g, origin, close, err := s.changeContext(ctx, raw)
 	if err != nil {
-		return WorkgroupChange{}, &APIError{Conflict, err.Error()}
+		return WorkgroupChange{}, &APIError{Code: Conflict, Message: err.Error()}
 	}
 	defer close()
 	if req.Workstream != "" {
 		if !slices.Contains(s.changeMembers(g, wt), req.Workstream) {
-			return WorkgroupChange{}, &APIError{Validation, "target is not a member"}
+			return WorkgroupChange{}, &APIError{Code: Validation, Message: "target is not a member"}
 		}
 		origin = req.Workstream
 	}
@@ -349,22 +349,22 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 	defer lock.Unlock()
 	changes, err := readChanges(wt, g.Members[0])
 	if err != nil {
-		return WorkgroupChange{}, &APIError{Internal, err.Error()}
+		return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	for _, c := range changes {
 		if c.Request.Key == req.Key {
 			if !reflect.DeepEqual(req, c.Request) {
-				return c, &APIError{Conflict, "this key already names another change"}
+				return c, &APIError{Code: Conflict, Message: "this key already names another change"}
 			}
 			return c, nil
 		}
 		if c.State != "applied" && c.State != "rejected" && c.State != "failed" {
-			return c, &APIError{Conflict, "decide the pending workgroup change first"}
+			return c, &APIError{Code: Conflict, Message: "decide the pending workgroup change first"}
 		}
 	}
 	before, members, err := s.snapshotChange(g, wt)
 	if err != nil {
-		return WorkgroupChange{}, &APIError{Internal, err.Error()}
+		return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if req.Kind == "amend" {
 		for _, m := range members {
@@ -373,9 +373,9 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 				return WorkgroupChange{}, api
 			}
 			if _, _, approved, err := seal.Latest(r, m.Workstream); err != nil {
-				return WorkgroupChange{}, &APIError{Internal, err.Error()}
+				return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 			} else if !approved {
-				return WorkgroupChange{}, &APIError{Conflict, "ratify the project spec before requesting a delta amendment"}
+				return WorkgroupChange{}, &APIError{Code: Conflict, Message: "ratify the project spec before requesting a delta amendment"}
 			}
 		}
 	}
@@ -386,13 +386,13 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 			target = s.changeMembers(g, wt)
 		}
 		if !slices.Contains(s.changeMembers(g, wt), origin) && req.Scope == "workstream" {
-			return c, &APIError{Validation, "select a member workstream to cancel"}
+			return c, &APIError{Code: Validation, Message: "select a member workstream to cancel"}
 		}
 		c.Impact = amendment.CancelImpact(target, before.Graph, members)
 		c.State = "presenting"
 	}
 	if err := s.saveChange(ctx, wt, &c); err != nil {
-		return c, &APIError{Internal, err.Error()}
+		return c, &APIError{Code: Internal, Message: err.Error()}
 	}
 	return c, nil
 }
@@ -400,7 +400,7 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDecision) (WorkgroupChange, *APIError) {
 	wt, g, _, close, err := s.changeContext(ctx, raw)
 	if err != nil {
-		return WorkgroupChange{}, &APIError{Conflict, err.Error()}
+		return WorkgroupChange{}, &APIError{Code: Conflict, Message: err.Error()}
 	}
 	defer close()
 	lock := s.groupApprovalLock(g.ID)
@@ -408,7 +408,7 @@ func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDeci
 	defer lock.Unlock()
 	changes, err := readChanges(wt, g.Members[0])
 	if err != nil {
-		return WorkgroupChange{}, &APIError{Internal, err.Error()}
+		return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	for _, c := range changes {
 		if c.ID == id {
@@ -416,13 +416,13 @@ func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDeci
 				return c, nil
 			}
 			if c.State != "presented" || c.Revision != d.Revision {
-				return c, &APIError{Conflict, "approve the current presented impact summary"}
+				return c, &APIError{Code: Conflict, Message: "approve the current presented impact summary"}
 			}
 			if d.Decision != "approve" && d.Decision != "reject" {
-				return c, &APIError{Validation, "decision must be approve or reject"}
+				return c, &APIError{Code: Validation, Message: "decision must be approve or reject"}
 			}
 			if c.Request.Kind == "cancel" && d.Decision == "approve" && d.PullRequests != "close" && d.PullRequests != "draft" {
-				return c, &APIError{Validation, "choose close or draft for open pull requests at cancel time"}
+				return c, &APIError{Code: Validation, Message: "choose close or draft for open pull requests at cancel time"}
 			}
 			// Approval compares authoritative text with the exact reviewed
 			// snapshot; it never replaces pinned member state with a new read.
@@ -432,10 +432,10 @@ func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDeci
 					current, _, err = s.snapshotChange(g, wt)
 				}
 				if err != nil {
-					return c, &APIError{Internal, err.Error()}
+					return c, &APIError{Code: Internal, Message: err.Error()}
 				}
 				if !sameProjectSpec(current, c.Before) {
-					return c, &APIError{Conflict, "approved project spec changed; request a new delta"}
+					return c, &APIError{Code: Conflict, Message: "approved project spec changed; request a new delta"}
 				}
 			}
 			c.Decision = &d
@@ -444,12 +444,12 @@ func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDeci
 				c.State = "rejected"
 			}
 			if err := s.saveChange(ctx, wt, &c); err != nil {
-				return c, &APIError{Internal, err.Error()}
+				return c, &APIError{Code: Internal, Message: err.Error()}
 			}
 			return c, nil
 		}
 	}
-	return WorkgroupChange{}, &APIError{NotFound, "change not found"}
+	return WorkgroupChange{}, &APIError{Code: NotFound, Message: "change not found"}
 }
 
 func (c *runtimeControls) changeControl(repository *trace.Repository, scope coreadapter.Scope, decide bool) coreadapter.Tool {

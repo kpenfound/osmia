@@ -53,31 +53,6 @@ func amendmentDecided(id string, k int) string { return fmt.Sprintf("amendment-%
 // amendment to its requester's thread.
 func amendmentRulingTurn(id string) string { return "amendment_" + id + "_ruling" }
 
-// AmendmentDecision is one attributed decision on a presented amendment, recorded
-// as one revision of amendments/<n>/decision.json. Round is the debate round
-// the decided packet followed, Packet the revision of packet.json considered, Spec and Plan the revisions of the proposed amendments/<n>/spec.md
-// and plan.json, and SealRevision the revision of seal.json in force.
-// Overruled names the objections an overrule set aside.
-type AmendmentDecision struct {
-	Decision     string   `json:"decision"`
-	Note         string   `json:"note,omitempty"`
-	Round        int      `json:"round"`
-	Packet       int      `json:"packet"`
-	Spec         int      `json:"spec"`
-	Plan         int      `json:"plan"`
-	SealRevision int      `json:"seal_revision"`
-	Overruled    []string `json:"overruled,omitempty"`
-	Actor        string   `json:"actor,omitempty"`
-}
-
-// AmendmentDecisionRequest is the owner's decision on the named revision of
-// an amendment's packet.
-type AmendmentDecisionRequest struct {
-	Decision string `json:"decision"`
-	Note     string `json:"note,omitempty"`
-	Packet   int    `json:"packet"`
-}
-
 // amendmentSealMatches compares the sealed documents in force at a recorded
 // seal revision with the current seal. An upstream base move keeps that identity.
 func amendmentSealMatches(repository *trace.Repository, stream config.WorkstreamID, revision int, current seal.Seal) (bool, error) {
@@ -96,20 +71,6 @@ func amendmentSealMatches(repository *trace.Repository, stream config.Workstream
 		return original.Seal == current.Seal && original.SpecHash == current.SpecHash && original.Revision == current.Revision, nil
 	}
 	return false, fmt.Errorf("seal.json revision %d is missing", revision)
-}
-
-// AmendmentResponse describes one amendment: its state, the debate round it
-// reached, its latest packet and revision, and its latest decision.
-type AmendmentResponse struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Amendment  string              `json:"amendment"`
-	State      string              `json:"state"`
-	Round      int                 `json:"round"`
-	Packet     json.RawMessage     `json:"packet,omitempty"`
-	Revision   int                 `json:"revision,omitempty"`
-	Decision   *AmendmentDecision  `json:"decision,omitempty"`
-	Detail     string              `json:"detail,omitempty"`
 }
 
 // amendmentDecisions returns the recorded decisions on an amendment, oldest
@@ -217,10 +178,10 @@ func (s *Service) amendmentView(raw, id string) (AmendmentResponse, *APIError) {
 	}
 	c, found, err := readAmendment(repository, stream, id)
 	if err != nil {
-		return AmendmentResponse{}, &APIError{Internal, fmt.Sprintf("cannot read amendment %s of workstream %s; check the trace repository", id, stream)}
+		return AmendmentResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read amendment %s of workstream %s; check the trace repository", id, stream)}
 	}
 	if !found {
-		return AmendmentResponse{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no amendment %s", stream, id)}
+		return AmendmentResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no amendment %s", stream, id)}
 	}
 	return c.response(project, stream, ""), nil
 }
@@ -243,27 +204,27 @@ func (s *Service) decideAmendment(ctx context.Context, raw, id string, req Amend
 // twice. Approval is refused while an objection blocks it, and approval or
 // overrule once the sealed spec or plan moved since the request was filed.
 func (s *Service) recordAmendmentDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if !slices.Contains([]string{AmendmentApprove, AmendmentReject, AmendmentRound, AmendmentOverrule}, decision) {
-		return AmendmentResponse{}, &APIError{Validation, "an amendment decision is approve, reject, round or overrule"}
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "an amendment decision is approve, reject, round or overrule"}
 	}
 	if req.Packet < 1 {
-		return AmendmentResponse{}, &APIError{Validation, "name the revision of the amendment's packet the decision is on; read it with osmia amendment"}
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "name the revision of the amendment's packet the decision is on; read it with osmia amendment"}
 	}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return AmendmentResponse{}, failed
 	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
-		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s; amendments are decided while it is building or assembled", stream, featureState(feature.Value))}
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; amendments are decided while it is building or assembled", stream, featureState(feature.Value))}
 	}
 	c, found, err := readAmendment(repository, stream, id)
 	if err != nil {
 		return AmendmentResponse{}, failed
 	}
 	if !found {
-		return AmendmentResponse{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no amendment %s", stream, id)}
+		return AmendmentResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no amendment %s", stream, id)}
 	}
 	for _, d := range c.decisions {
 		if d.Packet != req.Packet {
@@ -272,13 +233,13 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 		if d.Decision == decision {
 			return c.response(project, stream, fmt.Sprintf("the recorded decision to %s amendment %s on packet revision %d is already recorded", decision, id, req.Packet)), nil
 		}
-		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("packet revision %d of amendment %s is already decided: %s", req.Packet, id, d.Decision)}
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("packet revision %d of amendment %s is already decided: %s", req.Packet, id, d.Decision)}
 	}
 	if c.state.Value != amendmentPresented || c.packet.Revision == 0 {
-		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s of workstream %s is %s; it can be decided once its packet is presented", id, stream, featureState(c.state.Value))}
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s of workstream %s is %s; it can be decided once its packet is presented", id, stream, featureState(c.state.Value))}
 	}
 	if req.Packet != c.packet.Revision {
-		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("packet revision %d of amendment %s is not the latest; revision %d is presented, read it with osmia amendment", req.Packet, id, c.packet.Revision)}
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("packet revision %d of amendment %s is not the latest; revision %d is presented, read it with osmia amendment", req.Packet, id, c.packet.Revision)}
 	}
 	current, sealDoc, sealed, err := seal.Latest(repository, stream)
 	if err != nil || !sealed {
@@ -303,16 +264,16 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 			return AmendmentResponse{}, failed
 		}
 		if !matching {
-			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed against seal.json revision %d; revision %d is in force, so reject it and file a new request", id, c.request.SealRevision, sealDoc.Revision)}
+			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed against seal.json revision %d; revision %d is in force, so reject it and file a new request", id, c.request.SealRevision, sealDoc.Revision)}
 		}
 		if decision == AmendmentApprove {
 			if blocked := shed.Blocked(entries); len(blocked) > 0 {
-				return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("objections %s block amendment %s; overrule them or reject the amendment", entryIDs(blocked), id)}
+				return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("objections %s block amendment %s; overrule them or reject the amendment", entryIDs(blocked), id)}
 			}
 			reason = fmt.Sprintf("the owner approved amendment %s on packet revision %d after round %d", id, c.packet.Revision, c.round)
 		} else {
 			if len(entries) == 0 {
-				return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("no objection stands against amendment %s; approve it instead", id)}
+				return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("no objection stands against amendment %s; approve it instead", id)}
 			}
 			for _, e := range entries {
 				record.Overruled = append(record.Overruled, e.ID)
@@ -326,7 +287,7 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 		reason = fmt.Sprintf("the owner rejected amendment %s on packet revision %d; the sealed spec and plan stay in force", id, c.packet.Revision)
 	case AmendmentRound:
 		if limit := s.current().Shed.MaxRounds; c.round >= limit {
-			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s has had %d of shed.max_rounds (%d) debate rounds; approve, overrule or reject it", id, c.round, limit)}
+			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s has had %d of shed.max_rounds (%d) debate rounds; approve, overrule or reject it", id, c.round, limit)}
 		}
 		to = "proposed"
 		reason = fmt.Sprintf("the owner asked for debate round %d on amendment %s after reading packet revision %d", c.round+1, id, c.packet.Revision)
@@ -350,7 +311,7 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 		Events:     []trace.Event{trace.Notice(transition, "amendment", reason)}}
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s changed while the decision was recorded; read it again with osmia amendment and retry", id)}
+			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s changed while the decision was recorded; read it again with osmia amendment and retry", id)}
 		}
 		return AmendmentResponse{}, failed
 	}

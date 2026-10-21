@@ -17,13 +17,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // awaitExtraction polls status until the latest extraction is terminal.
@@ -114,23 +113,23 @@ func newLibrarianFixture(t *testing.T) *librarianFixture {
 	must(t, os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("node_modules/\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS", "AGENTS.md")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
-	opts.Librarian = &Librarian{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}}
+	opts.Librarian = &Librarian{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}}
 	return &librarianFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 }
 
 // script installs the fake librarian's behaviour for one turn: it writes the
 // given output files and returns a successful result.
 func (f *librarianFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		var err error
 		if check != nil {
 			err = check(ctx, req, verified, tools)
@@ -206,9 +205,9 @@ func extractStatus(t *testing.T, s *Service, body string) int {
 }
 
 func (f *librarianFixture) runs() []string {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	return slices.Clone(f.engine.runs)
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	return slices.Clone(f.engine.Runs)
 }
 
 func entitiesWith(t *testing.T, seed kb.Map, alias string) string {
@@ -476,8 +475,8 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 
 	// A third run is refused while it is still running.
 	entered, release := make(chan struct{}), make(chan struct{})
-	f.engine.mu.Lock()
-	f.engine.turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-release:
@@ -492,7 +491,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-three", ResultText: "done", SessionDir: req.SessionDir}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = c.ExtractProject(ctx, id)
 	must(t, err)
 	select {
@@ -612,11 +611,11 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 		}
 	}
 	// A turn that fails in the backend is a failed extraction with its reason.
-	f.engine.mu.Lock()
-	f.engine.turns["extract-4-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-4-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("model refused")
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = c.ExtractProject(ctx, id)
 	must(t, err)
 	if x := awaitExtraction(t, c); x.Extraction != 4 || x.State != "failed" || !strings.Contains(x.Reason, "extract-4-1 failed") || !strings.Contains(x.Reason, "model refused") {
@@ -638,13 +637,13 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 	// The first attempt is stopped mid-turn: the backend returns on cancellation.
 	entered := make(chan struct{})
 	var once sync.Once
-	f.engine.mu.Lock()
-	f.engine.turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() { close(entered) })
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	s, err := Start(ctx, f.opts)
 	must(t, err)
 	c := NewClient(s.Socket())
@@ -721,13 +720,13 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 
 	// An extraction interrupted at every attempt fails with the count.
 	f2 := newLibrarianFixture(t)
-	f2.engine.mu.Lock()
+	f2.engine.Mu.Lock()
 	for attempt := 1; attempt <= maxExtractionAttempts; attempt++ {
-		f2.engine.turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f2.engine.Turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
 		}
 	}
-	f2.engine.mu.Unlock()
+	f2.engine.Mu.Unlock()
 	s2, c2 := start(t, f2.opts)
 	_, err = c2.AddProject(ctx, request(f2.clone))
 	must(t, err)
@@ -749,7 +748,7 @@ func TestExtractionStateWhileRetrying(t *testing.T) {
 	opts := fixtureAt(t, home)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), registrationActor)
 	must(t, err)
 	defer repo.Close()

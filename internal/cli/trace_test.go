@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -23,17 +24,17 @@ func TestTraceUsesServiceAPI(t *testing.T) {
 		paths = append(paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case service.Prefix + "/trace/" + stream:
-			json.NewEncoder(w).Encode(service.TraceSummary{Workstream: stream, Feature: "delivered", Criteria: []service.TraceCriterion{{Criterion: "spec#1", Text: "Works"}}})
-		case service.Prefix + "/trace/" + stream + "/unit/a":
-			json.NewEncoder(w).Encode(service.UnitTrace{Workstream: stream, Unit: "a", Feature: "abandoned", Gaps: []service.TraceGap{{Link: "review", State: service.LinkNotCreated, Reason: "not reviewed"}}})
-		case service.Prefix + "/trace/" + stream + "/criterion/spec#1":
-			json.NewEncoder(w).Encode(service.CriterionTrace{Workstream: stream, Criterion: "spec#1", Text: "Works", Feature: "delivered"})
-		case service.Prefix + "/trace/" + stream + "/commit/" + strings.Repeat("a", 40):
-			json.NewEncoder(w).Encode(service.CommitTrace{Workstream: stream, Commit: strings.Repeat("a", 40), Feature: "delivered", Records: []service.CommitRecord{{Role: "landing", Unit: "a", Ref: service.TraceRef{ID: "landing", Revision: 2, Path: "units/a/landing.json"}}}})
+		case wire.Prefix + "/trace/" + stream:
+			json.NewEncoder(w).Encode(wire.TraceSummary{Workstream: stream, Feature: "delivered", Criteria: []wire.TraceCriterion{{Criterion: "spec#1", Text: "Works"}}})
+		case wire.Prefix + "/trace/" + stream + "/unit/a":
+			json.NewEncoder(w).Encode(wire.UnitTrace{Workstream: stream, Unit: "a", Feature: "abandoned", Gaps: []wire.TraceGap{{Link: "review", State: service.LinkNotCreated, Reason: "not reviewed"}}})
+		case wire.Prefix + "/trace/" + stream + "/criterion/spec#1":
+			json.NewEncoder(w).Encode(wire.CriterionTrace{Workstream: stream, Criterion: "spec#1", Text: "Works", Feature: "delivered"})
+		case wire.Prefix + "/trace/" + stream + "/commit/" + strings.Repeat("a", 40):
+			json.NewEncoder(w).Encode(wire.CommitTrace{Workstream: stream, Commit: strings.Repeat("a", 40), Feature: "delivered", Records: []wire.CommitRecord{{Role: "landing", Unit: "a", Ref: wire.TraceRef{ID: "landing", Revision: 2, Path: "units/a/landing.json"}}}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(service.ErrorResponse{Error: service.APIError{Code: service.NotFound, Message: "not in trace"}})
+			json.NewEncoder(w).Encode(wire.ErrorResponse{Error: wire.APIError{Code: wire.NotFound, Message: "not in trace"}})
 		}
 	})}
 	go server.Serve(listener)

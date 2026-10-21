@@ -25,14 +25,6 @@ const reviewerRole = "reviewer"
 
 var reviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
 
-// ReviewFinding is one thing the mason must change before the unit's
-// acceptance holds.
-type ReviewFinding struct {
-	Severity string `json:"severity"`
-	Evidence string `json:"evidence"`
-	Action   string `json:"action"`
-}
-
 // UnitVerdict is a unit reviewer's decision on a candidate: whether the
 // unit's acceptance holds, a summary of how the reviewer verified it, and the
 // findings that send it back.
@@ -499,7 +491,7 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 		}
 	}
 	if !ruled && latest.Decision == "review" && latest.Candidate == candidate {
-		guidance += fmt.Sprintf("\n\nThe %s ruled on contested candidate %s: review it again. Note: %s", latest.ruler(), latest.Candidate, latest.Note)
+		guidance += fmt.Sprintf("\n\nThe %s ruled on contested candidate %s: review it again. Note: %s", contestRuler(latest), latest.Candidate, latest.Note)
 	}
 	return guidance, nil
 }
@@ -928,7 +920,7 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	if found && ruling.Decision == "revise" && ruling.Candidate == result.Identity.Candidate.Revision {
-		request.Prompt += "\n\nThe " + ruling.ruler() + " ruled that this candidate needs revision: " + ruling.Note
+		request.Prompt += "\n\nThe " + contestRuler(ruling) + " ruled that this candidate needs revision: " + ruling.Note
 	}
 	if r.s.boundary != nil {
 		if err := r.s.step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {

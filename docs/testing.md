@@ -68,6 +68,26 @@ Service tests run checks with a fake `ReviewChecks`: fixtures built on
 `projectFixture` pass every check, and the unit check tests script listings,
 passing, failing and incomplete runs. No test reaches a Dagger engine.
 
+Running-service tests outside `internal/service` use
+[`servicetest`](../internal/servicetest) to start the real service and web
+listener, drive the API, and seed sealed builds. Its `Project` helpers provide
+`SeedBuild`, `SeedBuilding`, `SeedBuildingPaused`, `BuiltAs` and `BuiltPaused`.
+Execution hooks and private fixture operations go through `service.TestHooks`,
+`StartForTest` and `InspectForTest`, separate from production options.
+
+[`fixturekit`](../internal/servicetest/fixturekit) holds the service-independent
+fake agents, checks and GitHub clients, local repository and configuration
+builders, sealed-build inputs, clocks and test defaults. It never imports
+`internal/service`. Both `servicetest` and the in-package controller fixtures
+build on this lower layer. Each test package applies
+`fixturekit.ApplyServiceTestDefaults` in `TestMain` to enable shuffling unless
+the caller explicitly selects a shuffle setting.
+
+[`browsertest`](../internal/browsertest) runs browser tests through
+`servicetest` and owns the shared Chromium harness. Tests that need private
+controller fixtures stay with those controllers and share the same harness;
+`TestMain` closes Chromium after each package's tests finish.
+
 ## Keep service tests focused
 
 Service lifecycle tests start real reconcilers and write durable traces to

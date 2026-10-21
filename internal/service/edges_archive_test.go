@@ -64,9 +64,9 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 				}
 			}
 			if tc.detected {
-				host.mu.Lock()
-				host.prs = []pulls.PullRequest{{Number: 71, State: "closed", Merged: true, MergeCommit: "merged-upstream", HeadRepository: publication.Fork, Head: publication.Branch}}
-				host.mu.Unlock()
+				host.Mu.Lock()
+				host.Prs = []pulls.PullRequest{{Number: 71, State: "closed", Merged: true, MergeCommit: "merged-upstream", HeadRepository: publication.Fork, Head: publication.Branch}}
+				host.Mu.Unlock()
 				lifecycleAwait(t, f, "own merge detection", func() bool {
 					o, rev, err := ownPullRequestOutcomeAt(up, f.stream1)
 					must(t, err)
@@ -223,12 +223,12 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 					must(t, store.UpdateArchive(a))
 				}
 			}
-			host.prs = []pulls.PullRequest{{Number: 41, Merged: true, MergeCommit: "wrong-pr", HeadRepository: p.Fork, Head: p.Branch}, {Number: 42, State: "open", Merged: tc.merged, MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
+			host.Prs = []pulls.PullRequest{{Number: 41, Merged: true, MergeCommit: "wrong-pr", HeadRepository: p.Fork, Head: p.Branch}, {Number: 42, State: "open", Merged: tc.merged, MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
 			if tc.closed {
-				host.prs[1].State = "closed"
+				host.Prs[1].State = "closed"
 			}
 			if tc.failed {
-				host.findErr = errors.New("lookup unavailable")
+				host.FindErr = errors.New("lookup unavailable")
 			}
 			status, err := s.upstreamMergeStatus(ctx, repo, trace.Edge{From: stream, To: quiet, Type: trace.EdgeHardBlock})
 			if tc.failed {

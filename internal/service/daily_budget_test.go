@@ -39,13 +39,6 @@ func dailyBudgetService(t *testing.T, n int, backend coreadapter.Turns) (*Servic
 	return s, a, repo, clock
 }
 
-// jump sets the clock; its next reading is one second after at.
-func jump(c *demoClock, at time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = at
-}
-
 // appendDayCost records an attempt's cost in stream, started at at.
 func appendDayCost(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string, at time.Time, amount float64, known bool) {
 	t.Helper()

@@ -498,7 +498,7 @@ func (n *notifier) diagnostics() []Diagnostic {
 	defer n.mu.Unlock()
 	var out []Diagnostic
 	if n.fault != "" {
-		out = append(out, Diagnostic{"notify", Internal, n.fault})
+		out = append(out, Diagnostic{Field: "notify", Code: Internal, Message: n.fault})
 	}
 	if n.ledger == nil || n.ledger.Failure == nil {
 		return out
@@ -512,5 +512,5 @@ func (n *notifier) diagnostics() []Diagnostic {
 	if f.GaveUp {
 		message = fmt.Sprintf("gave up notifying the owner of %s at %s after %d attempts: %s", what, f.At.Format(time.RFC3339), f.Attempts, f.Reason)
 	}
-	return append(out, Diagnostic{"notify", Unavailable, message})
+	return append(out, Diagnostic{Field: "notify", Code: Unavailable, Message: message})
 }

@@ -81,7 +81,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 				t.Fatalf("a refused merge moved the feature: %+v %v", feature, err)
 			}
 
-			f.s.options.PullRequests = &fakePulls{uncredentialed: true}
+			f.s.options.PullRequests = &fakePulls{Uncredentialed: true}
 			out, api := f.s.mergedOutside(ctx, repo, stream)
 			if api != nil {
 				t.Fatal(api)

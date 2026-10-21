@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -22,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // crossRepoWiringFixture is two active projects in one running service, each
@@ -72,7 +71,7 @@ clone = "`+home2+`"
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	f := &crossRepoWiringFixture{opts: opts, cfg: cfg, clock: clock, project1: project, project2: otherProject, stream1: stream, stream2: otherStream,
 		ticks: make(chan time.Time), live: map[config.ProjectID]*trace.Repository{}}
@@ -93,9 +92,9 @@ clone = "`+home2+`"
 		must(t, repo.Close())
 	}
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	f.engine = &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	f.engine = &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
@@ -113,7 +112,7 @@ clone = "`+home2+`"
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -150,7 +149,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	t.Parallel()
 	ctx := context.Background()
 	f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
-	f.engine.turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		return questionResult(req, "session-chief", "The agreed work continues."), nil
 	}
 	s, err := Start(ctx, f.opts)
@@ -255,12 +254,12 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 			return questionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
-	f.engine.turns["build1"] = ask(question1)
-	f.engine.turns["build2"] = ask(question2)
+	f.engine.Turns["build1"] = ask(question1)
+	f.engine.Turns["build2"] = ask(question2)
 
 	var flagMu sync.Mutex
 	var answered1, answered2 bool
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		flagMu.Lock()
 		needAnswer2 := !answered2 && strings.Contains(req.Prompt, "asked by the mason: "+question2)
 		needAnswer1 := !answered1 && strings.Contains(req.Prompt, "asked by the mason: "+question1)
@@ -297,7 +296,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
-	f.engine.turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return questionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 
@@ -487,7 +486,7 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 	release := make(chan struct{})
 	var startedOnce, releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		startedOnce.Do(func() { close(started) })
 		select {
 		case <-release:

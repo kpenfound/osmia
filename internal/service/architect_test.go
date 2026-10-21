@@ -16,30 +16,13 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
-)
-
-const (
-	handedDesign = "# Resumable uploads\n\nUploads that drop resume where they stopped.\n"
-	validSpec    = "# Resumable uploads\n\nAn interrupted upload resumes from its last acknowledged chunk. It must not re-send acknowledged chunks.\n\n## Acceptance criteria\n\n1. An interrupted upload resumes from the last acknowledged chunk.\n2. Acknowledged chunks are never sent again.\n"
-	validPlan    = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
-]}
-`
-	// cyclicPlan has a dependency cycle and leaves criterion 2 unserved.
-	cyclicPlan = `{"version": 2, "units": [
-  {"id": "resume", "task": "Resume from the last chunk.", "acceptance": ["TestResume passes"], "criteria": ["spec#1"], "depends_on": ["dedupe"], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "task": "Skip acknowledged chunks.", "acceptance": ["No chunk is sent twice"], "criteria": [], "depends_on": ["resume"], "footprint": ["internal.trace"]}
-]}
-`
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // architectFixture is an active project with a ruled charter, a clone whose
@@ -85,15 +68,15 @@ func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessi
 	must(t, os.WriteFile(filepath.Join(clone, "secret.env"), []byte("TOKEN="+demoSecret+"\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now
-	opts.Issues = &fakeIssues{token: "ghp_architect_secret"}
-	opts.Architect = &Architect{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}}
+	opts.Issues = &fakeIssues{Token: "ghp_architect_secret"}
+	opts.Architect = &Architect{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}}
 	return opts, clone, engine, sessions, clock
 }
 
@@ -150,9 +133,9 @@ func (f *architectFixture) repository() *trace.Repository { return f.s.sole().re
 // script installs the fake architect's behaviour for one turn: it delivers
 // the given files and returns a successful result.
 func (f *architectFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		var err error
 		if check != nil {
 			err = check(ctx, req, verified, tools)
@@ -193,9 +176,9 @@ func (f *architectFixture) delivered(turn string) []draftStatus {
 }
 
 func (f *architectFixture) runs() []string {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	return slices.Clone(f.engine.runs)
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	return slices.Clone(f.engine.Runs)
 }
 
 // await polls the workstream's feature and draft states until want accepts
@@ -221,6 +204,7 @@ func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want 
 }
 
 func sketched(feature, _ string) bool { return feature == SketchedState }
+
 func draftAt(value string) func(string, string) bool {
 	return func(_, draft string) bool { return draft == value }
 }
@@ -794,15 +778,15 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	// drafts are exhausted the same way.
 	f3 := newArchitectFixture(t)
 	defer f3.stop(t)
-	f3.engine.mu.Lock()
+	f3.engine.Mu.Lock()
 	for n := 1; n <= maxDrafts; n++ {
 		for attempt := 1; attempt <= maxDraftAttempts; attempt++ {
-			f3.engine.turns[fmt.Sprintf("draft-%d-%d", n, attempt)] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+			f3.engine.Turns[fmt.Sprintf("draft-%d-%d", n, attempt)] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 				return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
 			}
 		}
 	}
-	f3.engine.mu.Unlock()
+	f3.engine.Mu.Unlock()
 	stream = f3.handIn(t, "design", handedDesign)
 	f3.await(t, stream, draftAt("exhausted"))
 	if runs := f3.runs(); len(runs) != maxDrafts*maxDraftAttempts {
@@ -818,11 +802,11 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("backend crashed")
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			if !strings.Contains(req.Prompt, "Draft 1 was not accepted:\ndraft 1 failed: architect turn draft-1-1 failed: ") {
@@ -872,13 +856,13 @@ func TestArchitectDraftWaitsForARunner(t *testing.T) {
 	ctx := context.Background()
 	entered := make(chan struct{})
 	var once sync.Once
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() { close(entered) })
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.handIn(t, "design", handedDesign)
 	select {
 	case <-entered:
@@ -1033,13 +1017,13 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 			// cancellation.
 			entered := make(chan struct{})
 			var once sync.Once
-			f.engine.mu.Lock()
-			f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				once.Do(func() { close(entered) })
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			stream := f.handIn(t, "design", handedDesign)
 			select {
 			case <-entered:
@@ -1178,8 +1162,8 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 	blocked := func(f *architectFixture) chan struct{} {
 		entered := make(chan struct{})
 		var once sync.Once
-		f.engine.mu.Lock()
-		f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Mu.Lock()
+		f.engine.Turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 			once.Do(func() { close(entered) })
 			select {
 			case <-ctx.Done():
@@ -1188,7 +1172,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 				return nil, errors.New("the turn was not cancelled")
 			}
 		}
-		f.engine.mu.Unlock()
+		f.engine.Mu.Unlock()
 		return entered
 	}
 	check := func(t *testing.T, f *architectFixture, stream config.WorkstreamID) {

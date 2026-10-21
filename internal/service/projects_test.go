@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	osmiacharter "github.com/kpenfound/osmia/internal/charter"
@@ -18,41 +17,20 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-const commentedConfig = `# Owner's notes stay at the top.
-version = 1
-active_projects = [] # none yet
-workspaces = "git" # the tests run on Git worktrees whether or not jj is installed
-
-[profiles.default] # keep this profile
-agent = "claude"
-model = "test"
-[profiles.other]
-agent = "codex"
-model = "other"
-`
 
 // projectFixture writes a root without a project and a local Git clone.
 func projectFixture(t *testing.T) (Options, string) {
 	t.Helper()
-	home, err := os.MkdirTemp("", "op-")
-	must(t, err)
-	t.Cleanup(func() { os.RemoveAll(home) })
-	resolved, err := config.ResolveRoot(filepath.Join(home, "root"), "")
-	must(t, err)
-	root := resolved.String()
-	must(t, os.MkdirAll(root, 0700))
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(commentedConfig), 0600))
-	clone := filepath.Join(home, "clone")
-	must(t, os.Mkdir(clone, 0700))
-	demoGit(t, home, "init", "--quiet", clone)
-	return Options{Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, ShutdownTimeout: 100 * time.Millisecond, reviewChecks: passingChecks}, clone
+	cfg, clone := fixturekit.ProjectConfig(t)
+	o := testOptions(cfg)
+	o.Workstreams = nil
+	o.reviewChecks = passingChecks
+	return o, clone
 }
-func request(clone string) ProjectAddRequest {
-	return ProjectAddRequest{Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: clone}
-}
+
 func projectDirectories(t *testing.T, root string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(root, "projects"))
@@ -66,6 +44,7 @@ func projectDirectories(t *testing.T, root string) []string {
 	}
 	return names
 }
+
 func hasDiagnostic(ds []Diagnostic, code Code) bool {
 	for _, d := range ds {
 		if d.Code == code {
@@ -74,6 +53,7 @@ func hasDiagnostic(ds []Diagnostic, code Code) bool {
 	}
 	return false
 }
+
 func activeProjects(t *testing.T, root string) []string {
 	t.Helper()
 	cfg, err := config.Load(config.Options{Root: root})
@@ -104,7 +84,7 @@ func TestZeroProjectStart(t *testing.T) {
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{}}, nil), Validation)
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: project}, Mode: "soft", Source: "owner"}, nil), Validation)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	must(t, s.Close())
 	_, c = start(t, opts)
 	after, err := c.Runtime(ctx)
@@ -195,7 +175,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
+	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{Project: id, ContextMode: bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
 	// Repeating the same registration returns the project; another is refused.

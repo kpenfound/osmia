@@ -121,7 +121,7 @@ func hardPauseRepository(t *testing.T, n int) (*config.Config, *trace.Repository
 	home := t.TempDir()
 	cfg, err := config.Load(fixtureAt(t, home).Config)
 	must(t, err)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -261,7 +261,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -275,7 +275,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	reply := func(id string, cancelled bool) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: id}, FinalResponse: "Answer " + id, Cancelled: cancelled}}
 	}
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("chief", false), reply("second", false))}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("chief", false), reply("second", false))}, Hooks: map[string]func(context.Context){}}
 	lives := make(chan *trace.Repository, 1)
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
@@ -288,7 +288,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 
 	entered, stopped, settling := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	turns.hooks["first"] = func(ctx context.Context) {
+	turns.Hooks["first"] = func(ctx context.Context) {
 		close(entered)
 		<-ctx.Done()
 		close(stopped)
@@ -363,7 +363,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
 	chiefEntered, chiefRelease := make(chan struct{}), make(chan struct{})
 	var chiefErr error
-	turns.hooks["chief"] = func(ctx context.Context) {
+	turns.Hooks["chief"] = func(ctx context.Context) {
 		close(chiefEntered)
 		<-chiefRelease
 		chiefErr = ctx.Err()
@@ -396,7 +396,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 		t.Fatalf("resumed turn %+v", second)
 	}
 	var ran []string
-	for _, call := range turns.fake.Calls() {
+	for _, call := range turns.Fake.Calls() {
 		ran = append(ran, call.Scope.Turn)
 	}
 	if !slices.Equal(ran, []string{"first", "chief", "second"}) {

@@ -14,13 +14,12 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func haltGuardControllers(t *testing.T, f *crossRepoRatifyFixture) {
@@ -69,8 +68,8 @@ func assertGuardRefusal(t *testing.T, f *crossRepoRatifyFixture, id config.Workg
 
 func scriptGuardDraft(t *testing.T, f *crossRepoRatifyFixture, turn string, criterion int, spec string, calls *atomic.Int32, graph ...string) {
 	t.Helper()
-	f.engine.mu.Lock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
 		data, err := os.ReadFile(filepath.Join(req.Grants.Mounts[0].Path, "members", string(f.stream1), plan.SpecPath))
 		if err != nil {
@@ -99,7 +98,7 @@ func scriptGuardDraft(t *testing.T, f *crossRepoRatifyFixture, turn string, crit
 		})
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Redraft delivered", SessionDir: req.SessionDir, NumTurns: 1}, err
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 }
 
 func assertGuardRatifiable(t *testing.T, f *crossRepoRatifyFixture, id config.WorkgroupID, criterion int, revision int) {
@@ -504,12 +503,12 @@ func TestProjectSpecContractGuardFailureAndRetry(t *testing.T) {
 	spec := strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
 	reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, spec)
 	var calls atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["project-spec-draft-3"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["project-spec-draft-3"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
 		return &agent.Result{ClaudeID: "empty-redraft", ResultText: "No delivery", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
 	assertGuardRefusal(t, f, id, 2, "ended without delivering")
 	runRefresh(t, f)
@@ -593,12 +592,12 @@ func TestProjectSpecInitialDraftFailureRemainsTerminal(t *testing.T) {
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	var calls atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["project-spec-draft-1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["project-spec-draft-1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
 		return &agent.Result{ClaudeID: "no-project-spec", ResultText: "No delivery", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	id, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if api != nil {
 		t.Fatal(api)

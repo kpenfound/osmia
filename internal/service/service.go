@@ -680,20 +680,20 @@ func (s *Service) projectFor(id config.ProjectID) (config.ProjectID, *APIError) 
 	if id == "" {
 		switch len(ids) {
 		case 0:
-			return "", &APIError{NoProject, "no project is configured; add one with osmia project add"}
+			return "", &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 		case 1:
 			return ids[0], nil
 		}
-		return "", &APIError{Validation, "several projects are active; name one of " + projectList(ids)}
+		return "", &APIError{Code: Validation, Message: "several projects are active; name one of " + projectList(ids)}
 	}
 	if err := config.CheckProjectIDs(id); err != nil {
-		return "", &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+		return "", &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 	}
 	if !slices.Contains(ids, id) {
 		if len(ids) == 0 {
-			return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; no project is active", id)}
+			return "", &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; no project is active", id)}
 		}
-		return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; the active projects are %s", id, projectList(ids))}
+		return "", &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; the active projects are %s", id, projectList(ids))}
 	}
 	return id, nil
 }

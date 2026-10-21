@@ -427,7 +427,7 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	}
 	list, err := f.c.Statuses(ctx)
 	must(t, err)
-	if len(list.Workstreams) != 2 || !reflect.DeepEqual(list.Diagnostics, []Diagnostic{{"units", Internal, message}}) {
+	if len(list.Workstreams) != 2 || !reflect.DeepEqual(list.Diagnostics, []Diagnostic{{Field: "units", Code: Internal, Message: message}}) {
 		t.Fatalf("status list %+v", list)
 	}
 	for _, w := range list.Workstreams {

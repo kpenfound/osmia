@@ -239,8 +239,8 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				retired, survivor = survivor, retired
 				retiredProject, survivorProject = survivorProject, retiredProject
 			}
-			f.engine.mu.Lock()
-			f.engine.turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := callTool(ctx, tools, ProjectSpecDraftTool, map[string]any{
 					"behavior":  "Chunks the server accepts are acknowledged with their offset; the client resumes uploads from the last acknowledged offset.",
 					"contracts": []map[string]any{{"name": "acknowledgment", "text": "The server's acknowledgment of a stored chunk names its offset; the client reads that offset to resume."}},
@@ -249,7 +249,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				})
 				return questionResult(req, "session-project-spec", "The least member supplies the shared contract."), err
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
@@ -277,8 +277,8 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			var approvals atomic.Int32
 			var revision atomic.Int64
 			const key = "retired-driver-change"
-			f.engine.mu.Lock()
-			f.engine.turns["change-unit-boundary"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["change-unit-boundary"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				select {
 				case <-release:
 					return questionResult(req, "session-boundary", "The whole unit boundary is safe."), nil
@@ -286,7 +286,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					return nil, ctx.Err()
 				}
 			}
-			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				names, err := toolNames(ctx, tools)
 				if err != nil {
 					return nil, err
@@ -350,7 +350,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				}
 				return questionResult(req, "session-chief", "Following the original shared conversation."), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			f.checkContinuation(t)
 			lifecycleWorker(t, f, retiredProject, retired, "worker_first", "change-unit-boundary", "Finish this whole unit before changing intent.")
 			lifecycleWorker(t, f, survivorProject, survivor, "worker_second", "change-unit-boundary", "Finish this whole unit before changing intent.")

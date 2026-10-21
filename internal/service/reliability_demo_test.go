@@ -16,13 +16,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newParallelMasonFixtureCounting is newParallelMasonFixture whose service
@@ -41,14 +40,14 @@ func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, dr
 		mapping.Entities = append(mapping.Entities, kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}})
 	}
 	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), librarianActor, "fixture"))
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.turns[masonTurnID(unit)] = fake.turn
+		f.engine.Turns[masonTurnID(unit)] = fake.turn
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
 			fake.play[name] = failMasonTurn
-			f.engine.turns[name] = fake.turn
+			f.engine.Turns[name] = fake.turn
 		}
 	}
 	return f, fake, passed
@@ -218,10 +217,10 @@ func TestReliabilityDemonstration(t *testing.T) {
 	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
 	masons.mu.Unlock()
 
-	f.engine.mu.Lock()
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	f.engine.Mu.Lock()
+	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	// upload's mason reports what its session cost.
-	f.engine.turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
@@ -229,7 +228,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return result, err
 	}
 	// audit's mason saves a file and is still working when it is stopped.
-	f.engine.turns[masonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		path := filepath.Join(req.Workspace.Directory(), auditFile)
 		if err := errors.Join(os.MkdirAll(filepath.Dir(path), 0755), os.WriteFile(path, []byte("package audit\n"), 0644)); err != nil {
 			return nil, err
@@ -238,7 +237,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		<-ctx.Done()
 		return &agent.Result{ClaudeID: "session-audit", ResultText: "Half of audit is built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 	}
-	f.engine.turns[auditRecovered] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[auditRecovered] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		auditContinuation = req
 		mu.Unlock()
@@ -246,18 +245,18 @@ func TestReliabilityDemonstration(t *testing.T) {
 	}
 	// The owner switches masons to the other agent binary while dedupe's
 	// first turn runs.
-	f.engine.turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
 		mu.Unlock()
 		var ack MutationResponse
-		if err := c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{masonRole, "other"}, &ack); err != nil || !ack.Applied {
+		if err := c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: masonRole, Profile: "other"}, &ack); err != nil || !ack.Applied {
 			problems.report("profile switch during dedupe's turn: %v %+v", err, ack)
 		}
 		return masons.turn(ctx, req, verified, tools)
 	}
 	// dedupe's continuation holds the loop until the owner has reloaded.
-	f.engine.turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeContinuation = req
 		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
@@ -271,7 +270,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return masons.turn(ctx, req, verified, tools)
 	}
 	// resume's first session on claude hits the provider's usage limit.
-	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		backend := req.Profile.Agent
 		mu.Lock()
 		resumeAttempts = append(resumeAttempts, req)
@@ -282,8 +281,8 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return masons.turn(ctx, req, verified, tools)
 	}
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
@@ -293,7 +292,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return chief(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	// 1. Daily budget. upload's session spends USD 1.25. The next pass
 	// pauses the factory softly, attributed to the daily budget, and audit
@@ -412,7 +411,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 
 	// The owner clears the switch while the follow-up runs on codex; the
 	// next mason turn is back on the configured profile.
-	mutation(t, c, "DELETE", "profile", ClearProfileRequest{masonRole})
+	mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: masonRole})
 	if u := unitStatus(t, f, stream, "resume"); !reflect.DeepEqual(u, f.deferred(t, stream, "resume", slotless(1))) {
 		t.Fatalf("resume while dedupe holds the slot: %+v", u)
 	}

@@ -12,13 +12,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newAskingMasonFixture is a mason fixture whose chief of staff is returned,
@@ -35,9 +34,9 @@ func newAskingMasonFixturePrepared(t *testing.T, masons int, drafted string, p *
 	t.Helper()
 	f, fake := newMasonFixturePrepared(t, masons, drafted, prepare)
 	c := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns["*"] = c.turn
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns["*"] = c.turn
 	return f, fake, c
 }
 
@@ -110,9 +109,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	var mu sync.Mutex
 	var answered []agent.Request
 	var during []string
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, asking, "1")
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, asking, "1")
+	f.engine.Mu.Unlock()
 	f.answer("1", func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		state, err := f.unitState(asking, "resume")
 		if err != nil {
@@ -255,9 +254,9 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	defer f.stop(t)
 	c.release("1")
 	c.release("2")
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = fakes.asking(p, "", "1")
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("resume")] = fakes.asking(p, "", "1")
+	f.engine.Mu.Unlock()
 	f.answer("1", asks(p, "2"))
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
 	stream := f.seedBuilding(t, "design", independentPlan)

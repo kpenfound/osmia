@@ -11,19 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// checkFunc runs every check with its function, and lists no links.
-type checkFunc func(context.Context, string) (CheckResult, error)
-
-func (f checkFunc) List(context.Context, string) ([]string, error) { return nil, nil }
-func (f checkFunc) Check(ctx context.Context, dir string, _ []string) (CheckResult, error) {
-	return f(ctx, dir)
-}
-
-// passingChecks is the check runner of service fixtures: every check passes.
-var passingChecks = checkFunc(func(context.Context, string) (CheckResult, error) {
-	return CheckResult{Output: "== CHECKS ==  ✔ 1 passed\n✔ dag://go/packages/tests/test 1.0s OK\n"}, nil
-})
-
 func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := newReviewFixture(t, "checks")

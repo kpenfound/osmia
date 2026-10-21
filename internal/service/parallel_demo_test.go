@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // demoPlan has resume and dedupe in internal.trace, ahead of upload and audit
@@ -46,18 +45,18 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 		}
 		return nil
 	}
-	f.engine.mu.Lock()
-	f.engine.turns[recovered] = masons.turn
+	f.engine.Mu.Lock()
+	f.engine.Turns[recovered] = masons.turn
 	// A clean turn without an outcome gets a follow-up; failing it keeps the
 	// unit implementing, holding its slot.
 	for _, unit := range []string{"upload", "audit"} {
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
 			masons.play[name] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
-			f.engine.turns[name] = masons.turn
+			f.engine.Turns[name] = masons.turn
 		}
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	// Both workstreams are built on the same plan while the factory is
 	// paused: nothing starts, every ready unit says why, and paused
@@ -86,8 +85,8 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	var mu sync.Mutex
 	dedupeTurns := 0
 	entered := make(chan struct{})
-	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if sessionStream(req) != string(hi) {
 			return masons.turn(ctx, req, turn, tools)
 		}
@@ -104,7 +103,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 
 	// Priority: the owner puts hi first and lifts the pause. hi takes both
 	// slots with its disjoint resume and upload; dedupe, ahead of upload in

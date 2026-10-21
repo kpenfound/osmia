@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -23,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // toolNames lists the tools a fake agent's session offers, sorted.
@@ -70,7 +69,7 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 	home, err := os.MkdirTemp("", prefix)
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	f := &questionFixture{opts: fixtureAt(t, home), clock: &fixedClock{now: demoStart}, lives: make(chan *trace.Repository, 1), ticks: make(chan time.Time), results: map[string][]string{}}
+	f := &questionFixture{opts: fixtureAt(t, home), clock: &fixedClock{At: demoStart}, lives: make(chan *trace.Repository, 1), ticks: make(chan time.Time), results: map[string][]string{}}
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
 	must(t, err)
@@ -102,9 +101,9 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 	}
 	must(t, repo.Close())
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	f.engine = &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	f.engine = &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
@@ -113,7 +112,7 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
 	f.opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.lives <- r
-		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.engine,
+		turns := &isolation.Turns{Workspaces: &demoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.engine,
 			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
@@ -121,7 +120,7 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -207,17 +206,17 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			return result(req, session, "Asked"), nil
 		}
 	}
-	engine.turns["build"] = asker("session-mason", "Where does state live?")
-	engine.turns["build2"] = asker("session-mason2", "")
-	engine.turns["review"] = asker("session-reviewer", "Is the log format fixed?")
+	engine.Turns["build"] = asker("session-mason", "Where does state live?")
+	engine.Turns["build2"] = asker("session-mason2", "")
+	engine.Turns["review"] = asker("session-reviewer", "Is the log format fixed?")
 	answerPrompt := questions.Prompt(trace.Question{Header: trace.Header{ID: "1"}, Question: "Where does state live?"}, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "In files under the root.", Citations: []string{"charter#1"}})
 	// The answer arrives on the thread that asked, after its earlier turn.
-	engine.turns["answer_1"] = asker("session-mason", "Which file holds the index?", answerPrompt, "Work: build")
+	engine.Turns["answer_1"] = asker("session-mason", "Which file holds the index?", answerPrompt, "Work: build")
 
 	answered, escalated := make(chan struct{}), make(chan struct{})
 	// firstDeliveries counts the turns that carried the events of questions 1 and 2.
 	firstDeliveries := 0
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		names, err := toolNames(ctx, tools)
 		if err != nil {
@@ -335,10 +334,10 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		return total, unacknowledged
 	}
 	runs := func() map[string]int {
-		engine.mu.Lock()
-		defer engine.mu.Unlock()
+		engine.Mu.Lock()
+		defer engine.Mu.Unlock()
 		out := map[string]int{}
-		for _, name := range engine.runs {
+		for _, name := range engine.Runs {
 			if strings.HasPrefix(name, "events_") {
 				name = "events"
 			}
@@ -519,21 +518,6 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	}
 }
 
-// claimTurn queues and claims a turn of the agent in an offline trace and
-// returns the turn's scope, so a test can call the question writes directly.
-func claimTurn(t *testing.T, repo *trace.Repository, home string, ws config.WorkstreamID, agent, thread, turn string, at time.Time) coreadapter.Scope {
-	t.Helper()
-	ctx := context.Background()
-	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: ws, At: at, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "message_" + turn}
-	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, ws, agent, "token_"+turn, filepath.Join(home, turn), at)
-	must(t, err)
-	th, err := repo.Thread(ws, agent)
-	must(t, err)
-	return coreadapter.Scope{Project: string(project), Workstream: string(ws), Thread: thread, Turn: turn, Role: th.Identity.Role}
-}
-
 // An answer recorded in an abandoned workstream stays undelivered, while
 // another workstream's answer is queued with its asker's role profile.
 func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
@@ -545,7 +529,7 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 	opts := fixtureAt(t, home)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -594,7 +578,7 @@ func TestAnswersAreNotDeliveredToMergedUnits(t *testing.T) {
 	opts := fixtureAt(t, home)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)

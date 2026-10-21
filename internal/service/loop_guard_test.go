@@ -19,10 +19,10 @@ import (
 func recordSessions(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, n int) {
 	t.Helper()
 	for range n {
-		f.clock.mu.Lock()
-		f.clock.now = f.clock.now.Add(time.Minute)
-		at := f.clock.now
-		f.clock.mu.Unlock()
+		f.clock.Mu.Lock()
+		f.clock.At = f.clock.At.Add(time.Minute)
+		at := f.clock.At
+		f.clock.Mu.Unlock()
 		id := fmt.Sprintf("session-%d", at.UnixNano())
 		must(t, repository.Append(context.Background(), trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "loop-fixture"},
 			Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: reviewerAgent("resume"), Turn: id, Role: reviewerRole}, AttemptID: id, At: at, Usage: coreadapter.Usage{CostUSD: 0.5, CostKnown: true, Turns: 1}}}))

@@ -117,5 +117,5 @@ func feedSelection(selection *CheckSelection) *FeedCheckSelection {
 	if selection == nil {
 		return nil
 	}
-	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail, Description: selection.describe()}
+	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail, Description: describeSelection(*selection)}
 }

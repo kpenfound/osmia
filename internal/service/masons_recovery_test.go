@@ -186,9 +186,9 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	// occupied capacity throughout the assertions.
 	clarification := masonAgent("upload") + "-clarify-1"
 	masons.play[clarification] = failMasonTurn
-	f.engine.mu.Lock()
-	f.engine.turns[clarification] = masons.turn
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[clarification] = masons.turn
+	f.engine.Mu.Unlock()
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
 	stream := f.seedBuildingPaused(t, factory, disjointPlan, "start-recovery")[0]

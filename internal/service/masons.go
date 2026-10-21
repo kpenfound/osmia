@@ -402,14 +402,14 @@ func (m *masons) resumeMasonRuling(ctx context.Context, stream config.Workstream
 		return false, err
 	}
 	turnID := fmt.Sprintf("%s-owner-revise-%d", masonAgent(unit), ruling.ResetTurn)
-	prompt := "The " + ruling.ruler() + " ruled that you should revise this unit in your existing workspace. Note: " + ruling.Note + "\nCheck the unit's acceptance, then call done or ask if you need a decision."
+	prompt := "The " + contestRuler(ruling.ContestedRuling) + " ruled that you should revise this unit in your existing workspace. Note: " + ruling.Note + "\nCheck the unit's acceptance, then call done or ask if you need a decision."
 	if ruling.turn != "" {
 		turnID, prompt = ruling.turn, ruling.prompt
 	}
 	if slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turnID }) {
 		return false, nil
 	}
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ruling.actor(), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: contestActor(ruling.ContestedRuling), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
 	err = m.enqueueTurn(ctx, req)
 	return err == nil, err
 }

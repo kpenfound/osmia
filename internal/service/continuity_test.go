@@ -2,13 +2,11 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -18,153 +16,13 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-// The thread continuity demonstration: one mason thread receives two messages, the service
-// restarts between them, and the second turn continues either by resuming the
-// fake backend session or by replaying the owned log. Set OSMIA_CONTINUITY_DEMO_DIR to
-// keep each case's root for inspection; see docs/thread-continuity-demonstration.md.
-
-const (
-	demoAgent  = "agent_mason"
-	demoThread = "thread_mason"
-	demoRole   = "mason"
-	// Delivery credentials exist in the service process but never reach a turn.
-	demoSecret = "ghp_demo_delivery_credential_must_not_leak"
-)
-
-var demoStart = time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC)
-
-// demoTimeout only guards against a hang; trace publication runs Git and is
-// slow under the race detector on a loaded machine.
-const demoTimeout = 5 * time.Minute
-
-type demoClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *demoClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(time.Second)
-	return c.now
-}
-
-type demoLease func(context.Context) error
-
-func (f demoLease) Release(ctx context.Context) error { return f(ctx) }
-
-// demoWorkspaces is the fake repository provider: it lends the target clone,
-// which keeps its service-owned .git directory, to the turn preparation path.
-type demoWorkspaces struct {
-	mu                 sync.Mutex
-	directory          string
-	acquired, released int
-}
-
-func (w *demoWorkspaces) Acquire(_ context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.acquired++
-	release := demoLease(func(context.Context) error { w.mu.Lock(); w.released++; w.mu.Unlock(); return nil })
-	return coreadapter.WorkspaceLease{Workspace: coreadapter.Workspace{ID: "clone", Directory: w.directory, Access: req.Access}, Lease: release}, nil
-}
-
-// demoTransport serves the scoped MCP server in memory and lends the client
-// side to the fake container engine under the turn's service token.
-type demoTransport struct {
-	sessions *demoSessions
-}
-type demoSessions struct {
-	mu    sync.Mutex
-	byKey map[string]*mcp.ClientSession
-}
-
-func (d *demoTransport) Start(ctx context.Context, server *mcp.Server) (coreadapter.Endpoint, coreadapter.Lease, error) {
-	serverSide, clientSide := mcp.NewInMemoryTransports()
-	served, err := server.Connect(ctx, serverSide, nil)
-	if err != nil {
-		return coreadapter.Endpoint{}, nil, err
-	}
-	client, err := mcp.NewClient(&mcp.Implementation{Name: "fake-agent", Version: "1"}, nil).Connect(ctx, clientSide, nil)
-	if err != nil {
-		served.Close()
-		return coreadapter.Endpoint{}, nil, err
-	}
-	token := rand.Text()
-	d.sessions.mu.Lock()
-	d.sessions.byKey[token] = client
-	d.sessions.mu.Unlock()
-	release := demoLease(func(context.Context) error {
-		d.sessions.mu.Lock()
-		delete(d.sessions.byKey, token)
-		d.sessions.mu.Unlock()
-		return errors.Join(client.Close(), served.Wait())
-	})
-	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, release, nil
-}
-
-// demoTurn is what the fake backend does inside the boundary core verified.
-type demoTurn func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error)
-
-// demoEngine is the fake execution engine. Core's fake enforcer admits each
-// request the way a real session does, and Run verifies it with core's own
-// container boundary, which is evidence of the grants, not of OS enforcement.
-type demoEngine struct {
-	mu       sync.Mutex
-	sessions *demoSessions
-	turns    map[string]demoTurn
-	resume   func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error
-	runs     []string
-	checks   int
-}
-
-func (e *demoEngine) CheckResume(_ context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.checks++
-	return e.resume(previous, next, session)
-}
-func (e *demoEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
-	return &enforcertest.Enforcer{Sandbox: s.Mode, Image: s.Image, Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
-		return e.Run(ctx, turn.Request)
-	}}, nil
-}
-func (e *demoEngine) Verify(req agent.Request) (*agent.Turn, error) {
-	return (&agent.Runner{}).Verify(req)
-}
-func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
-	verified, err := e.Verify(req)
-	if err != nil {
-		return nil, err
-	}
-	e.mu.Lock()
-	e.runs = append(e.runs, req.Name)
-	turn := e.turns[req.Name]
-	if turn == nil {
-		// Turns the service names itself, such as event turns, share a script.
-		turn = e.turns["*"]
-	}
-	e.mu.Unlock()
-	e.sessions.mu.Lock()
-	tools := e.sessions.byKey[req.Env["OSMIA_MCP_TOKEN"]]
-	e.sessions.mu.Unlock()
-	// A session turn is granted no tool, so it has no MCP host to lend it
-	// one either, the same way a classifier turn has none.
-	if turn == nil || (tools == nil && req.Profile.Name != "classifier" && req.Profile.Name != sessionRole) {
-		return nil, fmt.Errorf("unexpected turn %q", req.Name)
-	}
-	return turn(ctx, req, verified, tools)
-}
 
 // checkGrants reports a request whose grants or verified turn reach beyond a
 // private writable view outside clone: another mount, VCS, an ungranted tool, a
@@ -188,23 +46,6 @@ func checkGrants(req agent.Request, verified *agent.Turn, clone string, fail fun
 			fail("verified environment exposes %s", key)
 		}
 	}
-}
-
-func callTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (string, error) {
-	result, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		return "", err
-	}
-	var text strings.Builder
-	for _, content := range result.Content {
-		if c, ok := content.(*mcp.TextContent); ok {
-			text.WriteString(c.Text)
-		}
-	}
-	if result.IsError {
-		return "", errors.New(text.String())
-	}
-	return text.String(), nil
 }
 
 // checkBoundary makes the negative assertions from inside a running turn. It
@@ -278,17 +119,6 @@ func snapshot(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-func demoGit(t *testing.T, home string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return string(out)
-}
-
 // deliver accepts an owner message and publishes the intent to run it.
 func deliver(t *testing.T, repo *trace.Repository, turn string, version uint64, at time.Time) trace.TurnRequest {
 	t.Helper()
@@ -354,7 +184,7 @@ func demonstrate(t *testing.T, mode string) {
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	cloneBefore := snapshot(t, clone)
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -364,15 +194,15 @@ func demonstrate(t *testing.T, mode string) {
 	first := deliver(t, repo, "first", 0, clock.Now())
 	must(t, repo.Close())
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
 		if mode == "resume" && previous == next && session == (coreadapter.BackendSession{Backend: "claude", ID: "session-first"}) {
 			return nil
 		}
 		return coreadapter.ErrResumeUnavailable
 	}
-	workspaces := &demoWorkspaces{directory: clone}
+	workspaces := &demoWorkspaces{Directory: clone}
 	views := filepath.Join(root, "views")
 	must(t, os.Mkdir(views, 0700))
 	var bound sync.Mutex
@@ -390,7 +220,7 @@ func demonstrate(t *testing.T, mode string) {
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return r.NotesTools(demoAgent, scope)
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
 		// This demonstration exercises the Runner's resume mechanism directly,
 		// independent of Osmia's own role confinement (which only the session
@@ -409,7 +239,7 @@ func demonstrate(t *testing.T, mode string) {
 	// First service lifetime: the first turn runs; a second message arrives
 	// while it is active; the service stops as the backend returns.
 	entered := make(chan struct{})
-	engine.turns["first"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["first"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		err := checkBoundary(ctx, req, verified, tools, clone)
 		if req.ResumeID != "" || !strings.HasSuffix(req.Prompt, first.Prompt) {
 			err = errors.Join(err, fmt.Errorf("first turn context: %q %q", req.ResumeID, req.Prompt))
@@ -475,7 +305,7 @@ func demonstrate(t *testing.T, mode string) {
 
 	// Second service lifetime: the controller finds both intents by scanning.
 	finished := make(chan struct{})
-	engine.turns["second"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["second"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		defer close(finished)
 		err := checkBoundary(ctx, req, verified, tools, clone)
 		switch mode {
@@ -547,11 +377,11 @@ func demonstrate(t *testing.T, mode string) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	if engine.runs[0] != "first" || engine.runs[1] != "second" || len(engine.runs) != 2 {
-		t.Fatalf("backend runs %v", engine.runs)
+	if engine.Runs[0] != "first" || engine.Runs[1] != "second" || len(engine.Runs) != 2 {
+		t.Fatalf("backend runs %v", engine.Runs)
 	}
-	if want := map[string]int{"resume": 1, "replay": 1}[mode]; engine.checks != want {
-		t.Fatalf("resume checks %d", engine.checks)
+	if want := map[string]int{"resume": 1, "replay": 1}[mode]; engine.Checks != want {
+		t.Fatalf("resume checks %d", engine.Checks)
 	}
 	th, err = repo.Thread(stream, demoAgent)
 	must(t, err)
@@ -662,8 +492,8 @@ func demonstrate(t *testing.T, mode string) {
 	if entries, err := os.ReadDir(views); err != nil || len(entries) != 0 {
 		t.Fatalf("views leaked: %v %v", entries, err)
 	}
-	if workspaces.acquired != 2 || workspaces.released != 2 {
-		t.Fatalf("workspace leases: %d acquired, %d released", workspaces.acquired, workspaces.released)
+	if workspaces.Acquired != 2 || workspaces.Released != 2 {
+		t.Fatalf("workspace leases: %d acquired, %d released", workspaces.Acquired, workspaces.Released)
 	}
 }
 

@@ -117,14 +117,14 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 	p := openBrowser(t)
 	// Capacity must update from the service's EventSource, even when no
 	// configuration poll or page reload can refresh the status incidentally.
-	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
+	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`window.setInterval = () => 0;`).Do(ctx)
 		return err
 	}))
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`window.sameSlotDocument = true`, nil)
-	p.click("#capacity-button")
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.Eval(`window.sameSlotDocument = true`, nil)
+	p.Click("#capacity-button")
 	const row = `#capacity [data-role=checks]`
 	observe := func(used int, waiting []SlotWait) {
 		t.Helper()
@@ -137,8 +137,8 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 			got := roleCapacity(t, status.Capacity, checksRole)
 			return got.Limit == 2 && got.Used == used && reflect.DeepEqual(got.Waiting, waiting)
 		})
-		p.awaitText(row+` [data-field=slots]`, fmt.Sprintf("%d / 2 slots", used))
-		p.await("check wait count", `document.querySelectorAll('`+row+` [data-field=waiting]').length === `+fmt.Sprint(len(waiting)))
+		p.AwaitText(row+` [data-field=slots]`, fmt.Sprintf("%d / 2 slots", used))
+		p.Await("check wait count", `document.querySelectorAll('`+row+` [data-field=waiting]').length === `+fmt.Sprint(len(waiting)))
 		for i, w := range waiting {
 			label := "unit " + w.Unit
 			if w.Review != 0 {
@@ -146,14 +146,14 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 			} else if w.Session {
 				label = "session"
 			}
-			p.await("waiting run identity", `document.querySelectorAll('`+row+` [data-field=waiting]')[`+fmt.Sprint(i)+`]?.textContent === `+quote(string(w.Workstream)+" "+label+": every slot is taken"))
+			p.Await("waiting run identity", `document.querySelectorAll('`+row+` [data-field=waiting]')[`+fmt.Sprint(i)+`]?.textContent === `+quote(string(w.Workstream)+" "+label+": every slot is taken"))
 		}
 		header := fmt.Sprintf("checks: %d of 2 slots", used)
 		if len(waiting) > 0 {
 			header += fmt.Sprintf(", %d waiting", len(waiting))
 		}
-		p.await("the header check meter", `document.querySelector('[data-meter=checks]')?.title === `+quote(header))
-		p.await("the same page document", `window.sameSlotDocument === true`)
+		p.Await("the header check meter", `document.querySelector('[data-meter=checks]')?.title === `+quote(header))
+		p.Await("the same page document", `window.sameSlotDocument === true`)
 	}
 	noWait := []SlotWait{}
 	observe(0, noWait)
@@ -189,13 +189,13 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 	observe(2, []SlotWait{unitWait, finalWait, sessionWait})
 
 	for _, waiting := range [][]SlotWait{{finalWait, sessionWait}, {sessionWait}, noWait} {
-		checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+		checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 		awaitRunner()
 		observe(2, waiting)
 	}
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	observe(1, noWait)
-	checks.release <- checkOutcome{result: CheckResult{Output: passedReport}}
+	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
 	observe(0, noWait)
 	for range sessions {
 		must(t, awaitCheck(t, sessionErrors))

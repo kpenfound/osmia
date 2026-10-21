@@ -55,12 +55,12 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				configuration.options = func(opts *Options) { opts.PullRequests = host }
 				f = newConfiguredProductionDesignFixture(t, configuration)
 				f.stream1 = f.origin
-				f.engine.mu.Lock()
-				f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+				f.engine.Mu.Lock()
+				f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 					_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
 					return questionResult(req, "session-selection", "Only the server needs a change."), err
 				}
-				f.engine.mu.Unlock()
+				f.engine.Mu.Unlock()
 				f.startOwner(t)
 				var packet PacketResponse
 				lifecycleAwait(t, f, "single-member packet", func() bool {

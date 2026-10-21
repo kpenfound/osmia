@@ -67,7 +67,7 @@ func maintenanceFixture(t *testing.T) *publicationFixture {
 	must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
 	// A second upstream commit forces maintenance to move the reviewed branch.
 	advanceUpstream(t, p.shedFixture, map[string]string{"INTEGRATED.md": "dependency is integrated\n"})
-	host := &fakePulls{fork: func() string { tip, _ := p.forkBranch(t); return tip }}
+	host := &fakePulls{Fork: func() string { tip, _ := p.forkBranch(t); return tip }}
 	p.s.options.PullRequests = repositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
 	refresh := &baseRefresher{s: p.s, repository: repo}
 	must(t, refresh.Pass(ctx))
@@ -144,20 +144,20 @@ func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *tes
 	must(t, p.publisher().Pass(ctx))
 	publish := actionOperation(t, p.repository, p.stream, publishUpstreamAction)
 	host := p.s.options.PullRequests.(repositoryPulls)[p.s.cfg.Project.Upstream]
-	host.lose = true
+	host.Lose = true
 	if _, err := p.publisher().Apply(ctx, publish); err == nil {
 		t.Fatal("expected lost hosting response")
 	}
 	p.reopen(t)
 	result, err = p.publisher().Apply(ctx, publish)
 	must(t, err)
-	if result.Outcome != "succeeded" || host.creates != 1 || p.feature(t) != DeliveredState {
-		t.Fatalf("publication %+v creates %d", result, host.creates)
+	if result.Outcome != "succeeded" || host.Creates != 1 || p.feature(t) != DeliveredState {
+		t.Fatalf("publication %+v creates %d", result, host.Creates)
 	}
 	records, err := publications(p.repository, p.stream)
 	must(t, err)
 	last := records[len(records)-1]
-	if last.Upstream != p.s.cfg.Project.Upstream || last.PriorURL != p.pulls.prs[0].URL {
+	if last.Upstream != p.s.cfg.Project.Upstream || last.PriorURL != p.pulls.Prs[0].URL {
 		t.Fatalf("relationship %+v", last)
 	}
 	followups, err := followup.Read(p.repository, p.stream)
@@ -170,7 +170,7 @@ func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *tes
 	must(t, err)
 	records, err = publications(p.repository, p.stream)
 	must(t, err)
-	if len(records) != before || host.creates != 1 {
+	if len(records) != before || host.Creates != 1 {
 		t.Fatal("retry duplicated delivery")
 	}
 }
@@ -229,7 +229,7 @@ func TestDependentDeliveryMaintenanceGapKeepsImplementationTerminal(t *testing.T
 	must(t, err)
 	report, reason, err := reviewer.finalGate(ctx, p.stream)
 	must(t, err)
-	if !report.Maintenance || reason != "" || len(report.blocking()) != 1 || p.feature(t) != DeliveredState {
+	if !report.Maintenance || reason != "" || len(reportBlocking(report)) != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("maintenance gap: %+v reason %q state %s", report, reason, p.feature(t))
 	}
 	units, err := followup.Read(p.repository, p.stream)
@@ -265,7 +265,7 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: publicationDocument, Revision: 1, Project: repo.Project(), Workstream: parent, At: p.s.now(), Actor: foremanActor, Cause: "delivery"}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: publicationPath, Content: string(data)}}))
 	host := p.s.options.PullRequests.(repositoryPulls)[p.s.cfg.Project.Upstream]
-	host.prs = []pulls.PullRequest{{Number: 7, Merged: true, Base: "main", Head: sealed.Branch, HeadRepository: p.s.cfg.Project.Fork, HeadCommit: sealed.Base.Commit}}
+	host.Prs = []pulls.PullRequest{{Number: 7, Merged: true, Base: "main", Head: sealed.Branch, HeadRepository: p.s.cfg.Project.Fork, HeadCommit: sealed.Base.Commit}}
 	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "branch", "-D", sealed.Branch)
 	ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
 	must(t, err)

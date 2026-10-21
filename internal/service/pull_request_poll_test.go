@@ -42,26 +42,26 @@ func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
 			t.Run(fmt.Sprintf("delivered-%v/%s", delivered, interval), func(t *testing.T) {
 				cfg, repo, host, refresh, _ := stopFixture(t)
 				// Keep a fixed clock so both sides of the exact boundary are tested.
-				clock := &fixedClock{now: demoStart}
+				clock := &fixedClock{At: demoStart}
 				refresh.s.options.Reconciliation.Now = clock.Now
 				cfg.Project.PullRequestPoll = interval.String()
 				cfg.Projects[0] = cfg.Project
 				sealStream(t, repo)
 				if delivered {
 					p := deliverWithPullRequest(t, repo, cfg, 42)
-					host.prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
+					host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
 				}
 				ctx := context.Background()
 				must(t, refresh.Pass(ctx))
 				op := latestBaseRefreshOperation(t, repo, stream)
 				_, err := refresh.Apply(ctx, op)
 				must(t, err)
-				calls := host.finds
+				calls := host.Finds
 				for _, advance := range []time.Duration{time.Minute, interval - time.Minute - time.Nanosecond} {
 					clock.Advance(advance)
 					must(t, refresh.Pass(ctx))
-					if n := baseRefreshOperationCount(t, repo, stream); n != 1 || host.finds != calls {
-						t.Fatalf("early refresh: operations=%d finds=%d, want 1/%d", n, host.finds, calls)
+					if n := baseRefreshOperationCount(t, repo, stream); n != 1 || host.Finds != calls {
+						t.Fatalf("early refresh: operations=%d finds=%d, want 1/%d", n, host.Finds, calls)
 					}
 				}
 				clock.Advance(time.Nanosecond)
@@ -77,8 +77,8 @@ func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
 				if delivered {
 					wantCalls++
 				}
-				if host.finds != wantCalls {
-					t.Fatalf("finds=%d want %d", host.finds, wantCalls)
+				if host.Finds != wantCalls {
+					t.Fatalf("finds=%d want %d", host.Finds, wantCalls)
 				}
 			})
 		}
@@ -90,18 +90,18 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 		for _, previous := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/previous-%v", kind, previous), func(t *testing.T) {
 				f := newEdgeGraphFixture(t, kind)
-				clock := &fixedClock{now: f.s.now()}
+				clock := &fixedClock{At: f.s.now()}
 				f.s.options.Reconciliation.Now = clock.Now
 				p := DeliveryPublication{Status: publicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: featureBranch(f.upstream), PullRequest: 42}
 				recordUpstreamOwnPullRequest(t, f.s, f.repository, f.upstream, p)
-				host := &fakePulls{prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
+				host := &fakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
 				f.s.options.PullRequests = host
 				ctx := context.Background()
 				if previous {
 					must(t, f.s.edgeResolverPass(ctx, f.repository))
 					clock.Advance(10*time.Minute - time.Nanosecond)
 					must(t, f.s.edgeResolverPass(ctx, f.repository))
-					if host.finds != 1 {
+					if host.Finds != 1 {
 						t.Fatal("open edge polled before interval")
 					}
 					clock.Advance(time.Nanosecond)
@@ -109,12 +109,12 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				before, rev, _, err := edgeObservationAt(f.repository, f.downstream)
 				must(t, err)
 				failure := errors.New("upstream unavailable")
-				host.findErr = failure
+				host.FindErr = failure
 				err = f.s.edgeResolverPass(ctx, f.repository)
 				if !errors.Is(err, failure) {
 					t.Fatalf("provider error changed: %v", err)
 				}
-				calls := host.finds
+				calls := host.Finds
 				after, afterRev, _, err := edgeObservationAt(f.repository, f.downstream)
 				must(t, err)
 				if rev != afterRev || !reflect.DeepEqual(before, after) {
@@ -137,7 +137,7 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				for _, advance := range []time.Duration{0, time.Minute, 9*time.Minute - time.Nanosecond} {
 					clock.Advance(advance)
 					must(t, f.s.edgeResolverPass(ctx, f.repository))
-					if host.finds != calls {
+					if host.Finds != calls {
 						t.Fatal("failed attempt retried before interval")
 					}
 				}
@@ -145,8 +145,8 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				if err := f.s.edgeResolverPass(ctx, f.repository); !errors.Is(err, failure) {
 					t.Fatalf("retry error: %v", err)
 				}
-				if host.finds != calls+1 {
-					t.Fatalf("retry finds=%d want %d", host.finds, calls+1)
+				if host.Finds != calls+1 {
+					t.Fatalf("retry finds=%d want %d", host.Finds, calls+1)
 				}
 				_, afterRev, _, err = edgeObservationAt(f.repository, f.downstream)
 				must(t, err)
@@ -178,7 +178,7 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 		t.Run(interval.String(), func(t *testing.T) {
 			ctx := context.Background()
 			cfg, repo, host, refresh := ownPRFixture(t)
-			clock := &fixedClock{now: demoStart}
+			clock := &fixedClock{At: demoStart}
 			s := refresh.s
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
@@ -194,7 +194,7 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 			s.store = store
 			must(t, store.SetArchived(archive))
 			// Failed archived reads must survive reload too.
-			host.findErr = errors.New("provider unavailable")
+			host.FindErr = errors.New("provider unavailable")
 			stages, err := s.stages(cfg, repo)
 			must(t, err)
 			pipeline := &pipeline{}
@@ -203,8 +203,8 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 			pollHooks(t, s, repo)
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, stream))
 			must(t, err)
-			if host.finds != 2 {
-				t.Fatalf("initial lookups=%d", host.finds)
+			if host.Finds != 2 {
+				t.Fatalf("initial lookups=%d", host.Finds)
 			}
 			path, err := cfg.Root.ProjectConfig(cfg.Project.ID)
 			must(t, err)
@@ -217,21 +217,21 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 					t.Fatal(api)
 				}
 				pollHooks(t, s, repo)
-				if host.finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
+				if host.Finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
 					t.Fatal("reload restarted cooldown")
 				}
 			}
 			clock.Advance(interval - time.Nanosecond)
 			pollHooks(t, s, repo)
-			if host.finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
+			if host.Finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
 				t.Fatal("poll before reloaded interval")
 			}
 			clock.Advance(time.Nanosecond)
 			pollHooks(t, s, repo)
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, stream))
 			must(t, err)
-			if host.finds != 4 || baseRefreshOperationCount(t, repo, stream) != 2 {
-				t.Fatalf("due lookups=%d operations=%d", host.finds, baseRefreshOperationCount(t, repo, stream))
+			if host.Finds != 4 || baseRefreshOperationCount(t, repo, stream) != 2 {
+				t.Fatalf("due lookups=%d operations=%d", host.Finds, baseRefreshOperationCount(t, repo, stream))
 			}
 		})
 	}
@@ -248,14 +248,14 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 			must(t, err)
 			defer store.Close()
 			f.s.store = store
-			clock := &fixedClock{now: f.s.now()}
+			clock := &fixedClock{At: f.s.now()}
 			f.s.options.Reconciliation.Now = clock.Now
 			host := &fakePulls{}
 			f.s.options.PullRequests = host
 			for i, member := range []config.WorkstreamID{f.upstream, f.downstream} {
 				p := DeliveryPublication{Status: publicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: featureBranch(member), PullRequest: 42 + i}
 				recordUpstreamOwnPullRequest(t, f.s, f.repository, member, p)
-				host.prs = append(host.prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
+				host.Prs = append(host.Prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
 			}
 			refresh := &baseRefresher{s: f.s, repository: f.repository}
 			ctx := context.Background()
@@ -268,7 +268,7 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 				}
 			}
 			pass()
-			before := host.finds
+			before := host.Finds
 			if projectRequest {
 				out, api := f.s.rebaseProject(ctx, ProjectRebaseRequest{Project: f.project})
 				if api != nil || len(out.Covered) != 2 {
@@ -283,11 +283,11 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 			if projectRequest {
 				want++
 			}
-			if host.finds != want || baseRefreshOperationCount(t, f.repository, f.downstream) != 2 {
-				t.Fatalf("request did not check own PR and edge: %d -> %d", before, host.finds)
+			if host.Finds != want || baseRefreshOperationCount(t, f.repository, f.downstream) != 2 {
+				t.Fatalf("request did not check own PR and edge: %d -> %d", before, host.Finds)
 			}
 			pass()
-			if host.finds != want || baseRefreshOperationCount(t, f.repository, f.downstream) != 2 {
+			if host.Finds != want || baseRefreshOperationCount(t, f.repository, f.downstream) != 2 {
 				t.Fatal("request bypassed interval more than once")
 			}
 		})
@@ -298,7 +298,7 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	host := &fakePulls{}
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	ticks := make(chan time.Time)
 	var passed atomic.Int64
 	opts.PullRequests = host
@@ -314,9 +314,9 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	_, err = trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, clock.Now(), ownerActor, "fixture")
 	must(t, err)
 	p := DeliveryPublication{Status: publicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: featureBranch(member), PullRequest: 42}
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
+	host.Mu.Unlock()
 	recordUpstreamOwnPullRequest(t, s, repo, member, p)
 	must(t, s.refreshRuntime())
 	tick := func() {
@@ -354,9 +354,9 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	for _, advance := range []time.Duration{time.Minute, 4 * time.Minute, 5*time.Minute - time.Nanosecond} {
 		clock.Advance(advance)
 		tick()
-		host.mu.Lock()
-		calls := host.finds
-		host.mu.Unlock()
+		host.Mu.Lock()
+		calls := host.Finds
+		host.Mu.Unlock()
 		if calls != 1 || baseRefreshOperationCount(t, repo, member) != 1 {
 			t.Fatalf("default polled early: finds=%d", calls)
 		}
@@ -370,9 +370,9 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	must(t, err)
 	waitChecked(2)
 	tick()
-	host.mu.Lock()
-	calls := host.finds
-	host.mu.Unlock()
+	host.Mu.Lock()
+	calls := host.Finds
+	host.Mu.Unlock()
 	if calls != 2 {
 		t.Fatalf("rebase lookup count=%d", calls)
 	}
@@ -384,7 +384,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			ctx := context.Background()
 			cfg, repo, host, refresh := ownPRFixture(t)
 			s := refresh.s
-			clock := &fixedClock{now: demoStart}
+			clock := &fixedClock{At: demoStart}
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
 			s.hub = newHub()
@@ -393,10 +393,10 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			must(t, trace.RecordProjectSpec(ctx, repo, group, trace.ProjectSpec{Behavior: "Dependency waits for merge", Graph: []trace.Edge{{From: quiet, To: stream, Type: trace.EdgeHardBlock}}}, demoStart, ownerActor, "fixture"))
 			p := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(quiet), PullRequest: 42}
 			recordUpstreamOwnPullRequest(t, s, repo, quiet, p)
-			host.prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
+			host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
 			failure := errors.New("upstream unavailable")
 			if failed {
-				host.findErr = failure
+				host.FindErr = failure
 			}
 			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, quiet}}})
 			must(t, err)
@@ -426,8 +426,8 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 				}
 			}
 			pass(failed)
-			if host.finds != 1 {
-				t.Fatalf("initial finds=%d", host.finds)
+			if host.Finds != 1 {
+				t.Fatalf("initial finds=%d", host.Finds)
 			}
 			path, err := cfg.Root.ProjectConfig(cfg.Project.ID)
 			must(t, err)
@@ -440,19 +440,19 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 					t.Fatal(api)
 				}
 				pass(false)
-				if host.finds != 1 {
+				if host.Finds != 1 {
 					t.Fatal("reload restarted edge cooldown")
 				}
 			}
 			clock.Advance(20*time.Minute - time.Nanosecond)
 			pass(false)
-			if host.finds != 1 {
+			if host.Finds != 1 {
 				t.Fatal("edge polled before new interval")
 			}
 			clock.Advance(time.Nanosecond)
 			pass(failed)
-			if host.finds != 2 {
-				t.Fatalf("due finds=%d", host.finds)
+			if host.Finds != 2 {
+				t.Fatalf("due finds=%d", host.Finds)
 			}
 		})
 	}
@@ -473,21 +473,21 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 			cfg := f.s.about(repo)
 			p := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: cfg.Project.BaseBranch, Branch: featureBranch(base), Commit: baseTip, PullRequest: 42}
 			recordUpstreamOwnPullRequest(t, f.s, repo, base, p)
-			host := &fakePulls{prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
+			host := &fakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
 			f.s.options.PullRequests = host
-			clock := &fixedClock{now: f.s.now()}
+			clock := &fixedClock{At: f.s.now()}
 			f.s.options.Reconciliation.Now = clock.Now
 			refresh := &baseRefresher{s: f.s, repository: repo}
 			must(t, refresh.Pass(ctx))
 			op := latestBaseRefreshOperation(t, repo, dependent)
 			_, err = refresh.Apply(ctx, op)
 			must(t, err)
-			if host.finds != 1 {
-				t.Fatalf("dependency lookup count=%d", host.finds)
+			if host.Finds != 1 {
+				t.Fatalf("dependency lookup count=%d", host.Finds)
 			}
 			clock.Advance(10*time.Minute - time.Nanosecond)
 			must(t, refresh.Pass(ctx))
-			if host.finds != 1 || baseRefreshOperationCount(t, repo, dependent) != 1 {
+			if host.Finds != 1 || baseRefreshOperationCount(t, repo, dependent) != 1 {
 				t.Fatal("dependency polled early")
 			}
 			clock.Advance(time.Nanosecond)
@@ -498,8 +498,8 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 			}
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, dependent))
 			must(t, err)
-			if host.finds != 2 {
-				t.Fatalf("dependency retry count=%d", host.finds)
+			if host.Finds != 2 {
+				t.Fatalf("dependency retry count=%d", host.Finds)
 			}
 
 			f.s.setSole(runtimeFor(repo))
@@ -523,11 +523,11 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 			must(t, refresh.Pass(ctx))
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, dependent))
 			must(t, err)
-			if host.finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
+			if host.Finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
 				t.Fatal("drift request did not immediately recheck dependency")
 			}
 			must(t, refresh.Pass(ctx))
-			if host.finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
+			if host.Finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
 				t.Fatal("dependency bypass ran more than once")
 			}
 		})

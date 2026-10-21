@@ -12,13 +12,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -134,8 +133,8 @@ func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 	deliver := func(ctx context.Context, tools *mcp.ClientSession, path, content, want string) error {
 		return verdict(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}, want)
 	}
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		dir := req.Workspace.Directory()
 		var spec, plan string
 		switch {
@@ -154,7 +153,7 @@ func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 2}, nil
 	}
-	f.engine.turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		args := map[string]any{
 			"behavior": "Chunks the server accepts are acknowledged with their offset; the client resumes uploads from the last acknowledged offset.",
 			"contracts": []map[string]any{
@@ -181,7 +180,7 @@ func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 }
 
 // awaitProjectSpec waits for the workgroup's project spec to be recorded.

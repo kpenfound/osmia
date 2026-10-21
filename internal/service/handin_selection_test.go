@@ -31,9 +31,9 @@ func handInProduction(t *testing.T, f *productionDesignFixture, req HandInReques
 	t.Helper()
 	ready := make(chan struct{})
 	defer close(ready)
-	f.engine.mu.Lock()
-	selection := f.engine.turns["select-repos-1"]
-	f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	selection := f.engine.Turns["select-repos-1"]
+	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		select {
 		case <-ready:
 		case <-ctx.Done():
@@ -44,7 +44,7 @@ func handInProduction(t *testing.T, f *productionDesignFixture, req HandInReques
 		}
 		return selection(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	req.Project, req.Key = f.project, "production-handin"
 	if req.Stdin == nil && req.Path == "" && req.URL == "" {
 		text := productionBrief
@@ -98,9 +98,9 @@ func TestHandInProductionSelectsDraftsRatifiesAndRestarts(t *testing.T) {
 			case "issue":
 				req.URL = "https://github.com/owner/repo/issues/12"
 				fake := f.opts.Issues.(*fakeIssues)
-				fake.mu.Lock()
-				fake.text = map[issues.Ref]string{{Owner: "owner", Repo: "repo", Number: 12}: productionBrief}
-				fake.mu.Unlock()
+				fake.Mu.Lock()
+				fake.Text = map[issues.Ref]string{{Owner: "owner", Repo: "repo", Number: 12}: productionBrief}
+				fake.Mu.Unlock()
 			}
 			req = handInProduction(t, f, req)
 			packet := f.awaitPacket(t)
@@ -127,9 +127,9 @@ func TestHandInProductionSelectsDraftsRatifiesAndRestarts(t *testing.T) {
 			f.checkContinuation(t)
 			if form == "issue" {
 				fake := f.opts.Issues.(*fakeIssues)
-				fake.mu.Lock()
-				count := fake.fetches
-				fake.mu.Unlock()
+				fake.Mu.Lock()
+				count := fake.Fetches
+				fake.Mu.Unlock()
 				if count != 1 {
 					t.Fatalf("issue fetched %d times", count)
 				}
@@ -217,14 +217,14 @@ func TestHandInProductionRefusesInvalidSelectionBeforeAllocation(t *testing.T) {
 			case "invalid":
 				selected = []string{"invalid"}
 			}
-			f.engine.mu.Lock()
-			f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Mu.Lock()
+			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if _, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": selected}); err == nil {
 					return nil, errors.New("invalid selection accepted")
 				}
 				return questionResult(req, "session-refused", "Selection refused."), nil
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			req := handInProduction(t, f, HandInRequest{})
 			f.wait(t, "refused selection", func() bool {
 				repo, err := f.s.repository(f.project)
@@ -278,17 +278,17 @@ func TestHandInProductionSingleSelectedRepoKeepsOrdinaryPacket(t *testing.T) {
 					target = f.project2
 					f.stream1 = f.stream2
 				}
-				f.engine.mu.Lock()
-				f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+				f.engine.Mu.Lock()
+				f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 					_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(target)}})
 					return questionResult(req, "session-single", "One repo is affected."), err
 				}
 				for i := 1; i <= 2; i++ {
-					f.engine.turns[roundTurnID(1, committeeAgent(i), 1)] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+					f.engine.Turns[roundTurnID(1, committeeAgent(i), 1)] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 						return questionResult(req, "session-committee-"+req.Name, "The single-repo draft fits the charter."), nil
 					}
 				}
-				f.engine.mu.Unlock()
+				f.engine.Mu.Unlock()
 				req := handInProduction(t, f, HandInRequest{SkipDebate: skip})
 				var packet PacketResponse
 				f.wait(t, "ordinary packet", func() bool {
@@ -394,18 +394,18 @@ func TestHandInProductionSharedChiefResumesBothQuestionsAfterRestart(t *testing.
 	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
-	f.engine.mu.Lock()
-	f.engine.turns["handin-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["handin-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Should acknowledgments retain their offsets?"})
 		return questionResult(req, "session-ask", "Asked the shared chief."), err
 	}
-	f.engine.turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, "Keep the acknowledged offset.") {
 			return nil, errors.New("answer went to the wrong asking turn")
 		}
 		return questionResult(req, "session-resumed", "Resumed within the contract."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "handin-ask", "Follow the server slice.")
 	lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "handin-ask", "Follow the client slice.")
 	originals := make([]trace.Question, 2)
@@ -432,8 +432,8 @@ func TestHandInProductionSharedChiefResumesBothQuestionsAfterRestart(t *testing.
 		return ready
 	})
 	f.stop(t)
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil {
 			return nil, err
@@ -447,7 +447,7 @@ func TestHandInProductionSharedChiefResumesBothQuestionsAfterRestart(t *testing.
 		}
 		return questionResult(req, "session-chief", "Both member questions were answered."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 	f.wait(t, "both original askers resumed", func() bool {
 		for i, m := range []config.WorkstreamID{f.stream1, f.stream2} {
@@ -482,17 +482,17 @@ func TestHandInProductionPreservesSameRepoBaseOnSelectedMember(t *testing.T) {
 	t.Parallel()
 	f := newHandInProductionFixture(t)
 	parent := HandInWorkstream(f.project, "parent")
-	f.engine.mu.Lock()
-	selectBoth := f.engine.turns["select-repos-1"]
-	f.engine.turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	selectBoth := f.engine.Turns["select-repos-1"]
+	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Workspace.Directory(), string(parent)) {
 			_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
 			return questionResult(req, "session-parent", "The parent affects only its repo."), err
 		}
 		return selectBoth(ctx, req, verified, tools)
 	}
-	draft := f.engine.turns["draft-1-1"]
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	draft := f.engine.Turns["draft-1-1"]
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Workspace.Directory(), string(parent)) {
 			return draft(ctx, req, verified, tools)
 		}
@@ -503,7 +503,7 @@ func TestHandInProductionPreservesSameRepoBaseOnSelectedMember(t *testing.T) {
 		}
 		return questionResult(req, "session-parent-draft", "Parent drafted."), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	text := "Implement the same-repo prerequisite."
 	_, err := f.c.HandIn(context.Background(), HandInRequest{Project: f.project, Key: "parent", Stdin: &text, SkipDebate: true})
 	must(t, err)

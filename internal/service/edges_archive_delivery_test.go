@@ -30,7 +30,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	interrupt.Store(true)
 	var passes atomic.Int64
 	var failedChecks, repairedChecks atomic.Int32
-	host := &fakePulls{syncHead: true}
+	host := &fakePulls{SyncHead: true}
 	hook := newFakeWebhook(t)
 	configuration := productionDesignConfiguration{
 		wait: lifecycleAwait,
@@ -76,13 +76,13 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		home := filepath.Dir(clone)
 		// The configured upstream is a local bare remote, so publication never
 		// reaches GitHub or a real repository.
-		host.fork = func() string {
+		host.Fork = func() string {
 			return strings.TrimSpace(demoGit(t, home, "-C", f.repos[1].remote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(f.stream2)))
 		}
 		configureDeliverySigner(t, clone)
-		f.engine.mu.Lock()
-		chief := f.engine.turns["*"]
-		f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Mu.Lock()
+		chief := f.engine.Turns["*"]
+		f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			var err error
 			switch {
 			case strings.HasPrefix(req.Name, "mason-") && strings.HasSuffix(req.Name, "-implement"):
@@ -127,7 +127,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 			}
 			return questionResult(req, "session-"+req.Name, "Implemented and reviewed"), err
 		}
-		f.engine.mu.Unlock()
+		f.engine.Mu.Unlock()
 	})
 	defer f.stop(t)
 	up, err := f.s.repository(f.project)
@@ -136,9 +136,9 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	must(t, err)
 	upstream := DeliveryPublication{Status: publicationOpened, Upstream: f.repos[0].upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: featureBranch(f.stream1), Commit: "upstream-feature", PullRequest: 71, URL: "https://example.invalid/pull/71"}
 	recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, upstream)
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: upstream.PullRequest, State: "open", HeadRepository: upstream.Fork, Head: upstream.Branch, URL: upstream.URL}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: upstream.PullRequest, State: "open", HeadRepository: upstream.Fork, Head: upstream.Branch, URL: upstream.URL}}
+	host.Mu.Unlock()
 
 	awaitReview := func(review int) DeliveryPresentation {
 		t.Helper()
@@ -234,9 +234,9 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if reference, waiting, err := unresolvedMergeOrderEdge(down, f.stream2); err != nil || !waiting || reference != upstream.Upstream+"#71" {
 		t.Fatalf("dependent lacks truthful merge wait: %q %v %v", reference, waiting, err)
 	}
-	host.mu.Lock()
-	host.prs[0].Merged, host.prs[0].State, host.prs[0].MergeCommit = true, "closed", merged
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs[0].Merged, host.Prs[0].State, host.Prs[0].MergeCommit = true, "closed", merged
+	host.Mu.Unlock()
 	// Edge observations are polled at most once per configured interval.
 	f.clock.Advance(10 * time.Minute)
 	lifecycleAwait(t, f, "edge read interrupted before persistence", observed.Load)
@@ -311,10 +311,10 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	}
 	pass := passes.Load()
 	lifecycleAwait(t, f, "publication stays gated after re-review", func() bool { return passes.Load() > pass+1 })
-	host.mu.Lock()
-	readies, creates := host.readies, host.creates
-	host.mu.Unlock()
-	remoteTip := host.fork()
+	host.Mu.Lock()
+	readies, creates := host.Readies, host.Creates
+	host.Mu.Unlock()
+	remoteTip := host.Fork()
 	if readies != 0 || creates != 1 || remoteTip != draft.Commit {
 		t.Fatalf("publication escaped fresh approval: ready=%d create=%d pushed=%s draft=%s", readies, creates, remoteTip, draft.Commit)
 	}
@@ -363,9 +363,9 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if len(units) != len(updates) {
 		t.Fatalf("restart duplicated dependency work: %+v", units)
 	}
-	host.mu.Lock()
-	readies, creates = host.readies, host.creates
-	host.mu.Unlock()
+	host.Mu.Lock()
+	readies, creates = host.Readies, host.Creates
+	host.Mu.Unlock()
 	if readies != 1 || creates != 1 {
 		t.Fatalf("publication duplicated: readies=%d creates=%d", readies, creates)
 	}

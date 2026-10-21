@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -27,6 +25,7 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // apiError checks that err is the service's error with the code and message.
@@ -89,9 +88,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			return questionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
-	f.engine.turns["build"] = asker("Where does state live?")
-	f.engine.turns["review"] = asker("Is the log format fixed?")
-	f.engine.turns["build_other"] = asker("May I add a dependency?")
+	f.engine.Turns["build"] = asker("Where does state live?")
+	f.engine.Turns["review"] = asker("Is the log format fixed?")
+	f.engine.Turns["build_other"] = asker("May I add a dependency?")
 	// The answer arrives after the asking turn, on the same session's thread.
 	resumed := func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		f.mu.Lock()
@@ -105,7 +104,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		f.results["resumed"] = append(f.results["resumed"], req.Prompt[strings.Index(req.Prompt, "The owner ruled"):])
 		return questionResult(req, "session-"+req.Name, "Built"), nil
 	}
-	f.engine.turns["answer_1"], f.engine.turns["answer_2"] = resumed, resumed
+	f.engine.Turns["answer_1"], f.engine.Turns["answer_2"] = resumed, resumed
 
 	relayed := make(chan struct{})
 	section, sectionErr := envelope.Render(envelope.Section{Name: "owner_response", Text: "Both are part of the contract."}, envelope.Section{Name: "returned_answer", Text: "State and the log format are part of the contract."})
@@ -113,7 +112,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		t.Fatal(sectionErr)
 	}
 	notice := "- workstreams/" + string(stream) + "/questions/1/rulings.jsonl (record 1 revision 2, workstream " + string(stream) + ")\n" + section
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		f.mu.Lock()
 		switch {
 		// The prompt replays the thread's earlier turns, so the newest event is
@@ -189,10 +188,10 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		return out
 	}
 	runs := func() map[string]int {
-		f.engine.mu.Lock()
-		defer f.engine.mu.Unlock()
+		f.engine.Mu.Lock()
+		defer f.engine.Mu.Unlock()
 		out := map[string]int{}
-		for _, name := range f.engine.runs {
+		for _, name := range f.engine.Runs {
 			if strings.HasPrefix(name, "events_") {
 				name = "events"
 			}
@@ -463,7 +462,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	opts := fixtureAt(t, home)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), ownerActor)
 	must(t, err)
 	defer repo.Close()

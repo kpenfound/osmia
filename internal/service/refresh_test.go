@@ -77,9 +77,9 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	must(t, err)
 	encoded, err := kb.Encode(current)
 	must(t, err)
-	f.engine.mu.Lock()
-	previous := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	previous := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, "refresh-") {
 			return previous(ctx, req, verified, tools)
 		}
@@ -121,7 +121,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Refreshed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	return f, masons
 }
 
@@ -150,9 +150,9 @@ func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 	defer f.stop(t)
 	entered := make(chan struct{})
 	release := make(chan struct{}, 1)
-	f.engine.mu.Lock()
-	previous := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	previous := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "refresh-") {
 			close(entered)
 			select {
@@ -163,7 +163,7 @@ func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 		}
 		return previous(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "refresh-in-flight", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	select {

@@ -17,7 +17,6 @@ import (
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -25,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newFinalFixture seeds a sealed validPlan with a committee runner and no
@@ -164,9 +164,9 @@ func assembleBoth(t *testing.T, f *shedFixture, repository *trace.Repository, a 
 // finalTurn installs the fake committee member's turn of final review k.
 func (f *shedFixture) finalTurn(k, attempt int, run func(ctx context.Context, tools *mcp.ClientSession) error) string {
 	turn := finalTurnID(k, committeeAgent(1), attempt)
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := run(ctx, tools); err != nil {
 			return nil, err
 		}
@@ -469,13 +469,13 @@ func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Final review 1 read ") || !strings.Contains(prompt, "- blocking: "+blocking[0]) || !strings.Contains(prompt, "change since for what changed after final review 1") {
 		t.Fatalf("the second reader's prompt lacks the first review:\n%s", prompt)
 	}
-	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || result.Outcome != "succeeded" || report.Review != 2 || !slices.Equal(report.blocking(), blocking) {
+	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || result.Outcome != "succeeded" || report.Review != 2 || !slices.Equal(reportBlocking(report), blocking) {
 		t.Fatalf("the second review %+v, reason %q: %v", report, reason, err)
 	}
 
 	f.s.setSole(&activeProject{repository: repository})
 	p, api := f.s.deliveryPresentation(ctx, string(stream))
-	if api != nil || !slices.Equal(p.Report.blocking(), blocking) {
+	if api != nil || !slices.Equal(reportBlocking(p.Report), blocking) {
 		t.Fatalf("presentation %+v: %v", p.Report, api)
 	}
 	decision := DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
@@ -743,7 +743,7 @@ func TestFinalReviewWaitsForChecksThatComplete(t *testing.T) {
 		if _, open := entry(); open {
 			t.Fatalf("the inbox reports %d incomplete runs", n+1)
 		}
-		f.clock.now = f.clock.now.Add(wait + time.Minute)
+		f.clock.At = f.clock.At.Add(wait + time.Minute)
 		if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%d runs in a row", n+2)) {
 			t.Fatalf("run %d: %v", n+2, err)
 		}
@@ -759,7 +759,7 @@ func TestFinalReviewWaitsForChecksThatComplete(t *testing.T) {
 	if _, err := a.Apply(ctx, op); err == nil {
 		t.Fatal("the checks ran again before the longer wait passed")
 	}
-	f.clock.now = f.clock.now.Add(finalCheckDelay(3) + time.Minute)
+	f.clock.At = f.clock.At.Add(finalCheckDelay(3) + time.Minute)
 	result, err := a.Apply(ctx, op)
 	must(t, err)
 	if result.Outcome != "succeeded" || runs != 4 || read != 1 {
@@ -861,7 +861,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 				map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream only\n"})
 			links := []string{"dag+check://go/test", "dag+check://release/version"}
-			checks := &fakeChecks{links: links, outcomes: passing()}
+			checks := &fakeChecks{Links: links, Outcomes: passing()}
 			f.s.options.reviewChecks = checks
 			probability := 0.9
 			if mode == "declined" {
@@ -878,10 +878,10 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 				boostJev(f.s, provider)
 			}
 			if mode == "unlisted" {
-				checks.listErr = errors.New("listing unavailable")
+				checks.ListErr = errors.New("listing unavailable")
 			}
 			if mode == "no_checks" {
-				checks.links = nil
+				checks.Links = nil
 			}
 			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checked branch.", "findings": []any{}})
@@ -908,7 +908,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			} else if selection.Mode != selectionFull || selection.Reason != mode || len(selection.Links) != 0 {
 				t.Fatalf("full evidence: %+v, want %s", selection, mode)
 			}
-			if runs := checks.runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
+			if runs := checks.Runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
 				t.Fatalf("runner links %v, command %v", runs, run.Command)
 			}
 			starts := finalCheckStarts(t, repo, stream)
@@ -945,13 +945,13 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			reader, err := repo.Thread(stream, committeeAgent(1))
 			must(t, err)
 			request := reader.Turns[len(reader.Turns)-1].Request
-			if !strings.Contains(request.Prompt, selection.describe()) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
+			if !strings.Contains(request.Prompt, describeSelection(*selection)) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
 				t.Fatalf("reader lacks selection: %s\n%s", request.SystemPrompt, request.Prompt)
 			}
 			entries, err := feedChecks(repo, stream)
 			must(t, err)
 			i := slices.IndexFunc(entries, func(e FeedEntry) bool { return e.FinalChecks != nil })
-			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != selection.describe() {
+			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != describeSelection(*selection) {
 				t.Fatalf("feed selection: %+v", entries)
 			}
 		})

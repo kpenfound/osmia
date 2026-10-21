@@ -241,7 +241,7 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 // answer within the latency bound while it is blocked.
 func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{links: []string{"dag://x"}, outcomes: []checkOutcome{{block: true}}}
+	checks := &fakeChecks{Links: []string{"dag://x"}, Outcomes: []checkOutcome{{Block: true}}}
 	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	workstream, repository := seedBuild(t, f, "stall-check", independentPlan, config.WorkspacesGit, base)

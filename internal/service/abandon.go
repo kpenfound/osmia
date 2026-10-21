@@ -47,22 +47,22 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
-		return AbandonResponse{}, &APIError{Validation, "reason must not be empty"}
+		return AbandonResponse{}, &APIError{Code: Validation, Message: "reason must not be empty"}
 	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: abandonTransition}
 	state, err := repository.SetFeatureStateUnless(ctx, h, AbandonedState, reason, AbandonedState, DeliveredState)
 	switch {
 	case errors.Is(err, trace.ErrFeatureState):
-		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
 	case errors.Is(err, trace.ErrConflict):
-		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
 	case err != nil:
 		return AbandonResponse{}, failed
 	}
 	s.turns.cancel(stream)
 	if _, err := repository.CancelTurns(context.WithoutCancel(ctx), stream, s.now(), abandonActor, cancelReason); err != nil {
-		return AbandonResponse{}, &APIError{Internal, fmt.Sprintf("workstream %s is abandoned but its queued turns could not be cancelled; they are cancelled at the next start. Check the trace repository", stream)}
+		return AbandonResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("workstream %s is abandoned but its queued turns could not be cancelled; they are cancelled at the next start. Check the trace repository", stream)}
 	}
 	return AbandonResponse{Project: project, Workstream: stream, State: AbandonedState, Reason: reason}, nil
 }

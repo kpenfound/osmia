@@ -17,8 +17,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -26,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -170,9 +169,9 @@ func newAskingFixtureWith(t *testing.T, members, rounds int, p *faults, prepare 
 		}
 	})
 	c := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns["*"] = c.turn
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns["*"] = c.turn
 	return f, c
 }
 
@@ -180,9 +179,9 @@ func newAskingFixtureWith(t *testing.T, members, rounds int, p *faults, prepare 
 // question id to its asker.
 func (f *shedFixture) answer(id string, run fakeTurn) string {
 	turn := questions.TurnID(id)
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := run(ctx, req, verified, tools); err != nil {
 			return nil, err
 		}
@@ -673,11 +672,11 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	// The first lifetime leaves the choice for the chief turn planted
 	// between lifetimes. Its ordinary event turns finish but cannot
 	// escalate the question before that direct answer is recorded.
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		return questionResult(req, "session-chief", "Choice left for the planted turn"), nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	member := committeeAgent(1)
 	asked := make(chan struct{})
 	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
@@ -703,9 +702,9 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
 	})
 	f.stop(t)
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = c.turn
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = c.turn
+	f.engine.Mu.Unlock()
 	// Between lifetimes a second attempt is reserved on the member's thread
 	// as a crash would leave it, the chief of staff answers, and the answer
 	// is queued behind the reservation.

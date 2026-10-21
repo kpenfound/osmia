@@ -74,9 +74,9 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	check(false)
 	// Only the exact archived current PR may supply the post-cleanup merge.
 	p := publications[0]
-	host.mu.Lock()
-	host.prs = []pulls.PullRequest{{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: "upstream-merge", Head: p.Branch, HeadRepository: p.Fork}}
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = []pulls.PullRequest{{Number: p.PullRequest, State: "closed", Merged: true, MergeCommit: "upstream-merge", Head: p.Branch, HeadRepository: p.Fork}}
+	host.Mu.Unlock()
 	lifecycleAwait(t, f, "durable merge receipt before archive reconciliation", reached.Load)
 	down, err := f.s.repository(f.project2)
 	must(t, err)
@@ -94,9 +94,9 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	interrupt.Store(false)
 	// Recovery must replay the durable receipt even when polling can no longer
 	// supply that upstream merge.
-	host.mu.Lock()
-	host.prs = nil
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = nil
+	host.Mu.Unlock()
 	f.start(t)
 	lifecycleAwait(t, f, "recovered archived resolution", func() bool { a, ok := archiveRecord(t, f.s.store, f.stream1); return ok && archiveResolved(a) })
 	a, _ = archiveRecord(t, f.s.store, f.stream1)
@@ -105,9 +105,9 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	}
 	check(false) // The sink's unmerged ready PR still keeps the shared spec active.
 	sink := publications[1]
-	host.mu.Lock()
-	host.prs = append(host.prs, pulls.PullRequest{Number: sink.PullRequest, State: "closed", Merged: true, MergeCommit: "sink-merge", Head: sink.Branch, HeadRepository: sink.Fork})
-	host.mu.Unlock()
+	host.Mu.Lock()
+	host.Prs = append(host.Prs, pulls.PullRequest{Number: sink.PullRequest, State: "closed", Merged: true, MergeCommit: "sink-merge", Head: sink.Branch, HeadRepository: sink.Fork})
+	host.Mu.Unlock()
 	lifecycleAwait(t, f, "last member observed merged and group retired", func() bool {
 		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
 		must(t, err)

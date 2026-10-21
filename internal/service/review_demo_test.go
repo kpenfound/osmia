@@ -32,8 +32,8 @@ func TestExactReviewDemonstration(t *testing.T) {
 	masons.play[masonTurnID("resume")] = reportDone("Initial candidate")
 	var reviews atomic.Int32
 	var old, revised UnitReviewIdentity
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, masonAgent("resume")+"-revise-") {
 			if !strings.Contains(req.Prompt, "Handle retry token") {
 				return nil, fmt.Errorf("revision lost the finding: %s", req.Prompt)
@@ -97,7 +97,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 		}
 		return chief.turn(ctx, req, turn, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		if !strings.Contains(req.Prompt, relayedRuling) {
 			return fmt.Errorf("reviewer did not receive the ruling")
@@ -123,9 +123,9 @@ func TestExactReviewDemonstration(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			thread, _ := f.repository().Thread(stream, reviewerAgent("resume"))
-			f.engine.mu.Lock()
-			runs := append([]string(nil), f.engine.runs...)
-			f.engine.mu.Unlock()
+			f.engine.Mu.Lock()
+			runs := append([]string(nil), f.engine.Runs...)
+			f.engine.Mu.Unlock()
 			t.Fatalf("waiting for reviewer question: state %s, reviews %d, thread %+v, runs %v", state.Value, reviews.Load(), thread.Turns, runs)
 		}
 		time.Sleep(50 * time.Millisecond)

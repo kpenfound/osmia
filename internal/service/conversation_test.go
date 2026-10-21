@@ -7,82 +7,24 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// chiefTurns is a fake chief of staff. It answers each prompt, and the first
-// turn it runs waits for hold to close when hold is set.
-type chiefTurns struct {
-	mu      sync.Mutex
-	calls   []coreadapter.PreparedTurn
-	hold    chan struct{}
-	entered chan struct{}
-}
-
-func (c *chiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-	c.mu.Lock()
-	c.calls = append(c.calls, p)
-	first := len(c.calls) == 1
-	c.mu.Unlock()
-	if first && c.hold != nil {
-		close(c.entered)
-		select {
-		case <-c.hold:
-		case <-ctx.Done():
-			return coreadapter.SessionResult{}, ctx.Err()
-		}
-	}
-	session := coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "session"}
-	switch p.Prompt {
-	case "fail":
-		return coreadapter.SessionResult{Session: session, FinalResponse: "partial", IsError: true}, nil
-	case "cancel":
-		return coreadapter.SessionResult{Session: session, FinalResponse: "stopped", Cancelled: true}, nil
-	case "silent":
-		return coreadapter.SessionResult{Session: session}, nil
-	}
-	return coreadapter.SessionResult{Session: session, FinalResponse: "Answer to " + p.Prompt}, nil
-}
-
-func (c *chiefTurns) CheckResume(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
-	return nil
-}
-
-func (c *chiefTurns) Calls() []coreadapter.PreparedTurn {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]coreadapter.PreparedTurn(nil), c.calls...)
-}
 
 // conversationFixture creates a project with a trace holding two workstreams
 // and a charter rule.
 func conversationFixture(t *testing.T, prefix string) (Options, *config.Config) {
 	t.Helper()
-	ctx := context.Background()
-	home, err := os.MkdirTemp("", prefix)
-	must(t, err)
-	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
-	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, demoStart, owner))
-	must(t, repo.CreateWorkstream(ctx, quiet, demoStart, owner))
-	recordCharter(t, repo, trace.CharterTemplate+"\n## Rules\n\n1. Keep the upload API stable.\n")
-	must(t, repo.Close())
-	opts.Reconciliation.Now = (&demoClock{now: demoStart}).Now
-	return opts, cfg
+	opts, cfg := fixturekit.Conversation(t, prefix)
+	o := testOptions(opts)
+	o.Reconciliation.Now = (&demoClock{At: demoStart}).Now
+	return o, cfg
 }
 
 // runChief binds the fake chief of staff through the thread dispatcher. It
@@ -127,7 +69,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "cv-")
-	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	runChief(&opts, cfg, turns)
 	s, c := start(t, opts)
 
@@ -143,7 +85,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		t.Fatalf("thread after send: %+v", th)
 	}
 	select {
-	case <-turns.entered:
+	case <-turns.Entered:
 	case <-time.After(demoTimeout):
 		t.Fatal("message did not run as a turn")
 	}
@@ -160,7 +102,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	if got := states(list); !reflect.DeepEqual(got, []string{"message:running", "message:queued", "message:queued", "message:queued", "message:queued"}) {
 		t.Fatalf("mid-turn listing: %v", got)
 	}
-	close(turns.hold)
+	close(turns.Hold)
 
 	list = awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 9 })
 	want := []ConversationEntry{
@@ -286,27 +228,27 @@ func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 	data, err := os.ReadFile(file)
 	must(t, err)
 	must(t, os.WriteFile(file, append(data, []byte("\n[profiles.same]\nagent = \"claude\"\nmodel = \"same\"\n")...), 0600))
-	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	runChief(&opts, cfg, turns)
 	s, c := start(t, opts)
 	_, err = c.Send(ctx, stream, "first")
 	must(t, err)
 	select {
-	case <-turns.entered:
+	case <-turns.Entered:
 	case <-time.After(demoTimeout):
 		t.Fatal("first turn did not start")
 	}
-	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "same"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: "same"})
 	if calls := turns.Calls(); len(calls) != 1 || calls[0].Profile.Name != "default" {
 		t.Fatalf("in-flight profile changed: %+v", calls)
 	}
-	close(turns.hold)
+	close(turns.Hold)
 	awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 2 })
 	for i, step := range []struct{ profile, prompt string }{{"same", "second"}, {"other", "third"}, {"", "fourth"}} {
 		if i == 2 {
-			mutation(t, c, "DELETE", "profile", ClearProfileRequest{trace.ChiefOfStaff})
+			mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: trace.ChiefOfStaff})
 		} else if i > 0 {
-			mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, step.profile})
+			mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: step.profile})
 		}
 		_, err := c.Send(ctx, stream, step.prompt)
 		must(t, err)
@@ -339,7 +281,7 @@ func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
 	t.Parallel()
 	opts, _ := conversationFixture(t, "cf-")
 	s, c := start(t, opts)
-	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: "other"})
 	sent, err := c.Send(context.Background(), stream, "hello")
 	must(t, err)
 	th, err := s.sole().repository.ChiefOfStaffThread(stream)

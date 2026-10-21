@@ -175,7 +175,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	demoGit(t, home, "init", "--quiet", "--bare", fork)
 	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	pull := &fakePulls{syncHead: true, fork: func() string {
+	pull := &fakePulls{SyncHead: true, Fork: func() string {
 		out := strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 		return out
 	}}
@@ -191,9 +191,9 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	// Upstream already has its own open, unmerged pull request.
 	upstreamPullRequest := DeliveryPublication{Status: publicationOpened, Upstream: "owner/other", Fork: "owner/other-fork", Branch: featureBranch(upstream), Commit: "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2", PullRequest: 77, URL: "https://example.invalid/owner/other/pull/77"}
 	recordUpstreamOwnPullRequest(t, f.s, repo2, upstream, upstreamPullRequest)
-	pull.mu.Lock()
-	pull.prs = append(pull.prs, pulls.PullRequest{Number: upstreamPullRequest.PullRequest, URL: upstreamPullRequest.URL, State: "open", HeadRepository: upstreamPullRequest.Fork, Head: upstreamPullRequest.Branch, HeadCommit: upstreamPullRequest.Commit, Base: "main"})
-	pull.mu.Unlock()
+	pull.Mu.Lock()
+	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: upstreamPullRequest.PullRequest, URL: upstreamPullRequest.URL, State: "open", HeadRepository: upstreamPullRequest.Fork, Head: upstreamPullRequest.Branch, HeadCommit: upstreamPullRequest.Commit, Base: "main"})
+	pull.Mu.Unlock()
 
 	must(t, f.s.edgeResolverPass(ctx, repository))
 	provider := f.s.Context()
@@ -244,11 +244,11 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	if got := pub.feature(t); got != DeliveredState {
 		t.Fatalf("the dependent is %s, want delivered: a draft pull request is still a published pull request", got)
 	}
-	pull.mu.Lock()
-	if len(pull.prs) != 2 || !pull.prs[1].Draft {
-		t.Fatalf("the dependent's own pull request did not open as a draft linking the dependency: %+v", pull.prs)
+	pull.Mu.Lock()
+	if len(pull.Prs) != 2 || !pull.Prs[1].Draft {
+		t.Fatalf("the dependent's own pull request did not open as a draft linking the dependency: %+v", pull.Prs)
 	}
-	pull.mu.Unlock()
+	pull.Mu.Unlock()
 	firstPublication, found, err := currentOwnPublication(repository, stream)
 	must(t, err)
 	if !found || firstPublication.Approval != 1 || !strings.Contains(demoGit(t, home, "-C", f.clone, "cat-file", "-p", firstPublication.Commit), "gpgsig") {
@@ -257,23 +257,23 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 
 	// Simulate the upstream merge: the only recorded event a merge-order
 	// edge resolves on, never an agent outcome (spec#11).
-	pull.mu.Lock()
-	pull.prs[0].Merged = true
-	pull.prs[0].MergeCommit = "aabbccddeeff0011223344556677889900aabbccdd"
-	pull.mu.Unlock()
+	pull.Mu.Lock()
+	pull.Prs[0].Merged = true
+	pull.Prs[0].MergeCommit = "aabbccddeeff0011223344556677889900aabbccdd"
+	pull.Mu.Unlock()
 	// edgeResolverPass polls no more often than once per configured interval; advancing
 	// the fixture's clock well past that keeps this second call from being
 	// skipped as a too-recent repeat of the first.
-	f.clock.mu.Lock()
-	f.clock.now = f.clock.now.Add(11 * time.Minute)
-	f.clock.mu.Unlock()
+	f.clock.Mu.Lock()
+	f.clock.At = f.clock.At.Add(11 * time.Minute)
+	f.clock.Mu.Unlock()
 	must(t, f.s.edgeResolverPass(ctx, repository))
 	if pending, err := upstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || !pending {
 		t.Fatalf("the upstream merge was not recognised as pending maintenance: %v %v", pending, err)
 	}
 
 	a := &finalReviewer{s: f.s, repository: repository}
-	must(t, recordOwnPullRequestOutcome(ctx, repo2, f.s.now(), upstream, "fixture", pull.prs[0].Number, ownPullRequestOutcomeMerged))
+	must(t, recordOwnPullRequestOutcome(ctx, repo2, f.s.now(), upstream, "fixture", pull.Prs[0].Number, ownPullRequestOutcomeMerged))
 	if done, err := resolved(repo2, upstream); err != nil || !done {
 		t.Fatalf("merged upstream is not resolved: %v, %v", done, err)
 	}
@@ -283,7 +283,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	}
 	updates, err := followup.Read(repository, stream)
 	must(t, err)
-	if len(updates) != 1 || !strings.Contains(updates[0].Unit.Task, pull.prs[0].MergeCommit) {
+	if len(updates) != 1 || !strings.Contains(updates[0].Unit.Task, pull.Prs[0].MergeCommit) {
 		t.Fatalf("merged dependency update units: %+v", updates)
 	}
 	must(t, f.s.edgeResolverPass(ctx, repository))
@@ -299,12 +299,12 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	if _, admitted, err := build.read(stream); err != nil || !admitted {
 		t.Fatalf("post-merge update is stranded: %v, %v", admitted, err)
 	}
-	mergeDirectly(t, f, repository, stream, updates[0].Unit.ID, map[string]string{"dependency.txt": pull.prs[0].MergeCommit + "\n"})
+	mergeDirectly(t, f, repository, stream, updates[0].Unit.ID, map[string]string{"dependency.txt": pull.Prs[0].MergeCommit + "\n"})
 	runReview := func(gap bool) FinalReport {
 		t.Helper()
-		f.clock.mu.Lock()
-		f.clock.now = f.clock.now.Add(time.Second)
-		f.clock.mu.Unlock()
+		f.clock.Mu.Lock()
+		f.clock.At = f.clock.At.Add(time.Second)
+		f.clock.Mu.Unlock()
 		must(t, a.Pass(ctx))
 		op := actionOperation(t, repository, stream, deliveryReviewAction)
 		in, err := decodeFinalReview(op)
@@ -361,7 +361,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	// Only a fresh delivery approval (the second and only other owner
 	// prompt) authorises marking the existing pull request ready: never
 	// before it (spec#13, spec#14).
-	if pull.readies != 0 {
+	if pull.Readies != 0 {
 		t.Fatal("the dependent's pull request was marked ready before any fresh delivery approval")
 	}
 	freshApproval := pub.approve(t, nil)
@@ -382,12 +382,12 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	if !found || publication.Approval != 2 || publication.Commit == firstPublication.Commit || !strings.Contains(demoGit(t, home, "-C", f.clone, "cat-file", "-p", publication.Commit), "gpgsig") {
 		t.Fatalf("ready publication lacks fresh owner approval and signing: %+v", publication)
 	}
-	if got := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "show", publication.Commit+":dependency.txt")); got != pull.prs[0].MergeCommit {
+	if got := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "show", publication.Commit+":dependency.txt")); got != pull.Prs[0].MergeCommit {
 		t.Fatalf("published dependency reference is %q, want the merged commit", got)
 	}
-	pull.mu.Lock()
-	draft, readies, creates := pull.prs[1].Draft, pull.readies, pull.creates
-	pull.mu.Unlock()
+	pull.Mu.Lock()
+	draft, readies, creates := pull.Prs[1].Draft, pull.Readies, pull.Creates
+	pull.Mu.Unlock()
 	if draft {
 		t.Fatal("the dependent's pull request was not marked ready after the fresh delivery approval")
 	}
@@ -498,7 +498,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 	}
 	report, reason, err := reviewer.finalGate(ctx, stream)
 	must(t, err)
-	if !report.Maintenance || report.EdgeResolved == "" || reason != "" || len(report.blocking()) != 1 || p.feature(t) != DeliveredState {
+	if !report.Maintenance || report.EdgeResolved == "" || reason != "" || len(reportBlocking(report)) != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("later maintenance gap: %+v reason %q state %s", report, reason, p.feature(t))
 	}
 	if body := noticeOf(t, repo, stream, fmt.Sprintf("final-review-%d-reviewed", in.Review)); !strings.Contains(body, "move the workstream to building with move_workstream") {

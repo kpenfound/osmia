@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
@@ -74,12 +75,12 @@ func TestSendAndConversation(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
 
-	var sent service.ConversationEntry
+	var sent wire.ConversationEntry
 	must(t, json.Unmarshal([]byte(successful(t, root, "send", stream, "Start with uploads.", "--json")), &sent))
-	if sent.Kind != "message" || sent.State != service.TurnQueued || sent.Text != "Start with uploads." || !strings.HasPrefix(sent.Turn, "message_") {
+	if sent.Kind != "message" || sent.State != wire.TurnQueued || sent.Text != "Start with uploads." || !strings.HasPrefix(sent.Turn, "message_") {
 		t.Fatalf("send --json: %+v", sent)
 	}
-	var list service.ConversationResponse
+	var list wire.ConversationResponse
 	deadline := time.Now().Add(5 * time.Minute)
 	for {
 		var current service.ConversationResponse
@@ -94,9 +95,9 @@ func TestSendAndConversation(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	answered := list.Entries[1].At
-	want := service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{
-		{Turn: sent.Turn, Kind: "message", Text: "Start with uploads.", At: sent.At, State: service.TurnDone},
-		{Turn: sent.Turn, Kind: "response", Text: "Noted.\nThe plan is next.", At: answered, State: service.TurnDone},
+	want := wire.ConversationResponse{Workstream: stream, Entries: []wire.ConversationEntry{
+		{Turn: sent.Turn, Kind: "message", Text: "Start with uploads.", At: sent.At, State: wire.TurnDone},
+		{Turn: sent.Turn, Kind: "response", Text: "Noted.\nThe plan is next.", At: answered, State: wire.TurnDone},
 	}}
 	if !reflect.DeepEqual(list, want) || !answered.After(sent.At) {
 		t.Fatalf("conversation --json: %+v", list)
@@ -164,12 +165,12 @@ func TestSendAndConversation(t *testing.T) {
 
 func TestConversationTextWithoutMessages(t *testing.T) {
 	var w strings.Builder
-	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{}}, "send")
+	showConversation(&w, wire.ConversationResponse{Workstream: stream, Entries: []wire.ConversationEntry{}}, "send")
 	if want := "Conversation: " + stream + "\n  no messages yet; send one with osmia send " + stream + " \"...\"\n"; w.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", w.String(), want)
 	}
 	w.Reset()
-	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{{Turn: "message_1", Kind: "message", Text: "Why?\n", At: written, State: service.TurnFailed}}}, "send")
+	showConversation(&w, wire.ConversationResponse{Workstream: stream, Entries: []wire.ConversationEntry{{Turn: "message_1", Kind: "message", Text: "Why?\n", At: written, State: wire.TurnFailed}}}, "send")
 	if want := "Conversation: " + stream + "\n2026-09-16T10:00:00Z owner [message_1 failed]\n  Why?\n"; w.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", w.String(), want)
 	}

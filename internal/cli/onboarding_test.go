@@ -21,14 +21,14 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The project onboarding demonstration: a project is added from a local fixture
@@ -196,10 +196,10 @@ func treeHash(t *testing.T, dir string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func onboardingStatus(t *testing.T, root string) service.ConfigResponse {
+func onboardingStatus(t *testing.T, root string) wire.ConfigResponse {
 	t.Helper()
 	var st struct {
-		Configuration service.ConfigResponse
+		Configuration wire.ConfigResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st))
 	return st.Configuration
@@ -249,7 +249,7 @@ func TestProjectOnboarding(t *testing.T) {
 	}
 
 	// 2. project add registers the project; the trace lives under the root.
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "demo", "--upstream", "owner/demo", "--fork", "fork/demo", "--clone", clone, "--json")), &added))
 	id := added.Project.ID
 	traceDir := added.Project.Trace
@@ -325,7 +325,7 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("hand-in with an empty charter: %d %q %q", code, out, diag)
 	}
 	var all struct {
-		Status service.StatusResponse
+		Status wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	if len(all.Status.Workstreams) != 0 {

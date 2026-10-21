@@ -360,18 +360,6 @@ func list(entries []string) string {
 	return strings.Join(entries, ", ")
 }
 
-// UnitStatus is the recorded state, latest card and landing of one unit of
-// the sealed plan or a final-review follow-up. A ready unit the mason
-// controller deferred carries the deferral, and its message as Reason.
-type UnitStatus struct {
-	Unit     string            `json:"unit"`
-	State    string            `json:"state"`
-	Reason   string            `json:"reason,omitempty"`
-	Deferral *UnitDispatch     `json:"deferral,omitempty"`
-	Card     *coreadapter.Card `json:"card,omitempty"`
-	Landing  *UnitLanding      `json:"landing,omitempty"`
-}
-
 // unitStates returns states, latest cards, landings and deferrals, taken from
 // the given workflow states, reports, landing and dispatch documents, of the
 // units of the workstream's sealed plan and final-review follow-ups, in

@@ -97,7 +97,7 @@ func (s *Service) validateAdd(req ProjectAddRequest) (config.Project, *APIError)
 // shared by project creation and by adding a repo to an existing project.
 func (s *Service) validateRepo(name, upstream, fork, clone, baseBranch string) (config.Project, *APIError) {
 	invalid := func(message string) (config.Project, *APIError) {
-		return config.Project{}, &APIError{Validation, message}
+		return config.Project{}, &APIError{Code: Validation, Message: message}
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || strings.ContainsAny(name, "\x00\r\n") {
@@ -154,7 +154,7 @@ func repoNameFromUpstream(upstream string) string {
 // repo, with GroupID already set to the project.
 func (s *Service) validateAddRepo(req RepoAddRequest) (config.Project, config.Project, *APIError) {
 	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return config.Project{}, config.Project{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 	}
 	cfg := s.current()
 	var primary config.Project
@@ -165,10 +165,10 @@ func (s *Service) validateAddRepo(req RepoAddRequest) (config.Project, config.Pr
 		}
 	}
 	if !found {
-		return config.Project{}, config.Project{}, &APIError{Validation, fmt.Sprintf("project %s is not active", req.Project)}
+		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active", req.Project)}
 	}
 	if !primary.IsDefaultRepo() {
-		return config.Project{}, config.Project{}, &APIError{Validation, fmt.Sprintf("project %s is a repo of project %s; add repos there instead", req.Project, primary.Group())}
+		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is a repo of project %s; add repos there instead", req.Project, primary.Group())}
 	}
 	name := req.Name
 	if name == "" {
@@ -194,7 +194,7 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	defer s.projectMu.Unlock()
 	pending, err := s.readPending()
 	if err != nil {
-		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
 		if conflict := pendingCloneConflict(s.current(), pending.Project); conflict != nil {
@@ -223,7 +223,7 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 		}
 	}
 	if err := s.reserve(&p); err != nil {
-		return ProjectResponse{}, &APIError{Internal, "cannot reserve a project identity under the root; check its permissions"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
 	}
 	if err := s.step("journal-written"); err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
@@ -243,7 +243,7 @@ func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectRespo
 	defer s.projectMu.Unlock()
 	pending, err := s.readPending()
 	if err != nil {
-		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
 		if conflict := pendingCloneConflict(s.current(), pending.Project); conflict != nil {
@@ -272,7 +272,7 @@ func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectRespo
 		}
 	}
 	if err := s.reserve(&p); err != nil {
-		return ProjectResponse{}, &APIError{Internal, "cannot reserve a project identity under the root; check its permissions"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
 	}
 	if err := s.step("journal-written"); err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
@@ -285,7 +285,7 @@ func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectRespo
 }
 
 func activeError(id config.ProjectID) *APIError {
-	return &APIError{ProjectActive, fmt.Sprintf("project %s already owns this registration or clone; use a separate clone for another project", id)}
+	return &APIError{Code: ProjectActive, Message: fmt.Sprintf("project %s already owns this registration or clone; use a separate clone for another project", id)}
 }
 func incomplete(id config.ProjectID, err error) *APIError {
 	reason := "storage failure"
@@ -295,7 +295,7 @@ func incomplete(id config.ProjectID, err error) *APIError {
 	case errors.Is(err, trace.ErrLocked):
 		reason = "trace locked"
 	}
-	return &APIError{Internal, fmt.Sprintf("registration of project %s is incomplete (%s); fix the root and run osmia project add again to finish it", id, reason)}
+	return &APIError{Code: Internal, Message: fmt.Sprintf("registration of project %s is incomplete (%s); fix the root and run osmia project add again to finish it", id, reason)}
 }
 func (s *Service) added(p config.Project) ProjectResponse {
 	view := s.projectGroupView(p)
@@ -584,16 +584,16 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 	defer s.projectMu.Unlock()
 	cfg := s.current()
 	if len(cfg.Projects) == 0 {
-		return ProjectResponse{}, &APIError{NoProject, "no project is configured; add one with osmia project add"}
+		return ProjectResponse{}, &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 	}
 	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return ProjectResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+		return ProjectResponse{}, &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 	}
 	if !cfg.Active(req.Project) {
 		if len(cfg.Projects) == 1 {
-			return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active project is %s", req.Project, cfg.Projects[0].ID)}
+			return ProjectResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active; the active project is %s", req.Project, cfg.Projects[0].ID)}
 		}
-		return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
+		return ProjectResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
 	}
 	removed := cfg.For(req.Project).Project
 	if removed.IsDefaultRepo() {
@@ -604,7 +604,7 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 					ids = append(ids, string(o.ID))
 				}
 			}
-			return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s still has other repos (%s); remove them first", removed.ID, strings.Join(ids, ", "))}
+			return ProjectResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s still has other repos (%s); remove them first", removed.ID, strings.Join(ids, ", "))}
 		}
 	}
 	configPath, err := cfg.Root.Config()
@@ -612,7 +612,7 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		err = config.RemoveActiveProject(configPath, req.Project)
 	}
 	if err != nil {
-		return ProjectResponse{}, &APIError{Internal, "cannot edit active_projects in config.toml; check the file and its permissions"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot edit active_projects in config.toml; check the file and its permissions"}
 	}
 	s.mu.Lock()
 	var active *activeProject
@@ -639,7 +639,7 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		}
 	}
 	if err := errors.Join(closed, s.refreshRuntime()); err != nil {
-		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}
 	}
 	s.hub.publish(Event{Kind: EventResync})
 	view := projectView(cfg.Root, removed)
@@ -658,7 +658,7 @@ func (s *Service) finishDraining(active *activeProject) error {
 func pendingCloneConflict(cfg *config.Config, pending config.Project) *APIError {
 	for _, p := range cfg.Projects {
 		if p.ID != pending.ID && p.Clone == pending.Clone {
-			return &APIError{Internal, fmt.Sprintf("registration of project %s conflicts with active project %s using the same clone", pending.ID, p.ID)}
+			return &APIError{Code: Internal, Message: fmt.Sprintf("registration of project %s conflicts with active project %s using the same clone", pending.ID, p.ID)}
 		}
 	}
 	return nil

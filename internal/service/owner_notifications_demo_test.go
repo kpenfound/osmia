@@ -14,13 +14,12 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ledgerModTime is the modification time of the notifications ledger at
@@ -80,7 +79,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch}
 	f.opts.PullRequests = prs
 
 	// The fake architect and committee draft and debate the amendment.
@@ -114,12 +113,12 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		return err
 	})
 
-	f.engine.mu.Lock()
+	f.engine.Mu.Lock()
 	// resume's mason asks question 1; its answer turn asks question 2, which
 	// the chief of staff routes to an amendment,
 	// and the turn that brings the owner's ruling spends past the budget.
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
-	f.engine.turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.Turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
@@ -127,10 +126,10 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		return result, err
 	}
 	for i := 1; i <= 3; i++ {
-		f.engine.turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
+		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.turn
 	}
-	chief := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
@@ -147,7 +146,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	f.start(t)
 
 	// notified waits until the webhook has accepted the notification of kind
@@ -283,11 +282,11 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	problems.check(t)
 	p.check(t)
 	masons.check(t)
-	prs.mu.Lock()
-	if len(prs.prs) != 1 || prs.creates != 1 || prs.prs[0].Body != presented.Draft {
-		t.Fatalf("pull requests %+v", prs.prs)
+	prs.Mu.Lock()
+	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft {
+		t.Fatalf("pull requests %+v", prs.Prs)
 	}
-	prs.mu.Unlock()
+	prs.Mu.Unlock()
 
 	// Exactly one notification per owner decision and one for the pause.
 	kinds := []string{InboxRatification, InboxEscalation, InboxAmendment, NotifyBudgetPause, InboxContested, InboxDelivery}

@@ -15,12 +15,11 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestProjectCharterSharedByRepoAPIContextAndRestart(t *testing.T) {
@@ -229,9 +228,9 @@ func TestDesignProductionWorkerBundlesShareProjectCharter(t *testing.T) {
 	must(t, err)
 	f.awaitApproved(t)
 	read := make(chan json.RawMessage, 1)
-	f.engine.mu.Lock()
-	fallback := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	fallback := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Read the shared project policy") {
 			raw, err := callTool(ctx, tools, projectContextTool, map[string]any{"path": "charter.md"})
 			if err != nil {
@@ -245,7 +244,7 @@ func TestDesignProductionWorkerBundlesShareProjectCharter(t *testing.T) {
 		}
 		return fallback(ctx, req, turn, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	check := func() {
 		t.Helper()
 		primary, err := f.s.repository(f.project)
@@ -322,8 +321,8 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 			unblock := func() { once.Do(func() { close(release) }) }
 			t.Cleanup(unblock)
 			read := make(chan error, 1)
-			f.turns.mu.Lock()
-			f.turns.hooks[turn(otherProject, "first")] = func(ctx context.Context) {
+			f.turns.Mu.Lock()
+			f.turns.Hooks[turn(otherProject, "first")] = func(ctx context.Context) {
 				close(entered)
 				select {
 				case <-release:
@@ -335,7 +334,7 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 				}
 				read <- err
 			}
-			f.turns.mu.Unlock()
+			f.turns.Mu.Unlock()
 			s, c := start(t, f.opts)
 			await(t, "the member's running turn", entered)
 			finished := make(chan error, 1)

@@ -108,13 +108,13 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 	mu.Lock()
 	defer mu.Unlock()
 	if len(members) < 2 {
-		return "", &APIError{Validation, "a cross-repo workgroup needs at least two member workstreams"}
+		return "", &APIError{Code: Validation, Message: "a cross-repo workgroup needs at least two member workstreams"}
 	}
 	resolved := make([]trace.CrossRepoMember, 0, len(members))
 	seen := map[config.WorkstreamID]bool{}
 	for _, m := range members {
 		if seen[m] {
-			return "", &APIError{Validation, fmt.Sprintf("workstream %s is named twice", m)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is named twice", m)}
 		}
 		seen[m] = true
 		_, _, repo, api := s.conversationTrace(string(m))
@@ -127,27 +127,27 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 	for _, m := range resolved {
 		id, err := m.Project.CrossRepoWorkgroupOf(m.Workstream)
 		if err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot read the cross-repo workgroup locator of workstream %s: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the cross-repo workgroup locator of workstream %s: %v", m.Workstream, err)}
 		}
 		if id != "" {
 			if resuming != "" && resuming != id {
-				return "", &APIError{Conflict, fmt.Sprintf("workstream %s already belongs to a different cross-repo workgroup than the rest of this join", m.Workstream)}
+				return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already belongs to a different cross-repo workgroup than the rest of this join", m.Workstream)}
 			}
 			resuming = id
 		}
 		groups, _, err := trace.Workgroups(m.Project)
 		if err != nil {
-			return "", &APIError{Internal, err.Error()}
+			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		if group, ok := trace.WorkgroupOf(groups, m.Workstream); ok && len(group.Members) != 1 {
-			return "", &APIError{Conflict, fmt.Sprintf("workstream %s already belongs to a multi-member local workgroup", m.Workstream)}
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already belongs to a multi-member local workgroup", m.Workstream)}
 		}
 		th, err := m.Project.ChiefOfStaffThread(m.Workstream)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", &APIError{Internal, fmt.Sprintf("cannot read the chief-of-staff thread of workstream %s: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the chief-of-staff thread of workstream %s: %v", m.Workstream, err)}
 		}
 		if err == nil && len(th.Turns) > 0 {
-			return "", &APIError{Conflict, fmt.Sprintf("workstream %s already has chief-of-staff turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already has chief-of-staff turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
 		}
 	}
 	var wt *trace.Repository
@@ -155,7 +155,7 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 	if resuming == "" {
 		entries, err := os.ReadDir(filepath.Join(s.current().Root.String(), "workgroups"))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", &APIError{Internal, fmt.Sprintf("cannot inspect pending workgroup joins: %v", err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot inspect pending workgroup joins: %v", err)}
 		}
 		for _, entry := range entries {
 			id, err := config.ParseWorkgroupID(entry.Name())
@@ -167,12 +167,12 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 				if candidate != nil {
 					candidate.Close()
 				}
-				return "", &APIError{Internal, fmt.Sprintf("cannot inspect workgroup %s: %v", id, err)}
+				return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot inspect workgroup %s: %v", id, err)}
 			}
 			groups, _, err := trace.Workgroups(candidate)
 			candidate.Close()
 			if err != nil {
-				return "", &APIError{Internal, fmt.Sprintf("cannot read workgroup %s: %v", id, err)}
+				return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read workgroup %s: %v", id, err)}
 			}
 			for _, group := range groups {
 				matches := len(group.Members) == len(resolved)+1
@@ -191,7 +191,7 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 	if resuming == "" {
 		created, createdGroup, err := trace.CreateWorkgroupTrace(ctx, s.current().Root, resolved, s.now(), ownerActor, "draft-workgroup")
 		if err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot create the workgroup: %v", err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot create the workgroup: %v", err)}
 		}
 		wt, g = created, createdGroup
 	} else {
@@ -200,12 +200,12 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 			opened.Close()
 		}
 		if err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot reopen the half-joined cross-repo workgroup %s: %v", resuming, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot reopen the half-joined cross-repo workgroup %s: %v", resuming, err)}
 		}
 		groups, _, err := trace.Workgroups(opened)
 		if err != nil {
 			opened.Close()
-			return "", &APIError{Internal, fmt.Sprintf("cannot read the record of cross-repo workgroup %s: %v", resuming, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the record of cross-repo workgroup %s: %v", resuming, err)}
 		}
 		found := false
 		for _, candidate := range groups {
@@ -220,35 +220,35 @@ func (s *Service) DraftWorkgroup(ctx context.Context, members []config.Workstrea
 		}
 		if !matches {
 			opened.Close()
-			return "", &APIError{Internal, fmt.Sprintf("cross-repo workgroup %s does not match the requested members", resuming)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cross-repo workgroup %s does not match the requested members", resuming)}
 		}
 		wt = opened
 	}
 	defer wt.Close()
 	if err := s.step("workgroup-created"); err != nil {
-		return "", &APIError{Internal, err.Error()}
+		return "", &APIError{Code: Internal, Message: err.Error()}
 	}
 	for _, m := range resolved {
 		if err := s.step("workgroup-member-joining"); err != nil {
-			return "", &APIError{Internal, err.Error()}
+			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		// The locator and chief share a member trace; the solitary group is
 		// in the separate project trace. Publish the route before removing
 		// that group, so interruption leaves an authoritative shared route.
 		if err := m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, s.now(), ownerActor, "draft-workgroup"); err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot join workstream %s to the shared chief: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared chief: %v", m.Workstream, err)}
 		}
 		if err := s.step("workgroup-member-routed"); err != nil {
-			return "", &APIError{Internal, err.Error()}
+			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		if err := m.Project.RetractWorkgroup(ctx, m.Workstream, s.now(), ownerActor, "draft-workgroup"); err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot retract workstream %s's own one-workstream workgroup: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot retract workstream %s's own one-workstream workgroup: %v", m.Workstream, err)}
 		}
 		if err := s.step("workgroup-member-transferred"); err != nil {
-			return "", &APIError{Internal, err.Error()}
+			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		if err := s.step("workgroup-member-joined"); err != nil {
-			return "", &APIError{Internal, err.Error()}
+			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
 	return g.ID, nil

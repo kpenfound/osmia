@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -23,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -57,8 +56,6 @@ func (p *faults) check(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-type fakeTurn = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error
 
 // objects makes a member's turn raise one objection.
 func objects(p *faults, kind shed.Kind, part, citation string) fakeTurn {

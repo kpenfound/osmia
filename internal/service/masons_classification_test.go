@@ -34,16 +34,16 @@ func TestMasonContestedRuling(t *testing.T) {
 			defer f.stop(t)
 			fake.response = map[string]string{masonTurnID("resume"): tc.response}
 			ownerTurn := masonAgent("resume") + "-owner-revise-"
-			f.engine.mu.Lock()
+			f.engine.Mu.Lock()
 			if tc.name == "bound" {
 				for i := 1; i < f.s.cfg.Mason.MaxCleanTurns; i++ {
 					delete(fake.play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
 				}
 			}
-			f.engine.turns[ownerTurn+"1"] = fake.turn
-			f.engine.turns[ownerTurn+"2"] = fake.turn
-			f.engine.turns[ownerTurn+"3"] = fake.turn
-			f.engine.mu.Unlock()
+			f.engine.Turns[ownerTurn+"1"] = fake.turn
+			f.engine.Turns[ownerTurn+"2"] = fake.turn
+			f.engine.Turns[ownerTurn+"3"] = fake.turn
+			f.engine.Mu.Unlock()
 			stream := f.seedBuilding(t, tc.name+"-ruling", validPlan)
 			f.awaitUnit(t, stream, "resume", UnitContested)
 			status, err := f.c.Status(context.Background(), stream)
@@ -75,9 +75,9 @@ func TestMasonContestedRuling(t *testing.T) {
 			if tc.name == "bound" {
 				continuation := fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), reset+1)
 				fake.play[continuation] = reportDone("Owner revision")
-				f.engine.mu.Lock()
-				f.engine.turns[continuation] = fake.turn
-				f.engine.mu.Unlock()
+				f.engine.Mu.Lock()
+				f.engine.Turns[continuation] = fake.turn
+				f.engine.Mu.Unlock()
 			} else {
 				fake.play[turnID] = reportDone("Owner revision")
 			}
@@ -152,9 +152,9 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 				return err
 			}
 			delete(fake.play, masonAgent("resume")+"-clarify-1")
-			f.engine.mu.Lock()
-			f.engine.turns[masonAgent("resume")+"-clarify-1"] = fake.turn
-			f.engine.mu.Unlock()
+			f.engine.Mu.Lock()
+			f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.turn
+			f.engine.Mu.Unlock()
 			stream := f.seedBuilding(t, "classified", validPlan)
 			deadline := time.Now().Add(demoTimeout)
 			for {
@@ -176,13 +176,13 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			}
 			f.awaitEventTurns(t, stream, "classified "+tc.class)
-			f.engine.mu.Lock()
-			for _, name := range f.engine.runs {
+			f.engine.Mu.Lock()
+			for _, name := range f.engine.Runs {
 				if strings.Contains(name, "-classifier-") {
 					t.Errorf("classifier ran without a configured profile: %s", name)
 				}
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 		})
 	}
 }
@@ -208,9 +208,9 @@ func TestMasonJevClassification(t *testing.T) {
 	defer f.stop(t)
 	fake.response = map[string]string{masonTurnID("resume"): "Wrote the store. The unit is ready for review."}
 	delete(fake.play, masonAgent("resume")+"-clarify-1")
-	f.engine.mu.Lock()
-	f.engine.turns[masonAgent("resume")+"-clarify-1"] = fake.turn
-	f.engine.mu.Unlock()
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.turn
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "jev-classified", validPlan)
 	deadline := time.Now().Add(demoTimeout)
 	for {
@@ -234,9 +234,9 @@ func TestMasonJevClassification(t *testing.T) {
 	if requests := p.Requests(); len(requests) == 0 || requests[0].State.(map[string]any)["message"] != "Wrote the store. The unit is ready for review." {
 		t.Fatalf("Jev requests %+v", requests)
 	}
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	for _, name := range f.engine.runs {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	for _, name := range f.engine.Runs {
 		if strings.HasPrefix(name, masonTurnID("resume")+"-classifier-") {
 			t.Errorf("classifier ran after Jev classified the turn: %s", name)
 		}
@@ -259,10 +259,10 @@ func TestMasonModelClassifier(t *testing.T) {
 			f, fake := newConfiguredMasonFixture(t, "masons = 1\n", validPlan, "default")
 			defer f.stop(t)
 			fake.response = map[string]string{masonTurnID("resume"): "Edited the file."}
-			f.engine.mu.Lock()
+			f.engine.Mu.Lock()
 			for i := 1; i <= tc.attempts; i++ {
 				i := i
-				f.engine.turns[masonTurnID("resume")+"-classifier-"+string(rune('0'+i))] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+				f.engine.Turns[masonTurnID("resume")+"-classifier-"+string(rune('0'+i))] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 					if req.Profile.Name != "classifier" {
 						t.Errorf("classifier profile: %+v", req.Profile)
 					}
@@ -272,13 +272,13 @@ func TestMasonModelClassifier(t *testing.T) {
 					return &agent.Result{ClaudeID: "classifier", SessionDir: req.SessionDir, ResultText: tc.replies[i-1], NumTurns: 1, CostUSD: .02, CostKnown: true}, nil
 				}
 			}
-			f.engine.mu.Unlock()
+			f.engine.Mu.Unlock()
 			stream := f.seedBuilding(t, "model-classifier", validPlan)
 			th := f.awaitMasonRan(t, stream, "resume")
 			if got := th.Turns[0].Response.Classification.Class; got != tc.want {
-				f.engine.mu.Lock()
-				runs := append([]string(nil), f.engine.runs...)
-				f.engine.mu.Unlock()
+				f.engine.Mu.Lock()
+				runs := append([]string(nil), f.engine.Runs...)
+				f.engine.Mu.Unlock()
 				t.Fatalf("class %s want %s; runs %v; response %+v", got, tc.want, runs, th.Turns[0].Response)
 			}
 			if got := len(th.Turns[0].Response.ClassifierUsage); got != tc.attempts {

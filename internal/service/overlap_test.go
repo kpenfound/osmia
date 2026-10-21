@@ -204,7 +204,7 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	demoGit(t, home, "init", "-q", filepath.Join(home, "clone"))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	p := &overlapPlanted{t: t, opts: opts, cfg: cfg, clock: &fixedClock{now: demoStart}, ticks: make(chan time.Time)}
+	p := &overlapPlanted{t: t, opts: opts, cfg: cfg, clock: &fixedClock{At: demoStart}, ticks: make(chan time.Time)}
 	p.opts.Reconciliation.Now, p.opts.Reconciliation.Ticks = p.clock.Now, p.ticks
 	const (
 		a         config.WorkstreamID = "w_00000000000000000000000000000001"

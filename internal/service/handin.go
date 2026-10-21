@@ -59,20 +59,20 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 	cfg := s.current()
 	_, c, err := s.loadCharter(ctx, req.Project)
 	if errors.Is(err, errNoActiveProject) {
-		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
+		return HandInResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	edit := "osmia edit charter " + string(cfg.For(req.Project).Project.Group())
 	if errors.Is(err, errNoTrace) {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
 	if err != nil {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the charter of project %s; check the project trace", req.Project)}
+		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter of project %s; check the project trace", req.Project)}
 	}
 	if c.Empty() {
-		return HandInResponse{}, &APIError{CharterEmpty, fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: %s", req.Project, edit)}
+		return HandInResponse{}, &APIError{Code: CharterEmpty, Message: fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: %s", req.Project, edit)}
 	}
 	if !handInKey.MatchString(req.Key) {
-		return HandInResponse{}, &APIError{Validation, "key must be 1 to 128 letters, digits, '_' or '-', starting with a letter or digit"}
+		return HandInResponse{}, &APIError{Code: Validation, Message: "key must be 1 to 128 letters, digits, '_' or '-', starting with a letter or digit"}
 	}
 	forms := 0
 	for _, set := range []bool{req.Path != "", req.URL != "", req.Stdin != nil} {
@@ -81,7 +81,7 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 		}
 	}
 	if forms != 1 {
-		return HandInResponse{}, &APIError{Validation, "hand in exactly one input: a file path, an issue URL or stdin"}
+		return HandInResponse{}, &APIError{Code: Validation, Message: "hand in exactly one input: a file path, an issue URL or stdin"}
 	}
 	source, name, api := handInSource(req)
 	if api != nil {
@@ -90,15 +90,15 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 
 	repository, err := s.repository(req.Project)
 	if errors.Is(err, errNoTrace) {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
 	if err != nil {
-		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
+		return HandInResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	stream := HandInWorkstream(req.Project, req.Key)
 	workstreamTrace, err := cfg.Root.WorkstreamTrace(req.Project, stream)
 	if err != nil {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
+		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
 	}
 	h := handIn{s: s, repository: repository, req: req, stream: stream, source: source, name: name, trace: workstreamTrace}
 	// A key whose input is already copied finishes without reading it again.
@@ -125,7 +125,7 @@ type handIn struct {
 }
 
 func (h handIn) failed(step string) (HandInResponse, bool, *APIError) {
-	return HandInResponse{}, false, &APIError{Internal, fmt.Sprintf("hand-in to project %s failed while %s workstream %s; retry with the same key, or check %s", h.req.Project, step, h.stream, h.trace)}
+	return HandInResponse{}, false, &APIError{Code: Internal, Message: fmt.Sprintf("hand-in to project %s failed while %s workstream %s; retry with the same key, or check %s", h.req.Project, step, h.stream, h.trace)}
 }
 
 // record finishes the hand-in under the hand-in lock. With the input already
@@ -142,11 +142,11 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 	}
 	exists := slices.Contains(streams, stream)
 	if _, archived := h.s.archivedWorkstream(string(stream)); archived {
-		return HandInResponse{}, false, &APIError{Conflict, "workstream is permanently archived; use a new hand-in key"}
+		return HandInResponse{}, false, &APIError{Code: Conflict, Message: "workstream is permanently archived; use a new hand-in key"}
 	}
 	_, archivedBase := h.s.archivedWorkstream(string(req.Base))
 	if req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == librarianWorkstream(req.Project)) {
-		return HandInResponse{}, false, &APIError{Validation, "base must name another feature workstream in the same project"}
+		return HandInResponse{}, false, &APIError{Code: Validation, Message: "base must name another feature workstream in the same project"}
 	}
 	var doc *trace.Document
 	var handed, skipped bool
@@ -168,7 +168,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 			}
 		}
 		if (doc != nil || initial.Revision > 0) && initial.Base != req.Base {
-			return HandInResponse{}, false, &APIError{Conflict, "the hand-in key already names a different base"}
+			return HandInResponse{}, false, &APIError{Code: Conflict, Message: "the hand-in key already names a different base"}
 		}
 		transitions, err := trace.Read[trace.Transition](repository, stream)
 		if err != nil {
@@ -180,7 +180,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		skipped = slices.ContainsFunc(transitions, skippedAtHandIn)
 	}
 	if doc != nil && (doc.Source != h.source || req.Stdin != nil && doc.Content != *req.Stdin) {
-		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
+		return HandInResponse{}, false, &APIError{Code: Conflict, Message: fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
 	}
 	// Whether debate is skipped is part of the request: a retry asks for what
 	// the recorded hand-in did, and a hand-in interrupted before recording
@@ -190,7 +190,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		if skipped {
 			did = "skipping debate"
 		}
-		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in workstream %s %s; use a new key", req.Key, stream, did)}
+		return HandInResponse{}, false, &APIError{Code: Conflict, Message: fmt.Sprintf("key %s already handed in workstream %s %s; use a new key", req.Key, stream, did)}
 	}
 	if doc == nil && content == nil {
 		return HandInResponse{}, false, nil
@@ -204,7 +204,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 			// keeps it until it is delivered or abandoned.
 			backend, checkErr := h.s.newWorkspaces(ctx, h.s.about(h.repository))
 			if checkErr != nil {
-				return HandInResponse{}, false, &APIError{Unavailable, fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
+				return HandInResponse{}, false, &APIError{Code: Unavailable, Message: fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
 			}
 			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, ownerActor)
 		}
@@ -225,7 +225,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 				return h.failed("reading base of")
 			}
 			if _, err := repository.SetWorkstreamBase(ctx, stream, req.Base, recorded.Revision, now); err != nil {
-				return HandInResponse{}, false, &APIError{Validation, "base must form an acyclic graph of available workstreams in this project"}
+				return HandInResponse{}, false, &APIError{Code: Validation, Message: "base must form an acyclic graph of available workstreams in this project"}
 			}
 		}
 		// The workstream may be new: the runtime store learns it before the
@@ -272,7 +272,7 @@ func handInSource(req HandInRequest) (source, name string, api *APIError) {
 	switch {
 	case req.Path != "":
 		if !filepath.IsAbs(req.Path) || filepath.Clean(req.Path) != req.Path || strings.ContainsAny(req.Path, "\x00\r\n") {
-			return "", "", &APIError{Validation, "path must be a clean absolute file path"}
+			return "", "", &APIError{Code: Validation, Message: "path must be a clean absolute file path"}
 		}
 		name = filepath.Base(req.Path)
 		if !validHandedName(name) {
@@ -282,7 +282,7 @@ func handInSource(req HandInRequest) (source, name string, api *APIError) {
 	case req.URL != "":
 		ref, err := issues.Parse(req.URL)
 		if err != nil {
-			return "", "", &APIError{Validation, err.Error()}
+			return "", "", &APIError{Code: Validation, Message: err.Error()}
 		}
 		return ref.URL(), fmt.Sprintf("issue-%d.md", ref.Number), nil
 	default:
@@ -308,43 +308,43 @@ func (s *Service) readHanded(ctx context.Context, req HandInRequest) (string, *A
 		// would wait for a writer.
 		info, err := os.Stat(req.Path)
 		if err != nil {
-			return "", &APIError{Validation, fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
 		}
 		if !info.Mode().IsRegular() {
-			return "", &APIError{Validation, fmt.Sprintf("%s is not a regular file", req.Path)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("%s is not a regular file", req.Path)}
 		}
 		f, err := os.OpenFile(req.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
-			return "", &APIError{Validation, fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
 		}
 		defer f.Close()
 		info, err = f.Stat()
 		if err != nil || !info.Mode().IsRegular() {
-			return "", &APIError{Validation, fmt.Sprintf("%s is not a regular file", req.Path)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("%s is not a regular file", req.Path)}
 		}
 		data, err := io.ReadAll(io.LimitReader(f, MaxHandedBytes+1))
 		if err != nil {
-			return "", &APIError{Validation, fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
+			return "", &APIError{Code: Validation, Message: fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
 		}
 		content = string(data)
 	case req.URL != "":
 		ref, _ := issues.Parse(req.URL)
 		text, err := s.options.Issues.Fetch(ctx, ref)
 		if err != nil {
-			return "", &APIError{Internal, fmt.Sprintf("cannot fetch %s; check the URL and the service's GitHub access", ref.URL())}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s; check the URL and the service's GitHub access", ref.URL())}
 		}
 		content = text
 	default:
 		content = *req.Stdin
 	}
 	if len(content) > MaxHandedBytes {
-		return "", &APIError{Validation, fmt.Sprintf("handed input is larger than %d bytes", MaxHandedBytes)}
+		return "", &APIError{Code: Validation, Message: fmt.Sprintf("handed input is larger than %d bytes", MaxHandedBytes)}
 	}
 	if strings.TrimSpace(content) == "" {
-		return "", &APIError{Validation, "handed input is empty"}
+		return "", &APIError{Code: Validation, Message: "handed input is empty"}
 	}
 	if !utf8.ValidString(content) {
-		return "", &APIError{Validation, "handed input must be UTF-8 text"}
+		return "", &APIError{Code: Validation, Message: "handed input must be UTF-8 text"}
 	}
 	return content, nil
 }

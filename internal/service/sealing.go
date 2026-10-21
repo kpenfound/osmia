@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/vcs"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"

@@ -182,8 +182,8 @@ func TestDesignProductionRetiredDeltaPreservesRunningSharedClaim(t *testing.T) {
 	installRetirementDelta(t, f, &drafts)
 	const key = "running-retired-dispatch"
 	turn := deltaTurnID(WorkgroupChange{ID: key}, architectAgent, deltaDraftTool)
-	f.engine.mu.Lock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		close(running)
 		select {
 		case <-release:
@@ -192,7 +192,7 @@ func TestDesignProductionRetiredDeltaPreservesRunningSharedClaim(t *testing.T) {
 		}
 		return deliverRetirementDelta(ctx, req, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	c, api := f.s.requestChange(ctx, string(f.origin), ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Revise the acknowledgment contract."})
 	if api != nil {
 		t.Fatal(api)
@@ -297,10 +297,10 @@ func deliverRetirementDelta(ctx context.Context, req agent.Request, tools *mcp.C
 
 func installRetirementDelta(t *testing.T, f *productionDesignFixture, drafts *atomic.Int32, mutations ...func(*trace.ProjectSpec)) {
 	t.Helper()
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	previous := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	previous := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)
 		if err != nil {
 			return nil, err
