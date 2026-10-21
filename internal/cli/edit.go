@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -103,9 +104,9 @@ func runEdit(ctx context.Context, c *service.Client, kind, target, from string, 
 	}
 	var recorded trace.Document
 	if kind == "charter" {
-		recorded, err = c.EditCharter(ctx, project, service.CharterEdit{Revision: current.Revision, Content: string(content)})
+		recorded, err = c.EditCharter(ctx, project, wire.CharterEdit{Revision: current.Revision, Content: string(content)})
 	} else {
-		edit := service.DraftEdit{SpecRevision: draft["spec"].Revision, PlanRevision: draft["plan"].Revision, Spec: draft["spec"].Content, Plan: draft["plan"].Content}
+		edit := wire.DraftEdit{SpecRevision: draft["spec"].Revision, PlanRevision: draft["plan"].Revision, Spec: draft["spec"].Content, Plan: draft["plan"].Content}
 		if kind == "spec" {
 			edit.Spec = string(content)
 		} else {
@@ -129,13 +130,13 @@ func runEdit(ctx context.Context, c *service.Client, kind, target, from string, 
 
 // editFailure reports a failed read or save of an edited document.
 func editFailure(stderr io.Writer, err error) int {
-	var api *service.APIError
+	var api *wire.APIError
 	if errors.As(err, &api) && api.Message == "" {
 		switch api.Code {
-		case service.Validation:
-			err = &service.APIError{Code: api.Code, Message: "the edit is invalid; documents must be UTF-8 text within the size limit"}
-		case service.NotFound:
-			err = &service.APIError{Code: api.Code, Message: "not found; check the project or workstream ID with status"}
+		case wire.Validation:
+			err = &wire.APIError{Code: api.Code, Message: "the edit is invalid; documents must be UTF-8 text within the size limit"}
+		case wire.NotFound:
+			err = &wire.APIError{Code: api.Code, Message: "not found; check the project or workstream ID with status"}
 		}
 	}
 	return report(stderr, err, true)

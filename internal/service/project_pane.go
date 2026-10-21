@@ -64,8 +64,8 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 	if err != nil {
 		return err
 	}
-	merged := w.State != nil && evidence.resolution(*w.State) == "merged"
-	open := evidence.published && !(evidence.outcome.PullRequest == evidence.publication.PullRequest && evidence.outcome.Outcome != "")
+	merged := w.State != nil && evidence.Resolution(*w.State) == "merged"
+	open := evidence.Published && !(evidence.Outcome.PullRequest == evidence.Publication.PullRequest && evidence.Outcome.Outcome != "")
 	_, paused := s.pausing(w.Project, w.Workstream)
 	w.DisplayState = paneState(w.State, w.Wait, paused, open, merged)
 	return nil

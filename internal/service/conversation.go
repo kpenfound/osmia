@@ -14,24 +14,14 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ownerActor is the provenance of messages the owner sends.
-var ownerActor = trace.Actor{Kind: "owner", ID: "local"}
-
 // chiefPrompt opens the system prompt of every owner message turn; the
 // priority guidance and the workstream's rendered bundle follow it.
 const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
-
-// ownerWritingGuidance tells the chief of staff how to write the text the
-// owner's inbox shows. It belongs in the system prompt of every
-// chief-of-staff turn.
-const ownerWritingGuidance = "The owner reads your escalations, escalated contests and units held for them in an inbox, often on a phone, and must be able to decide from it in under a minute. Write that text for them: " +
-	"lead with the decision you need, in one or two plain sentences; say what is stuck in a sentence; give each option as one sentence saying what happens if they choose it; keep the recommendation to the option you would choose and its main reason. " +
-	"Leave out how you got there, evidence that does not change the choice, turn names, file paths, record revisions and commit hashes; the owner can read those in the feed and the trace. " +
-	"Prefer short sentences and plain words to jargon, and a short list to a long paragraph. Never repeat the same point in two fields."
 
 // now is the service clock: the reconciliation clock when one is supplied.
 func (s *Service) now() time.Time {
@@ -47,14 +37,14 @@ func (s *Service) now() time.Time {
 func (s *Service) conversationTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return "", "", nil, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return "", "", nil, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
 	if _, ok := s.archivedWorkstream(raw); ok {
-		return "", "", nil, &APIError{Conflict, "workstream is permanently archived; its history is unavailable"}
+		return "", "", nil, &APIError{Code: Conflict, Message: "workstream is permanently archived; its history is unavailable"}
 	}
 	cfg, projects := s.runtimes()
 	if len(cfg.Projects) == 0 {
-		return "", "", nil, &APIError{NoProject, "no project is configured; add one with osmia project add"}
+		return "", "", nil, &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 	}
 	for _, active := range projects {
 		if !cfg.Active(active.id) || id == librarianWorkstream(active.id) {
@@ -62,13 +52,13 @@ func (s *Service) conversationTrace(raw string) (config.ProjectID, config.Workst
 		}
 		streams, err := active.repository.Workstreams()
 		if err != nil {
-			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+			return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
 		}
 		if slices.Contains(streams, id) {
 			return active.id, id, active.repository, nil
 		}
 	}
-	return "", "", nil, &APIError{Validation, fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
+	return "", "", nil, &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
 // send accepts an owner message as the next turn of the workstream's
@@ -79,41 +69,41 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		return ConversationEntry{}, api
 	}
 	if design, err := isDesignWorkstream(repository, stream); err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", stream)}
 	} else if design {
-		return ConversationEntry{}, &APIError{Validation, fmt.Sprintf("workstream %s is a design session; send messages with POST %s/design/%s/message", stream, Prefix, stream)}
+		return ConversationEntry{}, &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is a design session; send messages with POST %s/design/%s/message", stream, Prefix, stream)}
 	}
 	if blocked, err := s.designStartBlocksDraft(repository, stream); err != nil {
-		return ConversationEntry{}, &APIError{Internal, err.Error()}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: err.Error()}
 	} else if blocked {
 		state, err := repository.Workflow(stream, designStartSubject)
 		if err != nil || (state.Value != "active" && state.Value != "complete" && state.Value != "invalid") {
-			return ConversationEntry{}, &APIError{Conflict, "the design workgroup is starting; retry once conversation adoption completes"}
+			return ConversationEntry{}, &APIError{Code: Conflict, Message: "the design workgroup is starting; retry once conversation adoption completes"}
 		}
 	}
 	if strings.TrimSpace(req.Text) == "" {
-		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
+		return ConversationEntry{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	cfg := s.current()
 	name, profile, err := s.chiefOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
 	}
 	target, host, bundleStream, closeTarget, err := s.chiefRepository(ctx, repository, stream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	bundleProject, err := target.ProjectFor(bundleStream)
 	if err != nil {
 		closeTarget()
-		return ConversationEntry{}, &APIError{Internal, err.Error()}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if bundleProject.Project() != target.Project() {
 		project = bundleProject.Project()
 	}
 	context, err := chiefContext(ctx, s.Context(), target, closeTarget, project, bundleStream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the knowledge base and the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the knowledge base and the trace repository", stream)}
 	}
 	note := ""
 	if host != stream {
@@ -121,18 +111,18 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return ConversationEntry{}, &APIError{Internal, "cannot generate a message ID"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot generate a message ID"}
 	}
 	id := hex.EncodeToString(nonce[:])
 	at := s.now()
-	failed := &APIError{Internal, fmt.Sprintf("cannot record the message for workstream %s; check the trace repository", stream)}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for workstream %s; check the trace repository", stream)}
 	// chiefContext already closed the first resolution once it finished
 	// reading from it, so the durable write below reopens the target fresh,
 	// exactly as chiefRepository documents: transient, never held open past
 	// one call.
 	target, _, _, closeTarget, err = s.chiefRepository(ctx, repository, stream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeTarget()
 	if _, err := target.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
@@ -166,12 +156,12 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	}
 	target, _, _, closeTarget, err := s.chiefRepository(context.Background(), repository, stream)
 	if err != nil {
-		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeTarget()
-	entries, err := consistentRead(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
+	entries, err := readview.Consistent(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
 	if err != nil {
-		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
+		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}
 	return ConversationResponse{Workstream: stream, Entries: entries}, nil
 }
@@ -402,60 +392,4 @@ func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]C
 		out = append(out, ConversationEntry{Turn: "change-" + c.ID + "-impact", Kind: "action", Text: text, At: at, State: TurnDone})
 	}
 	return out, nil
-}
-
-// conversation returns a turn's message and, once the turn completed with a
-// final response, that response.
-func conversation(q trace.QueuedTurn) []ConversationEntry {
-	state := TurnQueued
-	switch {
-	case q.Claim == nil:
-	case q.CompletedAt.IsZero():
-		state = TurnRunning
-	case q.Status() == "failed" || q.Status() == "interrupted":
-		state = TurnFailed
-	default:
-		state = TurnDone
-	}
-	req := q.Request
-	out := []ConversationEntry{{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state, QueuedReason: queuedReason(trace.Thread{Turns: []trace.QueuedTurn{q}}, q)}}
-	if !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.FinalResponse != "" {
-		out = append(out, ConversationEntry{Turn: req.TurnID, Kind: "response", Text: q.Response.Result.FinalResponse, At: q.Response.At, State: state})
-	}
-	return out
-}
-
-// queuedReason describes the earlier work on this thread without changing the
-// turn's existing state. Durable sequence, rather than request time, orders it.
-func queuedReason(th trace.Thread, turn trace.QueuedTurn) string {
-	if turn.Claim != nil || !turn.CompletedAt.IsZero() {
-		return ""
-	}
-	for _, earlier := range th.Turns {
-		if earlier.Request.TurnID == turn.Request.TurnID {
-			break
-		}
-		if !earlier.CompletedAt.IsZero() {
-			continue
-		}
-		kind := "background"
-		switch {
-		case earlier.Request.Actor == ownerActor:
-			kind = "owner message"
-		case strings.Contains(earlier.Request.Cause, "event") || strings.HasPrefix(earlier.Request.TurnID, "event"):
-			kind = "event"
-		case strings.Contains(earlier.Request.Cause, "answer"):
-			kind = "answer"
-		case strings.Contains(earlier.Request.TurnID, "contest"):
-			kind = "contest decision"
-		case strings.Contains(earlier.Request.TurnID, "amend"):
-			kind = "amendment"
-		}
-		article := "a "
-		if kind == "event" || kind == "owner message" || kind == "answer" || kind == "amendment" {
-			article = "an "
-		}
-		return "waiting for " + article + kind + " turn on this thread"
-	}
-	return "starting"
 }

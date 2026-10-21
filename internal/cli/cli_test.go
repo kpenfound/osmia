@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 )
@@ -72,15 +73,15 @@ func TestCommandsAndRestart(t *testing.T) {
 	root := opts.Config.Root
 	status := successful(t, root, "status", "--json")
 	var st struct {
-		Health        service.HealthResponse
-		Configuration service.ConfigResponse
-		Runtime       service.RuntimeResponse
+		Health        wire.HealthResponse
+		Configuration wire.ConfigResponse
+		Runtime       wire.RuntimeResponse
 	}
 	must(t, json.Unmarshal([]byte(status), &st))
 	if !st.Health.Ready || st.Configuration.Effective.Project.ID != project || len(st.Configuration.Digest) != 64 {
 		t.Fatal(status)
 	}
-	if want := []service.ProjectRuntime{{Project: project, ContextMode: "file"}}; !reflect.DeepEqual(st.Runtime.Projects, want) {
+	if want := []wire.ProjectRuntime{{Project: project, ContextMode: "file"}}; !reflect.DeepEqual(st.Runtime.Projects, want) {
 		t.Fatal(status)
 	}
 	text := successful(t, root, "status")
@@ -103,8 +104,8 @@ func TestCommandsAndRestart(t *testing.T) {
 	for _, args := range cases {
 		result := successful(t, root, append(args, "--json")...)
 		var mutation struct {
-			Mutation service.MutationResponse
-			Runtime  service.RuntimeResponse
+			Mutation wire.MutationResponse
+			Runtime  wire.RuntimeResponse
 		}
 		must(t, json.Unmarshal([]byte(result), &mutation))
 		if !mutation.Mutation.Applied {
@@ -114,9 +115,9 @@ func TestCommandsAndRestart(t *testing.T) {
 	must(t, s.Close())
 	s, err = service.Start(context.Background(), opts)
 	must(t, err)
-	var rt service.RuntimeResponse
+	var rt wire.RuntimeResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "profiles", "--json")), &rt))
-	if len(rt.Effective.Pauses) != 3 || len(rt.Effective.Priorities) != 1 || rt.Effective.Profiles["mason"] != "other" || rt.Profiles["mason"] != (service.EffectiveProfile{Name: "other", Source: "owner_override"}) {
+	if len(rt.Effective.Pauses) != 3 || len(rt.Effective.Priorities) != 1 || rt.Effective.Profiles["mason"] != "other" || rt.Profiles["mason"] != (wire.EffectiveProfile{Name: "other", Source: "owner_override"}) {
 		t.Fatalf("%+v", rt)
 	}
 	if out := successful(t, root, "profiles"); !strings.Contains(out, "mason: other source=owner_override") {
@@ -137,9 +138,9 @@ func TestCommandsAndRestart(t *testing.T) {
 		}
 	}
 	// Unmarshal into a fresh value because omitted JSON fields retain old values.
-	rt = service.RuntimeResponse{}
+	rt = wire.RuntimeResponse{}
 	must(t, json.Unmarshal([]byte(successful(t, root, "profiles", "--json")), &rt))
-	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || rt.Effective.Profiles["mason"] != "default" || rt.Profiles["mason"] != (service.EffectiveProfile{Name: "default", Source: "configuration"}) {
+	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || rt.Effective.Profiles["mason"] != "default" || rt.Profiles["mason"] != (wire.EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("%+v", rt)
 	}
 	code, out, diag := invoke(t, root, "profiles", "set", "mason", "missing")
@@ -196,21 +197,21 @@ func TestAPIErrorsAreSafe(t *testing.T) {
 	socket := filepath.Join(root, "fake.sock")
 	ln, err := net.Listen("unix", socket)
 	must(t, err)
-	var response service.Code
+	var response wire.Code
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(409)
-		json.NewEncoder(w).Encode(service.ErrorResponse{Error: service.APIError{Code: response, Message: "secret-do-not-print"}})
+		json.NewEncoder(w).Encode(wire.ErrorResponse{Error: wire.APIError{Code: response, Message: "secret-do-not-print"}})
 	})}
 	defer server.Close()
 	// Requests are sequential; each response completes before the code changes.
 	go server.Serve(ln)
 	for _, tc := range []struct {
-		code service.Code
+		code wire.Code
 		exit int
 		hint string
 	}{
-		{service.Malformed, 4, "versions"}, {service.Validation, 4, "IDs"}, {service.Conflict, 5, "restart"},
-		{service.Unsupported, 5, "supported commands"}, {service.RestartRequired, 5, "restart required"}, {service.Unavailable, 3, "osmia serve"}, {service.Internal, 5, "status"},
+		{wire.Malformed, 4, "versions"}, {wire.Validation, 4, "IDs"}, {wire.Conflict, 5, "restart"},
+		{wire.Unsupported, 5, "supported commands"}, {wire.RestartRequired, 5, "restart required"}, {wire.Unavailable, 3, "osmia serve"}, {wire.Internal, 5, "status"},
 	} {
 		response = tc.code
 		code, out, diag := invoke(t, root, "status", "--socket", "fake.sock")

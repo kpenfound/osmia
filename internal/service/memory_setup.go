@@ -13,20 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// MemorySetup contains reviewable Hearsay configuration fragments, not applied
-// configuration. JSON contents are valid YAML for Hearsay's directory loader.
-type MemorySetup struct {
-	Files    map[string]json.RawMessage `json:"files"`
-	Entities map[string]string          `json:"hearsay_entities"`
-	Scope    string                     `json:"hearsay_scope"`
-	Anchors  []MemoryAnchor             `json:"anchors"`
-}
-type MemoryAnchor struct {
-	Source   string `json:"source"`
-	Artifact string `json:"artifact"`
-	Scope    string `json:"scope"`
-}
-
 func (s *Service) memorySetup(w http.ResponseWriter, r *http.Request, raw string) {
 	if r.Method != http.MethodGet {
 		fail(w, Unsupported)

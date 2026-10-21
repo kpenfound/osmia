@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -24,25 +25,13 @@ type statusesRead struct {
 	api        *APIError
 }
 
-// statuses reports every workstream of every active project, ordered by last
-// activity time, newest first, or none when no project or trace is active.
-// Last activity is derived only from durable trace records, so a read-only
-// request such as this one never changes it. Workstreams that share a last
-// activity time are ordered by creation time, newest first, then by
-// workstream ID, so the order stays the same across repeated loads and a
-// service restart. Archived workstreams are reported and marked archived. The
-// librarian's workstream carries no feature and is left out. A
-// workstream whose agent turns, unit states, overlap advisories or drift
-// rebases cannot be read is reported without them and its first such failure
-// in unreadable, by workstream.
-
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
-	snapshot, err := consistentRead(func() (statusesRead, error) {
+	snapshot, err := readview.Consistent(func() (statusesRead, error) {
 		list, unreadable, api := s.statusesSnapshot()
 		return statusesRead{list, unreadable, api}, nil
 	}, s.groupApprovalGeneration)
 	if err != nil {
-		return nil, nil, &APIError{Internal, err.Error()}
+		return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 	}
 	return snapshot.list, snapshot.unreadable, snapshot.api
 }
@@ -101,11 +90,11 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 		// this project's trace-read rows: a racing archive, or any other
 		// runtime mutation, forces the whole attempt to retry rather than
 		// land in a response assembled from two different moments.
-		found, err := consistentRead(func() (projectStatusResult, error) {
+		found, err := readview.Consistent(func() (projectStatusResult, error) {
 			state, _ := s.effective()
 			list, projectUnreadable, api := s.projectStatuses(active)
 			if api != nil {
-				return projectStatusResult{}, apiErrAsError{api}
+				return projectStatusResult{}, apiErrAsError{Api: api}
 			}
 			var rows []workstreamActivity
 			for i := range list {
@@ -138,7 +127,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 				}
 				archivedView := WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}
 				if err := presentArchivedWorkstream(active.repository, &archivedView, a); err != nil {
-					projectUnreadable[a.Workstream] = Diagnostic{"presentation", Internal, err.Error()}
+					projectUnreadable[a.Workstream] = Diagnostic{Field: "presentation", Code: Internal, Message: err.Error()}
 				}
 				rows = append(rows, workstreamActivity{status: archivedView, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
 			}
@@ -147,9 +136,9 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 		if err != nil {
 			var wrapped apiErrAsError
 			if errors.As(err, &wrapped) {
-				return nil, nil, wrapped.api
+				return nil, nil, wrapped.Api
 			}
-			return nil, nil, &APIError{Internal, err.Error()}
+			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
 		out = append(out, found.list...)
 		for id, d := range found.unreadable {
@@ -199,7 +188,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 	unreadable := map[config.WorkstreamID]Diagnostic{}
 	list, err := active.repository.Statuses()
 	if err != nil {
-		return nil, nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+		return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 	}
 	mode := s.Context().Mode(active.id)
 	librarian := librarianWorkstream(active.id)
@@ -209,11 +198,11 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		}
 		design, err := isDesignWorkstream(active.repository, w.Workstream)
 		if err != nil {
-			return nil, nil, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
+			return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
 		}
 		targetStream, err := s.designStatusAddress(active.repository, w.Workstream)
 		if err != nil {
-			return nil, nil, &APIError{Internal, err.Error()}
+			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if targetStream != w.Workstream {
 			continue
@@ -221,14 +210,14 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		view := statusView(active.id, mode, w, design)
 		approval, accepted, err := active.repository.GroupApprovalOf(w.Workstream)
 		if err != nil {
-			return nil, nil, &APIError{Internal, err.Error()}
+			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if accepted {
 			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool { return g.Kind == "ratification" })
 		}
 		group, err := active.repository.CrossRepoWorkgroupOf(w.Workstream)
 		if err != nil {
-			return nil, nil, &APIError{Internal, err.Error()}
+			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if group != "" {
 			chief, host, _, close, err := s.chiefRepository(context.Background(), active.repository, w.Workstream)
@@ -236,14 +225,14 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 				statuses, readErr := trace.Read[trace.Status](chief, host)
 				close()
 				if readErr != nil {
-					return nil, nil, &APIError{Internal, readErr.Error()}
+					return nil, nil, &APIError{Code: Internal, Message: readErr.Error()}
 				}
 				if len(statuses) > 0 {
 					st := statuses[len(statuses)-1]
 					view.Status = &StatusView{Goal: st.Goal, Attention: st.Attention, Note: st.Note, Agents: st.Agents, Revision: st.Revision, UpdatedAt: st.At}
 				}
 			} else if !errors.Is(err, errWorkgroupJoining) {
-				return nil, nil, &APIError{Internal, err.Error()}
+				return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 			}
 		}
 
@@ -252,7 +241,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			err = s.step("status-agents")
 		}
 		if err != nil {
-			unreadable[w.Workstream] = Diagnostic{"agents", Internal, fmt.Sprintf("cannot read the agent turns of workstream %s; check the trace repository", w.Workstream)}
+			unreadable[w.Workstream] = Diagnostic{Field: "agents", Code: Internal, Message: fmt.Sprintf("cannot read the agent turns of workstream %s; check the trace repository", w.Workstream)}
 		} else {
 			view.Agents = agents
 		}
@@ -262,7 +251,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		}
 		if err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
-				unreadable[w.Workstream] = Diagnostic{"units", Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
+				unreadable[w.Workstream] = Diagnostic{Field: "units", Code: Internal, Message: fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
 			}
 			units = nil
 		}
@@ -270,7 +259,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		advisories, err := overlapAdvisories(active.repository, w.Workstream, w.Subjects)
 		if err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
-				unreadable[w.Workstream] = Diagnostic{"advisories", Internal, fmt.Sprintf("cannot read the overlap advisories of workstream %s; check the trace repository", w.Workstream)}
+				unreadable[w.Workstream] = Diagnostic{Field: "advisories", Code: Internal, Message: fmt.Sprintf("cannot read the overlap advisories of workstream %s; check the trace repository", w.Workstream)}
 			}
 		} else {
 			view.Advisories = advisories
@@ -278,14 +267,14 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		drift, err := latestDrift(active.repository, w.Workstream, w.Subjects)
 		if err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
-				unreadable[w.Workstream] = Diagnostic{"drift", Internal, fmt.Sprintf("cannot read the drift rebases of workstream %s; check the trace repository", w.Workstream)}
+				unreadable[w.Workstream] = Diagnostic{Field: "drift", Code: Internal, Message: fmt.Sprintf("cannot read the drift rebases of workstream %s; check the trace repository", w.Workstream)}
 			}
 		} else {
 			view.Drift = drift
 		}
 		if wait, err := edgeWaitDisplay(active.repository, w.Workstream); err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
-				unreadable[w.Workstream] = Diagnostic{"edges", Internal, fmt.Sprintf("cannot read the workgroup edges of workstream %s; check the trace repository", w.Workstream)}
+				unreadable[w.Workstream] = Diagnostic{Field: "edges", Code: Internal, Message: fmt.Sprintf("cannot read the workgroup edges of workstream %s; check the trace repository", w.Workstream)}
 			}
 		} else {
 			view.Wait = wait
@@ -300,12 +289,12 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		if accepted && !approval.Complete {
 			_, detail, err := s.groupApprovalDetail(approval)
 			if err != nil {
-				return nil, nil, &APIError{Internal, err.Error()}
+				return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 			}
 			view.Wait = detail
 		}
 		if err := s.presentWorkstream(active.repository, &view); err != nil {
-			unreadable[w.Workstream] = Diagnostic{"presentation", Internal, err.Error()}
+			unreadable[w.Workstream] = Diagnostic{Field: "presentation", Code: Internal, Message: err.Error()}
 		}
 		out = append(out, workstreamActivity{status: view, lastActivity: w.LastActivity, createdAt: w.CreatedAt})
 	}
@@ -370,7 +359,7 @@ func (s *Service) statusList() StatusResponse {
 	diagnostics := []Diagnostic{}
 	streaks, err := s.failureStreaks()
 	if err != nil {
-		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
+		diagnostics = append(diagnostics, Diagnostic{Field: "failure_streaks", Code: Internal, Message: "cannot read the turn attempts of the active project; check the trace repository"})
 	}
 	diagnostics = append(diagnostics, s.notifier.diagnostics()...)
 	usage, unread := s.providerUsage(state, profiles)
@@ -382,7 +371,7 @@ func (s *Service) statusList() StatusResponse {
 	workspaces, err := s.newWorkspaces(checking, s.current())
 	cancel()
 	if err != nil {
-		diagnostics = append(diagnostics, Diagnostic{"workspaces", Unavailable, workspaces.Problem})
+		diagnostics = append(diagnostics, Diagnostic{Field: "workspaces", Code: Unavailable, Message: workspaces.Problem})
 	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
@@ -390,7 +379,7 @@ func (s *Service) statusList() StatusResponse {
 	}
 	capacity := s.capacityStatus(list)
 	if api != nil {
-		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message}), Workspaces: workspaces}
+		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{Field: "workstreams", Code: api.Code, Message: api.Message}), Workspaces: workspaces}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
@@ -458,10 +447,10 @@ func (s *Service) failureStreaks() ([]FailureStreak, error) {
 func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
-		return WorkstreamStatus{}, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
+		return WorkstreamStatus{}, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
 	if len(s.current().Projects) == 0 {
-		return WorkstreamStatus{}, &APIError{NoProject, "no project is configured; add one with osmia project add"}
+		return WorkstreamStatus{}, &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
@@ -477,26 +466,26 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 			}
 			streams, err := active.repository.Workstreams()
 			if err != nil {
-				return WorkstreamStatus{}, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+				return WorkstreamStatus{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
 			}
 			if slices.Contains(streams, id) {
 				id, err = s.designStatusAddress(active.repository, id)
 				if err != nil {
-					return WorkstreamStatus{}, &APIError{Internal, err.Error()}
+					return WorkstreamStatus{}, &APIError{Code: Internal, Message: err.Error()}
 				}
 				break
 			}
 		}
 	}
 	if d, ok := unreadable[id]; ok {
-		return WorkstreamStatus{}, &APIError{d.Code, d.Message}
+		return WorkstreamStatus{}, &APIError{Code: d.Code, Message: d.Message}
 	}
 	for _, w := range list {
 		if w.Workstream == id {
 			return w, nil
 		}
 	}
-	return WorkstreamStatus{}, &APIError{NotFound, fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
+	return WorkstreamStatus{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
 // designStatusAddress maps an adopted design host to its first live member,

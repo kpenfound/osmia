@@ -14,12 +14,11 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The chief of staff sets the project's priority order when the owner asks,
@@ -56,10 +55,10 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	must(t, err)
 	must(t, repo.Close())
 
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
 
 	var mu sync.Mutex
 	var problems []string
@@ -74,7 +73,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		}
 		results[step] = append(results[step], out)
 	}
-	engine.turns["events_seed"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["events_seed"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		defer close(seeded)
 		mu.Lock()
 		defer mu.Unlock()
@@ -94,7 +93,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		}
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
-	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
+	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		// Ending the seeded workstreams delivers a notice to the delivered
 		// one's chief of staff.
 		if strings.HasPrefix(req.Name, "events_") {

@@ -37,11 +37,11 @@
   ```sh
   dagger check --progress=report --go-test=TestA
   dagger check --progress=report --go-test=TestA --go-test=TestB
-  dagger check --progress=report --go-package=internal/service
-  dagger check --progress=report --go-package=internal/service --go-test=TestA
+  dagger check --progress=report --go-package=internal/intakejourney
+  dagger check --progress=report --go-package=internal/executionjourney --go-test=TestExactReviewDemonstration
   ```
 
-  `--go-test` alone selects every test with that name, in any package; add `--go-package` to pick one. `dagger list go-tests -a --go-package=internal/service` lists a package's tests, and `-f=cli` prints each one as the flags that select it.
+  `--go-test` alone selects every test with that name, in any package; add `--go-package` to pick one. `dagger list go-tests -a --go-package=internal/intakejourney` lists the intake journeys, and `-f=cli` prints each one as the flags that select it.
 - `--progress=report` names each check by its link. To rerun a failing check exactly, pass that link back to `dagger check`, quoted:
 
   ```sh
@@ -50,7 +50,7 @@
 
   `dagger list checks --all -f=link` lists the link of every check, including checks outside the Go module such as `release:version-round-trip`.
 - Add `--env=race` to run the selected tests with the race detector, or `--env=flake` to run each selected test five times when reproducing a flake.
-- Browser tests of the web page run in the Go check, whose container installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
+- Browser tests in `internal/browsertest`, `internal/intakejourney`, `internal/executionjourney` and `internal/lifecycle` run in the Go check, whose container installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
 - Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
 - Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.

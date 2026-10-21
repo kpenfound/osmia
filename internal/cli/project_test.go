@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -51,7 +52,7 @@ func TestProjectCommands(t *testing.T) {
 		t.Fatalf("status without a project:\n%s", status)
 	}
 	var st struct {
-		Configuration service.ConfigResponse
+		Configuration wire.ConfigResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st))
 	if st.Configuration.Project != nil {
@@ -76,7 +77,7 @@ func TestProjectCommands(t *testing.T) {
 	must(t, err)
 	relative, err := filepath.Rel(wd, clone)
 	must(t, err)
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", relative, "--base-branch", "develop", "--json")), &added))
 	id := added.Project.ID
 	if err := config.CheckProjectIDs(id); err != nil || added.Project.BaseBranch != "develop" || !strings.HasSuffix(added.Project.Clone, "clone") || !strings.Contains(added.NextStep, "osmia edit charter "+string(id)) {
@@ -108,7 +109,7 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(extracted, "Extraction 2 of project "+string(id)+" (dagger) started") || !strings.Contains(extracted, "osmia status") {
 		t.Fatalf("extract output:\n%s", extracted)
 	}
-	var er service.ExtractionResponse
+	var er wire.ExtractionResponse
 	if extraction = awaitExtraction(t, root); extraction.Extraction != 2 || extraction.State != "failed" {
 		t.Fatalf("second extraction: %+v", extraction)
 	}
@@ -135,7 +136,7 @@ func TestProjectCommands(t *testing.T) {
 		t.Fatalf("status with charter rules:\n%s", status)
 	}
 	var st2 struct {
-		Configuration service.ConfigResponse
+		Configuration wire.ConfigResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st2))
 	if cs := st2.Configuration.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 || cs.Revision != 2 || len(cs.Diagnostics) != 1 {
@@ -179,7 +180,7 @@ func TestProjectAddRepoAndListRepos(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
 
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 	id := added.Project.ID
 	if len(added.Project.Repos) != 1 || added.Project.Repos[0].ID != id || !added.Project.Repos[0].Default {
@@ -192,12 +193,12 @@ func TestProjectAddRepoAndListRepos(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	var repoAdded service.ProjectResponse
+	var repoAdded wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add-repo", string(id), "--upstream", "dagger/docs", "--clone", secondClone, "--json")), &repoAdded))
 	if len(repoAdded.Project.Repos) != 2 {
 		t.Fatalf("repo not added: %+v", repoAdded.Project.Repos)
 	}
-	var second service.RepoView
+	var second wire.RepoView
 	for _, r := range repoAdded.Project.Repos {
 		if !r.Default {
 			second = r
@@ -214,7 +215,7 @@ func TestProjectAddRepoAndListRepos(t *testing.T) {
 	if !strings.Contains(text, string(id)+" (default)") || !strings.Contains(text, string(second.ID)) || !strings.Contains(text, "dagger/docs") {
 		t.Fatalf("project repos text output:\n%s", text)
 	}
-	var repos []service.RepoView
+	var repos []wire.RepoView
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "repos", string(id), "--json")), &repos))
 	if len(repos) != 2 {
 		t.Fatalf("project repos --json: %+v", repos)
@@ -235,12 +236,12 @@ func TestProjectAddRepoAndListRepos(t *testing.T) {
 }
 
 // awaitExtraction polls status until the latest extraction is terminal.
-func awaitExtraction(t *testing.T, root string) service.ExtractionState {
+func awaitExtraction(t *testing.T, root string) wire.ExtractionState {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Minute)
 	for {
 		var st struct {
-			Configuration service.ConfigResponse
+			Configuration wire.ConfigResponse
 		}
 		must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st))
 		if p := st.Configuration.Project; p != nil && p.Extraction != nil && (p.Extraction.State == "succeeded" || p.Extraction.State == "failed") {

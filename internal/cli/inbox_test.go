@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
@@ -78,13 +79,13 @@ func TestInboxAndAnswer(t *testing.T) {
 	root := opts.Config.Root
 	escalated := written.Add(time.Hour)
 
-	var list service.InboxResponse
+	var list wire.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
-	want := service.InboxResponse{Entries: []service.InboxEntry{
-		{Kind: service.InboxEscalation, Project: project, Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(project)}},
-			Asked: []service.InboxQuestion{{ID: "1", AskedBy: "mason1", Question: "Where does state live?"}, {ID: "2", AskedBy: "reviewer1", Question: "Is the log format fixed?"}}},
-		{Kind: service.InboxEscalation, Project: project, Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/2", Body: map[string]any{"project": string(project)}},
-			Asked: []service.InboxQuestion{{ID: "3", AskedBy: "mason2", Question: "May I add a dependency?"}}},
+	want := wire.InboxResponse{Entries: []wire.InboxEntry{
+		{Kind: wire.InboxEscalation, Project: project, Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: escalated, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(project)}},
+			Asked: []wire.InboxQuestion{{ID: "1", AskedBy: "mason1", Question: "Where does state live?"}, {ID: "2", AskedBy: "reviewer1", Question: "Is the log format fixed?"}}},
+		{Kind: wire.InboxEscalation, Project: project, Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", OpenedAt: escalated, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/inbox/2", Body: map[string]any{"project": string(project)}},
+			Asked: []wire.InboxQuestion{{ID: "3", AskedBy: "mason2", Question: "May I add a dependency?"}}},
 	}}
 	if !reflect.DeepEqual(list, want) {
 		t.Fatalf("inbox --json:\n%+v\nwant\n%+v", list, want)
@@ -122,9 +123,9 @@ func TestInboxAndAnswer(t *testing.T) {
 		}
 	}
 
-	var answered service.AnswerResponse
+	var answered wire.AnswerResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "2", "No new dependencies.", "--json")), &answered))
-	if !reflect.DeepEqual(answered, service.AnswerResponse{Number: 2, Workstream: stream, Batch: "escalation_3", Questions: []string{"3"}, Ruling: "No new dependencies.", At: written.Add(2 * time.Hour)}) {
+	if !reflect.DeepEqual(answered, wire.AnswerResponse{Number: 2, Workstream: stream, Batch: "escalation_3", Questions: []string{"3"}, Ruling: "No new dependencies.", At: written.Add(2 * time.Hour)}) {
 		t.Fatalf("answer --json: %+v", answered)
 	}
 	if got := successful(t, root, "inbox"); got != "Inbox: no decisions are waiting for you\n" {
@@ -146,12 +147,12 @@ func TestAnswerAccept(t *testing.T) {
 	if code != 4 || out != "" || diag != "validation: inbox entry 2 has no eligible quick reply; give a ruling explicitly\n" {
 		t.Fatalf("refused accept: %d %q %q", code, out, diag)
 	}
-	var list service.InboxResponse
+	var list wire.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	if len(list.Entries) != 2 || list.Entries[1].QuickReply != "" || list.Entries[0].QuickReply != recommendation {
 		t.Fatalf("inbox after refusal: %+v", list)
 	}
-	var accepted service.AnswerResponse
+	var accepted wire.AnswerResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "1", "--accept", "--json")), &accepted))
 	if accepted.Ruling != recommendation {
 		t.Fatalf("accepted ruling: %q", accepted.Ruling)
@@ -187,17 +188,17 @@ func TestAnswerAccept(t *testing.T) {
 func TestInboxPrintsEveryDecisionKind(t *testing.T) {
 	opened := written.Add(time.Hour)
 	stamp := opened.Format(time.RFC3339)
-	list := service.InboxResponse{Entries: []service.InboxEntry{
-		{Kind: service.InboxRatification, Workstream: stream, Revision: 2, Question: "Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled", Blocked: "Sealing.",
-			Options: []string{}, Recommendation: "do not ratify yet: ratification is blocked by 1 objection", OpenedAt: opened, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/ratify/" + stream, Body: map[string]any{"spec": 1.0, "plan": 3.0}}},
-		{Kind: service.InboxContested, Workstream: stream, Unit: "resume", Question: "Unit resume is contested: two bounces", Blocked: "Unit resume.", Options: []string{"review", "revise"}, Recommendation: "Both reviews flag the same retry gap; rule revise.", OpenedAt: opened},
-		{Kind: service.InboxAmendment, Workstream: stream, Amendment: "2", Unit: "resume", Revision: 4, Question: "Amend it?", Blocked: "Unit resume waits for the decision.",
+	list := wire.InboxResponse{Entries: []wire.InboxEntry{
+		{Kind: wire.InboxRatification, Workstream: stream, Revision: 2, Question: "Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled", Blocked: "Sealing.",
+			Options: []string{}, Recommendation: "do not ratify yet: ratification is blocked by 1 objection", OpenedAt: opened, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/ratify/" + stream, Body: map[string]any{"spec": 1.0, "plan": 3.0}}},
+		{Kind: wire.InboxContested, Workstream: stream, Unit: "resume", Question: "Unit resume is contested: two bounces", Blocked: "Unit resume.", Options: []string{"review", "revise"}, Recommendation: "Both reviews flag the same retry gap; rule revise.", OpenedAt: opened},
+		{Kind: wire.InboxAmendment, Workstream: stream, Amendment: "2", Unit: "resume", Revision: 4, Question: "Amend it?", Blocked: "Unit resume waits for the decision.",
 			Options: []string{"approve", "reject"}, Recommendation: "approve: no objection stands", OpenedAt: opened},
-		{Kind: service.InboxDelivery, Workstream: stream, Revision: 5, Question: "Deliver it?", Blocked: "Publishing the pull request.", Options: []string{"approve"}, OpenedAt: opened,
-			Answer: service.InboxAnswer{Method: "POST", Path: "/v1/delivery/" + stream, Body: map[string]any{"review": 2.0, "review_revision": 5.0, "commit": "abc123", "draft_hash": "f00"}}},
-		{Kind: service.InboxPublication, Workstream: stream, Revision: 1, Question: "Publishing owner approval 1 has failed 3 times in a row. Last failure: GitHub answered 403", Blocked: "Publishing the pull request.", Options: []string{}, OpenedAt: opened,
-			Answer: service.InboxAnswer{Method: "GET", Path: "/v1/delivery/" + stream, Body: map[string]any{}}},
-		{Kind: service.InboxEscalation, Workstream: stream, Number: 3, Batch: "escalation_4", Question: "Which format?", Blocked: "The unit.", Options: []string{}, Recommendation: "Merge them.", OpenedAt: opened},
+		{Kind: wire.InboxDelivery, Workstream: stream, Revision: 5, Question: "Deliver it?", Blocked: "Publishing the pull request.", Options: []string{"approve"}, OpenedAt: opened,
+			Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/delivery/" + stream, Body: map[string]any{"review": 2.0, "review_revision": 5.0, "commit": "abc123", "draft_hash": "f00"}}},
+		{Kind: wire.InboxPublication, Workstream: stream, Revision: 1, Question: "Publishing owner approval 1 has failed 3 times in a row. Last failure: GitHub answered 403", Blocked: "Publishing the pull request.", Options: []string{}, OpenedAt: opened,
+			Answer: wire.InboxAnswer{Method: "GET", Path: "/v1/delivery/" + stream, Body: map[string]any{}}},
+		{Kind: wire.InboxEscalation, Workstream: stream, Number: 3, Batch: "escalation_4", Question: "Which format?", Blocked: "The unit.", Options: []string{}, Recommendation: "Merge them.", OpenedAt: opened},
 	}}
 	var out strings.Builder
 	showInbox(&out, list)

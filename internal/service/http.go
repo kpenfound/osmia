@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/tailnet"
 	"github.com/kpenfound/osmia/internal/web"
 )
 
@@ -41,7 +43,7 @@ func fail(w http.ResponseWriter, code Code) {
 	case Forbidden:
 		status, message = 403, "web and tailnet requests need a Host naming the listener and, except reads, Content-Type application/json"
 	}
-	respond(w, status, ErrorResponse{APIError{code, message}})
+	respond(w, status, ErrorResponse{Error: APIError{Code: code, Message: message}})
 }
 
 // failWith reports a project operation error with the message the operation
@@ -61,10 +63,10 @@ func failWith(w http.ResponseWriter, api *APIError) {
 	case Unavailable:
 		status = 503
 	}
-	respond(w, status, ErrorResponse{*api})
+	respond(w, status, ErrorResponse{Error: *api})
 }
 func noProject(field string) Diagnostic {
-	return Diagnostic{field, NoProject, "no project is configured; add one with osmia project add"}
+	return Diagnostic{Field: field, Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 }
 func digest(c *config.Config) string {
 	b, _ := json.Marshal(c)
@@ -84,7 +86,7 @@ func (s *Service) configuration() ConfigResponse {
 		if err == nil {
 			extractions[p.ID] = extraction
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"extraction", Internal, "cannot read the knowledge-base extraction state; check the trace repository at " + directory})
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "extraction", Code: Internal, Message: "cannot read the knowledge-base extraction state; check the trace repository at " + directory})
 		}
 	}
 	for _, p := range cfg.Projects {
@@ -108,7 +110,7 @@ func (s *Service) configuration() ConfigResponse {
 		if err == nil {
 			view.CharterState = &state
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read the charter; check the trace at " + view.Trace + ", and write the charter with: osmia edit charter " + string(view.ID)})
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "charter", Code: Internal, Message: "cannot read the charter; check the trace at " + view.Trace + ", and write the charter with: osmia edit charter " + string(view.ID)})
 		}
 		out.Projects = append(out.Projects, view)
 	}
@@ -120,19 +122,19 @@ func (s *Service) configuration() ConfigResponse {
 	}
 	out.Diagnostics = append(out.Diagnostics, s.notifier.diagnostics()...)
 	if pending != nil {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "projects", Code: Internal, Message: "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
 	}
 	next, restart, err := s.candidate(cfg)
 	out.Drift = s.configDrift(cfg, err)
 	if err != nil {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", Validation, "disk configuration is invalid (" + reloadError(err, time.Time{}).Message + "); loaded configuration retained"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "configuration", Code: Validation, Message: "disk configuration is invalid (" + reloadError(err, time.Time{}).Message + "); loaded configuration retained"})
 		return out
 	}
 	if digest(next) != out.Digest {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", ReloadRequired, "disk configuration differs; run osmia reload to apply it"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "configuration", Code: ReloadRequired, Message: "disk configuration differs; run osmia reload to apply it"})
 	}
 	if len(restart) > 0 {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", RestartRequired, "disk configuration changes " + strings.Join(restart, ", ") + "; restart the service to apply it"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "configuration", Code: RestartRequired, Message: "disk configuration changes " + strings.Join(restart, ", ") + "; restart the service to apply it"})
 	}
 	return out
 }
@@ -141,7 +143,7 @@ func (s *Service) runtimeView() RuntimeResponse {
 	cfg := s.current()
 	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Jev: s.jev.Status(), Diagnostics: []Diagnostic{}}
 	for _, id := range cfg.ProjectIDs() {
-		out.Projects = append(out.Projects, ProjectRuntime{id, s.Context().Mode(id)})
+		out.Projects = append(out.Projects, ProjectRuntime{Project: id, ContextMode: s.Context().Mode(id)})
 	}
 	if len(out.Projects) == 0 {
 		out.Diagnostics = append(out.Diagnostics, noProject("project"))
@@ -151,14 +153,14 @@ func (s *Service) runtimeView() RuntimeResponse {
 		if strings.HasPrefix(field, "profiles.") {
 			field = "profiles"
 		}
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{field, Validation, "stored reference is unavailable; excluded from effective state"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: field, Code: Validation, Message: "stored reference is unavailable; excluded from effective state"})
 	}
 	if err := s.store.CheckDisk(); err != nil {
 		code := Internal
 		if errors.Is(err, runtime.ErrConflict) {
 			code = Conflict
 		}
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"runtime", code, "disk runtime differs or is unreadable; acknowledged state retained"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "runtime", Code: code, Message: "disk runtime differs or is unreadable; acknowledged state retained"})
 	}
 	return out
 }
@@ -204,11 +206,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/stop" {
-		if arrivedOn(r) != 0 {
+		if tailnet.ArrivedOn(r) != 0 {
 			fail(w, Forbidden)
 			return
 		}
-		respond(w, http.StatusAccepted, StopResponse{true})
+		respond(w, http.StatusAccepted, StopResponse{Stopping: true})
 		s.cancel()
 		return
 	}
@@ -236,7 +238,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			// the runtime store (status.go); a request whose view cannot
 			// refresh within coreReadBound answers with the last one
 			// instead of blocking past it (bounded_read.go, boundedView).
-			out, stale := boundedView(r.Context(), &s.statusViews, coreReadBound, s.statusList)
+			out, stale := readview.Bounded(r.Context(), &s.statusViews, coreReadBound, s.statusList)
 			out.Tailnet = s.tailnetStatus(r.Context())
 			if stale {
 				w.Header().Set(StaleHeader, "true")
@@ -257,7 +259,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/trace/"); ok {
 			stream, kind, selector, valid := splitTracePath(path)
 			if !valid {
-				failWith(w, &APIError{Validation, "expected trace/<workstream>[/unit|criterion|commit/<selector>]"})
+				failWith(w, &APIError{Code: Validation, Message: "expected trace/<workstream>[/unit|criterion|commit/<selector>]"})
 			} else if out, api := s.traceView(r.Context(), stream, kind, selector); api != nil {
 				failWith(w, api)
 			} else {
@@ -301,7 +303,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
 				if out, api := s.conversationList(id); api != nil {
 					if _, err := config.ParseWorkstreamID(id); err == nil && api.Code == Validation {
-						api = &APIError{NotFound, "design session not found"}
+						api = &APIError{Code: NotFound, Message: "design session not found"}
 					}
 					failWith(w, api)
 				} else {
@@ -615,7 +617,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/contested/"); ok && r.Method == http.MethodPost {
 		stream, unit, found := strings.Cut(target, "/")
 		if !found || unit == "" {
-			failWith(w, &APIError{Validation, "a contested ruling requires a workstream and unit"})
+			failWith(w, &APIError{Code: Validation, Message: "a contested ruling requires a workstream and unit"})
 			return
 		}
 		var v ContestedRulingRequest
@@ -644,7 +646,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if unit == "" {
-			failWith(w, &APIError{Validation, "a move requires a workstream and unit"})
+			failWith(w, &APIError{Code: Validation, Message: "a move requires a workstream and unit"})
 			return
 		}
 		var v UnitMoveRequest
@@ -669,7 +671,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/charter/"); ok {
 		stream, question, found := strings.Cut(target, "/")
 		if !found || question == "" || strings.Contains(question, "/") {
-			failWith(w, &APIError{Validation, "expected charter/<workstream>/<question>"})
+			failWith(w, &APIError{Code: Validation, Message: "expected charter/<workstream>/<question>"})
 			return
 		}
 		var (
@@ -699,7 +701,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/amendment/"); ok {
 		stream, id, found := strings.Cut(target, "/")
 		if !found || id == "" || strings.Contains(id, "/") {
-			failWith(w, &APIError{Validation, "expected amendment/<workstream>/<amendment>"})
+			failWith(w, &APIError{Code: Validation, Message: "expected amendment/<workstream>/<amendment>"})
 			return
 		}
 		var (
@@ -937,7 +939,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		fail(w, code)
 		return
 	}
-	respond(w, 200, MutationResponse{true})
+	respond(w, 200, MutationResponse{Applied: true})
 }
 func decode(w http.ResponseWriter, r *http.Request, out any) bool {
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))

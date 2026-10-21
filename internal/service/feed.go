@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -19,12 +20,12 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	}
 	chief, _, _, closeChief, err := s.chiefRepository(context.Background(), repository, stream)
 	if err != nil {
-		return FeedResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeChief()
-	entries, err := consistentRead(func() ([]FeedEntry, error) { return feedEntries(repository, chief, stream) }, repository.Generation, chief.Generation)
+	entries, err := readview.Consistent(func() ([]FeedEntry, error) { return feedEntries(repository, chief, stream) }, repository.Generation, chief.Generation)
 	if err != nil {
-		return FeedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
+		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
 	}
 	return FeedResponse{Workstream: stream, Entries: entries}, nil
 }

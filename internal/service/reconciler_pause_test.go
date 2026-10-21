@@ -1,26 +1,27 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"slices"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const pauseNote = "A hard pause stopped your last turn."
@@ -94,27 +95,9 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 }
 
 // operationRecord returns the workstream's one operation of the action.
-func operationRecord(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) trace.OperationRecord {
-	t.Helper()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
-	if len(ops) != 1 {
-		t.Fatalf("%s operations: %+v", action, ops)
-	}
-	return ops[0]
-}
+var operationRecord = fixturekit.OperationRecord
 
-// retries counts the retries recorded for the operation.
-func retries(op trace.OperationRecord) int {
-	n := 0
-	for _, a := range op.History {
-		if a.Kind == "retry" {
-			n++
-		}
-	}
-	return n
-}
+var retries = intakefixture.Retries
 
 // checkHeld checks that the operation of a paused workstream is pending with
 // one retry naming the pause, and stays so over at least 3 further
@@ -165,9 +148,9 @@ func newShedFixtureCounting(t *testing.T, members int) (*shedFixture, *atomic.In
 // session is stopped.
 func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp.ClientSession) error) chan struct{} {
 	entered := make(chan struct{})
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := work(ctx, tools); err != nil {
 			return nil, err
 		}
@@ -182,9 +165,9 @@ func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp
 // prompt names the stop, runs work, and ends normally.
 func continueTurn(f *architectFixture, stopped trace.QueuedTurn, work func(context.Context, *mcp.ClientSession) error) string {
 	turn := fmt.Sprintf("%s-continue-%d", stopped.Request.TurnID, stopped.Sequence)
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, stopped.Request.Prompt) || !strings.Contains(req.Prompt, pauseNote) {
 			return nil, fmt.Errorf("continuation prompt %q", req.Prompt)
 		}
@@ -198,20 +181,7 @@ func continueTurn(f *architectFixture, stopped trace.QueuedTurn, work func(conte
 	return turn
 }
 
-// awaitTurn waits until the i-th turn of the agent's thread completed.
-func awaitTurn(t *testing.T, repository func() *trace.Repository, stream config.WorkstreamID, agent string, i int) trace.QueuedTurn {
-	t.Helper()
-	var q trace.QueuedTurn
-	eventually(t, fmt.Sprintf("turn %d of %s did not complete", i, agent), func() bool {
-		th, err := repository().Thread(stream, agent)
-		if err != nil || len(th.Turns) <= i || th.Turns[i].CompletedAt.IsZero() {
-			return false
-		}
-		q = th.Turns[i]
-		return true
-	})
-	return q
-}
+var awaitTurn = intakefixture.AwaitTurn
 
 // checkContinued checks that the thread holds the stopped turn and its
 // continuation, completed normally, and no further attempt.
@@ -242,8 +212,8 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	defer f.stop(t)
 	entered := make(chan struct{})
 	var runs atomic.Int32
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if runs.Add(1) > 1 {
 			for path, content := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan} {
 				if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
@@ -259,7 +229,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	paused := f.handIn(t, "paused", handedDesign)
 	select {
 	case <-entered:
@@ -317,8 +287,8 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 	defer f.stop(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() {
 			close(entered)
 			<-release
@@ -330,7 +300,7 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-draft", ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	running := f.handIn(t, "running", handedDesign)
 	select {
 	case <-entered:
@@ -525,7 +495,7 @@ func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 	hard := ownerPause("workstream", f.project, stream, "hard", "Stop the amendment")
 
 	seedAmendment(t, f.architectFixture, repo, stream)
-	drafts := &amendmentDrafter{&drafter{s: f.s, repository: repo}}
+	drafts := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
 	must(t, drafts.Pass(ctx))
 	draftOp := amendmentOp(t, repo, stream, AmendmentDraftAction)
 	amended := strings.Replace(validSpec, "last acknowledged chunk", "durable checkpoint", 1)
@@ -557,7 +527,7 @@ func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 		t.Fatalf("the amended spec the stopped turn delivered: %+v", docs)
 	}
 
-	debate := amendmentDebate{&debate{s: f.s, repository: repo}}
+	debate := amendmentDebate{Debate: &debate{S: f.s.intake().DebateDependencies(), Repository: repo}}
 	must(t, debate.Pass(ctx))
 	_, err = debate.Apply(ctx, amendmentOp(t, repo, stream, AmendmentRoundAction))
 	must(t, err)

@@ -2,19 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-const factoryPolicySubject = "factory-policy"
-const factoryPolicyVersion = "adaptive"
-
-// acceptanceDraftInstructions applies to every architect submission path.
-const acceptanceDraftInstructions = "\n\nAcceptance states observable behaviours and may name tests the unit adds as evidence. Never require a whole-suite check pass or run. There is no need to list existing tests to keep passing: the factory's service-owned check gate catches regressions. The factory runs and selects checks itself, using smart-check selection. A passing service-owned check gate is the evidence that required tests ran and passed."
 
 // checkGateReviewInstructions gives both reviewer roles the same test evidence rule.
 const checkGateReviewInstructions = " Test passing is decided by the service-owned check gate. When the gate passed for the candidate, every acceptance item or criterion requiring tests to pass (whole-suite, scoped or named) is satisfied as to passing: the passing gate is the evidence that required tests ran and passed. Never raise a finding by itself because only a smart-check selection ran, because you cannot see that a named test was selected, or because you cannot run tests yourself. Still judge from the work whether tests the unit was asked to add exist and exercise the stated behaviour."
@@ -42,28 +33,6 @@ func factoryInstructions(scope coreadapter.Scope) string {
 		role += checkGateReviewInstructions
 	}
 	return "\n\nCurrent factory operating policy (takes precedence over older role instructions, including those in conversation history; preserves task-specific requirements and owner decisions): the owner controls intent, constraints and publication. The factory controls engineering choices and recorded plan revisions within that intent. " + role + "\n"
-}
-
-// recordFactoryPolicy commits adoption and its recovery notice together. Repeating
-// reconciliation never loses the notice or creates another one after acknowledgment.
-func recordFactoryPolicy(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, at time.Time, revisit bool) error {
-	st, err := r.Workflow(stream, factoryPolicySubject)
-	if err != nil || st.Value == factoryPolicyVersion {
-		return err
-	}
-	if st.Value != "" {
-		return fmt.Errorf("unsupported factory policy %q", st.Value)
-	}
-	id := factoryPolicySubject + "-" + factoryPolicyVersion
-	tx := trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.Project(), Workstream: stream, At: at, Actor: serviceActor, Cause: factoryPolicySubject},
-		Subject: factoryPolicySubject, To: factoryPolicyVersion, Reason: "Current factory authority applies to subsequent turns; sealed intent, assignments and owner decisions are preserved.",
-	}}
-	if revisit {
-		tx.Events = []trace.Event{trace.Notice(id, "chief", "Reassess this in-flight workstream under current factory authority. Read factory_context and current activity for unresolved questions, contested units and pending amendments, including blockers whose earlier notices were already acknowledged. Investigate and resolve engineering decisions within approved intent; commission a plan revision where assignments or acceptance methods need adaptation. Do not automatically rewrite plans, reopen completed work, clear explicit owner holds or substitute for an owner decision. Existing escalations remain recorded. Ratification and publication still require the owner.")}
-	}
-	_, err = r.Transact(ctx, tx)
-	return err
 }
 
 func (s *Service) reconcileFactoryPolicy(ctx context.Context, r *trace.Repository) error {

@@ -1,0 +1,411 @@
+package intake
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/kpenfound/osmia/internal/amendment"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+// amendmentApplied is the state of an approved amendment once its effect on
+// the workstream's units, approvals and final report is recorded.
+const AmendmentApplied = "applied"
+
+// amendmentUnitID is the ID of the transition that reworks a unit for an
+// amendment, or notifies it.
+func AmendmentUnitID(unit, id string, rework bool) string {
+	if rework {
+		return trace.UnitSubject(unit) + "_reworked_amendment_" + id
+	}
+	return trace.UnitSubject(unit) + "_notified_amendment_" + id
+}
+
+// amendmentMasonTurn is the mason turn that carries an amendment's notice and
+// the unit's amended bundle.
+func AmendmentMasonTurn(unit, id string) string { return MasonAgent(unit) + "-amendment-" + id }
+
+// classifyAmendment returns the first revision of an amendment's application
+// record: the revisions it moves the workstream from and to, the request and
+// the decision note, and the affected set the architect's draft recorded with
+// its units classified against the sealed and approved plans.
+func ClassifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, sealedPlan, approvedPlan trace.Document, from, to amendment.Pin) (amendment.Application, error) {
+	var affected AmendmentAffected
+	if err := json.Unmarshal([]byte(affectedDoc.Content), &affected); err != nil {
+		return amendment.Application{}, fmt.Errorf("%s revision %d does not parse: %v", affectedDoc.Path, affectedDoc.Revision, err)
+	}
+	before, err := plan.Parse([]byte(sealedPlan.Content))
+	if err != nil {
+		return amendment.Application{}, fmt.Errorf("the sealed plan does not parse: %v", err)
+	}
+	after, err := plan.Parse([]byte(approvedPlan.Content))
+	if err != nil {
+		return amendment.Application{}, fmt.Errorf("the approved plan does not parse: %v", err)
+	}
+	a := amendment.Application{Amendment: req.ID, From: from, To: to, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Note: d.Note,
+		Criteria: append([]string{}, affected.Criteria...)}
+	if d.Actor == trace.ChiefOfStaff {
+		a.Actor = d.Actor
+	}
+	a.Rework, a.Notify, a.Added, a.Removed = amendment.Classify(a.Criteria, affected.Units, before, after)
+	return a, nil
+}
+
+// application returns the latest revision of an amendment's application
+// record, and that document; a document of revision zero when the amendment
+// has none.
+func (a AmendmentDebate) Application(stream config.WorkstreamID, id string) (amendment.Application, trace.Document, error) {
+	docs, err := trace.Read[trace.Document](a.Repository, stream)
+	if err != nil {
+		return amendment.Application{}, trace.Document{}, err
+	}
+	var latest trace.Document
+	for _, d := range docs {
+		if d.ID == amendment.DocumentID(id) && d.Path == amendment.Path(id) {
+			latest = d
+		}
+	}
+	if latest.Revision == 0 {
+		return amendment.Application{}, latest, nil
+	}
+	var out amendment.Application
+	if err := json.Unmarshal([]byte(latest.Content), &out); err != nil {
+		return amendment.Application{}, latest, fmt.Errorf("%s revision %d: %w", latest.Path, latest.Revision, err)
+	}
+	return out, latest, nil
+}
+
+// apply records, in one commit, what a resealed amendment does to the
+// workstream: each reworked unit that is implementing, reviewing or approved
+// moves to implementing; each notified unit that is implementing stays
+// there, and one that is reviewing or approved moves to reviewing; units the
+// amended plan adds enter planned, or ready once every unit they depend on
+// has merged; a changed criterion that a merged unit serves becomes a
+// follow-up unit, since merged units are never reopened; a final report that
+// read the replaced revisions is named invalidated; and the amendment moves
+// to applied. Waiting and contested units are held and moved once they leave
+// that state. The second revision of amendments/<n>/application.json
+// records the held units, follow-ups and invalidated final review. A unit
+// whose state moved since it was read leaves the commit to the next pass.
+// The mason turns the moves call for are queued after the commit.
+func (a AmendmentDebate) ApplyAmendment(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState) error {
+	app, doc, err := a.Application(stream, req.ID)
+	if err != nil {
+		return err
+	}
+	if doc.Revision == 0 {
+		return fmt.Errorf("resealed amendment %s has no %s", req.ID, amendment.Path(req.ID))
+	}
+	b, found, err := a.S.BuildState(a.Repository, stream)
+	if err != nil || !found {
+		return err
+	}
+	cause := "amendment-" + req.ID + "-" + AmendmentResealed
+	at := a.S.Now()
+	header := func(id, unit string) trace.Header {
+		h := a.AmendmentHeader(id, stream, unit, cause)
+		h.At = at
+		return h
+	}
+	var units []trace.Transaction
+	held, merged := []string{}, []string{}
+	var reworked, notified []string
+	for _, group := range []struct {
+		Names  []string
+		Rework bool
+	}{{app.Rework, true}, {app.Notify, false}} {
+		for _, unit := range group.Names {
+			st := b.States[trace.UnitSubject(unit)]
+			switch st.Value {
+			case UnitWaiting, UnitContested:
+				held = append(held, unit)
+			case UnitMerged:
+				if group.Rework {
+					merged = append(merged, unit)
+				}
+			case UnitImplementing, UnitChecking, UnitReviewing, UnitApproved:
+				units = append(units, a.AmendUnit(stream, app, unit, st, group.Rework, header))
+				if group.Rework {
+					reworked = append(reworked, unit)
+				} else {
+					notified = append(notified, unit)
+				}
+			}
+		}
+	}
+	var entered []string
+	for _, id := range app.Added {
+		u, ok := b.Plan.Unit(id)
+		subject := trace.UnitSubject(id)
+		if !ok || b.States[subject].Value != "" {
+			continue
+		}
+		planned := subject + "_planned_amendment_" + req.ID
+		units = append(units, trace.Transaction{Transition: trace.Transition{Header: header(planned, id), Subject: subject, To: UnitPlanned,
+			Reason: fmt.Sprintf("amendment %s adds unit %s to the plan of seal %d", req.ID, id, app.To.Seal)}})
+		waiting := slices.DeleteFunc(slices.Clone(u.DependsOn), func(d string) bool { return b.States[trace.UnitSubject(d)].Value == UnitMerged })
+		if len(waiting) > 0 {
+			entered = append(entered, fmt.Sprintf("%s planned (waiting for %s)", id, strings.Join(waiting, ", ")))
+			continue
+		}
+		units = append(units, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: header(subject+"_ready_amendment_"+req.ID, id), Subject: subject, From: UnitPlanned, To: UnitReady,
+			Reason: fmt.Sprintf("unit %s is ready: every unit it depends on has merged", id)}})
+		entered = append(entered, id+" ready")
+	}
+	docs := []trace.Document{}
+	added, err := a.Followups(stream, app, b.Plan, merged)
+	if err != nil {
+		return err
+	}
+	var followups []string
+	if len(added) > 0 {
+		content, err := json.MarshalIndent(added, "", "  ")
+		if err != nil {
+			return err
+		}
+		rev, err := NextRevision(a.Repository, stream, followup.DocumentID)
+		if err != nil {
+			return err
+		}
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: followup.DocumentID, Revision: rev, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: AmendmentActor, Cause: cause},
+			Path: followup.Path, Content: string(content) + "\n"})
+		for _, f := range added {
+			followups = append(followups, f.Unit.ID)
+			subject := trace.UnitSubject(f.Unit.ID)
+			units = append(units,
+				trace.Transaction{Transition: trace.Transition{Header: header(subject+"-"+UnitPlanned, f.Unit.ID), Subject: subject, To: UnitPlanned, Reason: f.Gap}},
+				trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: header(subject+"-"+UnitReady, f.Unit.ID), Subject: subject, From: UnitPlanned, To: UnitReady,
+					Reason: fmt.Sprintf("follow-up %s is ready to address %s after amendment %s", f.Unit.ID, f.Criterion, req.ID)}})
+		}
+	}
+	applied := amendment.Applied{Held: held, Followups: append([]string{}, followups...)}
+	id := "amendment-" + req.ID + "-" + AmendmentApplied
+	events := []trace.Event{}
+	report, reported, err := a.S.LatestFinalReport(a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	if reported && report.Seal == app.From.Seal && report.Spec == app.From.Spec && report.Plan == app.From.Plan {
+		applied.FinalReview = report.Review
+		body := fmt.Sprintf("Final review %d read seal %d, spec revision %d and plan revision %d, which amendment %s replaced: its report no longer authorises delivery", report.Review, report.Seal, report.Spec, report.Plan, req.ID)
+		if _, _, approval, err := a.S.DeliveryDocuments(a.Repository, stream); err != nil {
+			return err
+		} else if approval != nil && approval.Review == report.Review {
+			body += ", and the owner's delivery approval of it no longer holds"
+		}
+		events = append(events, trace.Notice(id, "final-review", body+". Final review runs again once every unit has merged."))
+	}
+	app.Applied = &applied
+	content, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return err
+	}
+	docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.ID, Revision: doc.Revision + 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: AmendmentActor, Cause: cause},
+		Path: doc.Path, Content: string(content) + "\n"})
+	reason := fmt.Sprintf("approved amendment %s is applied to seal %d: reworked %s; notified %s; held until they leave waiting or contested %s; added %s; follow-ups %s", req.ID, app.To.Seal, List(reworked), List(notified), List(held), List(entered), List(followups))
+	if applied.FinalReview > 0 {
+		reason += fmt.Sprintf("; final review %d is invalidated", applied.FinalReview)
+	}
+	events = append([]trace.Event{trace.Notice(id, "amendment", reason)}, events...)
+	txs := append([]trace.Transaction{{ExpectedVersion: state.Version, Transition: trace.Transition{Header: header(id, req.Unit), Subject: AmendmentSubject(req.ID), From: AmendmentResealed, To: AmendmentApplied, Reason: reason}, Events: events}}, units...)
+	if _, err := a.Repository.RecordDocumentsWith(ctx, docs, txs...); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	if err := a.S.Step("amendment-applied"); err != nil {
+		return err
+	}
+	return a.Follow(ctx, stream, req)
+}
+
+// amendUnit returns the transaction that reworks or notifies one unit in the
+// state it is in: a reworked unit moves to implementing; a notified unit
+// stays implementing or checking, or moves to reviewing from reviewing or
+// approved.
+func (a AmendmentDebate) AmendUnit(stream config.WorkstreamID, app amendment.Application, unit string, st trace.WorkflowState, rework bool, header func(id, unit string) trace.Header) trace.Transaction {
+	id := AmendmentUnitID(unit, app.Amendment, rework)
+	to, reason := UnitImplementing, ""
+	switch {
+	case rework:
+		changed := app.Criteria
+		if u, err := SealedUnit(a.Repository, coreadapter.Scope{Workstream: string(stream), Unit: unit}); err == nil {
+			if addressed := slices.DeleteFunc(LandingCriteria(u), func(c string) bool { return !slices.Contains(app.Criteria, c) }); len(addressed) > 0 {
+				changed = addressed
+			}
+		}
+		reason = fmt.Sprintf("unit %s returns to implementing from %s: amendment %s changed the meaning of %s, which it serves; its mason builds it again against seal %d, spec revision %d and plan revision %d", unit, st.Value, app.Amendment, List(changed), app.To.Seal, app.To.Spec, app.To.Plan)
+	case st.Value == UnitImplementing:
+		reason = fmt.Sprintf("unit %s stays implementing: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its mason's next turn carries the notice and the amended bundle", unit, app.Amendment)
+	case st.Value == UnitChecking:
+		to = UnitChecking
+		reason = fmt.Sprintf("unit %s stays checking: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its review is taken against plan revision %d with the notice", unit, app.Amendment, app.To.Plan)
+	default:
+		to = UnitReviewing
+		reason = fmt.Sprintf("unit %s returns to review from %s: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its review is taken again against plan revision %d with the notice", unit, st.Value, app.Amendment, app.To.Plan)
+	}
+	return trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: header(id, unit), Subject: trace.UnitSubject(unit), From: st.Value, To: to, Reason: reason},
+		Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+": "+reason+".")}}
+}
+
+// followups returns one follow-up unit for every changed criterion that a
+// merged unit serves, scoped to the footprints of the plan's units that
+// serve it, unless it is recorded already.
+func (a AmendmentDebate) Followups(stream config.WorkstreamID, app amendment.Application, p plan.Plan, merged []string) ([]followup.Unit, error) {
+	previous, err := followup.Read(a.Repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]bool{}
+	for _, u := range p.Units {
+		known[u.ID] = true
+	}
+	for _, u := range previous {
+		known[u.Unit.ID] = true
+	}
+	var out []followup.Unit
+	for _, criterion := range app.Criteria {
+		var by []string
+		for _, id := range merged {
+			if u, ok := p.Unit(id); ok && slices.Contains(u.Criteria, criterion) {
+				by = append(by, id)
+			}
+		}
+		id := fmt.Sprintf("amendment-%s-%s", app.Amendment, strings.ReplaceAll(criterion, "#", "-"))
+		if len(by) == 0 || known[id] {
+			continue
+		}
+		var footprint []string
+		for _, u := range p.Units {
+			if slices.Contains(u.Criteria, criterion) {
+				for _, name := range u.Footprint {
+					if !slices.Contains(footprint, name) {
+						footprint = append(footprint, name)
+					}
+				}
+			}
+		}
+		gap := fmt.Sprintf("amendment %s changed the meaning of %s after %s merged; bring the merged work in line with the amended criterion", app.Amendment, criterion, strings.Join(by, ", "))
+		out = append(out, followup.Unit{Amendment: app.Amendment, Criterion: criterion, Gap: gap,
+			Unit: plan.Unit{ID: id, Title: "Address an amended criterion", Task: gap, Acceptance: []string{"The merged work satisfies " + criterion + " as the amended spec states it"}, Criteria: []string{criterion}, DependsOn: []string{}, Footprint: footprint}})
+	}
+	return out, nil
+}
+
+// follow finishes an applied amendment's unit moves on every pass: a held
+// unit that left waiting or contested is reworked or notified in the state
+// it is in now, and every move to implementing gets the mason turn that
+// carries the notice and the amended bundle. Each step finds what an earlier
+// pass did, so a restart between them completes the rest once.
+func (a AmendmentDebate) Follow(ctx context.Context, stream config.WorkstreamID, req trace.Amendment) error {
+	app, _, err := a.Application(stream, req.ID)
+	if err != nil || app.Applied == nil {
+		return err
+	}
+	transitions, err := trace.Read[trace.Transition](a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	recorded := func(id string) (trace.Transition, bool) {
+		i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == id })
+		if i < 0 {
+			return trace.Transition{}, false
+		}
+		return transitions[i], true
+	}
+	cause := "amendment-" + req.ID + "-" + AmendmentApplied
+	for _, unit := range app.Applied.Held {
+		rework := slices.Contains(app.Rework, unit)
+		if _, ok := recorded(AmendmentUnitID(unit, req.ID, rework)); ok {
+			continue
+		}
+		st, err := a.Repository.Workflow(stream, trace.UnitSubject(unit))
+		if err != nil {
+			return err
+		}
+		if st.Value != UnitImplementing && st.Value != UnitChecking && st.Value != UnitReviewing && st.Value != UnitApproved {
+			continue
+		}
+		tx := a.AmendUnit(stream, app, unit, st, rework, func(id, unit string) trace.Header { return a.AmendmentHeader(id, stream, unit, cause) })
+		if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
+			return err
+		}
+	}
+	if len(app.Applied.Held) > 0 {
+		if transitions, err = trace.Read[trace.Transition](a.Repository, stream); err != nil {
+			return err
+		}
+	}
+	for _, unit := range append(slices.Clone(app.Rework), app.Notify...) {
+		moved, ok := recorded(AmendmentUnitID(unit, req.ID, slices.Contains(app.Rework, unit)))
+		if !ok || moved.To != UnitImplementing {
+			continue
+		}
+		if err := a.EnqueueAmended(ctx, stream, app, unit, moved); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// enqueueAmended queues the mason turn that tells a unit's mason about the
+// amendment and carries the unit's amended bundle, unless the mason's thread
+// holds it already. The thread is created when the unit has none. A unit
+// whose bundle cannot be assembled because its spec no longer matches its
+// seal gets no turn, and the reason is recorded as the unit's block.
+func (a AmendmentDebate) EnqueueAmended(ctx context.Context, stream config.WorkstreamID, app amendment.Application, unit string, moved trace.Transition) error {
+	agent, turn := MasonAgent(unit), AmendmentMasonTurn(unit, app.Amendment)
+	cfg := a.S.About(a.Repository)
+	th, err := a.Repository.Thread(stream, agent)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: a.Repository.Project(), Workstream: stream, Unit: unit, At: moved.At, Actor: MasonActor, Cause: moved.ID}, Role: MasonRole, ThreadID: agent}
+		if err := a.Repository.CreateThread(ctx, identity); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	case slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn }):
+		return nil
+	}
+	mason, err := a.S.MasonBundle(ctx, a.Repository, stream, unit)
+	if errors.Is(err, bundle.ErrStaleSpec) {
+		return a.S.BlockMason(ctx, a.Repository, stream, unit, moved.ID, fmt.Sprintf("unit %s is implementing after amendment %s, and its mason's amended bundle cannot be assembled: %v", unit, app.Amendment, err))
+	}
+	if err != nil {
+		return err
+	}
+	profile, _, err := a.S.RoleExecution(cfg, MasonRole)
+	if err != nil {
+		return err
+	}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, Unit: unit, At: a.S.Now(), Actor: AmendmentActor, Cause: moved.ID, Depth: 1},
+		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: MasonSystemPrompt(cfg.Project), Prompt: AmendedMasonPrompt(app, mason, slices.Contains(app.Rework, unit))}
+	_, err = a.Repository.EnqueueTurn(ctx, req)
+	return err
+}
+
+// amendedMasonPrompt is the text of the mason turn that follows an approved
+// amendment: what it means for the unit, then the unit's amended bundle with
+// the amendment's notice.
+func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) string {
+	what := fmt.Sprintf("The owner approved amendment %s. It changed the assignment or criteria unit %s serves, so the unit returns to implementing: build it again in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
+	if !rework {
+		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit serves keep their meaning. Continue in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
+	}
+	if app.Actor == trace.ChiefOfStaff {
+		what = strings.ReplaceAll(what, "The owner", "The chief of staff")
+	}
+	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())
+}

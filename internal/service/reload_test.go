@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -23,26 +25,15 @@ import (
 // reloadFiles are the top-level and project configuration files of a fixture
 // with their original contents.
 type reloadFiles struct {
-	top, project         string
-	topText, projectText string
+	fixturekit.ReloadFiles
+	top, project, topText, projectText string
 }
 
 func configFiles(t *testing.T, opts Options) reloadFiles {
-	t.Helper()
-	f := reloadFiles{top: filepath.Join(opts.Config.Root, "config.toml"), project: filepath.Join(opts.Config.Root, "projects", string(project), "config.toml")}
-	top, err := os.ReadFile(f.top)
-	must(t, err)
-	p, err := os.ReadFile(f.project)
-	must(t, err)
-	f.topText, f.projectText = string(top), string(p)
-	return f
+	f := fixturekit.ConfigFiles(t, opts.Config.Root, project)
+	return reloadFiles{f, f.Top, f.Project, f.TopText, f.ProjectText}
 }
-
-func (f reloadFiles) write(t *testing.T, top, project string) {
-	t.Helper()
-	must(t, os.WriteFile(f.top, []byte(top), 0600))
-	must(t, os.WriteFile(f.project, []byte(project), 0600))
-}
+func (f reloadFiles) write(t *testing.T, top, project string) { f.ReloadFiles.Write(t, top, project) }
 
 func hasCode(ds []Diagnostic, field string, code Code) bool {
 	for _, d := range ds {
@@ -55,11 +46,7 @@ func hasCode(ds []Diagnostic, field string, code Code) bool {
 
 func reloadFails(t *testing.T, c *Client, path, field string) {
 	t.Helper()
-	_, err := c.Reload(context.Background())
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != Validation || !strings.Contains(api.Message, path+": "+field+": ") {
-		t.Fatalf("reload error: %v, want validation naming %s and %s", err, path, field)
-	}
+	intakefixture.ReloadFails(t, c.Reload, path, field)
 }
 
 // A reload validates the top-level file and the project's file as one
@@ -177,7 +164,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	_, c := start(t, opts)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
 	stored, err := os.ReadFile(filepath.Join(opts.Config.Root, "runtime.json"))
@@ -233,7 +220,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "rl-")
 	files := configFiles(t, opts)
-	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	var (
 		mu       sync.Mutex
 		bound    []*config.Config
@@ -256,7 +243,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	first, err := c.Send(ctx, stream, "first")
 	must(t, err)
 	select {
-	case <-turns.entered:
+	case <-turns.Entered:
 	case <-time.After(demoTimeout):
 		t.Fatal("the first message did not run")
 	}
@@ -266,7 +253,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	must(t, err)
 	second, err := c.Send(ctx, stream, "second")
 	must(t, err)
-	close(turns.hold)
+	close(turns.Hold)
 	awaitConversation(t, c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 4 && l.Entries[3].State == TurnDone
 	})

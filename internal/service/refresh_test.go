@@ -1,23 +1,25 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
+	context "context"
+	json "encoding/json"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fakeMasons) {
@@ -66,7 +68,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	}
 	project.pipeline.current.Store(&stages)
 	must(t, f.repository().RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
-	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		ok, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "learnings": []string{"Trace snapshots require a clean worktree."}})
 		if err != nil || !ok {
 			return fmt.Errorf("done: %s: %w", reason, err)
@@ -77,9 +79,9 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	must(t, err)
 	encoded, err := kb.Encode(current)
 	must(t, err)
-	f.engine.mu.Lock()
-	previous := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	previous := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, "refresh-") {
 			return previous(ctx, req, verified, tools)
 		}
@@ -121,27 +123,13 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Refreshed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	return f, masons
 }
 
 func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for time.Now().Before(deadline) {
-		ops, err := f.repository().Operations(librarianWorkstream(f.project))
-		must(t, err)
-		for _, op := range ops {
-			if op.Operation.Action == RefreshAction && op.Result != nil {
-				return op
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	ops, _ := f.repository().Operations(librarianWorkstream(f.project))
-	thread, threadErr := f.repository().Thread(librarianWorkstream(f.project), librarianAgent)
-	t.Fatalf("refresh did not complete within %s: operations %+v; librarian thread %+v (error %v)", demoTimeout, ops, thread, threadErr)
-	return trace.OperationRecord{}
+	return intakefixture.AwaitRefresh(t, f.repository(), f.project, RefreshAction, librarianAgent)
 }
 
 func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
@@ -150,9 +138,9 @@ func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 	defer f.stop(t)
 	entered := make(chan struct{})
 	release := make(chan struct{}, 1)
-	f.engine.mu.Lock()
-	previous := f.engine.turns["*"]
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	previous := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "refresh-") {
 			close(entered)
 			select {
@@ -163,7 +151,7 @@ func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 		}
 		return previous(ctx, req, verified, tools)
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "refresh-in-flight", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	select {
@@ -217,7 +205,7 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	if op.Result.Outcome != "succeeded" {
 		t.Fatalf("refresh: %+v", op.Result)
 	}
-	masons.check(t)
+	masons.Check(t)
 	var in refreshInput
 	must(t, json.Unmarshal(op.Operation.Input, &in))
 	if len(in.Landings) != 1 || in.Landings[0].Unit != "resume" || in.Landings[0].Commit != in.Commit || in.Workstream != stream {
@@ -276,7 +264,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
+	masons.Play[masonTurnID("resume")] = reportDone("Built")
 	stream := f.seedBuilding(t, "refresh-before-landing", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}
@@ -395,12 +383,4 @@ func TestRefreshFoldsAWorkstreamsLandingsOnceItIsQuiet(t *testing.T) {
 }
 
 // completedEffect is a reconciler whose effect has always completed.
-type completedEffect struct{}
-
-func (completedEffect) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
-	return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "completed", Result: &coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}}, nil
-}
-
-func (completedEffect) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}, nil
-}
+type completedEffect = fixturekit.CompletedEffect

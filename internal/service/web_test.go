@@ -1,51 +1,31 @@
 package service
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
+	bytes "bytes"
+	context "context"
+	json "encoding/json"
+	errors "errors"
 
-	"github.com/kpenfound/osmia/internal/runtime"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
+	net "net"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
 )
 
 // withWeb appends a listen.web setting to the fixture's top-level file.
 func withWeb(t *testing.T, opts Options, addr string) {
 	t.Helper()
-	path := filepath.Join(opts.Config.Root, "config.toml")
-	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("[listen]\nweb = \""+addr+"\"\n")...), 0600))
+	intakefixture.WithWeb(t, opts.Config.Root, addr)
 }
 
-// exchange sends one raw request through client and returns its status and
-// body.
-func exchange(t *testing.T, client *http.Client, method, url, contentType, body string, host string) (int, []byte) {
-	t.Helper()
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
-	must(t, err)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if host != "" {
-		req.Host = host
-	}
-	resp, err := client.Do(req)
-	must(t, err)
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	must(t, err)
-	return resp.StatusCode, data
-}
+var exchange = intakefixture.Exchange
 
 func socketHTTP(socket string) *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -53,16 +33,9 @@ func socketHTTP(socket string) *http.Client {
 	}}}
 }
 
-func webHTTP() *http.Client {
-	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
-}
+var webHTTP = intakefixture.WebHTTP
 
-func errorCode(t *testing.T, body []byte) Code {
-	t.Helper()
-	var out ErrorResponse
-	must(t, json.Unmarshal(body, &out))
-	return out.Error.Code
-}
+var errorCode = intakefixture.ErrorCode
 
 // Without listen.web the service binds only its Unix socket.
 func TestWebListenerDisabledByDefault(t *testing.T) {

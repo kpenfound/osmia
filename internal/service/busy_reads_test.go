@@ -12,65 +12,17 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// blockedFactoryOperation holds a repository effect until release closes.
-// Its unreserved action runs inline so read endpoints can be exercised while
-// the scheduling pass is occupied. Reads use the trace's short bookkeeping
-// lock and generation cache; they must not wait for the effect to finish.
-type blockedFactoryOperation struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func newBlockedFactoryOperation() *blockedFactoryOperation {
-	return &blockedFactoryOperation{started: make(chan struct{}), release: make(chan struct{})}
-}
-
-func (b *blockedFactoryOperation) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "fake factory operation in progress"}, nil
-}
-
-func (b *blockedFactoryOperation) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
-	b.once.Do(func() { close(b.started) })
-	select {
-	case <-b.release:
-	case <-ctx.Done():
-		return coreadapter.OperationResult{}, ctx.Err()
-	}
-	return coreadapter.OperationResult{Outcome: "complete", Evidence: "fake factory operation finished"}, nil
-}
-
-// requestFactoryOperation durably records a RepositoryBoundary operation of
-// streamID, under an action the service does not reserve for sealing,
-// building, landing, rebasing, drift or publishing, so the reconcile
-// controller routes it to the test's own fake adapter (sealing.go,
-// repositoryAdapter.Apply) rather than to a real one.
-func requestFactoryOperation(t *testing.T, repository *trace.Repository, streamID config.WorkstreamID, eventID string) {
-	t.Helper()
-	event := trace.Event{ID: eventID, Kind: "local-effect", Body: "simulated factory work"}
-	event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, streamID, event.ID), Boundary: coreadapter.RepositoryBoundary, Action: "fake-factory-op", Input: json.RawMessage(`{}`)}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: eventID + "-start", Revision: 1, Project: project, Workstream: streamID, At: demoStart, Actor: serviceActor, Cause: "owner"}
-	_, err := repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: "fake-" + eventID, To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
-	must(t, err)
-}
 
 // setUpBusyReadsService starts a service whose only active project has
 // stream already created, wired so a RepositoryBoundary operation reaches
 // blocking instead of a real sealer, builder or foreman.
 func setUpBusyReadsService(t *testing.T, blocking coreadapter.Reconciler) (*Service, *Client, *trace.Repository) {
 	t.Helper()
-	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
-	must(t, err)
-	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
-	must(t, repository.Close())
-
+	opts := testOptions(fixturekit.BusyReadsConfig(t))
 	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: blocking}
 	s, c := start(t, opts)
 	_, active := s.runtimeOf(project)
@@ -188,11 +140,11 @@ func TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked(t *testing.T
 	requestFactoryOperation(t, repository, stream, "busy-reads-blocked")
 
 	select {
-	case <-blocking.started:
+	case <-blocking.Started:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the fake factory operation never started")
 	}
-	defer close(blocking.release)
+	defer close(blocking.Release)
 
 	assertCoreReadEndpointsRespondWithin(t, c, stream, coreReadBound)
 }
@@ -223,11 +175,11 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 	requestTurnOperation(t, active.repository, stream, "busy-reads-turn")
 
 	select {
-	case <-blocking.started:
+	case <-blocking.Started:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the fake agent turn never started")
 	}
-	defer close(blocking.release)
+	defer close(blocking.Release)
 
 	assertCoreReadEndpointsRespondWithin(t, c, stream, coreReadBound)
 }
@@ -241,7 +193,7 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 // answer within the latency bound while it is blocked.
 func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
 	t.Parallel()
-	checks := &fakeChecks{links: []string{"dag://x"}, outcomes: []checkOutcome{{block: true}}}
+	checks := &fakeChecks{Links: []string{"dag://x"}, Outcomes: []checkOutcome{{Block: true}}}
 	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	workstream, repository := seedBuild(t, f, "stall-check", independentPlan, config.WorkspacesGit, base)
@@ -314,7 +266,7 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 
 	// A commit that lands while a workstream list read is assembling its
 	// response is retried from scratch (status.go, Service.statuses, through
-	// consistentRead), so the read never answers with some of its fields
+	// readview.Consistent), so the read never answers with some of its fields
 	// from before the commit and some from after it.
 	attempts := 0
 	var raceOnce sync.Once
@@ -334,57 +286,6 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 	}
 	if raced.Workstreams[0].State == nil || *raced.Workstreams[0].State != "building" {
 		t.Fatalf("workstream list returned a stale or inconsistent state after a racing commit: %+v", raced.Workstreams[0])
-	}
-}
-
-// TestConsistentReadRetriesAcrossARacingCommit shows the mechanism behind
-// the fix directly: a read that performs several separate Repository calls
-// is retried whole when a commit lands between them, so it never returns a
-// result assembled from two different generations of the trace.
-func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
-	t.Parallel()
-	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
-	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
-
-	const racingStream = config.WorkstreamID("w_1111111111111111111111111111aaaa")
-	raced := false
-	attempts := 0
-	type snapshot struct{ before, after int }
-	result, err := consistentRead(func() (snapshot, error) {
-		attempts++
-		before, err := repository.Workstreams()
-		if err != nil {
-			return snapshot{}, err
-		}
-		if !raced {
-			raced = true
-			// Committed from inside fn, between its two separate Repository
-			// calls, so an unprotected caller would see a different
-			// workstream count on each.
-			if err := repository.CreateWorkstream(context.Background(), racingStream, demoStart, serviceActor); err != nil {
-				return snapshot{}, err
-			}
-		}
-		after, err := repository.Workstreams()
-		if err != nil {
-			return snapshot{}, err
-		}
-		return snapshot{len(before), len(after)}, nil
-	}, repository.Generation)
-	must(t, err)
-	if attempts < 2 {
-		t.Fatalf("the racing commit did not force a retry: attempts=%d", attempts)
-	}
-	if result.before != result.after {
-		t.Fatalf("consistentRead returned a torn result: %+v", result)
-	}
-	if result.before != 2 {
-		t.Fatalf("consistentRead did not settle on the latest generation: %+v", result)
 	}
 }
 
@@ -441,7 +342,7 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 // TestInboxDoesNotMixRuntimeStateAcrossGenerations covers spec#8: inbox
 // (inbox.go) reads a project's statuses, escalations and, per workstream,
 // many further trace and runtime-store facts (operations, outbox, the loop
-// guard's pause, ...), inside one consistentRead attempt scoped to both the
+// guard's pause, ...), inside one readview.Consistent attempt scoped to both the
 // repository's and the runtime store's generation. A runtime mutation that
 // lands partway through that attempt, here the owner's loop guard pausing
 // the workstream, forces the whole attempt to retry rather than return a
@@ -528,11 +429,11 @@ func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testi
 	requestFactoryOperation(t, active.repository, stream, "isolation-blocked")
 
 	select {
-	case <-blocking.started:
+	case <-blocking.Started:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the fake factory operation never started")
 	}
-	defer close(blocking.release)
+	defer close(blocking.Release)
 
 	ctx := context.Background()
 	started := time.Now()
@@ -541,27 +442,5 @@ func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testi
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("owner action on another workstream took %s while factory work was blocked on a different workstream", elapsed)
-	}
-}
-
-// TestConsistentReadReturnsWithoutARacingWrite shows the common case: with
-// nothing racing it, consistentRead calls fn exactly once.
-func TestConsistentReadReturnsWithoutARacingWrite(t *testing.T) {
-	t.Parallel()
-	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
-
-	attempts := 0
-	_, err = consistentRead(func() (uint64, error) {
-		attempts++
-		return repository.Generation(), nil
-	}, repository.Generation)
-	must(t, err)
-	if attempts != 1 {
-		t.Fatalf("fn ran %d times with nothing racing it", attempts)
 	}
 }

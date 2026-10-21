@@ -55,7 +55,7 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 		if !fs.ValidPath(in.Path) || in.Start < 1 || in.Lines < 1 || in.Lines > 1000 {
 			return nil, errors.New("invalid code range")
 		}
-		g, err := featureWorkspaces(cfg, repo).of(config.WorkstreamID(scope.Workstream))
+		g, err := featureWorkspaces(cfg, repo).Of(config.WorkstreamID(scope.Workstream))
 		if err != nil {
 			return nil, err
 		}

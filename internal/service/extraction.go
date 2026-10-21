@@ -3,15 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -31,15 +27,6 @@ import (
 // knowledge-base extraction pass of the librarian.
 const ExtractAction = "kb-extract"
 
-const (
-	librarianRole   = "librarian"
-	librarianAgent  = "agent_librarian"
-	librarianThread = "thread_librarian"
-	// maxExtractionAttempts bounds the librarian turns one extraction may
-	// start after service stops interrupt earlier ones.
-	maxExtractionAttempts = 3
-)
-
 var librarianActor = trace.Actor{Kind: "agent", ID: librarianAgent}
 
 // Librarian supplies the execution boundary of the librarian's turns: the
@@ -50,13 +37,6 @@ type Librarian struct {
 	Hosts  coreadapter.MCPHosts
 }
 
-// librarianWorkstream is the project's workstream holding the librarian
-// thread and its extraction operations, derived from the project ID.
-func librarianWorkstream(project config.ProjectID) config.WorkstreamID {
-	sum := sha256.Sum256([]byte("librarian:" + string(project)))
-	return config.WorkstreamID("w_" + hex.EncodeToString(sum[:16]))
-}
-
 type extractionInput struct {
 	Extraction int `json:"extraction"`
 }
@@ -65,6 +45,7 @@ func extractionIDs(n int) (transition, event string) {
 	transition = fmt.Sprintf("extract-%d", n)
 	return transition, trace.EventID(transition, "run")
 }
+
 func turnID(n, attempt int) string { return fmt.Sprintf("extract-%d-%d", n, attempt) }
 
 // ensureLibrarianThread creates the librarian's workstream and thread in the
@@ -185,37 +166,6 @@ func extractionState(r *trace.Repository) (*ExtractionState, error) {
 	return state, nil
 }
 
-// progress derives an operation's state from its record: running while a
-// live claim has started the effect, pending while it is queued or waiting to
-// retry (with the retry's reason), otherwise its result's outcome, with the
-// failure's evidence as the reason. The time is the record's last action up to
-// the result, which fixes it: a later acknowledgement does not move it.
-func progress(record trace.OperationRecord) (state, reason string, at time.Time) {
-	state, at = "pending", record.Transition.At
-	for _, a := range record.History {
-		at = a.At
-		if a.Kind == "result" {
-			break
-		}
-		switch a.Kind {
-		case "retry":
-			reason = a.Failure
-		case "claim":
-			reason = ""
-		}
-	}
-	switch {
-	case record.Result != nil:
-		state, reason = record.Result.Outcome, ""
-		if state == "failed" {
-			reason = record.Result.Evidence
-		}
-	case record.EffectStarted && record.Claim != nil:
-		state, reason = "running", ""
-	}
-	return state, reason, at
-}
-
 // projectExtraction reports the active project's latest extraction.
 func (s *Service) projectExtraction(id config.ProjectID) (*ExtractionState, error) {
 	cfg, active := s.runtimeOf(id)
@@ -241,13 +191,13 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	req.Project = id
 	cfg, active := s.runtimeOf(id)
 	if !cfg.HasProject() {
-		return ExtractionResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
+		return ExtractionResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	if active == nil {
-		return ExtractionResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+		return ExtractionResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
 	r := active.repository
-	internal := &APIError{Internal, fmt.Sprintf("cannot record the extraction request in the trace of project %s; check the trace repository", req.Project)}
+	internal := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the extraction request in the trace of project %s; check the trace repository", req.Project)}
 	at := s.now()
 	if _, err := ensureLibrarianThread(ctx, r, at, registrationActor); err != nil {
 		return ExtractionResponse{}, internal
@@ -259,7 +209,7 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	n := 1
 	if state != nil {
 		if state.State == "pending" || state.State == "running" {
-			return ExtractionResponse{}, &APIError{Conflict, fmt.Sprintf("extraction %d of project %s is still %s; wait for it to finish and check osmia status", state.Extraction, req.Project, state.State)}
+			return ExtractionResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("extraction %d of project %s is still %s; wait for it to finish and check osmia status", state.Extraction, req.Project, state.State)}
 		}
 		n = state.Extraction + 1
 	}
@@ -282,7 +232,7 @@ type runnerAdapter struct {
 	amend       *amendmentDrafter
 	amendRounds amendmentDebate
 	rounds      *debate
-	finals      *finalReviewer
+	finals      coreadapter.Reconciler
 	checks      *checkers
 }
 
@@ -309,7 +259,7 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 		return a.rounds.Inspect(ctx, op)
 	}
 	if op.Action == ReplyAction || op.Action == RedraftAction {
-		return replier{a.rounds}.Inspect(ctx, op)
+		return replier{Debate: a.rounds}.Inspect(ctx, op)
 	}
 	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Inspect(ctx, op)
@@ -322,6 +272,7 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	return a.turns.Inspect(ctx, op)
 }
+
 func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	if op.Action == deltaTurnAction {
 		return a.deltas.Apply(ctx, op)
@@ -345,7 +296,7 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 		return a.rounds.Apply(ctx, op)
 	}
 	if op.Action == ReplyAction || op.Action == RedraftAction {
-		return replier{a.rounds}.Apply(ctx, op)
+		return replier{Debate: a.rounds}.Apply(ctx, op)
 	}
 	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Apply(ctx, op)
@@ -419,6 +370,7 @@ func extractionResult(docs []trace.Document) coreadapter.OperationResult {
 	}{subsystems, removed})
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: fmt.Sprintf("recorded %d subsystem files and the entity map", len(subsystems)), Data: data}
 }
+
 func failedExtraction(reason string) coreadapter.OperationResult {
 	return coreadapter.OperationResult{Outcome: "failed", Evidence: reason}
 }
@@ -627,23 +579,6 @@ func (e *extractor) turns() *isolation.Turns {
 	return memoryTurns(turns, e.s.about(e.repository), e.repository)
 }
 
-// stagedWorkspaces lends a service-staged directory as a turn's workspace.
-type stagedWorkspaces struct{}
-
-type noLease struct{}
-
-func (noLease) Release(context.Context) error { return nil }
-
-func (stagedWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
-	if err := ctx.Err(); err != nil {
-		return coreadapter.WorkspaceLease{}, err
-	}
-	if req.SourceDirectory == "" {
-		return coreadapter.WorkspaceLease{}, errors.New("staged workspace requires a source directory")
-	}
-	return coreadapter.WorkspaceLease{Workspace: coreadapter.Workspace{ID: filepath.Base(req.SourceDirectory), Directory: req.SourceDirectory, Access: req.Access}, Lease: noLease{}}, nil
-}
-
 // selectView stages the librarian's workspace for the claimed turn and selects
 // all of it: repo/, kb/, seed/ and the empty output/.
 func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
@@ -759,50 +694,6 @@ func seedTracked(ctx context.Context, clone string) (kb.Map, error) {
 		return kb.Map{}, err
 	}
 	return kb.Seed(dir)
-}
-
-// copyTracked copies the clone's tracked regular files into dst. Git only
-// lists the index; the clone is never written.
-func copyTracked(ctx context.Context, clone, dst string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", clone, "ls-files", "-z")
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("list tracked files of the clone: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	src, err := os.OpenRoot(clone)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	target, err := os.OpenRoot(dst)
-	if err != nil {
-		return err
-	}
-	defer target.Close()
-	for _, entry := range bytes.Split(out, []byte{0}) {
-		name := string(entry)
-		if name == "" || !fs.ValidPath(name) {
-			continue
-		}
-		info, err := src.Lstat(name)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		data, err := src.ReadFile(name)
-		if err != nil {
-			return err
-		}
-		if err := target.MkdirAll(path.Dir(name), 0700); err != nil {
-			return err
-		}
-		if err := target.WriteFile(name, data, 0600|(info.Mode().Perm()&0100)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // capture copies the view's output directory to the turn's directory before

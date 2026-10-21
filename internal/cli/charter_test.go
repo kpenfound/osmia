@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -54,7 +55,7 @@ func TestCharterCommands(t *testing.T) {
 	if out := successful(t, root, "charter"); out != "Charter: 1 proposed rules waiting; decide one with osmia charter <workstream-id> <question> ratify|decline\n\n"+proposed {
 		t.Fatalf("charter output %q", out)
 	}
-	var list service.CharterProposalsResponse
+	var list wire.CharterProposalsResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "charter", "--json")), &list))
 	if len(list.Proposals) != 1 || list.Proposals[0].State != trace.CharterProposed || list.Proposals[0].Rule != "Uploads resume." {
 		t.Fatalf("charter --json %+v", list)
@@ -76,7 +77,7 @@ func TestCharterCommands(t *testing.T) {
 		t.Fatalf("declining a ratified proposal: %d %q", code, diag)
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	var view service.CharterProposalView
+	var view wire.CharterProposalView
 	for {
 		must(t, json.Unmarshal([]byte(successful(t, root, "charter", stream, "1", "--json")), &view))
 		if view.State == trace.CharterChartered {

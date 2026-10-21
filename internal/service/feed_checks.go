@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -117,5 +118,5 @@ func feedSelection(selection *CheckSelection) *FeedCheckSelection {
 	if selection == nil {
 		return nil
 	}
-	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail, Description: selection.describe()}
+	return &FeedCheckSelection{Mode: selection.Mode, Selected: len(selection.Links), Judged: selection.Candidates, Listed: selection.Listed, Reason: selection.Reason, Detail: selection.Detail, Description: checkrun.DescribeSelection(*selection)}
 }

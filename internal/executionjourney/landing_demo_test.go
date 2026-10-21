@@ -1,0 +1,372 @@
+package executionjourney
+
+import (
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const landingPlan = `{"version": 1, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
+]}
+`
+
+const (
+	landingLearning = "Trace snapshots require a clean worktree."
+	landedKnowledge = "# Internal\n\nPrevious project knowledge.\n\n" + landingLearning + "\n"
+)
+
+var landingUnits = map[string]struct{ criterion, file string }{
+	"resume": {"spec#1", ""},
+	"audit":  {"spec#2", "internal/trace/audit.go"},
+	"dedupe": {"spec#2", "internal/trace/dedupe.go"},
+}
+
+type landingDemo struct {
+	mu        sync.Mutex
+	reviews   map[string][]UnitReviewIdentity
+	refreshed []string
+}
+
+func (d *landingDemo) reviewed(unit string) []UnitReviewIdentity {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.reviews[unit])
+}
+
+func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
+	return intakefixture.LandingReview(ctx, unit, req, tools, func(unit string, identity UnitReviewIdentity) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.reviews[unit] = append(d.reviews[unit], identity)
+	})
+}
+
+func (d *landingDemo) refresh(ctx context.Context, entities string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
+	var landings []UnitLanding
+	var reports []UnitReport
+	for path, into := range map[string]any{"source/landings.json": &landings, "source/reports.json": &reports} {
+		body, err := readTool(ctx, tools, path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		if err := json.Unmarshal([]byte(body), into); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	if len(landings) == 0 || len(landings) != len(reports) || !strings.Contains(req.Prompt, landings[len(landings)-1].Commit) {
+		return nil, fmt.Errorf("refresh sources %+v, reports %+v", landings, reports)
+	}
+	var units []string
+	for i, landing := range landings {
+		report := reports[i]
+		if landing.Unit != report.Unit || landing.Candidate != report.Candidate {
+			return nil, fmt.Errorf("refresh source landing %+v, report of %s on %s", landing, report.Unit, report.Candidate)
+		}
+		if landing.Unit == "resume" && !slices.Equal(report.Learnings, []string{landingLearning}) {
+			return nil, fmt.Errorf("resume's learnings %v", report.Learnings)
+		}
+		units = append(units, landing.Unit)
+	}
+	d.mu.Lock()
+	d.refreshed = append(d.refreshed, strings.Join(units, ","))
+	d.mu.Unlock()
+	for path, content := range map[string]string{"output/kb/internal.md": landedKnowledge, "output/kb/entities.json": entities} {
+		if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); err != nil {
+			return nil, err
+		}
+	}
+	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Refreshed", SessionDir: req.SessionDir, NumTurns: 1}, nil
+}
+
+func landingByUnit(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) map[string]trace.Document {
+	t.Helper()
+	return intakefixture.LandingByUnit(t, repository, stream, landingDocument)
+}
+
+func TestLandingDemonstration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, masons := newMasonFixture(t, 1, landingPlan)
+	defer f.stop(t)
+	f.stop(t)
+	configFile, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	must(t, err)
+	_, err = configFile.WriteString(librarianContainer)
+	must(t, errors.Join(err, configFile.Close()))
+	f.opts.Librarian = &Librarian{Engine: f.engine, Hosts: f.opts.Architect.Hosts}
+	f.start(t)
+	must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
+	mapping, err := kb.Load(f.repository())
+	must(t, err)
+	entities, err := kb.Encode(mapping)
+	must(t, err)
+
+	for unit, u := range landingUnits {
+		masons.Play[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+			if u.file != "" {
+				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), u.file), []byte("package trace\n// "+unit+"\n"), 0644); err != nil {
+					return err
+				}
+			}
+			args := map[string]any{"outcome": "Built " + unit}
+			if unit == "resume" {
+				args["learnings"] = []string{landingLearning}
+			}
+			recorded, reason, err := done(ctx, tools, args)
+			if err != nil || !recorded {
+				return fmt.Errorf("done refused: %q %v", reason, err)
+			}
+			return nil
+		}
+	}
+	demo := &landingDemo{reviews: map[string][]UnitReviewIdentity{}}
+	f.engine.Mu.Lock()
+	f.engine.Turns[masonTurnID("audit")] = masons.Turn
+	chief := f.engine.Turns["*"]
+	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		for unit := range landingUnits {
+			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
+				return demo.review(ctx, unit, req, tools)
+			}
+		}
+		if strings.HasPrefix(req.Name, "refresh-") {
+			return demo.refresh(ctx, string(entities), req, tools)
+		}
+		return chief(ctx, req, verified, tools)
+	}
+	f.engine.Mu.Unlock()
+
+	const (
+		held       = "crash: the landing commit was made"
+		afterMoved = "crash: the feature branch moved"
+	)
+	var moving atomic.Bool
+	f.s.boundary = func(name string) error {
+		switch {
+		case name == "land-committed" && !moving.Load():
+			return errors.New(held)
+		case name == "land-advanced" && moving.Load():
+			return errors.New(afterMoved)
+		}
+		return nil
+	}
+	stream, _ := f.builtAs(t, "landing-demo")
+	base := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-parse", featureBranch(stream)))
+	f.awaitUnit(t, stream, "resume", UnitApproved)
+	f.awaitUnit(t, stream, "audit", UnitApproved)
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		ops := landOperations(t, f.repository(), stream)
+		if len(ops) == 1 && slices.ContainsFunc(ops[0].History, func(a trace.OperationAction) bool { return a.Kind == "retry" }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the first landing was never interrupted: %+v", ops)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	f.stop(t)
+	if got := f.landedCommits(t, stream, base); len(got) != 0 {
+		t.Fatalf("an interrupted landing moved the feature branch: %v", got)
+	}
+	approvedAudit := demo.reviewed("audit")
+	if len(approvedAudit) != 1 || approvedAudit[0].Candidate.BaseRevision != base {
+		t.Fatalf("audit's reviews before the first landing: %+v", approvedAudit)
+	}
+
+	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	ops := landOperations(t, repository, stream)
+	first, err := decodeLand(ops[0].Operation)
+	must(t, err)
+	if first.Unit != "resume" || first.Base != base {
+		t.Fatalf("the first landing is %+v, not resume's on %s", first, base)
+	}
+	moving.Store(true)
+	if _, err := (&foreman{masons: newMasonController(f.s, repository)}).Apply(ctx, ops[0].Operation); err == nil || err.Error() != afterMoved {
+		t.Fatalf("the interrupted landing: %v", err)
+	}
+	must(t, repository.Close())
+	moved := f.landedCommits(t, stream, base)
+	if len(moved) != 1 {
+		t.Fatalf("the feature branch holds %v", moved)
+	}
+	f.start(t)
+
+	for _, unit := range []string{"resume", "audit", "dedupe"} {
+		f.awaitMerged(t, stream, unit)
+	}
+	masons.Check(t)
+	landings := landingByUnit(t, f.repository(), stream)
+	decoded := map[string]UnitLanding{}
+	for unit, d := range landings {
+		var l UnitLanding
+		must(t, json.Unmarshal([]byte(d.Content), &l))
+		decoded[unit] = l
+	}
+
+	resume := decoded["resume"]
+	interrupted := ops[0].Operation.ID
+	ops = landOperations(t, f.repository(), stream)
+	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID != interrupted })
+	if len(ops) != 1 || resume.Commit != moved[0] || resume.Operation != interrupted || resume.Candidate != first.Candidate || resume.Base != base || !slices.Equal(resume.Criteria, []string{"spec#1"}) {
+		t.Fatalf("resume's landing %+v, want commit %s of operation %s", resume, moved[0], interrupted)
+	}
+	if ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+		t.Fatalf("the first landing's result %+v", ops[0].Result)
+	}
+	for _, a := range ops[0].History {
+		if a.Kind == "retry" && !strings.Contains(a.Failure, held) {
+			t.Fatalf("the first landing's retry %+v", a)
+		}
+	}
+	if message := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%B", resume.Commit)); message != strings.TrimSpace(resume.Message) || !strings.Contains(message, "Osmia-Candidate: "+resume.Candidate) || !strings.Contains(message, landingTrailer+": "+resume.Operation) {
+		t.Fatalf("resume's landing commit message:\n%s", message)
+	}
+
+	commits := f.landedCommits(t, stream, base)
+	slices.Reverse(commits)
+	if len(commits) != 3 || commits[0] != resume.Commit {
+		t.Fatalf("the feature branch holds %v; resume landed as %s", commits, resume.Commit)
+	}
+	order := map[string]int{}
+	for unit, l := range decoded {
+		order[unit] = slices.Index(commits, l.Commit)
+		if order[unit] < 0 {
+			t.Fatalf("unit %s landed as %s, which the feature branch %v lacks", unit, l.Commit, commits)
+		}
+		parent := base
+		if order[unit] > 0 {
+			parent = commits[order[unit]-1]
+		}
+		if l.Base != parent || l.Branch != featureBranch(stream) || !slices.Equal(l.Criteria, []string{landingUnits[unit].criterion}) {
+			t.Fatalf("unit %s landed %+v on %v", unit, l, commits)
+		}
+		reviews := demo.reviewed(unit)
+		if last := reviews[len(reviews)-1]; last.Candidate.Revision != l.Candidate || last.Candidate.BaseRevision != l.Base {
+			t.Fatalf("unit %s landed candidate %s from %s; its last review was of %+v", unit, l.Candidate, l.Base, last.Candidate)
+		}
+	}
+	if order["dedupe"] < order["resume"] {
+		t.Fatalf("dedupe landed before resume: %v", order)
+	}
+
+	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
+	merged := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("resume")+"-"+UnitMerged })
+	ready := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("dedupe")+"-"+UnitReady })
+	started := slices.IndexFunc(transitions, func(tr trace.Transition) bool {
+		return tr.Subject == trace.UnitSubject("dedupe") && tr.To == UnitImplementing
+	})
+	if merged < 0 || ready < merged || started < ready || transitions[ready].Cause != resume.Operation || transitions[merged].Cause != resume.Operation {
+		t.Fatalf("resume merged at %d, dedupe ready at %d and started at %d", merged, ready, started)
+	}
+
+	rebases := unitRebases(t, f.repository(), stream, "audit")
+	if len(rebases) == 0 || rebases[0].State != UnitApproved || rebases[0].Onto != resume.Commit || rebases[0].Snapshot != approvedAudit[0].Candidate.Revision || len(rebases[0].Conflicts) != 0 {
+		t.Fatalf("audit's rebases %+v", rebases)
+	}
+	back := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("audit")+"-checking-rebase-1" })
+	if back < merged || transitions[back].From != UnitApproved || !strings.HasPrefix(transitions[back].Reason, "the approval no longer holds: ") {
+		t.Fatalf("audit's return to review at %d: %+v", back, transitions[max(back, 0)])
+	}
+	reviews := demo.reviewed("audit")
+	if len(reviews) < 2 || staleReview(approvedAudit[0], reviews[1]) == "" || reviews[1].Candidate.Revision != rebases[0].Commit || reviews[1].Candidate.BaseRevision != resume.Commit {
+		t.Fatalf("audit's reviews %+v after rebase %+v", reviews, rebases[0])
+	}
+	if audit := decoded["audit"]; audit.Candidate == approvedAudit[0].Candidate.Revision || audit.Base == base {
+		t.Fatalf("audit landed its approval from before the rebase: %+v", audit)
+	}
+
+	awaitRefresh(t, f)
+	var refresh trace.OperationRecord
+	var refreshes int
+	lib, err := f.repository().Operations(librarianWorkstream(f.project))
+	must(t, err)
+	for _, op := range lib {
+		var in refreshInput
+		if op.Operation.Action != RefreshAction || json.Unmarshal(op.Operation.Input, &in) != nil || in.Inspection != "" {
+			continue
+		}
+		refreshes++
+		refresh = op
+		var units []string
+		for _, l := range in.Landings {
+			units = append(units, l.Unit)
+			if l.Unit == "resume" && (l.Commit != resume.Commit || l.Landing != landings["resume"].Revision) {
+				t.Fatalf("resume's refresh source %+v", l)
+			}
+		}
+		if in.Workstream != stream || len(in.Landings) != 3 || in.Commit != in.Landings[2].Commit || !slices.Contains(units, "resume") || !slices.Contains(units, "audit") || !slices.Contains(units, "dedupe") {
+			t.Fatalf("refresh source %+v", in)
+		}
+	}
+	demo.mu.Lock()
+	refreshed := slices.Clone(demo.refreshed)
+	demo.mu.Unlock()
+	if refreshes != 1 || refresh.Result == nil || refresh.Result.Outcome != "succeeded" || len(refreshed) != 1 || !strings.Contains(refreshed[0], "resume") {
+		t.Fatalf("%d refreshes, the last %+v; refreshed %v", refreshes, refresh, refreshed)
+	}
+	docs, err := trace.Read[trace.Document](f.repository(), "")
+	must(t, err)
+	var ledger, prose trace.Document
+	for _, d := range docs {
+		switch d.ID {
+		case "kb-sources":
+			ledger = d
+		case "subsystem-internal":
+			if d.Cause == refresh.Operation.ID {
+				prose = d
+			}
+		}
+	}
+	var sources []KnowledgeSource
+	must(t, json.Unmarshal([]byte(ledger.Content), &sources))
+	i := slices.IndexFunc(sources, func(s KnowledgeSource) bool { return s.Operation == refresh.Operation.ID })
+	if prose.Content != landedKnowledge || i < 0 || sources[i].Subsystem != "internal" || sources[i].Revision != prose.Revision || sources[i].Unit != "resume" || sources[i].Commit != resume.Commit || sources[i].Landing != landings["resume"].Revision {
+		t.Fatalf("knowledge provenance %+v; prose %+v", sources, prose.Header)
+	}
+	var resumePrompt, dedupePrompt string
+	for _, req := range masons.Requests(stream) {
+		switch req.Name {
+		case masonTurnID("resume"):
+			resumePrompt = req.Prompt
+		case masonTurnID("dedupe"):
+			dedupePrompt = req.Prompt
+		}
+	}
+
+	if resumePrompt == "" || dedupePrompt == "" || strings.Contains(resumePrompt, landingLearning) || strings.Contains(dedupePrompt, landingLearning) {
+		t.Fatalf("the refreshed knowledge in the mason bundles: resume %t, dedupe %t", strings.Contains(resumePrompt, landingLearning), strings.Contains(dedupePrompt, landingLearning))
+	}
+
+	st, err := f.c.Status(ctx, stream)
+	must(t, err)
+	if len(st.Units) != 3 {
+		t.Fatalf("status units %+v", st.Units)
+	}
+	for _, u := range st.Units {
+		if u.State != UnitMerged || u.Landing == nil || u.Landing.Commit != decoded[u.Unit].Commit || u.Landing.Candidate != decoded[u.Unit].Candidate || u.Landing.Approval != decoded[u.Unit].Approval || !slices.Equal(u.Landing.Criteria, decoded[u.Unit].Criteria) {
+			t.Fatalf("status of unit %s: %+v", u.Unit, u)
+		}
+	}
+}

@@ -1,24 +1,22 @@
 package service
 
 import (
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"io"
-	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/ghlog"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/trace"
+	bytes "bytes"
+	context "context"
+	base64 "encoding/base64"
+	json "encoding/json"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	ghlog "github.com/kpenfound/osmia/internal/ghlog"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	io "io"
+	slog "log/slog"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
 )
 
 func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
@@ -416,25 +414,6 @@ func TestRecoveryDecisionDoesNotResetLoopGuard(t *testing.T) {
 	if !after.Equal(before) {
 		t.Fatal("a recovery instruction reset the no-progress budget")
 	}
-}
-
-// raiseFixtureContest records explicit escalation for owner-inbox fixtures.
-func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
-	t.Helper()
-	contest, found, err := unitContest(r, stream, unit)
-	must(t, err)
-	if !found {
-		t.Fatal("fixture unit has no contest")
-	}
-	data, err := json.Marshal(ChiefContestDecision{Contest: contest.ID, Decision: escalateContest, Turn: "fixture"})
-	must(t, err)
-	h := contest.Header
-	h.Schema = "osmia.trace.document"
-	h.ID = trace.UnitSubject(unit) + "-chief-" + contest.ID
-	h.Revision = 1
-	h.Actor = chiefActor
-	h.Cause = contest.ID
-	must(t, r.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: chiefContestPath(unit, contest.ID), Content: string(data)}}))
 }
 
 func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {

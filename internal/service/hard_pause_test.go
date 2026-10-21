@@ -11,11 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -34,20 +37,14 @@ func (f turnFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadap
 // of the scope, with no failure.
 func checkPauseStop(t *testing.T, q trace.QueuedTurn, scope, reason string) {
 	t.Helper()
-	r := q.Response
-	want := trace.TurnStop{Cause: trace.TurnStopHardPause, Scope: scope, Source: runtime.PauseOwner, Reason: reason}
-	if r == nil || q.CompletedAt.IsZero() || q.Status() != "interrupted" || r.Stop == nil || *r.Stop != want || r.Failure != "" || r.FailureClass != "" || r.Classification != nil {
-		t.Fatalf("turn %s was not stopped by the %s pause: %+v", q.Request.TurnID, scope, q)
-	}
+	intakefixture.CheckPauseStop(t, q, scope, reason)
 }
 
 // checkNoRetry checks that the turn's operation completed with the turn's
 // status and was never scheduled for a retry.
 func checkNoRetry(t *testing.T, op trace.OperationRecord, outcome string) {
 	t.Helper()
-	if !op.Acknowledged || op.Result == nil || op.Result.Outcome != outcome || !op.RetryAt.IsZero() || slices.ContainsFunc(op.History, func(a trace.OperationAction) bool { return a.Kind == "retry" }) {
-		t.Fatalf("turn operation: %+v", op)
-	}
+	intakefixture.CheckNoRetry(t, op, outcome)
 }
 
 func TestRunningTurnsStopWhatAHardPauseCovers(t *testing.T) {
@@ -117,27 +114,7 @@ func TestRunningTurnsStopWhatAHardPauseCovers(t *testing.T) {
 // and n mason threads, agent-<i>, each with its turn t-<i> queued.
 func hardPauseRepository(t *testing.T, n int) (*config.Config, *trace.Repository, *demoClock) {
 	t.Helper()
-	ctx := context.Background()
-	home := t.TempDir()
-	cfg, err := config.Load(fixtureAt(t, home).Config)
-	must(t, err)
-	clock := &demoClock{now: demoStart}
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	t.Cleanup(func() { repo.Close() })
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	for i := range n {
-		agent := fmt.Sprintf("agent-%d", i)
-		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: masonRole, ThreadID: agent}
-		must(t, repo.CreateThread(ctx, identity))
-		turn := fmt.Sprintf("t-%d", i)
-		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 1},
-			AgentID: agent, ThreadID: agent, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work " + turn}
-		_, err := repo.EnqueueTurn(ctx, req)
-		must(t, err)
-	}
-	return cfg, repo, clock
+	return fixturekit.HardPauseRepository(t, n)
 }
 
 // hardPauseService is a service with only the runtime store and the running
@@ -261,7 +238,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -275,7 +252,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	reply := func(id string, cancelled bool) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: id}, FinalResponse: "Answer " + id, Cancelled: cancelled}}
 	}
-	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("chief", false), reply("second", false))}, hooks: map[string]func(context.Context){}}
+	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("chief", false), reply("second", false))}, Hooks: map[string]func(context.Context){}}
 	lives := make(chan *trace.Repository, 1)
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
@@ -288,7 +265,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 
 	entered, stopped, settling := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	turns.hooks["first"] = func(ctx context.Context) {
+	turns.Hooks["first"] = func(ctx context.Context) {
 		close(entered)
 		<-ctx.Done()
 		close(stopped)
@@ -363,7 +340,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
 	chiefEntered, chiefRelease := make(chan struct{}), make(chan struct{})
 	var chiefErr error
-	turns.hooks["chief"] = func(ctx context.Context) {
+	turns.Hooks["chief"] = func(ctx context.Context) {
 		close(chiefEntered)
 		<-chiefRelease
 		chiefErr = ctx.Err()
@@ -396,7 +373,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 		t.Fatalf("resumed turn %+v", second)
 	}
 	var ran []string
-	for _, call := range turns.fake.Calls() {
+	for _, call := range turns.Fake.Calls() {
 		ran = append(ran, call.Scope.Turn)
 	}
 	if !slices.Equal(ran, []string{"first", "chief", "second"}) {

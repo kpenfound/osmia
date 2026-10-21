@@ -1,50 +1,5 @@
 package service
 
-import "slices"
-
-// apiErrAsError lets consistentRead's fn, whose signature returns the
-// standard error interface, carry an *APIError through a retry so the
-// caller can recover it with errors.As.
-type apiErrAsError struct{ api *APIError }
-
-func (e apiErrAsError) Error() string { return e.api.Message }
-
-// maxConsistentReadAttempts bounds consistentRead's retries. Each attempt
-// only repeats in-memory assembly over a trace's own generation-cached scan
-// and the runtime store's own cheap snapshot copy, so it is cheap; the
-// bound exists to give up and return the last attempt rather than retry
-// forever under a sustained burst of commits or runtime overrides.
-const maxConsistentReadAttempts = 20
-
-// consistentRead runs fn repeatedly until none of sources changes across one
-// call, so every separate trace or runtime read fn performs together
-// reflects one generation of each: a commit or a runtime mutation that lands
-// between two of fn's reads is retried from scratch, rather than assembled
-// into a response that mixes state from before it with state from after it.
-// Pass a repository's Generation method for a read scoped to one trace, and
-// also the service's runtime store's Generation when fn reads runtime state
-// too, such as a workstream's archived flag alongside its trace-read
-// status. fn must not write to anything sources covers.
-func consistentRead[T any](fn func() (T, error), sources ...func() uint64) (T, error) {
-	for attempt := 0; attempt < maxConsistentReadAttempts-1; attempt++ {
-		before := generationsOf(sources)
-		v, err := fn()
-		if slices.Equal(generationsOf(sources), before) {
-			return v, err
-		}
-	}
-	return fn()
-}
-
-// generationsOf reads every source once, in order.
-func generationsOf(sources []func() uint64) []uint64 {
-	out := make([]uint64, len(sources))
-	for i, g := range sources {
-		out[i] = g()
-	}
-	return out
-}
-
 // storeGeneration is the service's runtime store's own Generation, suitable
 // as a consistentRead source. Several tests build a *Service directly with
 // no store, the same way production code treats a nil store elsewhere

@@ -1,6 +1,8 @@
 package service
 
-import "github.com/kpenfound/osmia/internal/trace"
+import (
+	trace "github.com/kpenfound/osmia/internal/trace"
+)
 
 // sole returns the runtime of the service's only open project, or nil.
 func (s *Service) sole() *activeProject {
@@ -30,14 +32,4 @@ func (s *Service) setSole(p *activeProject) {
 // runtimeFor is the runtime of an open trace, as the service keeps it.
 func runtimeFor(repository *trace.Repository) *activeProject {
 	return &activeProject{id: repository.Project(), repository: repository}
-}
-
-// traces returns the open traces of the active projects.
-func (s *Service) traces() []*trace.Repository {
-	_, projects := s.runtimes()
-	out := make([]*trace.Repository, len(projects))
-	for i, p := range projects {
-		out[i] = p.repository
-	}
-	return out
 }

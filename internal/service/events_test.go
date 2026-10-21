@@ -14,23 +14,12 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type turnsFunc func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
-
-func (f turnsFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-	return f(ctx, p)
-}
-
-type fixedClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *fixedClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
-func (c *fixedClock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
+type turnsFunc = fixturekit.TurnsFunc
 
 func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	t.Parallel()
@@ -43,7 +32,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
@@ -181,7 +170,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{now: demoStart}
+	clock := &fixedClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)

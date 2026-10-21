@@ -1,80 +1,35 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"reflect"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/trace"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	http "net/http"
+	httptest "net/http/httptest"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 )
 
 // awaitExtraction polls status until the latest extraction is terminal.
 func awaitExtraction(t *testing.T, c *Client) ExtractionState {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		cfg, err := c.Configuration(context.Background())
-		must(t, err)
-		if cfg.Project != nil && cfg.Project.Extraction != nil {
-			if x := cfg.Project.Extraction; x.State == "succeeded" || x.State == "failed" {
-				return *x
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("extraction did not finish: %+v", cfg.Project)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-// awaitExtractionAcknowledged polls the librarian workstream until the latest
-// extraction operation is acknowledged. The reconcile controller records the
-// acknowledgement as a commit after the one carrying the result, so a terminal
-// extraction state is not yet the operation's last commit.
-func awaitExtractionAcknowledged(t *testing.T, s *Service) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if s.sole() != nil {
-			ops, err := s.sole().repository.Operations(librarianWorkstream(s.sole().repository.Project()))
-			must(t, err)
-			extractions, acknowledged := 0, 0
-			for _, o := range ops {
-				if o.Operation.Action != ExtractAction {
-					continue
-				}
-				extractions++
-				if o.Acknowledged {
-					acknowledged++
-				}
-			}
-			if extractions > 0 && extractions == acknowledged {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("extraction was not acknowledged")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return intakefixture.AwaitExtraction(t, c.Configuration)
 }
 
 // librarianFixture is a project root, a clone with tracked and untracked files
@@ -87,64 +42,21 @@ type librarianFixture struct {
 	clock    *demoClock
 }
 
-// librarianContainer runs the librarian in a container, the only sandbox
-// the core executor accepts.
-const librarianContainer = `[roles.librarian]
-sandbox = "container"
-image = "fixture-image"
-`
+const librarianContainer = fixturekit.LibrarianContainer
 
 func newLibrarianFixture(t *testing.T) *librarianFixture {
 	t.Helper()
-	opts, clone := projectFixture(t)
-	home := filepath.Dir(clone)
-	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString(librarianContainer)
-	must(t, errors.Join(err, configFile.Close()))
-	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("# Agents\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "secret.env"), []byte("TOKEN="+demoSecret+"\n"), 0600))
-	must(t, os.MkdirAll(filepath.Join(clone, "scratch"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "scratch", "notes.txt"), []byte("untracked\n"), 0600))
-	must(t, os.MkdirAll(filepath.Join(clone, "node_modules", "left-pad"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "node_modules", "left-pad", "index.js"), []byte("ignored\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("node_modules/\n"), 0600))
-	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS", "AGENTS.md")
-	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
-		return coreadapter.ErrResumeUnavailable
-	}
-	clock := &demoClock{now: demoStart}
-	opts.Reconciliation.Now = clock.Now
-	opts.Librarian = &Librarian{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}}
-	return &librarianFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
+	data := fixturekit.NewLibrarianSetup(t)
+	opts := testOptions(data.Config)
+	opts.Workstreams = nil
+	opts.reviewChecks = fixturekit.PassingChecks
+	opts.Reconciliation.Now = data.Clock.Now
+	opts.Librarian = &Librarian{Engine: data.Engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: data.Sessions}}}
+	return &librarianFixture{opts: opts, clone: data.Clone, engine: data.Engine, sessions: data.Sessions, clock: data.Clock}
 }
 
-// script installs the fake librarian's behaviour for one turn: it writes the
-// given output files and returns a successful result.
-func (f *librarianFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		var err error
-		if check != nil {
-			err = check(ctx, req, verified, tools)
-		}
-		for path, content := range files {
-			if _, e := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); e != nil {
-				err = errors.Join(err, fmt.Errorf("write %s: %w", path, e))
-			}
-		}
-		if err != nil {
-			return nil, err
-		}
-		return &agent.Result{ClaudeID: "session-" + turn, ResultText: "Knowledge base written", SessionDir: req.SessionDir, NumTurns: 2}, nil
-	}
+func (f *librarianFixture) script(turn string, files map[string]string, check func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error) {
+	fixturekit.ScriptLibrarian(f.engine, turn, files, check)
 }
 
 // trackedSeed is the entity seed of the clone's tracked files alone: the
@@ -206,24 +118,12 @@ func extractStatus(t *testing.T, s *Service, body string) int {
 }
 
 func (f *librarianFixture) runs() []string {
-	f.engine.mu.Lock()
-	defer f.engine.mu.Unlock()
-	return slices.Clone(f.engine.runs)
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	return slices.Clone(f.engine.Runs)
 }
 
-func entitiesWith(t *testing.T, seed kb.Map, alias string) string {
-	t.Helper()
-	m := kb.Map{Version: kb.Version}
-	for _, e := range seed.Entities {
-		if e.ID == "internal.trace" {
-			e.Aliases = append(e.Aliases, alias)
-		}
-		m.Entities = append(m.Entities, e)
-	}
-	data, err := kb.Encode(m)
-	must(t, err)
-	return string(data)
-}
+var entitiesWith = intakefixture.EntitiesWith
 
 // checkLibrarianBoundary makes the negative assertions from inside the turn:
 // only tracked files, the current knowledge base and the seed are visible, the
@@ -476,8 +376,8 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 
 	// A third run is refused while it is still running.
 	entered, release := make(chan struct{}), make(chan struct{})
-	f.engine.mu.Lock()
-	f.engine.turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-release:
@@ -492,7 +392,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-three", ResultText: "done", SessionDir: req.SessionDir}, nil
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = c.ExtractProject(ctx, id)
 	must(t, err)
 	select {
@@ -612,11 +512,11 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 		}
 	}
 	// A turn that fails in the backend is a failed extraction with its reason.
-	f.engine.mu.Lock()
-	f.engine.turns["extract-4-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-4-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("model refused")
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	_, err = c.ExtractProject(ctx, id)
 	must(t, err)
 	if x := awaitExtraction(t, c); x.Extraction != 4 || x.State != "failed" || !strings.Contains(x.Reason, "extract-4-1 failed") || !strings.Contains(x.Reason, "model refused") {
@@ -638,13 +538,13 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 	// The first attempt is stopped mid-turn: the backend returns on cancellation.
 	entered := make(chan struct{})
 	var once sync.Once
-	f.engine.mu.Lock()
-	f.engine.turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Mu.Lock()
+	f.engine.Turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() { close(entered) })
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	f.engine.mu.Unlock()
+	f.engine.Mu.Unlock()
 	s, err := Start(ctx, f.opts)
 	must(t, err)
 	c := NewClient(s.Socket())
@@ -721,13 +621,13 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 
 	// An extraction interrupted at every attempt fails with the count.
 	f2 := newLibrarianFixture(t)
-	f2.engine.mu.Lock()
+	f2.engine.Mu.Lock()
 	for attempt := 1; attempt <= maxExtractionAttempts; attempt++ {
-		f2.engine.turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f2.engine.Turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
 		}
 	}
-	f2.engine.mu.Unlock()
+	f2.engine.Mu.Unlock()
 	s2, c2 := start(t, f2.opts)
 	_, err = c2.AddProject(ctx, request(f2.clone))
 	must(t, err)
@@ -749,7 +649,7 @@ func TestExtractionStateWhileRetrying(t *testing.T) {
 	opts := fixtureAt(t, home)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), registrationActor)
 	must(t, err)
 	defer repo.Close()

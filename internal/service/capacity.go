@@ -88,13 +88,13 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 	for _, limit := range state.ProviderLimits {
 		names[limit.Backend] = true
 	}
-	unreadable := &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", cfg.Project.ID)}
+	unreadable := &Diagnostic{Field: "provider_usage", Code: Internal, Message: fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", cfg.Project.ID)}
 	costs := map[string][]trace.Cost{}
 	for _, p := range projects {
 		if !cfg.Active(p.id) && p.pipeline == nil {
 			continue
 		}
-		unreadable = &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", p.id)}
+		unreadable = &Diagnostic{Field: "provider_usage", Code: Internal, Message: fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", p.id)}
 		found, err := providerCosts(p.repository, day)
 		if err == nil {
 			err = s.step("status-provider-usage")

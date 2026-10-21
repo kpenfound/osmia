@@ -8,11 +8,11 @@ import (
 	"regexp"
 	"strings"
 
+	wire "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/swaggest/openapi-go"
 	"github.com/swaggest/openapi-go/openapi31"
-
-	"github.com/kpenfound/osmia/internal/service"
 )
 
 const description = `The Osmia service serves this API over its Unix socket and, when configured,
@@ -79,6 +79,7 @@ func Spec() ([]byte, error) {
 	r.JSONSchemaReflector().DefaultOptions = append(r.JSONSchemaReflector().DefaultOptions,
 		jsonschema.InterceptDefName(func(_ reflect.Type, name string) string {
 			name = strings.TrimPrefix(name, "Service")
+			name = strings.TrimPrefix(name, "Api")
 			// A package's type named after it, such as config.Config.
 			if half := len(name) / 2; len(name)%2 == 0 && name[:half] == name[half:] {
 				return name[:half]
@@ -92,7 +93,7 @@ func Spec() ([]byte, error) {
 		}
 		oc.SetID(operationID(route))
 		oc.SetSummary(route.Summary)
-		if route.Path == service.Prefix+"/feed/{workstream}" {
+		if route.Path == wire.Prefix+"/feed/{workstream}" {
 			oc.SetDescription(feedDescription)
 		}
 		if params := pathParameters(route.Path); params != nil {
@@ -112,7 +113,7 @@ func Spec() ([]byte, error) {
 			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status))
 		}
 		if status < 400 {
-			oc.AddRespStructure(service.ErrorResponse{}, func(cu *openapi.ContentUnit) {
+			oc.AddRespStructure(wire.ErrorResponse{}, func(cu *openapi.ContentUnit) {
 				cu.IsDefault = true
 				cu.Description = "The request failed; the error names its code and reason."
 			})
@@ -159,7 +160,7 @@ func deleteBody(r *openapi31.Reflector, route service.Route) error {
 // getStatusByWorkstream for GET /v1/status/{workstream}.
 func operationID(route service.Route) string {
 	id := strings.ToLower(route.Method)
-	for _, segment := range strings.Split(strings.TrimPrefix(route.Path, service.Prefix+"/"), "/") {
+	for _, segment := range strings.Split(strings.TrimPrefix(route.Path, wire.Prefix+"/"), "/") {
 		if name, ok := strings.CutPrefix(segment, "{"); ok {
 			segment = "by-" + strings.TrimSuffix(name, "}")
 		}

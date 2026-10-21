@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -22,9 +23,9 @@ func TestReloadCommand(t *testing.T) {
 	path := filepath.Join(resolved, "config.toml")
 	original, err := os.ReadFile(path)
 	must(t, err)
-	var before service.ConfigResponse
+	var before wire.ConfigResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &struct {
-		Configuration *service.ConfigResponse `json:"configuration"`
+		Configuration *wire.ConfigResponse `json:"configuration"`
 	}{&before}))
 
 	must(t, os.WriteFile(path, append(append([]byte{}, original...), "[capacity]\nmasons = 0\n"...), 0600))
@@ -37,7 +38,7 @@ func TestReloadCommand(t *testing.T) {
 	}
 
 	must(t, os.WriteFile(path, append(append([]byte{}, original...), "[listen]\nsocket = \"local.sock\"\n[capacity]\nmasons = 7\n"...), 0600))
-	var reloaded service.ReloadResponse
+	var reloaded wire.ReloadResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "reload", "--json")), &reloaded))
 	if reloaded.Digest == before.Digest || len(reloaded.Digest) != 64 || len(reloaded.RestartRequired) != 1 || reloaded.RestartRequired[0] != "listen.socket" {
 		t.Fatalf("reload: %+v", reloaded)

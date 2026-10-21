@@ -90,7 +90,7 @@ func TestFactoryActionLogRecordsCoreServiceAndFactoryEvents(t *testing.T) {
 	must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{now: demoStart}
+	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)

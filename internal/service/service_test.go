@@ -1,205 +1,38 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
-	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"io/fs"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strconv"
-	"strings"
-	"sync"
-	"syscall"
-	"testing"
-	"time"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/trace"
+	bufio "bufio"
+	bytes "bytes"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	fmt "fmt"
+	config "github.com/kpenfound/osmia/internal/config"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	io "io"
+	net "net"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	sync "sync"
+	syscall "syscall"
+	testing "testing"
+	time "time"
 )
-
-const project config.ProjectID = "p_0123456789abcdef0123456789abcdef"
-const stream config.WorkstreamID = "w_0123456789abcdef0123456789abcdef"
-
-func must(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// traceQuery runs query against the trace database in directory through a
-// read-only connection of its own, which needs no lock and so reads beside
-// any handle the service holds.
-func traceQuery(t *testing.T, directory, query string, args ...any) [][]byte {
-	t.Helper()
-	out, err := queryTrace(directory, query, args...)
-	must(t, err)
-	return out
-}
-
-// queryTrace is traceQuery returning its error.
-func queryTrace(directory, query string, args ...any) ([][]byte, error) {
-	db, err := sql.Open("sqlite", "file:"+trace.TraceDatabase(directory)+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out [][]byte
-	for rows.Next() {
-		var value []byte
-		if err := rows.Scan(&value); err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	return out, rows.Err()
-}
-
-// traceExec runs statement against the trace database in directory, which no
-// handle may hold open, to stage damage a test then reads back.
-func traceExec(t *testing.T, directory, statement string, args ...any) {
-	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+trace.TraceDatabase(directory)+"?_pragma=busy_timeout(5000)")
-	must(t, err)
-	defer db.Close()
-	_, err = db.Exec(statement, args...)
-	must(t, err)
-}
-
-// workstreamTraceDirectory is stream's own trace directory.
-func workstreamTraceDirectory(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) string {
-	t.Helper()
-	dir, err := root.WorkstreamTrace(project, stream)
-	must(t, err)
-	return dir
-}
-
-// workstreamRecords returns the bodies of the records stream's trace holds at
-// its logical path name, in the order they were recorded.
-func workstreamRecords(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, name string) [][]byte {
-	t.Helper()
-	return traceQuery(t, workstreamTraceDirectory(t, root, project, stream), "SELECT body FROM records WHERE path = ? ORDER BY seq", "workstreams/"+string(stream)+"/"+name)
-}
-
-// latestDocumentIn returns the content of the latest revision of the
-// document at path in the trace in directory, whose documents are recorded
-// at log. A document with no revision is fs.ErrNotExist.
-func latestDocumentIn(directory, log, path string) ([]byte, error) {
-	bodies, err := queryTrace(directory, "SELECT body FROM records WHERE path = ? ORDER BY seq", log)
-	if err != nil {
-		return nil, err
-	}
-	var latest *trace.Document
-	for _, body := range bodies {
-		var d trace.Document
-		if err := json.Unmarshal(body, &d); err != nil {
-			return nil, err
-		}
-		if d.Path == path {
-			latest = &d
-		}
-	}
-	if latest == nil {
-		return nil, fmt.Errorf("%s: %w", path, fs.ErrNotExist)
-	}
-	return []byte(latest.Content), nil
-}
-
-// workstreamDocument returns the content of the latest revision of the
-// document at path in stream's trace.
-func workstreamDocument(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, path string) ([]byte, error) {
-	t.Helper()
-	return latestDocumentIn(workstreamTraceDirectory(t, root, project, stream), "workstreams/"+string(stream)+"/documents.jsonl", path)
-}
-
-// projectDocument returns the content of the latest revision of the project
-// document at path.
-func projectDocument(t *testing.T, root config.Root, project config.ProjectID, path string) ([]byte, error) {
-	t.Helper()
-	dir, err := root.ProjectTrace(project)
-	must(t, err)
-	return latestDocumentIn(dir, "documents.jsonl", path)
-}
-
-// traceCommits returns how many commits the trace in directory holds.
-func traceCommits(t *testing.T, directory string) int {
-	t.Helper()
-	rows := traceQuery(t, directory, "SELECT CAST(count(*) AS TEXT) FROM commits")
-	n, err := strconv.Atoi(string(rows[0]))
-	must(t, err)
-	return n
-}
 
 // writeCharter records content as the project's next charter revision
 // through the API, as the owner does, and returns that revision.
 func writeCharter(t *testing.T, c *Client, project config.ProjectID, content string) trace.Document {
 	t.Helper()
-	ctx := context.Background()
-	current, err := c.Charter(ctx, project)
-	must(t, err)
-	doc, err := c.EditCharter(ctx, project, CharterEdit{Revision: current.Revision, Content: content})
-	must(t, err)
-	return doc
+	return intakefixture.WriteCharter(t, c, project, content)
 }
 
-// editDraft records spec and plan as the owner's edit of stream's draft
-// through the API. An empty argument keeps that document as it is.
-func editDraft(t *testing.T, c *Client, stream config.WorkstreamID, spec, plan string) map[string]trace.Document {
-	t.Helper()
-	ctx := context.Background()
-	docs, err := c.Documents(ctx, stream)
-	must(t, err)
-	if spec == "" {
-		spec = docs["spec"].Content
-	}
-	if plan == "" {
-		plan = docs["plan"].Content
-	}
-	edited, err := c.EditDraft(ctx, stream, DraftEdit{SpecRevision: docs["spec"].Revision, PlanRevision: docs["plan"].Revision, Spec: spec, Plan: plan})
-	must(t, err)
-	return edited
-}
-
-// awaitAcknowledged polls fetch until it returns operations and the reconcile
-// controller has acknowledged every one of them. An operation's result and its
-// acknowledgement are committed after the state its Apply commits, so a test
-// that reached an operation through an awaited state must wait here before it
-// asserts on the operation's result, acknowledgement or history.
-func awaitAcknowledged(t *testing.T, fetch func(*testing.T) []trace.OperationRecord) []trace.OperationRecord {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		ops := fetch(t)
-		acknowledged := len(ops) > 0
-		for _, o := range ops {
-			if !o.Acknowledged {
-				acknowledged = false
-			}
-		}
-		if acknowledged {
-			return ops
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("operations were not acknowledged: %+v", ops)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
+var awaitAcknowledged = fixturekit.AwaitAcknowledged
 
 func fixture(t *testing.T) Options {
 	t.Helper()
@@ -213,25 +46,9 @@ func fixture(t *testing.T) Options {
 // workstreams are created on Git worktrees whether or not jj is installed.
 func fixtureAt(t *testing.T, home string) Options {
 	t.Helper()
-	root := filepath.Join(home, "root")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(project)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version = 1
-active_projects = [%q]
-workspaces = "git"
-[profiles.default]
-agent = "claude"
-model = "test"
-[profiles.other]
-agent = "codex"
-model = "other"
-`, project)), 0600))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(project), "config.toml"), []byte(`version = 1
-upstream = "upstream/repo"
-fork = "owner/repo"
-clone = "`+filepath.Join(home, "clone")+`"
-`), 0600))
-	return Options{Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, Workstreams: []config.WorkstreamID{stream}, ShutdownTimeout: 100 * time.Millisecond}
+	return testOptions(fixturekit.ConfigAt(t, home))
 }
+
 func start(t *testing.T, opts Options) (*Service, *Client) {
 	t.Helper()
 	s, err := Start(context.Background(), opts)
@@ -245,14 +62,12 @@ func start(t *testing.T, opts Options) (*Service, *Client) {
 	})
 	return s, c
 }
+
 func mutation(t *testing.T, c *Client, method, kind string, input any) {
 	t.Helper()
-	var result MutationResponse
-	must(t, c.Do(context.Background(), method, Prefix+"/runtime/"+kind, input, &result))
-	if !result.Applied {
-		t.Fatal("not acknowledged")
-	}
+	intakefixture.Mutation(t, c, method, kind, input)
 }
+
 func TestRoundTrip(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -280,7 +95,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
 	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priorities) != 1 || before.Effective.Profiles["mason"] != "other" {
@@ -305,8 +120,8 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(before, after)
 	}
 	mutation(t, c2, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
-	mutation(t, c2, "DELETE", "priority", ClearPriorityRequest{project})
-	mutation(t, c2, "DELETE", "profile", ClearProfileRequest{"mason"})
+	mutation(t, c2, "DELETE", "priority", ClearPriorityRequest{Project: project})
+	mutation(t, c2, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
 	after, err = c2.Runtime(ctx)
 	must(t, err)
 	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
@@ -323,6 +138,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("cleared overrides returned after restart")
 	}
 }
+
 func TestRootContention(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -345,8 +161,9 @@ func TestRootContention(t *testing.T) {
 	}
 	_, err = c.Health(context.Background())
 	must(t, err)
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 }
+
 func TestStaleSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -362,6 +179,7 @@ func TestStaleSocket(t *testing.T) {
 	_, err = c.Health(context.Background())
 	must(t, err)
 }
+
 func TestForeignLiveSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -384,6 +202,7 @@ func TestForeignLiveSocket(t *testing.T) {
 	must(t, err)
 	conn.Close()
 }
+
 func TestSocketAndLockArtifacts(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"file", "symlink", "lock-symlink"} {
@@ -412,12 +231,13 @@ func TestSocketAndLockArtifacts(t *testing.T) {
 		})
 	}
 }
+
 func TestInvalidDiskRetainsView(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
 	cfg, err := c.Configuration(ctx)
@@ -450,7 +270,7 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 	if !reflect.DeepEqual(state.Effective, before.Effective) || len(state.Diagnostics) != 1 {
 		t.Fatal(state)
 	}
-	err = c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{"mason", "default"}, nil)
+	err = c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "mason", Profile: "default"}, nil)
 	assertCode(t, err, Conflict)
 	disk, err := os.ReadFile(path)
 	must(t, err)
@@ -458,16 +278,12 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 		t.Fatal("disk overwritten")
 	}
 	must(t, os.WriteFile(path, original, 0600))
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "default"})
+	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "default"})
 	must(t, s.Close())
 }
-func assertCode(t *testing.T, err error, code Code) {
-	t.Helper()
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != code {
-		t.Fatalf("got %v, want %s", err, code)
-	}
-}
+
+var assertCode = fixturekit.AssertCode
+
 func TestErrors(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -485,15 +301,16 @@ func TestErrors(t *testing.T) {
 			t.Fatal(v, resp.StatusCode)
 		}
 	}
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{"missing", "secret"}, nil), Validation)
+	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "missing", Profile: "secret"}, nil), Validation)
 	assertCode(t, c.Do(ctx, "GET", Prefix+"/reload", nil, nil), Unsupported)
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/config/listen", nil, nil), RestartRequired)
 	// A non-regular runtime file is a storage failure, not a validation failure.
 	must(t, os.Mkdir(filepath.Join(opts.Config.Root, "runtime.json"), 0700))
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{"mason", "other"}, nil), Internal)
+	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "mason", Profile: "other"}, nil), Internal)
 	must(t, s.Close())
 	assertCode(t, c.Do(ctx, "GET", Prefix+"/health", nil, nil), Unavailable)
 }
+
 func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -540,6 +357,7 @@ func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 		t.Fatal("acknowledged changes lost")
 	}
 }
+
 func TestCancellationClosesInflightAndReleasesRoot(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -607,6 +425,7 @@ func TestShutdownDrainsAcceptedMutation(t *testing.T) {
 		t.Fatal("drained mutation lost")
 	}
 }
+
 func TestFailedStartupAndConfiguredSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -667,70 +486,4 @@ func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
 	defer syscall.Close(dup)
 	must(t, s.Close())
 	start(t, opts)
-}
-
-// recordSpec records content as the owner's next revision of stream's spec
-// directly in its trace, whatever the workstream's state.
-func recordSpec(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, content string) {
-	t.Helper()
-	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
-	var latest *trace.Document
-	for i := range docs {
-		if docs[i].Path == "spec.md" {
-			latest = &docs[i]
-		}
-	}
-	if latest == nil {
-		t.Fatalf("workstream %s records no spec", stream)
-	}
-	next := *latest
-	next.Revision++
-	next.Content, next.At, next.Actor, next.Cause, next.Depth = content, latest.At.Add(time.Second), trace.Actor{Kind: "owner", ID: "local"}, "owner-edit", 0
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{next}))
-}
-
-// documentCommit returns the commit that recorded the latest revision of the
-// document at path in stream's trace.
-func documentCommit(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, path string) string {
-	t.Helper()
-	rows := traceQuery(t, workstreamTraceDirectory(t, root, project, stream), "SELECT CAST(commit_seq AS TEXT) FROM records WHERE path = ? AND schema = 'osmia.trace.document' AND json_extract(body, '$.path') = ? ORDER BY seq DESC LIMIT 1", "workstreams/"+string(stream)+"/documents.jsonl", path)
-	if len(rows) != 1 {
-		t.Fatalf("workstream %s records no %s", stream, path)
-	}
-	return string(rows[0])
-}
-
-// traceFile returns the trace file name of the trace in directory, such as
-// a role's notes, and whether it exists.
-func traceFile(t *testing.T, directory, name string) ([]byte, bool) {
-	t.Helper()
-	rows := traceQuery(t, directory, "SELECT content FROM files WHERE path = ?", name)
-	if len(rows) == 0 {
-		return nil, false
-	}
-	return rows[0], true
-}
-
-// recordCharter records content as the owner's next charter revision through
-// repo, a trace the test holds itself.
-func recordCharter(t *testing.T, repo *trace.Repository, content string) {
-	t.Helper()
-	ctx := context.Background()
-	current, err := repo.Charter(ctx)
-	must(t, err)
-	_, err = repo.EditCharter(ctx, current.Revision, content, current.At.Add(time.Second))
-	must(t, err)
-}
-
-// committedPaths returns, for each commit of the trace in directory after
-// the first after commits, the record paths and document paths it wrote.
-func committedPaths(t *testing.T, directory string, after int) []string {
-	t.Helper()
-	var out []string
-	for _, seq := range traceQuery(t, directory, "SELECT CAST(seq AS TEXT) FROM commits WHERE seq > ? ORDER BY seq", after) {
-		paths := traceQuery(t, directory, "SELECT path || ' ' || coalesce(json_extract(body, '$.path'), '') FROM records WHERE commit_seq = ? ORDER BY seq", string(seq))
-		out = append(out, string(bytes.Join(paths, []byte("\n"))))
-	}
-	return out
 }

@@ -19,20 +19,25 @@ import (
 	"time"
 
 	corejev "github.com/kpenfound/agentcore/jev"
+	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/skills"
+	"github.com/kpenfound/osmia/internal/tailnet"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -193,8 +198,8 @@ type Service struct {
 	logger    *slog.Logger
 	lock      *os.File
 	listener  *net.UnixListener
-	web       net.Listener // nil unless listen.web is configured
-	tailnet   *tailnetLink // nil unless listen.tailnet is configured
+	web       net.Listener  // nil unless listen.web is configured
+	tailnet   *tailnet.Link // nil unless listen.tailnet is configured
 	// tailnetDone closes when the tailnet supervisor has stopped.
 	tailnetDone chan struct{}
 	socketInfo  os.FileInfo
@@ -208,11 +213,11 @@ type Service struct {
 	requests    sync.WaitGroup
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
-	hub *hub
+	hub *eventstream.Hub
 	// activity is the in-process record of long-running backend operations,
 	// separate from the trace and the runtime store: reporting and reading
 	// it never wait on the trace mutex or on operationMu.
-	activity *activityRegistry
+	activity *activity.Registry
 	// notifier posts new inbox entries to notify.webhook.
 	notifier *notifier
 	// driftAsked is set once an owner's drift rebase request is recorded,
@@ -223,8 +228,8 @@ type Service struct {
 	// statusViews holds the last workstream list statusList produced, so a
 	// request that cannot refresh it within coreReadBound still answers
 	// with that snapshot, marked stale, instead of blocking past the
-	// bound (bounded_read.go, boundedView).
-	statusViews viewCache[StatusResponse]
+	// bound (bounded_read.go, readview.Bounded).
+	statusViews readview.Cache[StatusResponse]
 }
 
 // log returns s's structured logger, or a silent one when a test built s
@@ -283,11 +288,11 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), logger: logger}
-	s.activity = newActivityRegistry(s.now)
-	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
-	s.pool = &scheduler.Shared{Changed: func() { s.hub.publish(Event{Kind: EventCapacity}) }}
-	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.publish(Event{Kind: EventCapacity}) }}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	s.activity = activity.New(s.now)
+	s.activity.Notify = func() { s.hub.Publish(Event{Kind: EventActivity}) }
+	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
+	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
@@ -326,7 +331,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	st.Observe(func() { s.hub.publish(Event{Kind: EventRuntime}) })
+	st.Observe(func() { s.hub.Publish(Event{Kind: EventRuntime}) })
 	defer func() {
 		if err != nil {
 			st.Close()
@@ -371,7 +376,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 	}
 	if cfg.Listen.Tailnet != "" {
-		s.tailnet, s.tailnetDone = &tailnetLink{}, make(chan struct{})
+		s.tailnet, s.tailnetDone = &tailnet.Link{}, make(chan struct{})
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
@@ -397,10 +402,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// A first join that fails leaves the tailnet down for the supervisor
 		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
-			s.tailnet.set(nil, err.Error())
+			s.tailnet.Set(nil, err.Error())
 			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
 		} else {
-			s.tailnet.set(node, "")
+			s.tailnet.Set(node, "")
 			logger.Info("tailnet joined", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "state", "up")
 		}
 	}
@@ -444,18 +449,18 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		defer s.requests.Done()
 		sw := &statusResponseWriter{ResponseWriter: w}
 		started := time.Now()
-		kind := arrivedOn(r)
+		kind := tailnet.ArrivedOn(r)
 		defer func() {
 			ghlog.Logger(r.Context()).Info("api request handled", "listener", listenerName(kind), "method", r.Method, "path", r.URL.Path, "status", sw.status, "duration", time.Since(started).String())
 		}()
 		switch kind {
-		case webListener:
-			if !webAllowed(r) {
+		case tailnet.WebListener:
+			if !tailnet.WebAllowed(r) {
 				fail(sw, Forbidden)
 				return
 			}
-		case tailnetListener:
-			if !tailnetAllowed(r, hostname, s.tailnetNames) {
+		case tailnet.TailnetListener:
+			if !tailnet.Allowed(r, hostname, s.tailnetNames) {
 				fail(sw, Forbidden)
 				return
 			}
@@ -466,7 +471,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
-		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
+		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: tailnet.ConnContext}
 	s.ready.Store(true)
 	for _, p := range projects {
 		s.launch(p)
@@ -476,7 +481,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	go func() {
 		listeners := []net.Listener{listener}
 		if s.web != nil {
-			listeners = append(listeners, tagged{Listener: s.web, kind: webListener})
+			listeners = append(listeners, tailnet.Tagged{Listener: s.web, Kind: tailnet.WebListener})
 		}
 		if s.tailnet != nil {
 			go s.superviseTailnet(root, hostname)
@@ -498,7 +503,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		s.ready.Store(false)
 		// Event streams never go idle, so they end before the drain.
-		s.hub.close()
+		s.hub.Close()
 		drain, stop := context.WithTimeout(context.Background(), opts.ShutdownTimeout)
 		if e := s.server.Shutdown(drain); e != nil {
 			s.server.Close()
@@ -554,11 +559,11 @@ func startedListeners(s *Service) []string {
 
 // listenerName names the listener kind arrivedOn reports, for the
 // api-request-handled log record.
-func listenerName(kind listenerKind) string {
+func listenerName(kind tailnet.ListenerKind) string {
 	switch kind {
-	case webListener:
+	case tailnet.WebListener:
 		return "web"
-	case tailnetListener:
+	case tailnet.TailnetListener:
 		return "tailnet"
 	default:
 		return "socket"
@@ -579,14 +584,17 @@ func (w *statusResponseWriter) WriteHeader(status int) {
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
+
 func (w *statusResponseWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return w.ResponseWriter.Write(p)
 }
+
 func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (s *Service) Socket() string                           { return s.cfg.Listen.Socket }
+
+func (s *Service) Socket() string { return s.cfg.Listen.Socket }
 
 // WebAddr is the bound address of the web listener, or empty when listen.web
 // is not configured.
@@ -603,7 +611,7 @@ func (s *Service) TailnetAddr() string {
 	if s.tailnet == nil {
 		return ""
 	}
-	if node := s.tailnet.current(); node != nil {
+	if node := s.tailnet.Current(); node != nil {
 		return node.Addr().String()
 	}
 	return ""
@@ -621,11 +629,13 @@ func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListene
 	}
 	join := s.options.JoinTailnet
 	if join == nil {
-		join = joinTailscale(s.logger)
+		join = tailnet.JoinTailscale(s.logger)
 	}
 	return join(hostname, dir)
 }
-func (s *Service) Wait() error  { <-s.done; return s.err }
+
+func (s *Service) Wait() error { <-s.done; return s.err }
+
 func (s *Service) Close() error { s.cancel(); return s.Wait() }
 
 // current returns the loaded configuration; project registration replaces it.
@@ -680,20 +690,20 @@ func (s *Service) projectFor(id config.ProjectID) (config.ProjectID, *APIError) 
 	if id == "" {
 		switch len(ids) {
 		case 0:
-			return "", &APIError{NoProject, "no project is configured; add one with osmia project add"}
+			return "", &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 		case 1:
 			return ids[0], nil
 		}
-		return "", &APIError{Validation, "several projects are active; name one of " + projectList(ids)}
+		return "", &APIError{Code: Validation, Message: "several projects are active; name one of " + projectList(ids)}
 	}
 	if err := config.CheckProjectIDs(id); err != nil {
-		return "", &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+		return "", &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 	}
 	if !slices.Contains(ids, id) {
 		if len(ids) == 0 {
-			return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; no project is active", id)}
+			return "", &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; no project is active", id)}
 		}
-		return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; the active projects are %s", id, projectList(ids))}
+		return "", &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; the active projects are %s", id, projectList(ids))}
 	}
 	return id, nil
 }
@@ -722,6 +732,7 @@ func RunSignals(ctx context.Context, opts Options) error {
 	defer stop()
 	return Run(ctx, opts)
 }
+
 func removeStaleSocket(path string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -750,13 +761,14 @@ func removeStaleSocket(path string) error {
 	}
 	return os.Remove(path)
 }
+
 func (s *Service) cleanupSocket() {
 	s.listener.Close()
 	if s.web != nil {
 		s.web.Close()
 	}
 	if s.tailnet != nil {
-		if node := s.tailnet.current(); node != nil {
+		if node := s.tailnet.Current(); node != nil {
 			node.Close()
 			node.Leave()
 		}
@@ -1128,7 +1140,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return nil, nil, nil, err
 	}
 	repository.SetCharterResolver(s.charterRepository)
-	observe := s.hub.traceEvents(cfg.Project.ID)
+	observe := s.hub.TraceEvents(cfg.Project.ID, librarianWorkstream(cfg.Project.ID))
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
 	if options.Worker == "" {
 		options.Worker = "local-operations"
@@ -1189,24 +1201,24 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 // repository. Building them runs no hook and applies no operation.
 func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*stages, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
-	draft := &drafter{s: s, repository: repository}
-	rounds := &debate{s: s, repository: repository}
-	seals := &sealer{s: s, repository: repository}
-	build := &builder{s: s, repository: repository}
+	draft := &drafter{S: s.intake().DrafterDependencies(), Repository: repository}
+	rounds := &debate{S: s.intake().DebateDependencies(), Repository: repository}
+	seals := &sealer{S: s.intake().SealerDependencies(), Repository: repository}
+	build := &builder{S: s.intake().BuilderDependencies(), Repository: repository}
 	overlap := &overlaps{s: s, repository: repository}
-	rules := charterer{s: s, repository: repository}
+	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
-	finals := &finalReviewer{s: s, repository: repository}
-	publish := &publisher{s: s, repository: repository}
-	amend := &amendmentDrafter{drafter: draft}
-	amendRounds := amendmentDebate{rounds}
+	finals := &delivery.FinalReviewer{S: s.delivery(), Repository: repository}
+	publish := &delivery.Publisher{S: s.delivery(), Repository: repository}
+	amend := &amendmentDrafter{Drafter: draft}
+	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
-	runner := runnerAdapter{deltas: deltaRunner{s}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
-	cleanup := &workspaceCleanup{cfg: cfg, repository: repository, now: s.now}
-	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-cleanup", (&archiveCleanup{s: s, workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{s: s, repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
+	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
+	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
+	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/service"
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -31,14 +31,14 @@ func ratifyServer(t *testing.T, handler http.Handler) (string, string) {
 
 func TestRatifySendsOwnerReadPinsWithoutFetchingReplacements(t *testing.T) {
 	t.Parallel()
-	requests := make(chan service.RatifyRequest, 1)
+	requests := make(chan wire.RatifyRequest, 1)
 	root, socket := ratifyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/v1/ratify/"+stream {
 			t.Errorf("explicit decision fetched replacement pins: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected request", http.StatusBadRequest)
 			return
 		}
-		var req service.RatifyRequest
+		var req wire.RatifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 			http.Error(w, "invalid request", http.StatusBadRequest)
@@ -46,7 +46,7 @@ func TestRatifySendsOwnerReadPinsWithoutFetchingReplacements(t *testing.T) {
 		}
 		requests <- req
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": service.APIError{Code: service.Conflict, Message: "the project spec is catching up with the latest member revisions; read the packet again"}})
+		json.NewEncoder(w).Encode(map[string]any{"error": wire.APIError{Code: wire.Conflict, Message: "the project spec is catching up with the latest member revisions; read the packet again"}})
 	}))
 	code, out, diag := invoke(t, root, "ratify", stream, "--project-spec-revision", "7", "--spec-revision", "2", "--plan-revision", "3", "--socket", socket)
 	if code != 5 || out != "" || !strings.Contains(diag, "read the packet again") {
@@ -61,7 +61,7 @@ func TestRatifyWithoutOwnerReadProjectRevisionRecordsNothing(t *testing.T) {
 	t.Parallel()
 	for _, drafted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "drafting", true: "drafted"}[drafted], func(t *testing.T) {
-			packet := service.PacketResponse{ProjectSpecRevision: 7}
+			packet := wire.PacketResponse{ProjectSpecRevision: 7}
 			packet.Packet.Revision.Spec, packet.Packet.Revision.Plan = 2, 3
 			if drafted {
 				packet.ProjectSpec = &trace.ProjectSpec{Behavior: "Shared behavior"}
@@ -100,7 +100,7 @@ func TestRatifySingleWorkstreamRequestOmitsProjectRevision(t *testing.T) {
 			return
 		}
 		requests <- req
-		json.NewEncoder(w).Encode(service.RatifyResponse{Workstream: stream, Spec: req["spec"], Plan: req["plan"]})
+		json.NewEncoder(w).Encode(wire.RatifyResponse{Workstream: stream, Spec: req["spec"], Plan: req["plan"]})
 	})
 	root, socket := ratifyServer(t, mux)
 	successful(t, root, "ratify", stream, "--socket", socket)

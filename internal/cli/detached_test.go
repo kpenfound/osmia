@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/service"
@@ -56,7 +57,7 @@ func TestDetachedServeReadinessDuplicateOwnerAndStop(t *testing.T) {
 	defer func() { detachedCommand = original }()
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
-	defer c.Do(context.Background(), "POST", service.Prefix+"/stop", nil, nil)
+	defer c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil)
 	code, out, diag := invoke(t, root, "serve", "--detach")
 	if code != 0 || diag != "" || !strings.Contains(out, "Osmia is ready") {
 		t.Fatalf("start %d %s %s", code, out, diag)
@@ -203,7 +204,7 @@ func TestForegroundServeFailureIsAStructuredRecordOnStandardError(t *testing.T) 
 	defer func() { detachedCommand = original }()
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
-	defer c.Do(context.Background(), "POST", service.Prefix+"/stop", nil, nil)
+	defer c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil)
 	code, out, diag := invoke(t, root, "serve", "--detach")
 	if code != 0 || diag != "" || !strings.Contains(out, "Osmia is ready") {
 		t.Fatalf("start %d %s %s", code, out, diag)
@@ -354,13 +355,13 @@ func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
 	defer func() { detachedCommand = original }()
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
-	defer c.Do(context.Background(), "POST", service.Prefix+"/stop", nil, nil)
+	defer c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil)
 	code, out, diag := invoke(t, root, "serve", "--detach")
 	if code != 0 || diag != "" || !strings.Contains(out, "Osmia is ready") {
 		t.Fatalf("start %d %s %s", code, out, diag)
 	}
 
-	var added service.ProjectResponse
+	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
 

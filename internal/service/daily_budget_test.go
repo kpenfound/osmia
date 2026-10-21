@@ -1,21 +1,22 @@
 package service
 
 import (
-	"context"
-	"errors"
-	"math/big"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
+	context "context"
+	errors "errors"
+	api "github.com/kpenfound/osmia/internal/api"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	adaptertest "github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	big "math/big"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
 )
 
 // budgetZone is the service host's time zone in daily budget tests: local
@@ -37,13 +38,6 @@ func dailyBudgetService(t *testing.T, n int, backend coreadapter.Turns) (*Servic
 	s.options.Location = budgetZone
 	s.setSole(&activeProject{repository: repo})
 	return s, a, repo, clock
-}
-
-// jump sets the clock; its next reading is one second after at.
-func jump(c *demoClock, at time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = at
 }
 
 // appendDayCost records an attempt's cost in stream, started at at.
@@ -69,16 +63,10 @@ func otherBudgetProject(t *testing.T, s *Service, repo *trace.Repository, clock 
 	return other
 }
 
-// factoryPause returns the factory pause in force, if any.
 func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
 	t.Helper()
 	st, _ := s.store.Effective()
-	for _, p := range st.Pauses {
-		if p.Target == factoryTarget {
-			return p, true
-		}
-	}
-	return runtime.Pause{}, false
+	return fixturekit.PauseOf(api.RuntimeResponse{Effective: st}, factoryTarget)
 }
 
 func budgetStatus(t *testing.T, s *Service) DailyBudgetStatus {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -69,7 +70,7 @@ func TestAmendmentCommands(t *testing.T) {
 	if !strings.HasPrefix(out, "Amendment 1 of "+stream+": presented after round 1\nPacket revision 1:\n") || !strings.Contains(out, "ratify: no objection stands") {
 		t.Fatalf("amendment output %q", out)
 	}
-	var view service.AmendmentResponse
+	var view wire.AmendmentResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "amendment", stream, "1", "--json")), &view))
 	if view.State != "presented" || view.Revision != 1 || view.Decision != nil {
 		t.Fatalf("amendment --json %+v", view)

@@ -115,7 +115,7 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "old_claim", dir, demoStart)
 	must(t, err)
 	must(t, repo.Close())
-	clock := &fixedClock{now: demoStart.Add(time.Minute)}
+	clock := &fixedClock{At: demoStart.Add(time.Minute)}
 	calls := make(chan coreadapter.PreparedTurn, 1)
 	opts.Reconciliation.Now = clock.Now
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {

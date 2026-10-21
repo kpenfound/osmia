@@ -14,9 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefDocumentsGuidance tells every chief-of-staff turn what its view holds.
-const chiefDocumentsGuidance = "Your read-only view holds current workstream documents: spec.md and plan.json while the member is unresolved, what the owner handed in under handed/, the shed rounds under shed/, and the amendment, unit, final review and delivery records once they exist. units/<unit>/activity.json shows each started unit's state, its contest and the rulings the contest takes, its recent transitions and block reasons, and its roles' latest turns with their outcomes and the tool calls the service refused. Call file_read with a path to read a file or list a directory; \".\" lists the whole view. Read the documents a question or event concerns before you answer, escalate or report on it. Use factory_context for retired documents and historical revisions; inspect_code with unit to inspect a mason candidate; read_remote_file to retrieve referenced GitHub files; and record_discovery to track and assign necessary new work. Use route_amendment without a question to commission revised assignments or bounded investigation. Resolve engineering decisions within approved intent; escalate intent changes, constraint exceptions or concrete operational limitations you cannot recover."
-
 // stageChiefDocuments stages current documents, excluding tool calls,
 // inspections and a resolved member's own spec and plan. Historical revisions
 // remain available through factory_context. Each staging replaces the last.
@@ -87,54 +84,6 @@ func stageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, worksp
 // each role's turns and of the unit's transitions; activityText bounds each
 // report and final response.
 const activityTurns, activityTransitions, activityText = 3, 12, 4000
-
-// UnitActivity is what the chief of staff reads of a started unit to see why
-// it is where it is.
-type UnitActivity struct {
-	Unit        string               `json:"unit"`
-	State       string               `json:"state"`
-	Contest     *ActivityContest     `json:"contest,omitempty"`
-	Transitions []ActivityTransition `json:"transitions"`
-	Turns       []ActivityTurn       `json:"turns"`
-}
-
-// ActivityContest is the contest a unit is in, the rulings it takes and how
-// many more the chief of staff may give the unit (-1 means no count gate).
-type ActivityContest struct {
-	ID               string                `json:"id"`
-	Reason           string                `json:"reason"`
-	Rulings          []string              `json:"rulings"`
-	ChiefRulingsLeft int                   `json:"chief_rulings_left"`
-	Decided          *ChiefContestDecision `json:"decided,omitempty"`
-}
-
-type ActivityTransition struct {
-	At      string `json:"at"`
-	Subject string `json:"subject"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Actor   string `json:"actor"`
-	Reason  string `json:"reason"`
-}
-
-// ActivityTurn is one of a role's latest turns on the unit.
-type ActivityTurn struct {
-	Agent         string            `json:"agent"`
-	Turn          string            `json:"turn"`
-	Status        string            `json:"status"`
-	Outcome       string            `json:"outcome,omitempty"`
-	Report        string            `json:"report,omitempty"`
-	FinalResponse string            `json:"final_response,omitempty"`
-	Failure       string            `json:"failure,omitempty"`
-	Refused       []ActivityRefusal `json:"refused,omitempty"`
-}
-
-// ActivityRefusal is a tool call of a turn that the service refused or that
-// failed.
-type ActivityRefusal struct {
-	Tool   string `json:"tool"`
-	Reason string `json:"reason"`
-}
 
 func clip(text string) string {
 	if len(text) <= activityText {

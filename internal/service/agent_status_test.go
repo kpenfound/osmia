@@ -101,10 +101,10 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 			return nil
 		}
 		list, unreadable, api := s.statuses()
-		if api != nil || len(list) != 1 || list[0].Agents != nil || unreadable[stream] != (Diagnostic{"agents", Internal, agentsMessage}) {
+		if api != nil || len(list) != 1 || list[0].Agents != nil || unreadable[stream] != (Diagnostic{Field: "agents", Code: Internal, Message: agentsMessage}) {
 			t.Fatalf("failing %v: %+v %+v %v", failing, list, unreadable, api)
 		}
-		if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, agentsMessage}) {
+		if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Code: Internal, Message: agentsMessage}) {
 			t.Fatalf("failing %v: workstream status %v", failing, api)
 		}
 	}

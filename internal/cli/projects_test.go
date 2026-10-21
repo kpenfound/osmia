@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
@@ -51,7 +52,7 @@ func TestAnswerNamesTheProjectOfTheEntry(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
 
-	var list service.InboxResponse
+	var list wire.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	byProject := map[config.ProjectID][]int{}
 	for _, e := range list.Entries {
@@ -140,12 +141,12 @@ func TestProjectAddWithoutFork(t *testing.T) {
 			if fork != "" {
 				args = append(args, "--fork", fork)
 			}
-			var added service.ProjectResponse
+			var added wire.ProjectResponse
 			must(t, json.Unmarshal([]byte(successful(t, opts.Config.Root, args...)), &added))
 			if added.Project.Fork != "" || added.Project.Upstream != "dagger/dagger" {
 				t.Fatal(added)
 			}
-			var again service.ProjectResponse
+			var again wire.ProjectResponse
 			must(t, json.Unmarshal([]byte(successful(t, opts.Config.Root, args...)), &again))
 			if again.Project.ID != added.Project.ID {
 				t.Fatal("registration was not idempotent")

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -140,7 +141,7 @@ while [ ! -f `+release+` ]; do sleep 0.05; done`))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := c.EditCharter(ctx, project, service.CharterEdit{Revision: 3, Content: "1. Keep changes small.\n"}); err != nil {
+	if _, err := c.EditCharter(ctx, project, wire.CharterEdit{Revision: 3, Content: "1. Keep changes small.\n"}); err != nil {
 		t.Fatal(err)
 	}
 	must(t, os.WriteFile(release, nil, 0600))

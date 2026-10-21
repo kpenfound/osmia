@@ -1,67 +1,25 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/redact"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 // syncBuffer is a bytes.Buffer safe for the concurrent writes a running
 // service's background goroutines, such as the tailnet supervisor, make
 // through its logger.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
+type syncBuffer = fixturekit.SyncBuffer
 
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-// Reset discards everything buffered so far, so a test can assert on only
-// what is logged after a given point.
-func (b *syncBuffer) Reset() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buf.Reset()
-}
-
-// decodeStructuredLines fails the test if any line of text is not a JSON
-// object with a timestamp, a level and a message.
-func decodeStructuredLines(t *testing.T, text string) {
-	t.Helper()
-	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var record struct {
-			Time, Level, Msg string
-		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			t.Fatalf("line is not a JSON object: %s: %v", line, err)
-		}
-		if record.Time == "" || record.Level == "" || record.Msg == "" {
-			t.Fatalf("line is missing a timestamp, level or message: %s", line)
-		}
-	}
-}
+var decodeStructuredLines = fixturekit.DecodeStructuredLines
 
 // TestServiceWritesOnlyStructuredRecordsToItsLogger shows that a service
 // started with a JSON-handler logger writes only JSON-line records through

@@ -95,7 +95,7 @@ func (s *Service) prepareGroupApproval(ctx context.Context, decision trace.Group
 			}
 			// Recovery uses the decision's round and encoded dispositions, never the
 			// current draft or committee record.
-			if api := o.record(ctx, shed.RatificationDocumentID(member.Round), shed.RatificationPath(member.Round), string(pinned), fmt.Sprintf("ratified-%d", member.Round), "prepare the pinned owner workgroup approval"); api != nil {
+			if api := o.Record(ctx, shed.RatificationDocumentID(member.Round), shed.RatificationPath(member.Round), string(pinned), fmt.Sprintf("ratified-%d", member.Round), "prepare the pinned owner workgroup approval"); api != nil {
 				return fmt.Errorf("prepare %s: %s", member.Workstream, api.Message)
 			}
 		}
@@ -119,44 +119,29 @@ func (s *Service) approvalMemberRepository(ctx context.Context, project config.P
 	return repo, err
 }
 
-func groupApprovalResponse(project config.ProjectID, stream config.WorkstreamID, decision trace.GroupApproval) RatifyResponse {
-	out := RatifyResponse{Project: project, Workstream: stream, Sealing: "pending", Detail: "the owner approved the workgroup; member seal preparations are pending"}
-	for _, member := range decision.Members {
-		out.Members = append(out.Members, member.Workstream)
-		if member.Workstream == stream {
-			out.Round, out.Spec, out.Plan = member.Round, member.Spec, member.Plan
-		}
-	}
-	if decision.Complete {
-		out.Sealing = "succeeded"
-		out.Detail = "every pinned member seal is complete; the workgroup is ratified"
-	}
-	return out
-}
-
 // resumeGroupApproval also serves retries after the members have left the shed.
 func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError) {
 	lock := s.groupApprovalLock(id)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := s.step("group-approval-retry-locked"); err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 
 	wt, g, err := s.approvalTrace(ctx, repo, id)
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	defer wt.Close()
 	decision, _, found, err := trace.ReadGroupApproval(wt, g.Members[0])
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if !found {
 		return RatifyResponse{}, false, nil
 	}
 	if decision.ProjectSpecRevision > 0 && projectSpecRevision != decision.ProjectSpecRevision {
-		return RatifyResponse{}, true, &APIError{Conflict, projectSpecCatchingUp}
+		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: projectSpecCatchingUp}
 	}
 	matched := false
 	for _, member := range decision.Members {
@@ -165,17 +150,17 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 		}
 	}
 	if !matched {
-		return RatifyResponse{}, true, &APIError{Conflict, "the request differs from the immutable workgroup approval"}
+		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: "the request differs from the immutable workgroup approval"}
 	}
 	if !decision.Complete {
 		if err := s.prepareGroupApproval(ctx, decision); err != nil {
-			return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+			return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
 	out := groupApprovalResponse(repo.Project(), stream, decision)
 	out.Sealing, out.Detail, err = s.groupApprovalDetail(decision)
 	if err != nil {
-		return RatifyResponse{}, true, &APIError{Internal, err.Error()}
+		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
 	return out, true, nil
 }
@@ -285,8 +270,8 @@ func (s *Service) reconcileGroupApproval(ctx context.Context, repo *trace.Reposi
 		if err != nil || !found {
 			return err
 		}
-		z := &sealer{s: s, repository: r}
-		op, requested, err := z.sealing(member.Workstream, latest)
+		z := &sealer{S: s.intake().SealerDependencies(), Repository: r}
+		op, requested, err := z.Sealing(member.Workstream, latest)
 		if err != nil || !requested {
 			return err
 		}
@@ -294,7 +279,7 @@ func (s *Service) reconcileGroupApproval(ctx context.Context, repo *trace.Reposi
 		if err != nil {
 			return err
 		}
-		outcome, err := z.outcome(member.Workstream, input.Seal, op.Operation.ID)
+		outcome, err := z.Outcome(member.Workstream, input.Seal, op.Operation.ID)
 		if err != nil {
 			return err
 		}
@@ -376,8 +361,8 @@ func (s *Service) groupApprovalDetail(decision trace.GroupApproval) (string, str
 		if !found {
 			continue
 		}
-		z := &sealer{s: s, repository: repo}
-		op, requested, err := z.sealing(member.Workstream, latest)
+		z := &sealer{S: s.intake().SealerDependencies(), Repository: repo}
+		op, requested, err := z.Sealing(member.Workstream, latest)
 		if err != nil {
 			return "", "", err
 		}
@@ -388,7 +373,7 @@ func (s *Service) groupApprovalDetail(decision trace.GroupApproval) (string, str
 		if err != nil {
 			return "", "", err
 		}
-		outcome, err := z.outcome(member.Workstream, input.Seal, op.Operation.ID)
+		outcome, err := z.Outcome(member.Workstream, input.Seal, op.Operation.ID)
 		if err != nil {
 			return "", "", err
 		}
