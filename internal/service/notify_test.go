@@ -157,14 +157,7 @@ var soon = intakefixture.Soon
 // 20-second deadline.
 func settled(t *testing.T, count func() int) {
 	t.Helper()
-	window := 50 * time.Millisecond
-	last, stableSince := count(), time.Now()
-	soon(t, "activity to settle", func() bool {
-		if n := count(); n != last {
-			last, stableSince = n, time.Now()
-		}
-		return time.Since(stableSince) >= window
-	})
+	intakefixture.Settled(t, count)
 }
 
 // breakInbox makes the inbox unreadable, or readable again, and announces it.

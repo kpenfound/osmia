@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -31,16 +33,7 @@ type lifecycleCleanupGate struct {
 }
 
 func (g *lifecycleCleanupGate) checkpoint(ctx context.Context, step string) error {
-	if step != "archive-cleanup-ready" {
-		return nil
-	}
-	g.reachOnce.Do(func() { close(g.reached) })
-	select {
-	case <-g.released:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return intakefixture.CleanupCheckpoint(ctx, step, g.reached, g.released, &g.reachOnce)
 }
 
 func (g *lifecycleCleanupGate) release() {

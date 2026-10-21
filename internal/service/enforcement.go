@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
@@ -89,7 +90,7 @@ var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_wri
 // unitMasonGrant is what a unit mason turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
-var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, factoryContextTool, projectContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
+var unitMasonGrant = execution.UnitMasonGrant
 
 // reviewerGrant is what a unit reviewer turn may do: read its candidate and
 // diff, ask the chief of staff, read factory context, record a discovery and
@@ -225,7 +226,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Scoped: func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					amend, err := driftMasonTools(r, scope, now)
-					return append([]coreadapter.Tool{reports.driftTool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope)}, amend...), err
+					return append([]coreadapter.Tool{reports.DriftTool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope)}, amend...), err
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
 					ask, err := questions.Tools(r, driftReviewerAgent, scope, now)
@@ -236,11 +237,11 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return nil, err
 					}
-					return append(ask, verdicts.tool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope), diff), nil
+					return append(ask, verdicts.Tool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope), diff), nil
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
-					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), reports.tool(r, scope)), err
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), reports.Tool(r, scope)), err
 				}
 				if scope.Role == reviewerRole {
 					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
@@ -248,7 +249,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.Tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
@@ -281,7 +282,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			},
 		}
 		turns = memoryTurns(turns, cfg, r)
-		runner := threadRunner(cfg, r, &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: &retriedTurns{Turns: turns, units: units, repository: r}, reports: reports}, reports: verdicts}, Repository: r}, now)
+		runner := threadRunner(cfg, r, &questions.Turns{Turns: execution.NewVerdictTurns(execution.NewReportingTurns(execution.NewRetriedTurns(turns, units.UnitWorkspaces, r), reports), verdicts), Repository: r}, now)
 		if service := controls.service.Load(); service != nil {
 			runner.OnProviderLimit = service.recordProviderLimit
 			runner.AdmitRole = service.admitRole

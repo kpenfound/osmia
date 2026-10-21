@@ -1,5 +1,7 @@
 package service
 
+// Test-prefixed exports in this file are test-only seams for running-service fixtures.
+
 const TestBaseRefreshAction = baseRefreshAction
 
 var TestChiefActions = chiefActions
@@ -51,3 +53,26 @@ var TestReviewerActor = reviewerActor
 var TestUnitContest = unitContest
 
 type TestVerdictTurns = verdictTurns
+
+var TestStageChiefDocuments = stageChiefDocuments
+var TestWithActions = withActions
+var TestDriftResolveTurnID = driftResolveTurnID
+var TestDriftReviewTurnID = driftReviewTurnID
+var TestDriftDiffTool = driftDiffTool
+var TestDriftWorkspaces = driftWorkspaces
+var TestOperationTrailer = operationTrailer
+var TestErrDriftAwaits = errDriftAwaits
+
+const TestDriftRebased = driftRebased
+const TestCommitChange = commitChange
+const TestDriftDocument = driftDocument
+const TestDriftMasonAgent = driftMasonAgent
+const TestDriftReviewerAgent = driftReviewerAgent
+const TestDriftsDirectory = driftsDirectory
+const TestLibrarianAgent = librarianAgent
+
+type TestRefreshInput = refreshInput
+
+var TestContestOptions = contestOptions
+
+const TestTurnRetries = turnRetries

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -67,13 +69,7 @@ func unblockArchiveCleanup(t *testing.T, ctx context.Context, repository *trace.
 // snapshot, and whether it has one at all.
 func archiveRecord(t *testing.T, store *runtime.Store, stream config.WorkstreamID) (runtime.Archive, bool) {
 	t.Helper()
-	state, _ := store.Snapshot()
-	for _, a := range state.Archived {
-		if a.Workstream == stream {
-			return a, true
-		}
-	}
-	return runtime.Archive{}, false
+	return intakefixture.ArchiveRecord(t, store, stream)
 }
 
 // workstreamTraceUnchanged fails t if the workstream's own trace holds a

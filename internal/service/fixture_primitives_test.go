@@ -108,8 +108,6 @@ const passedReport = fixturekit.PassedReport
 
 var failedReport = fixturekit.FailedReport
 
-var passing = fixturekit.Passing
-
 type fakeJJ = fixturekit.FakeJJ
 
 func testOptions(cfg config.Options) Options {
@@ -127,3 +125,5 @@ type faults = intakefixture.Faults
 var amendmentOp = intakefixture.AmendmentOp
 
 var apiError = intakefixture.ApiError
+
+var passing = fixturekit.Passing

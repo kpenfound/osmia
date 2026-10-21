@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -44,19 +45,7 @@ func awaitResolution(t *testing.T, s *Service, d drifter, stream config.Workstre
 // drift agent as a finished turn that ends with outcome, and returns it.
 func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()
-	ctx := context.Background()
-	th, err := repository.Thread(stream, agent)
-	must(t, err)
-	i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() })
-	if i < 0 {
-		t.Fatalf("thread %s has no turn to run", agent)
-	}
-	token := "done-" + th.Turns[i].Request.TurnID
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
-	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.clock.Now())
-	must(t, err)
-	completeClaimedTurn(t, f, repository, stream, agent, q, outcome)
-	return q
+	return intakefixture.CompleteDriftTurn(t, f.sharedTurns(), repository, stream, agent, outcome)
 }
 
 // completeClaimedTurn ends the claimed turn q of the workstream's agent as a
@@ -77,9 +66,7 @@ func resolvedDone(outcome string) *coreadapter.Outcome {
 // verdict.
 func driftVerdict(t *testing.T, verdict UnitVerdict) *coreadapter.Outcome {
 	t.Helper()
-	data, err := json.Marshal(verdict)
-	must(t, err)
-	return &coreadapter.Outcome{Status: verdictOutcome, Report: string(data)}
+	return intakefixture.VerdictOutcome(t, verdict, verdictOutcome)
 }
 
 var (
@@ -92,27 +79,13 @@ var (
 // when it has no thread.
 func turnIDs(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, agent string) []string {
 	t.Helper()
-	th, err := repository.Thread(stream, agent)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	must(t, err)
-	var ids []string
-	for _, q := range th.Turns {
-		ids = append(ids, q.Request.TurnID)
-	}
-	return ids
+	return intakefixture.TurnIDs(t, repository, stream, agent)
 }
 
 // resolutionWorkspace returns the workstream's drift resolution workspace.
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
-	w, found, err := workspaces(f.s.cfg, driftsDirectory, backendOf(t, f, stream)).Workspace(context.Background(), string(stream))
-	must(t, err)
-	if !found {
-		t.Fatal("the workstream has no drift resolution workspace")
-	}
-	return w
+	return intakefixture.Workspace(t, workspaces(f.s.cfg, driftsDirectory, backendOf(t, f, stream)), stream)
 }
 
 // featureTip returns the tip of the workstream's feature branch.
@@ -512,7 +485,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	}
 
 	reports := &masonReports{}
-	tool := reports.driftTool(scope)
+	tool := reports.DriftTool(scope)
 	for _, raw := range []string{`{"outcome":" "}`, `{"outcome":"Kept both owners"}`, `{"outcome":"again"}`} {
 		out, err := tool.Handle(ctx, json.RawMessage(raw))
 		must(t, err)
@@ -521,7 +494,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 			t.Fatalf("done %s returned %s", raw, out)
 		}
 	}
-	if got := reports.accepted[turnKey(scope)]; got.Report.Outcome != "Kept both owners" || got.Card != (coreadapter.Card{}) {
+	if got := reports.AcceptedForTest(turnKey(scope)); got.Report.Outcome != "Kept both owners" || got.Card != (coreadapter.Card{}) {
 		t.Fatalf("the accepted report %+v", got)
 	}
 }
@@ -530,13 +503,9 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 // drift review through the drift reviewer's workstream_diff tool.
 func driftResolutionDiff(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) string {
 	t.Helper()
-	tool, err := driftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: driftReviewerAgent, Turn: driftReviewTurnID(1, 1), Role: reviewerRole})
-	must(t, err)
-	out, err := tool.Handle(context.Background(), json.RawMessage(`{"change":"resolution"}`))
-	must(t, err)
-	var got struct{ Diff string }
-	must(t, json.Unmarshal(out, &got))
-	return got.Diff
+	return intakefixture.DriftResolutionDiff(t, func() (coreadapter.Tool, error) {
+		return driftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: driftReviewerAgent, Turn: driftReviewTurnID(1, 1), Role: reviewerRole})
+	})
 }
 
 // A drift rebase whose conflict resolution review sends back

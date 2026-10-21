@@ -31,7 +31,7 @@ type TestBuilding struct {
 
 func (d *TestUnitDriver) Read(w config.WorkstreamID) (TestBuilding, bool, error) {
 	b, found, err := d.read(w)
-	return TestBuilding{State: b, Plan: b.plan, States: b.states}, found, err
+	return TestBuilding{State: b, Plan: b.Plan(), States: b.States()}, found, err
 }
 func (d *TestUnitDriver) Start(ctx context.Context, b TestBuilding, u string) (bool, bool, error) {
 	return d.start(ctx, b.State, u)
@@ -111,4 +111,14 @@ type TestFinalInput = finalReviewInput
 
 func (d *TestUnitDriver) CandidateEvidence(ctx context.Context, w config.WorkstreamID, u string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	return d.candidateEvidence(ctx, w, u)
+}
+
+// TestDriftDriver lets local execution fixtures reconcile a drift that carries units.
+type TestDriftDriver struct{ drifter }
+
+func DriftForTest(s *Service, r *trace.Repository) *TestDriftDriver {
+	return &TestDriftDriver{drifter{&foreman{masons: &masons{s: s, cfg: s.about(r), repository: r}}}}
+}
+func (d *TestDriftDriver) Request(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
+	return d.requestDrifts(ctx, due)
 }

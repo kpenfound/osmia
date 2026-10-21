@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -80,18 +80,7 @@ type finalReviewInput struct {
 	Charter int    `json:"charter"`
 }
 
-// FinalRebase is the document final/rebase.json: the rebase of the feature
-// branch that final review Review reads. Before is the branch commit the
-// review was asked for, Upstream the upstream commit it was rebased onto and
-// Commit the rebased branch commit.
-type FinalRebase struct {
-	Review    int       `json:"review"`
-	Operation string    `json:"operation"`
-	Branch    string    `json:"branch"`
-	Upstream  seal.Base `json:"upstream"`
-	Before    string    `json:"before"`
-	Commit    string    `json:"commit"`
-}
+type FinalRebase = execution.FinalRebase
 
 // The severities of a final finding. A blocking finding stops delivery until
 // work resolves it or the owner accepts it; an advisory one is shown to the
@@ -199,7 +188,7 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 // sealed plan has merged, and does nothing while any has not, while work
 // remains unresolved, or while a move to building holds it for a revision.
 func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID) error {
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
+	b, found, err := a.s.execution().Units(a.repository).ReadSealed(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -218,7 +207,7 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 	}
 	var ids []string
 	subjects := map[string]bool{}
-	for _, u := range b.plan.Units {
+	for _, u := range b.Plan().Units {
 		ids = append(ids, u.ID)
 		subjects[trace.UnitSubject(u.ID)] = true
 	}
@@ -251,14 +240,7 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 
 // allMerged reports whether the building workstream's plan has units and
 // every one of them has merged.
-func allMerged(b building) bool {
-	for _, u := range b.plan.Units {
-		if b.states[trace.UnitSubject(u.ID)].Value != UnitMerged {
-			return false
-		}
-	}
-	return len(b.plan.Units) > 0
-}
+var allMerged = execution.AllMerged
 
 // errNoFeatureBranch is a workstream whose feature branch the clone lacks.
 var errNoFeatureBranch = errors.New("the clone has no feature branch")
@@ -336,7 +318,7 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if scheduler.Paused(state.Pauses, a.repository.Project(), stream) {
 		return nil
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
+	b, found, err := a.s.execution().Units(a.repository).ReadSealed(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -600,10 +582,12 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	rebase, rebased, err := a.rebase(stream, in.Review)
+	landing := a.s.execution().Landing(a.repository)
+	rebase, rebased, err := landing.ReadFeatureRebase(stream, in.Review)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+
 	if now.Move != in.Move {
 		return fail(fmt.Sprintf("the workstream was moved since the review was asked for; move %d asks for a fresh review", now.Move))
 	}
@@ -615,65 +599,29 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return coreadapter.OperationResult{}, err
 	}
 	if !rebased {
-		if now.Commit != in.Commit {
-			return fail(fmt.Sprintf("feature branch %s moved to %s since the review was asked for", report.Branch, now.Commit))
-		}
-		requested, err := (&foreman{masons: &masons{s: a.s, cfg: cfg, repository: a.repository}}).requestedAt(stream, op.ID)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		upstream, err := a.s.resolveBase(ctx, cfg, a.repository, stream, g)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		fetched := upstream.Commit
-		if err := a.s.step("final-rebase-replaying"); err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		currentBase, err := branchBase(ctx, a.repository, stream, g, in.Commit)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
 		var conflicts []string
-		err = workspace.LocalStep(ctx, string(stream)+"/"+op.ID+"/replay", requested, []workspace.Provider{g}, func(local context.Context) error {
-			commit, paths, err := g.ReplayFrom(local, currentBase.Commit, in.Commit, fetched, requested)
-			if err != nil {
-				return err
-			}
-			conflicts = paths
+		var reason string
+		rebase, conflicts, reason, err = landing.PrepareFeatureRebase(ctx, g, stream, execution.FinalRebase{Review: in.Review, Operation: op.ID, Branch: report.Branch, Before: in.Commit}, now.Commit,
+			func() (seal.Base, error) { return a.s.resolveBase(ctx, cfg, a.repository, stream, g) },
+			func() (seal.Base, error) { return branchBase(ctx, a.repository, stream, g, in.Commit) })
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if reason != "" {
 			if len(conflicts) > 0 {
-				return nil
+				report.Upstream, report.Conflicts = &rebase.Upstream, conflicts
 			}
-			rebase = FinalRebase{Review: in.Review, Operation: op.ID, Branch: report.Branch, Upstream: upstream, Before: in.Commit, Commit: commit}
-			return a.recordRebase(local, stream, rebase)
-		})
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if len(conflicts) > 0 {
-			report.Upstream, report.Conflicts = &upstream, conflicts
-			return fail(fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch is left at %s", report.Branch, upstream.Remote, upstream.Branch, fetched, strings.Join(conflicts, ", "), in.Commit))
-		}
-		if err := a.s.step("final-rebase-recorded"); err != nil {
-			return coreadapter.OperationResult{}, err
+			return fail(reason)
 		}
 	}
+
 	report.Upstream = &rebase.Upstream
-	if now.Commit != rebase.Before && now.Commit != rebase.Commit {
-		return fail(fmt.Sprintf("feature branch %s moved to %s during the review", report.Branch, now.Commit))
-	}
-	err = workspace.LocalStep(ctx, string(stream)+"/"+op.ID+"/move", a.s.now(), []workspace.Provider{g}, func(local context.Context) error {
-		acquired, err := g.Acquire(local, vcs.Request{Name: string(stream), Branch: report.Branch})
-		if err != nil {
-			return fmt.Errorf("feature branch %s: %w", report.Branch, err)
-		}
-		return g.Move(local, acquired.(workspace.Worktree), rebase.Before, rebase.Commit)
-	})
+	reason, err := landing.MoveFeatureRebase(ctx, g, stream, rebase, now.Commit)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if err := a.s.step("final-rebase-moved"); err != nil {
-		return coreadapter.OperationResult{}, err
+	if reason != "" {
+		return fail(reason)
 	}
 	report.Commit = rebase.Commit
 	checks, err := a.finalChecks(ctx, cfg, stream, report)
@@ -683,40 +631,8 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return a.read(ctx, cfg, stream, in, report, checks)
 }
 
-// rebase returns the recorded rebase of final review k, and whether one is.
 func (a *finalReviewer) rebase(stream config.WorkstreamID, k int) (FinalRebase, bool, error) {
-	docs, err := trace.Read[trace.Document](a.repository, stream)
-	if err != nil {
-		return FinalRebase{}, false, err
-	}
-	for _, d := range slices.Backward(docs) {
-		if d.ID != finalRebaseDocument {
-			continue
-		}
-		var r FinalRebase
-		if err := json.Unmarshal([]byte(d.Content), &r); err != nil {
-			return FinalRebase{}, false, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
-		}
-		if r.Review == k {
-			return r, true, nil
-		}
-	}
-	return FinalRebase{}, false, nil
-}
-
-// recordRebase records the next revision of final/rebase.json.
-func (a *finalReviewer) recordRebase(ctx context.Context, stream config.WorkstreamID, rebase FinalRebase) error {
-	content, err := json.MarshalIndent(rebase, "", "  ")
-	if err != nil {
-		return err
-	}
-	revision, err := nextRevision(a.repository, stream, finalRebaseDocument)
-	if err != nil {
-		return err
-	}
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalRebaseDocument, Revision: revision, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: foremanActor, Cause: rebase.Operation},
-		Path: finalRebasePath, Content: string(content) + "\n"}
-	return a.repository.RecordDocuments(ctx, []trace.Document{doc})
+	return execution.ReadFeatureRebase(a.repository, stream, k)
 }
 
 // read drives the first committee member's turn of the review to its end
@@ -999,15 +915,15 @@ func (a *finalReviewer) coverage(stream config.WorkstreamID, report FinalReport)
 	if err != nil {
 		return nil, err
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
+	b, found, err := a.s.execution().Units(a.repository).ReadSealed(stream)
 	if err != nil {
 		return nil, err
 	}
 	for i, c := range criteria {
 		var units []string
 		if found {
-			for _, u := range b.plan.Units {
-				if slices.Contains(u.Criteria, c.Criterion) && b.states[trace.UnitSubject(u.ID)].Value == UnitMerged {
+			for _, u := range b.Plan().Units {
+				if slices.Contains(u.Criteria, c.Criterion) && b.States()[trace.UnitSubject(u.ID)].Value == UnitMerged {
 					units = append(units, u.ID)
 				}
 			}
@@ -1599,7 +1515,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 	} else if stale {
 		return report, fmt.Sprintf("final review %d is stale: its upstream base changed; a new final review is required", report.Review), nil
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
+	b, found, err := a.s.execution().Units(a.repository).ReadSealed(stream)
 	if err != nil {
 		return report, "", err
 	}

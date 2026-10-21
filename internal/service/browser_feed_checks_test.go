@@ -2,22 +2,16 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	cdppage "github.com/chromedp/cdproto/page"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/chromedp/chromedp"
-	"github.com/kpenfound/agentcore/jev/jevtest"
-	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
-	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,21 +22,11 @@ import (
 // unrelated agent turns and delivery never run.
 func startFeedChecks(t *testing.T, f *shedFixture, checks ReviewChecks, action string) func() {
 	t.Helper()
-	file, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-	must(t, err)
-	_, err = file.WriteString("\n[listen]\nweb = \"127.0.0.1:0\"\n")
-	must(t, err)
-	must(t, file.Close())
-	var ready atomic.Bool
-	ticks := make(chan time.Time, 1)
-	f.opts.Reconciliation.Ticks = ticks
-	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		return !ready.Load() || op.Action != action
-	}
-	f.opts.reviewChecks = checks
-	f.start(t)
-	t.Cleanup(func() { f.stop(t) })
-	return func() { ready.Store(true); ticks <- f.clock.Now() }
+	return intakefixture.StartFeedChecks(t, f.opts.Config.Root, f.clock.Now, action, func(ticks chan time.Time, hold func(config.WorkstreamID, coreadapter.Operation) bool) {
+		f.opts.Reconciliation.Ticks = ticks
+		f.opts.Reconciliation.Hold = hold
+		f.opts.reviewChecks = checks
+	}, f.start, f.stop)
 }
 
 // openCheckFeed observes the page's actual EventSource without replacing any
@@ -50,100 +34,7 @@ func startFeedChecks(t *testing.T, f *shedFixture, checks ReviewChecks, action s
 // if the configuration poll would otherwise refresh the page later.
 func openCheckFeed(t *testing.T, f *shedFixture, stream config.WorkstreamID) *page {
 	t.Helper()
-	p := openBrowser(t)
-	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
-		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`
-   window.feedEvents = [];
-   window.sameFeedDocument = true;
-   window.setInterval = () => 0;
-   const ServiceEvents = window.EventSource;
-   window.EventSource = class extends ServiceEvents {
-    constructor(...args) {
-     super(...args);
-     this.addEventListener('workstream', event => feedEvents.push(JSON.parse(event.data)));
-    }
-   };`).Do(ctx)
-		return err
-	}))
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.SelectWorkstream(stream)
-	p.AwaitText(`[data-workstream="`+string(stream)+`"] [data-kind=transition][data-subject=feature]`, "Workstream")
-	p.Eval(`window.feedEvents.length = 0`, nil)
-	return p
-}
-
-func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"selected", "narrowed", "full"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			checks := newHeldChecks()
-			count, judged, selected := 113, 113, 3
-			if mode == "narrowed" {
-				count, judged, selected = checkselect.MaxQuestions+1, 1, 1
-			}
-			for i := range count {
-				checks.links = append(checks.links, fmt.Sprintf("dag+check://go/packages/tests/test?go-package=internal/trace&go-test=Test%03d", i))
-			}
-			f, stream, repo := newChecksFixture(t, "browser-unit-checks", checks)
-			must(t, repo.Close())
-			allow := startFeedChecks(t, f, checks, CheckAction)
-			if mode != "full" {
-				answers := map[string]systemone.Answer{}
-				for i := range judged {
-					probability := 0.1
-					if i < selected {
-						probability = 0.9
-					}
-					answers[checkselect.Question(i)] = jevtest.Noul(probability)
-				}
-				boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
-			}
-			p := openCheckFeed(t, f, stream)
-			const entry = `[data-kind=unit_checks][data-unit=resume][data-run="1"]`
-			p.Await("checks have not started", `!document.querySelector(`+quote(entry)+`)`)
-			allow()
-			ran := awaitCheck(t, checks.entered)
-			awaitFeedEvent(p, stream)
-			p.Await("the running check entry", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-			p.AwaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
-			selection := "checking " + strconv.Itoa(selected) + " of " + strconv.Itoa(judged)
-			if mode == "full" {
-				selection = "checking every check: the Jev boost is off"
-				if len(ran) != 0 {
-					t.Fatalf("full run selected links: %v", ran)
-				}
-			} else if len(ran) != selected {
-				t.Fatalf("runner received %v, want %d selected checks", ran, selected)
-			}
-			p.AwaitText(entry+` [data-field=selection]`, selection)
-			if mode == "narrowed" {
-				p.AwaitText(entry+` [data-field=listed]`, "narrowed from 129 listed")
-			}
-			assertFeedAnnotations(t, p, entry, 1)
-			// A recorded failure tests both the terminal state and wrapping a long
-			// check link on a phone. The full run completes successfully.
-			state := ChecksFailed
-			failed := checks.links[0]
-			outcome := checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport(failed)}}
-			if mode == "full" {
-				state = ChecksPassed
-				outcome = checkOutcome{Result: CheckResult{Output: passedReport}}
-			}
-			checks.release <- outcome
-			awaitFeedEvent(p, stream)
-			p.Await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
-			if mode == "full" {
-				selection = "every check ran: the Jev boost is off"
-			} else {
-				p.AwaitText(entry+` [data-field=failed]`, failed)
-			}
-			p.AwaitText(entry+` [data-field=selection]`, selection)
-			p.Await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)
-			assertFeedAnnotations(t, p, entry, 1)
-		})
-	}
+	return &page{browsertest.OpenCheckFeed(t, f.s.WebAddr(), stream)}
 }
 
 func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {

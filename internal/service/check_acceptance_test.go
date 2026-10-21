@@ -30,11 +30,7 @@ func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {
 
 func assertCheckGateReviewInstructions(t *testing.T, prompt string) {
 	t.Helper()
-	for _, want := range []string{"Test passing is decided by the service-owned check gate", "When the gate passed", "whole-suite, scoped or named", "satisfied as to passing", "evidence that required tests ran and passed", "Never raise a finding by itself", "only a smart-check selection ran", "cannot see that a named test was selected", "cannot run tests yourself", "tests the unit was asked to add exist and exercise the stated behaviour"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("review instructions lack %q: %s", want, prompt)
-		}
-	}
+	intakefixture.AssertCheckGateReviewInstructions(t, prompt)
 }
 
 func TestAcceptanceFactoryInstructions(t *testing.T) {

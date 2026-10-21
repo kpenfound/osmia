@@ -15,6 +15,8 @@ import (
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
@@ -71,20 +73,7 @@ func (f *shedFixture) awaitDrift(t *testing.T, stream config.WorkstreamID, want 
 // turns and none of them is unfinished.
 func (f *shedFixture) awaitMasonSettled(t *testing.T, stream config.WorkstreamID, unit string, turns int) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		th, err := f.repository().Thread(stream, masonAgent(unit))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		if err == nil && len(th.Turns) >= turns && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the mason of unit %s of %s never settled: %+v", unit, stream, th.Turns)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	intakefixture.AwaitMasonSettled(t, f.repository(), stream, unit, turns)
 }
 
 // TestDriftCadenceDemonstration keeps two building workstreams of one
@@ -227,11 +216,7 @@ func (d *driftDemo) problem(format string, args ...any) {
 
 func (d *driftDemo) check(t *testing.T) {
 	t.Helper()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.problems) != 0 {
-		t.Fatal(strings.Join(d.problems, "\n"))
-	}
+	intakefixture.CheckProblems(t, &d.mu, &d.problems)
 }
 
 // review plays unit review turns. audit's first reviewer asks for a drift

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"

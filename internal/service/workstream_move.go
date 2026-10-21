@@ -319,8 +319,8 @@ func (s *Service) assemblable(repo *trace.Repository, stream config.WorkstreamID
 	if !found || !allMerged(b) {
 		var open []string
 		if found {
-			for _, u := range b.plan.Units {
-				if b.states[trace.UnitSubject(u.ID)].Value != UnitMerged {
+			for _, u := range b.Plan().Units {
+				if b.States()[trace.UnitSubject(u.ID)].Value != UnitMerged {
 					open = append(open, u.ID)
 				}
 			}

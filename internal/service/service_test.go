@@ -489,8 +489,6 @@ func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
 	start(t, opts)
 }
 
-var recordSpec = intakefixture.RecordSpec
-
 // committedPaths returns, for each commit of the trace in directory after
 // the first after commits, the record paths and document paths it wrote.
 func committedPaths(t *testing.T, directory string, after int) []string {

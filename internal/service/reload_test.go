@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -55,11 +56,7 @@ func hasCode(ds []Diagnostic, field string, code Code) bool {
 
 func reloadFails(t *testing.T, c *Client, path, field string) {
 	t.Helper()
-	_, err := c.Reload(context.Background())
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != Validation || !strings.Contains(api.Message, path+": "+field+": ") {
-		t.Fatalf("reload error: %v, want validation naming %s and %s", err, path, field)
-	}
+	intakefixture.ReloadFails(t, c.Reload, path, field)
 }
 
 // A reload validates the top-level file and the project's file as one

@@ -3,11 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"

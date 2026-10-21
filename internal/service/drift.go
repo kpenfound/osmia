@@ -609,8 +609,8 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 	needsCarry := false
 	if found {
 		units := newUnitWorkspaces(d.cfg, d.repository)
-		for _, unit := range b.plan.Units {
-			state := b.states[trace.UnitSubject(unit.ID)].Value
+		for _, unit := range b.Plan().Units {
+			state := b.States()[trace.UnitSubject(unit.ID)].Value
 			if state == "" || state == UnitPlanned || state == UnitMerged {
 				continue
 			}
@@ -688,8 +688,8 @@ func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, re
 		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit carryover", rebase.Drift)
 	}
 	units := newUnitWorkspaces(d.cfg, d.repository)
-	for _, unit := range b.plan.Units {
-		state := b.states[trace.UnitSubject(unit.ID)].Value
+	for _, unit := range b.Plan().Units {
+		state := b.States()[trace.UnitSubject(unit.ID)].Value
 		if state == "" || state == UnitPlanned || state == UnitMerged {
 			continue
 		}

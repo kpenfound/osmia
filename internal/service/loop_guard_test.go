@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -32,13 +34,7 @@ func recordSessions(t *testing.T, f *shedFixture, repository *trace.Repository, 
 // moveUnitNow moves the unit to state to at the fixture's time.
 func moveUnitNow(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit, to string) {
 	t.Helper()
-	subject := trace.UnitSubject(unit)
-	state, err := repository.Workflow(stream, subject)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("%s-moved-%s-%d", subject, to, state.Version), Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: f.clock.Now(), Actor: foremanActor, Cause: "test"}
-	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: to, Reason: "the test moves it"}})
-	must(t, err)
+	intakefixture.MoveUnitNow(t, f.clock.Now(), foremanActor, repository, stream, unit, to)
 }
 
 // openRuntime gives the stopped fixture service a runtime store that knows

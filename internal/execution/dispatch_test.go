@@ -1,0 +1,138 @@
+package execution
+
+import (
+	json "encoding/json"
+
+	reflect "reflect"
+
+	testing "testing"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	trace "github.com/kpenfound/osmia/internal/trace"
+)
+
+// Each deferral reason is decided from what the pass ends with, in order of
+// precedence, and carries the IDs that explain it and a plain-language
+// message.
+func TestDeferralReasons(t *testing.T) {
+	t.Parallel()
+	const (
+		project config.ProjectID    = "p_00000000000000000000000000000001"
+		first   config.WorkstreamID = "w_00000000000000000000000000000001"
+		second  config.WorkstreamID = "w_00000000000000000000000000000002"
+	)
+	entity := func(name string) kb.Entity {
+		return kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}}
+	}
+	entities := kb.Map{Entities: []kb.Entity{entity("trace"), entity("upload"), entity("audit"), entity("index")}}
+	units := plan.Plan{Version: 1, Units: []plan.Unit{
+		{ID: "resume", Footprint: []string{"internal.trace"}},
+		{ID: "dedupe", Footprint: []string{"internal.trace"}},
+		{ID: "upload", Footprint: []string{"internal.upload"}},
+		{ID: "audit", DependsOn: []string{"upload"}, Footprint: []string{"internal.audit"}},
+		{ID: "vague", Footprint: []string{"internal.nowhere"}},
+		{ID: "index", Footprint: []string{"internal.index"}},
+	}}
+	stream := func(id config.WorkstreamID, implementing int, inFlight ...string) building {
+		states := map[string]trace.WorkflowState{}
+		for _, u := range units.Units {
+			states[trace.UnitSubject(u.ID)] = trace.WorkflowState{Version: 1, Value: UnitReady}
+		}
+		for _, u := range inFlight {
+			states[trace.UnitSubject(u)] = trace.WorkflowState{Version: 2, Value: UnitImplementing}
+		}
+		return building{stream: id, states: states, plan: units, inFlight: inFlight, implementing: implementing}
+	}
+	cfg := &config.Config{Capacity: config.Capacity{Masons: 3}, Project: config.Project{ID: project, Capacity: config.ProjectCapacity{PerWorkstream: 2}}}
+	factory := runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"}
+	pass := func(pauses []runtime.Pause, priorities []runtime.Priority, held map[config.WorkstreamID]string, candidates ...building) dispatchPass {
+		return dispatchPass{cfg: cfg, pauses: pauses, rank: scheduler.Rank(priorities, project), entities: entities, candidates: candidates, held: held}
+	}
+	busy := stream(first, 1, "resume")
+	behind := stream(second, 1, "upload")
+	// drained has a slot left but no unit it can start: resume is
+	// implementing and the rest are not ready.
+	drained := stream(second, 1, "resume")
+	for subject, state := range drained.states {
+		if state.Value == UnitReady {
+			drained.states[subject] = trace.WorkflowState{Version: 1, Value: UnitPlanned}
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		pass dispatchPass
+		b    building
+		unit string
+		want UnitDispatch
+	}{
+		{"pause", pass([]runtime.Pause{factory}, nil, map[config.WorkstreamID]string{first: "resume"}), busy, "dedupe",
+			UnitDispatch{Reason: DeferPaused, Pause: &factory, Message: "Waits while a factory pause is in force, set by owner."}},
+		{"blocked on itself", pass(nil, nil, map[config.WorkstreamID]string{first: "dedupe"}), stream(first, 0), "dedupe",
+			UnitDispatch{Reason: DeferBlocked, Blocked: "dedupe", Message: "Cannot start: the mason controller is blocked on this unit and tries again on every pass."}},
+		{"blocked on another unit", pass(nil, nil, map[config.WorkstreamID]string{first: "resume"}), busy, "dedupe",
+			UnitDispatch{Reason: DeferBlocked, Blocked: "resume", Message: "Waits while the mason controller is blocked on unit resume of this workstream."}},
+		{"footprint overlap", pass(nil, nil, nil, busy), busy, "dedupe",
+			UnitDispatch{Reason: DeferEntangled, Blockers: []plan.StartBlocker{{Unit: "resume", Reason: plan.OverlapReason}}, Message: "Waits for units in flight it is entangled with: resume (their footprints overlap)."}},
+		{"dependency", pass(nil, nil, nil, behind), behind, "audit",
+			UnitDispatch{Reason: DeferEntangled, Blockers: []plan.StartBlocker{{Unit: "upload", Reason: plan.DependencyReason}}, Message: "Waits for units in flight it is entangled with: upload (one depends on the other)."}},
+		{"unresolved footprint", pass(nil, nil, nil, busy), busy, "vague",
+			UnitDispatch{Reason: DeferEntangled, Blockers: []plan.StartBlocker{{Unit: "resume", Reason: plan.MappingReason}}, Message: "Waits for units in flight it is entangled with: resume (a footprint does not resolve through the entity map)."}},
+		{"workstream cap", pass(nil, nil, nil, stream(first, 2, "resume", "upload")), stream(first, 2, "resume", "upload"), "index",
+			UnitDispatch{Reason: DeferWorkstreamCap, Limit: 2, Message: "Waits for a slot in its workstream: 2 of its units are implementing, the per-workstream cap."}},
+		{"capacity", pass(nil, nil, nil, busy, behind), busy, "index",
+			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
+		{"capacity behind a capped higher-priority workstream", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, stream(second, 2, "resume", "upload")), busy, "index",
+			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
+		{"capacity behind a higher-priority workstream with nothing ready", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, drained), busy, "index",
+			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
+		{"priority", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, behind), busy, "index",
+			UnitDispatch{Reason: DeferPriority, Limit: 3, Workstreams: []config.WorkstreamID{second}, Message: "Waits for a mason slot: all 3 are in use, and higher-priority workstreams start first: " + string(second) + "."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := tc.pass.deferral(tc.b, tc.unit)
+			must(t, err)
+			tc.want.Unit, tc.want.Version, tc.want.Decision = tc.unit, 1, DispatchDeferred
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("deferral %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A deferral shows in status only while the unit is ready in the state it
+// was decided on; a start is never shown as a deferral.
+func TestCurrentDeferralFollowsTheUnitState(t *testing.T) {
+	t.Parallel()
+	d := UnitDispatch{Unit: "resume", Version: 3, Decision: DispatchDeferred, Reason: DeferCapacity, Limit: 1, Message: "Waits for a mason slot: all 1 are in use."}
+	doc := func(d UnitDispatch) trace.Document {
+		data, err := json.Marshal(d)
+		must(t, err)
+		return trace.Document{Header: trace.Header{ID: dispatchDocument(d.Unit), Revision: 1, Unit: d.Unit}, Content: string(data)}
+	}
+	for _, tc := range []struct {
+		name  string
+		doc   trace.Document
+		state trace.WorkflowState
+		want  *UnitDispatch
+	}{
+		{"current", doc(d), trace.WorkflowState{Version: 3, Value: UnitReady}, &d},
+		{"none recorded", trace.Document{}, trace.WorkflowState{Version: 3, Value: UnitReady}, nil},
+		{"unit moved on", doc(d), trace.WorkflowState{Version: 4, Value: UnitImplementing}, nil},
+		{"unit ready again", doc(d), trace.WorkflowState{Version: 5, Value: UnitReady}, nil},
+		{"started", doc(startedDispatch("resume", trace.WorkflowState{Version: 3})), trace.WorkflowState{Version: 3, Value: UnitReady}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := currentDeferral(tc.doc, tc.state)
+			must(t, err)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("deferral %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

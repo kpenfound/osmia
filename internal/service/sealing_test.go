@@ -24,7 +24,3 @@ func (f *architectFixture) awaitFeature(t *testing.T, stream config.WorkstreamID
 
 // notice returns the body of the notice the given transition told the chief
 // of staff with.
-func (f *architectFixture) notice(t *testing.T, stream config.WorkstreamID, transition string) string {
-	t.Helper()
-	return intakefixture.Notice(t, f.repository(), stream, transition)
-}

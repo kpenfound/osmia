@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -38,17 +40,7 @@ func enforcedIsolation(t *testing.T, f *shedFixture, repository *trace.Repositor
 // so a test can call its scoped tools exactly as a running turn would.
 func claimOldestTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string) trace.QueuedTurn {
 	t.Helper()
-	th, err := repository.Thread(stream, agent)
-	must(t, err)
-	i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() })
-	if i < 0 {
-		t.Fatalf("thread %s has no turn to claim", agent)
-	}
-	token := "claim-" + th.Turns[i].Request.TurnID
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
-	q, err := repository.ClaimTurn(context.Background(), stream, agent, token, directory, f.clock.Now())
-	must(t, err)
-	return q
+	return intakefixture.ClaimOldestTurn(t, f.sharedTurns(), repository, stream, agent)
 }
 
 // chiefAnswers has the real chief-of-staff answer tool record a ruling for
@@ -70,15 +62,7 @@ func chiefRecordsAnswer(t *testing.T, f *shedFixture, repository *trace.Reposito
 // askTool returns the named tool of list, failing the test if it is absent.
 func askTool(t *testing.T, list []coreadapter.Tool, name string) coreadapter.Tool {
 	t.Helper()
-	i := slices.IndexFunc(list, func(tool coreadapter.Tool) bool { return tool.Name == name })
-	if i < 0 {
-		var names []string
-		for _, tool := range list {
-			names = append(names, tool.Name)
-		}
-		t.Fatalf("no tool %s among %v", name, names)
-	}
-	return list[i]
+	return intakefixture.AskTool(t, list, name)
 }
 
 // A drift mason turn's production toolset, built through Enforce's Grants,

@@ -11,6 +11,8 @@ import (
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -127,21 +129,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 
 func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for time.Now().Before(deadline) {
-		ops, err := f.repository().Operations(librarianWorkstream(f.project))
-		must(t, err)
-		for _, op := range ops {
-			if op.Operation.Action == RefreshAction && op.Result != nil {
-				return op
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	ops, _ := f.repository().Operations(librarianWorkstream(f.project))
-	thread, threadErr := f.repository().Thread(librarianWorkstream(f.project), librarianAgent)
-	t.Fatalf("refresh did not complete within %s: operations %+v; librarian thread %+v (error %v)", demoTimeout, ops, thread, threadErr)
-	return trace.OperationRecord{}
+	return intakefixture.AwaitRefresh(t, f.repository(), f.project, RefreshAction, librarianAgent)
 }
 
 func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {

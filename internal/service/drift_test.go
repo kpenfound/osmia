@@ -25,23 +25,13 @@ import (
 // order they were asked for.
 func driftOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != DriftAction })
-	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
-	return ops
+	return intakefixture.DriftOperations(t, repository, stream, DriftAction)
 }
 
 // driftRecords returns every recorded revision of drift/rebase.json.
 func driftRecords(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []DriftRebase {
 	t.Helper()
-	var out []DriftRebase
-	for _, d := range streamDocuments(t, repository, stream, driftDocument) {
-		var r DriftRebase
-		must(t, json.Unmarshal([]byte(d.Content), &r))
-		out = append(out, r)
-	}
-	return out
+	return intakefixture.DriftRecords[DriftRebase](t, repository, stream, driftDocument)
 }
 
 var seals = intakefixture.Seals
@@ -53,17 +43,7 @@ func testDrift(config.WorkstreamID) (string, error) { return "the test asks for 
 // asked for, for the workstream.
 func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapter.Operation {
 	t.Helper()
-	asked := len(driftOperations(t, d.repository, stream))
-	requested, err := d.requestDrifts(context.Background(), testDrift)
-	must(t, err)
-	if !slices.Equal(requested, []config.WorkstreamID{stream}) {
-		t.Fatalf("drift rebases asked for %v, want %s", requested, stream)
-	}
-	ops := driftOperations(t, d.repository, stream)
-	if len(ops) != asked+1 {
-		t.Fatalf("drift operations %+v", ops)
-	}
-	return ops[asked].Operation
+	return intakefixture.RequestDrift(t, d.repository, stream, DriftAction, d.requestDrifts, testDrift)
 }
 
 // settleOperation reconciles one pending operation as the reconciliation
@@ -71,40 +51,7 @@ func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapt
 // the result recorded on the operation, at the time of the service's clock.
 func settleOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) coreadapter.OperationResult {
 	t.Helper()
-	ctx := context.Background()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	i := slices.IndexFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID == op.ID })
-	if i < 0 {
-		t.Fatalf("operation %s is not recorded", op.ID)
-	}
-	var result coreadapter.OperationResult
-	now := s.now()
-	must(t, repository.WithOperation(ctx, stream, ops[i].EventID, foremanActor, func() time.Time { return now }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
-		seen, err := r.Inspect(ctx, op)
-		if err != nil {
-			return err
-		}
-		observe := a.Action("observe", now)
-		observe.Observation = &seen
-		if err := a.Record(ctx, observe); err != nil {
-			return err
-		}
-		if seen.State == coreadapter.EffectCompleted {
-			result = *seen.Result
-		} else {
-			if err := a.Record(ctx, a.Action("effect", now)); err != nil {
-				return err
-			}
-			if result, err = r.Apply(ctx, op); err != nil {
-				return err
-			}
-		}
-		done := a.Action("result", now)
-		done.Result = &result
-		return a.Record(ctx, done)
-	}))
-	return result
+	return intakefixture.SettleOperation(t, s.now(), foremanActor, repository, stream, op, r)
 }
 
 // parentOf returns the first parent of a commit of the fixture's clone.

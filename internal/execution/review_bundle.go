@@ -1,0 +1,214 @@
+package execution
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/kpenfound/osmia/internal/amendment"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+func reviewDocument(unit string) string { return trace.UnitSubject(unit) + "-review" }
+
+// prepareUnitReview reads only recorded evidence. It records the identity
+// before a reviewer can be dispatched; failed preparation records a block.
+func (m *masons) prepareUnitReview(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
+	req, identity, err := m.unitReviewEvidence(ctx, stream, unit)
+	if err != nil {
+		if ctx.Err() == nil {
+			cause := checkingTransitionID(unit, 1)
+			blockErr := m.recordReviewPreparationError(ctx, stream, unit, cause, fmt.Sprintf("unit %s stays reviewing: its reviewer bundle cannot be assembled: %v", unit, err))
+			if blockErr != nil {
+				return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%w; record review error: %v", err, blockErr)
+			}
+		}
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	docs, err := trace.Read[trace.Document](m.repository, stream)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	var last trace.Document
+	for _, d := range docs {
+		if d.ID == reviewDocument(unit) {
+			last = d
+		}
+	}
+	encoded, err := json.MarshalIndent(identity, "", "  ")
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	content := string(encoded) + "\n"
+	if last.Content == content {
+		return req, identity, nil
+	}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reviewDocument(unit), Revision: last.Revision + 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: trace.Actor{Kind: "service", ID: "reviewer"}, Cause: reportDocument(unit)}
+	doc := trace.Document{Header: h, Path: fmt.Sprintf("units/%s/review.json", unit), Content: content}
+	if err := m.repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("record review identity: %w", err)
+	}
+	return req, identity, nil
+}
+
+func reviewBlockedSubject(unit string) string {
+	return "blocked-reviewer" + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
+}
+
+func (m *masons) recordReviewPreparationError(ctx context.Context, stream config.WorkstreamID, unit, cause, reason string) error {
+	subject := reviewBlockedSubject(unit)
+	state, err := m.repository.Workflow(stream, subject)
+	if err != nil {
+		return err
+	}
+	if state.Value != "" {
+		transitions, err := trace.Read[trace.Transition](m.repository, stream)
+		if err != nil {
+			return err
+		}
+		if slices.ContainsFunc(transitions, func(t trace.Transition) bool {
+			return t.Subject == subject && t.To == state.Value && t.Reason == reason
+		}) {
+			return nil
+		}
+	}
+	k := state.Version + 1
+	id := fmt.Sprintf("%s-%d", subject, k)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: trace.Actor{Kind: "service", ID: "reviewer"}, Cause: cause}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "The reviewer bundle is blocked: "+reason+". It can be prepared again after the evidence is fixed.")}}
+	_, err = m.repository.Transact(ctx, tx)
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
+}
+
+func (m *masons) unitReviewEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
+	state, err := m.repository.Workflow(stream, trace.UnitSubject(unit))
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if state.Value != UnitReviewing {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s is %s, not reviewing", unit, state.Value)
+	}
+	return m.candidateEvidence(ctx, stream, unit)
+}
+
+// candidateEvidence assembles the review request and identity of the unit's
+// recorded report, whatever the unit's state. A candidate that holds a
+// stored conflict has none.
+func (m *masons) candidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
+	docs, err := trace.Read[trace.Document](m.repository, stream)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	var reportDoc trace.Document
+	for _, d := range docs {
+		if d.ID == reportDocument(unit) {
+			reportDoc = d
+		}
+	}
+	if reportDoc.Revision == 0 {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s has no recorded mason report", unit)
+	}
+	var report UnitReport
+	if err := json.Unmarshal([]byte(reportDoc.Content), &report); err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %w", reportDoc.Path, err)
+	}
+	if report.Unit != unit || report.Base == "" || report.Candidate == "" || report.Seal < 1 || report.Branch == "" || report.Turn == "" || report.Outcome == "" {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s lacks the unit, candidate, base, seal, branch or mason evidence", reportDoc.Path)
+	}
+	s, _, found, err := seal.Latest(m.repository, stream)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if !found {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("workstream %s has no seal", stream)
+	}
+	applications, err := amendment.FromDocuments(docs)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if s.Seal != report.Seal && !amendment.CarriesReport(applications, unit, report.Seal, s.Seal) {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s report seal %d is not the current seal", unit, report.Seal)
+	}
+	files := bundle.Files{Provider: m.s.ContextFor(m.repository), Role: "reviewer", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }}
+	mason, err := files.Mason(ctx, m.repository.Project(), stream, unit)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if mason.Spec.Revision != s.Revision.Spec || mason.Plan.Revision != s.Revision.Plan || mason.Context.Charter.Revision == 0 || len(mason.Context.Entities.Unresolved) != 0 {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s lacks sealed revisions, charter or resolved local context", unit)
+	}
+	if reason := checkReport(MasonReport{Outcome: report.Outcome, Learnings: report.Learnings}); reason != "" {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
+	}
+	g, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if stored, err := g.StoredConflicts(ctx, report.Candidate); err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	} else if len(stored) != 0 {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("candidate %s holds unresolved conflicts in %s", report.Candidate, strings.Join(stored, ", "))
+	}
+	diff, err := g.Diff(ctx, report.Base, report.Candidate)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("candidate diff: %w", err)
+	}
+	sum := sha256.Sum256([]byte(diff))
+	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: report.Candidate, BaseRevision: report.Base, SpecRevision: fmt.Sprint(s.Revision.Spec), PlanRevision: fmt.Sprint(s.Revision.Plan)}, DiffSHA256: hex.EncodeToString(sum[:]), Report: fmt.Sprintf("%s revision %d", reportDoc.Path, reportDoc.Revision), Seal: s.Seal}
+	discoveries, digest, err := m.s.UnitDiscoveries(m.repository, stream, unit)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	identity.Discoveries = digest
+	items := []coreadapter.ContextItem{
+		{Source: "unit " + unit, Content: mason.RenderTask()},
+		{Source: reportDoc.Path, Content: reportDoc.Content},
+		{Source: mason.Spec.Source, Content: mason.Spec.Content},
+	}
+	if discoveries != "" {
+		items = append(items, coreadapter.ContextItem{Source: "necessary discovered work", Content: discoveries})
+	}
+	if notices := mason.RenderAmendments(); notices != "" {
+		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})
+	}
+	items = append(items, coreadapter.ContextItem{Source: "local context", Content: mason.Context.Brief()})
+	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: items}, identity, nil
+}
+
+// carried returns the reviewed identity with the current identity's seal,
+// spec and plan revisions when the amendments applied since the review leave
+// the review of the unit in force, and the reviewed identity unchanged
+// otherwise.
+func (m *masons) carried(stream config.WorkstreamID, unit string, reviewed, current UnitReviewIdentity) (UnitReviewIdentity, error) {
+	pin := func(i UnitReviewIdentity) (amendment.Pin, bool) {
+		spec, specErr := strconv.Atoi(i.Candidate.SpecRevision)
+		graph, planErr := strconv.Atoi(i.Candidate.PlanRevision)
+		return amendment.Pin{Seal: i.Seal, Spec: spec, Plan: graph}, specErr == nil && planErr == nil
+	}
+	from, ok := pin(reviewed)
+	to, now := pin(current)
+	if !ok || !now || from == to {
+		return reviewed, nil
+	}
+	applications, err := amendment.Read(m.repository, stream)
+	if err != nil {
+		return reviewed, err
+	}
+	if amendment.CarriesReview(applications, unit, from, to) {
+		reviewed.Seal, reviewed.Candidate.SpecRevision, reviewed.Candidate.PlanRevision = current.Seal, current.Candidate.SpecRevision, current.Candidate.PlanRevision
+	}
+	return reviewed, nil
+}

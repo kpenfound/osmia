@@ -125,8 +125,6 @@ var draftNext = intake.DraftNext
 
 var architectPrompt = intake.ArchitectPrompt
 
-var askedBy = intake.AskedBy
-
 const BuildAction = intake.BuildAction
 
 const BuildingState = intake.BuildingState
@@ -335,13 +333,7 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 
 var featureWorkspaces = intake.FeatureWorkspaces
 
-var landingCriteria = intake.LandingCriteria
-
-var masonActor = intake.MasonActor
-
 var masonAgent = intake.MasonAgent
-
-var masonSystemPrompt = intake.MasonSystemPrompt
 
 const resolveObjectionTool = intake.ResolveObjectionTool
 
@@ -606,7 +598,7 @@ func (s *Service) intakeRuntimes() (*config.Config, []*intake.Project) {
 }
 func (s *Service) intakeBuildState(repo *trace.Repository, stream config.WorkstreamID) (intake.BuildState, bool, error) {
 	b, found, err := (&masons{s: s, cfg: s.about(repo), repository: repo}).read(stream)
-	return intake.BuildState{States: b.states, Plan: b.plan}, found, err
+	return intake.BuildState{States: b.States(), Plan: b.Plan()}, found, err
 }
 func (s *Service) intakeMasonBundle(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
 	return (&masons{s: s, cfg: s.about(repo), repository: repo}).bundle(ctx, stream, unit)

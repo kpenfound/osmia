@@ -55,21 +55,7 @@ func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, s
 // advanceUpstream commits files on upstream's main and returns the commit.
 func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) string {
 	t.Helper()
-	home := filepath.Dir(f.clone)
-	scratch := filepath.Join(home, "upstream-scratch")
-	if _, err := os.Stat(scratch); err != nil {
-		// --no-hardlinks: a local clone otherwise hardlinks the bare
-		// repository's object files into scratch instead of copying them.
-		demoGit(t, home, "clone", "--quiet", "--no-hardlinks", filepath.Join(home, "remotes", "dagger", "dagger.git"), scratch)
-	}
-	for name, content := range files {
-		must(t, os.MkdirAll(filepath.Dir(filepath.Join(scratch, name)), 0700))
-		must(t, os.WriteFile(filepath.Join(scratch, name), []byte(content), 0600))
-	}
-	demoGit(t, home, "-C", scratch, "add", "--all")
-	demoGit(t, home, "-C", scratch, "-c", "user.name=Upstream", "-c", "user.email=upstream@example.invalid", "commit", "-qm", "Upstream moves")
-	demoGit(t, home, "-C", scratch, "push", "--quiet", "origin", "HEAD:main")
-	return strings.TrimSpace(demoGit(t, home, "-C", scratch, "rev-parse", "HEAD"))
+	return intakefixture.AdvanceUpstream(t, f.clone, files)
 }
 
 // finalOperations returns the workstream's final review operations.

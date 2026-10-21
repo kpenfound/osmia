@@ -2,7 +2,6 @@ package service
 
 import (
 	testing "testing"
-	time "time"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
@@ -19,8 +18,6 @@ const independentPlan = `{"version": 1, "units": [
 
 var allTransitions = intakefixture.AllTransitions
 
-type transitionMove = intakefixture.TransitionMove
-
 // builtAs is built with the design handed in under key.
 func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
 	t.Helper()
@@ -33,15 +30,7 @@ func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, tr
 // architect's drafts, so it is set after the hand-ins, when no unit exists.
 func (f *shedFixture) builtPaused(t *testing.T, target runtime.Target, keys ...string) []config.WorkstreamID {
 	t.Helper()
-	var streams []config.WorkstreamID
-	for _, key := range keys {
-		streams = append(streams, f.shedAs(t, key))
-	}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
-	for _, stream := range streams {
-		f.ratifiedBuild(t, stream)
-	}
-	return streams
+	return intakefixture.BuiltPaused(t, target, keys, f.shedAs, func() { mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"}) }, f.ratifiedBuild)
 }
 
 // shedAs hands in a workstream whose debate is skipped and waits in the
@@ -60,12 +49,3 @@ func (f *shedFixture) ratifiedBuild(t *testing.T, stream config.WorkstreamID) tr
 
 // checkUnits checks the unit states the status API lists for the workstream,
 // alone and in the list.
-func (f *architectFixture) checkUnits(t *testing.T, stream config.WorkstreamID, want []UnitStatus) {
-	t.Helper()
-	intakefixture.CheckUnits(t, f.c, f.checkStatusError, stream, want)
-}
-
-func (f *architectFixture) checkStatusError(t *testing.T, err error, elapsed time.Duration) {
-	t.Helper()
-	intakefixture.CheckStatusError(t, intakefixture.StatusService{Done: f.s.done, Wait: f.s.Wait, Socket: f.s.Socket, Ready: f.s.ready.Load}, err, elapsed)
-}

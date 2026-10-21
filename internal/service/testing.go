@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/jev"
 
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -295,4 +299,39 @@ func (a TestAccess) HoldAnswerDelivery() {
 		}
 		project.pipeline.next.Store(&stage)
 	}
+}
+
+// Execution is a test-only seam exposing the composed unit controllers to fixtures.
+func (a TestAccess) Execution() *execution.Controller { return a.s.execution() }
+
+func (a TestAccess) Admit(cfg *config.Config, r *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
+	return a.s.admit(cfg, r)
+}
+func (a TestAccess) Capacity(list []WorkstreamStatus) *CapacityStatus {
+	return a.s.capacityStatus(list)
+}
+func (a TestAccess) TraceView(ctx context.Context, w, kind, selector string) (any, *APIError) {
+	return a.s.traceView(ctx, w, kind, selector)
+}
+func (a TestAccess) ContestedEntry(r *trace.Repository, w config.WorkstreamID, u string) (InboxEntry, bool, error) {
+	return a.s.contestedEntry(r, w, u)
+}
+
+// SetStoppedRuntime binds a reopened runtime store before stopped-controller recovery.
+func (a TestAccess) SetStoppedRuntime(store *runtime.Store) error {
+	select {
+	case <-a.s.done:
+		a.s.store = store
+		return nil
+	default:
+		return fmt.Errorf("runtime replacement requires a stopped service")
+	}
+}
+
+// SetJudge binds a fixture judge for test-controlled check selection.
+func (a TestAccess) SetJudge(j *jev.Judge) { a.s.jev = j }
+
+// RecoverWorkspaces restores fixture checkpoints through startup recovery for tests.
+func (a TestAccess) RecoverWorkspaces(ctx context.Context, cfg *config.Config) error {
+	return a.s.recoverWorkspaces(ctx, cfg)
 }

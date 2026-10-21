@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
@@ -34,20 +36,14 @@ func (f turnFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadap
 // of the scope, with no failure.
 func checkPauseStop(t *testing.T, q trace.QueuedTurn, scope, reason string) {
 	t.Helper()
-	r := q.Response
-	want := trace.TurnStop{Cause: trace.TurnStopHardPause, Scope: scope, Source: runtime.PauseOwner, Reason: reason}
-	if r == nil || q.CompletedAt.IsZero() || q.Status() != "interrupted" || r.Stop == nil || *r.Stop != want || r.Failure != "" || r.FailureClass != "" || r.Classification != nil {
-		t.Fatalf("turn %s was not stopped by the %s pause: %+v", q.Request.TurnID, scope, q)
-	}
+	intakefixture.CheckPauseStop(t, q, scope, reason)
 }
 
 // checkNoRetry checks that the turn's operation completed with the turn's
 // status and was never scheduled for a retry.
 func checkNoRetry(t *testing.T, op trace.OperationRecord, outcome string) {
 	t.Helper()
-	if !op.Acknowledged || op.Result == nil || op.Result.Outcome != outcome || !op.RetryAt.IsZero() || slices.ContainsFunc(op.History, func(a trace.OperationAction) bool { return a.Kind == "retry" }) {
-		t.Fatalf("turn operation: %+v", op)
-	}
+	intakefixture.CheckNoRetry(t, op, outcome)
 }
 
 func TestRunningTurnsStopWhatAHardPauseCovers(t *testing.T) {

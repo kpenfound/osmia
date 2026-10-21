@@ -9,8 +9,6 @@ import (
 	testing "testing"
 )
 
-const askedQuestion = intakefixture.AskedQuestion
-
 const ownerRuling = intakefixture.OwnerRuling
 const relayedRuling = intakefixture.RelayedRuling
 const chiefRole = intakefixture.ChiefRole
@@ -43,13 +41,5 @@ func (f *shedFixture) question(t *testing.T, stream config.WorkstreamID, id stri
 }
 
 // awaitQuestion waits until question id is in the given state.
-func (f *shedFixture) awaitQuestion(t *testing.T, stream config.WorkstreamID, id, state string) {
-	t.Helper()
-	intakefixture.AwaitQuestion(t, f.repository(), stream, id, state)
-}
 
 // awaitTurn waits until the member's thread holds the given turn.
-func (f *shedFixture) awaitTurn(t *testing.T, stream config.WorkstreamID, member, turn string) trace.QueuedTurn {
-	t.Helper()
-	return intakefixture.AwaitNamedTurn(t, f.repository(), stream, member, turn)
-}
