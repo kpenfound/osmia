@@ -86,8 +86,3 @@ func conflictedDrift(t *testing.T, f *shedFixture, d drifter, stream config.Work
 	upstream := advanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
 	return before, upstream, requestDrift(t, d, stream)
 }
-
-func completeClaimedTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, q trace.QueuedTurn, outcome *coreadapter.Outcome) {
-	t.Helper()
-	f.sharedTurns().CompleteClaimedTurn(t, repository, stream, agent, q, outcome)
-}

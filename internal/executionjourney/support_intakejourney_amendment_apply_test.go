@@ -2,13 +2,10 @@ package executionjourney
 
 import (
 	context "context"
-
-	testing "testing"
-
 	config "github.com/kpenfound/osmia/internal/config"
-
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 func landingReason(t *testing.T, lands *foreman, repository *trace.Repository, stream config.WorkstreamID, unit string) string {

@@ -1,16 +1,13 @@
 package executionjourney
 
 import (
-	filepath "path/filepath"
-
-	strings "strings"
-	testing "testing"
-
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
 )
 
 func driftRecords(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []DriftRebase {

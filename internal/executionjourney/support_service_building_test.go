@@ -1,14 +1,11 @@
 package executionjourney
 
 import (
-	testing "testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	config "github.com/kpenfound/osmia/internal/config"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
-
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 func (f *shedFixture) builtPaused(t *testing.T, target runtime.Target, keys ...string) []config.WorkstreamID {

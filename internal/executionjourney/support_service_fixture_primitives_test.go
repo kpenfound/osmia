@@ -26,6 +26,7 @@ var awaitAcknowledged = fixturekit.AwaitAcknowledged
 var recordCharter = fixturekit.RecordCharter
 
 const stream = fixturekit.Stream
+
 const project = fixturekit.Project
 
 var configureDeliverySigner = fixturekit.ConfigureDeliverySigner

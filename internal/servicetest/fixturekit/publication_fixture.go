@@ -75,8 +75,5 @@ func PublicationFeature(t *testing.T, repository *trace.Repository, stream confi
 func ReopenPublication(t *testing.T, repository *trace.Repository, root config.Root, project config.Project) *trace.Repository {
 	t.Helper()
 	repository.Close()
-	reopened, err := trace.Open(root, project)
-	Must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	return reopened
+	return OpenTrace(t, root, project)
 }

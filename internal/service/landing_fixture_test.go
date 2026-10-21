@@ -2,17 +2,14 @@ package service
 
 import (
 	json "encoding/json"
-	"path/filepath"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	strings "strings"
-
 	testing "testing"
-
-	config "github.com/kpenfound/osmia/internal/config"
-
-	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons) {
@@ -26,12 +23,6 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons)
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	return intakefixture.LandOperations(t, repository, stream, LandAction)
-}
-
-func approvedReview(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, UnitReviewResult) {
-	t.Helper()
-	f := &foreman{masons: &masons{repository: repository}}
-	return intakefixture.ApprovedReview(t, stream, unit, f.approval)
 }
 
 func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit string) {
@@ -60,10 +51,3 @@ func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, conf
 	intakefixture.SeedApprovedUnits(t, func(u, o string) { seedReview(t, f, repository, stream, u, o) }, func(u, c string) { approveDirectly(t, f.s, repository, stream, u, c) })
 	return f, stream, repository
 }
-
-func (f *shedFixture) landedCommits(t *testing.T, stream config.WorkstreamID, base string) []string {
-	t.Helper()
-	return intakefixture.LandedCommits(t, filepath.Dir(f.clone), f.clone, stream, base)
-}
-
-const trackedFile = intakefixture.TrackedFile

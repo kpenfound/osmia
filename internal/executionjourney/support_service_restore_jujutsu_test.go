@@ -1,11 +1,10 @@
 package executionjourney
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	filepath "path/filepath"
+	testing "testing"
 
-	"path/filepath"
-
-	"testing"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func checkpoints(t *testing.T, f *shedFixture, directory string) []string {
@@ -21,11 +20,6 @@ func interrupted(t *testing.T, f *shedFixture, directory string) (string, bool) 
 func operationLog(t *testing.T, f *shedFixture, directory string) []string {
 	t.Helper()
 	return intakefixture.OperationLog(t, jujutsuRepository(f, directory), filepath.Dir(f.clone))
-}
-
-func checkpointEntry(t *testing.T, f *shedFixture, directory string) string {
-	t.Helper()
-	return intakefixture.CheckpointEntry(t, directory, checkpoints(t, f, directory))
 }
 
 func jujutsuRepository(f *shedFixture, directory string) string {

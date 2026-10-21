@@ -63,7 +63,6 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 	return s.execution().RuleContested(ctx, rawStream, unit, req)
 }
 
-var checkpointed = execution.Checkpointed
 var captureFiles = execution.CaptureFiles
 
 var unitName = execution.UnitName

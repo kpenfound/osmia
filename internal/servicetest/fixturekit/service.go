@@ -1,6 +1,7 @@
 package fixturekit
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -32,6 +33,18 @@ func TraceQuery(t *testing.T, directory, query string, args ...any) [][]byte {
 	t.Helper()
 	out, err := QueryTrace(directory, query, args...)
 	Must(t, err)
+	return out
+}
+
+// CommittedPaths returns, for each commit of the trace in directory after
+// the first after commits, the record paths and document paths it wrote.
+func CommittedPaths(t *testing.T, directory string, after int) []string {
+	t.Helper()
+	var out []string
+	for _, seq := range TraceQuery(t, directory, "SELECT CAST(seq AS TEXT) FROM commits WHERE seq > ? ORDER BY seq", after) {
+		paths := TraceQuery(t, directory, "SELECT path || ' ' || coalesce(json_extract(body, '$.path'), '') FROM records WHERE commit_seq = ? ORDER BY seq", string(seq))
+		out = append(out, string(bytes.Join(paths, []byte("\n"))))
+	}
 	return out
 }
 

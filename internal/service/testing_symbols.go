@@ -78,4 +78,3 @@ var TestContestOptions = contestOptions
 const TestTurnRetries = turnRetries
 
 var TestFeedChecks = feedChecks
-var TestFeedSelection = feedSelection

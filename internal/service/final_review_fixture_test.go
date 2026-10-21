@@ -1,14 +1,11 @@
 package service
 
 import (
-	"context"
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 // newFinalFixture seeds a sealed validPlan with a committee runner and no
@@ -46,8 +43,6 @@ func finalOperations(t *testing.T, repository *trace.Repository, stream config.W
 	return intakefixture.FinalOperations(t, repository, stream, FinalReviewAction)
 }
 
-var streamDocuments = intakefixture.StreamDocuments
-
 var transitionByID = intakefixture.TransitionByID
 
 var chiefEvent = intakefixture.ChiefEvent
@@ -60,9 +55,4 @@ func assembleBoth(t *testing.T, f *shedFixture, repository *trace.Repository, a 
 	return intakefixture.AssembleBoth(t, repository, a, stream, func(unit string, files map[string]string) string {
 		return mergeDirectly(t, f, repository, stream, unit, files)
 	}, resume, dedupe, AssembledState, FinalReviewAction)
-}
-
-// finalTurn installs the fake committee member's turn of final review k.
-func (f *shedFixture) finalTurn(k, attempt int, run func(context.Context, *mcp.ClientSession) error) string {
-	return intakefixture.FinalTurn(f.engine, finalTurnID(k, committeeAgent(1), attempt), run)
 }

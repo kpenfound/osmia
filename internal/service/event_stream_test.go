@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -82,21 +83,8 @@ func eventTraceFixture(t *testing.T) (*Service, *Client) {
 // trace and returns the options of a service that has not started.
 func eventTraceOptions(t *testing.T) Options {
 	t.Helper()
-	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "evs-")
-	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: quiet, At: demoStart, Actor: ownerActor, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
-	sessions := t.TempDir()
-	_, err = repo.Ask(ctx, demoAgent, claimTurn(t, repo, sessions, quiet, demoAgent, demoThread, "build", demoStart), "Where does state live?", demoStart)
-	must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, quiet, demoStart, serviceActor)
-	must(t, err)
-	_, err = repo.EscalateQuestions(ctx, trace.ChiefOfStaff, claimTurn(t, repo, sessions, quiet, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", demoStart),
-		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Recommendation: "In files."}, demoStart)
-	must(t, err)
-	must(t, repo.Close())
+	fixturekit.SeedEventTrace(t, cfg)
 	return opts
 }
 

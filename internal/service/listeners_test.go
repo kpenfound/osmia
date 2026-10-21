@@ -122,7 +122,7 @@ func TestEveryListenerServesThePageAndTheAPI(t *testing.T) {
 	}
 
 	// The tailnet goes away: the socket and web listener keep answering alike.
-	node.drop()
+	node.Drop()
 	eventually(t, "tailnet never reported down", func() bool {
 		h, err := c.Health(ctx)
 		return err == nil && h.Tailnet != nil && h.Tailnet.State == TailnetDown

@@ -62,6 +62,7 @@ func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFi
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
 	f.project, f.trace = intakefixture.AddArchitectProject(t, f.c, clone, "1. Keep changes small.\n2. Every change has a test.\n", func(t *testing.T, p config.ProjectID, text string) { writeCharter(t, f.c, p, text) })
+	f.s.cfg = f.s.current()
 	return f
 }
 

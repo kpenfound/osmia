@@ -51,9 +51,7 @@ func (c *contestFixture) contest(t *testing.T) trace.Transition {
 
 func (c *contestFixture) resolve(t *testing.T, input string) string {
 	t.Helper()
-	out, err := c.tool.Handle(context.Background(), json.RawMessage(input))
-	must(t, err)
-	return string(out)
+	return intakefixture.Handle(t, c.tool, input)
 }
 
 func (c *contestFixture) raised(t *testing.T, contest trace.Transition) (bool, string) {

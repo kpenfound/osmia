@@ -1,13 +1,10 @@
 package service
 
 import (
-	testing "testing"
-
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 type handInFixture struct {
@@ -33,20 +30,6 @@ func newHandInFixture(t *testing.T) *handInFixture {
 	f.issues, f.project, f.trace, f.home = data.Issues, data.Project, data.Trace, data.Home
 	return f
 }
-
-func newDesignFixture(t *testing.T) (*Service, *Client, config.ProjectID) {
-	t.Helper()
-	f := newHandInFixture(t)
-	return f.s, f.c, f.project
-}
-
-var recordDesignDraft = intakefixture.RecordDesignDraft
-
-const (
-	designSessionSubject = intake.DesignSessionSubject
-	designOpenValue      = intake.DesignOpenValue
-	designClosedValue    = intake.DesignClosedValue
-)
 
 func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
 	t.Helper()

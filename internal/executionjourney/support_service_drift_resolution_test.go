@@ -1,20 +1,16 @@
 package executionjourney
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	"strings"
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
+	context "context"
+	json "encoding/json"
+	errors "errors"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
+	strings "strings"
+	testing "testing"
 )
 
 var (

@@ -23,10 +23,6 @@ func (f *foreman) Drifts(ctx context.Context) error {
 	return err
 }
 
-func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
-	return f.RequestDrifts(ctx, due)
-}
-
 func (d drifter) ensureThread(ctx context.Context, stream config.WorkstreamID, agent, role string) error {
 	return d.driftDriver().EnsureThread(ctx, stream, agent, role)
 }

@@ -3,6 +3,7 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -197,9 +198,7 @@ func newMoveFixture(t *testing.T, key string) *moveFixture {
 
 func (m *moveFixture) moveUnit(t *testing.T, input string) string {
 	t.Helper()
-	out, err := m.move.Handle(context.Background(), json.RawMessage(input))
-	must(t, err)
-	return string(out)
+	return intakefixture.Handle(t, m.move, input)
 }
 
 func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {

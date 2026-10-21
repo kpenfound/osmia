@@ -26,17 +26,21 @@ import (
 // StartForTest binds these before startup recovery and controller launch.
 // Production callers use Start and Options.
 type TestHooks struct {
-	Enforcement    *TestEnforcementBinding
-	ReviewChecks   ReviewChecks
-	Boundary       func(context.Context, string) error
-	SchedulePassed func()
-	NotifyInbox    func(context.Context) (InboxResponse, *APIError)
-	CheckJJ        func(context.Context) (string, error)
-	SandboxBinary  string
+	ConversationTicks <-chan time.Time
+	Enforcement       *TestEnforcementBinding
+	ReviewChecks      ReviewChecks
+	Boundary          func(context.Context, string) error
+	SchedulePassed    func()
+	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
+	CheckJJ           func(context.Context) (string, error)
+	SandboxBinary     string
 }
 
 // StartForTest starts the real service with fixture execution boundaries.
 func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service, error) {
+	if hooks.ConversationTicks != nil {
+		opts.conversationTicks = hooks.ConversationTicks
+	}
 	if hooks.Enforcement != nil {
 		opts.controls = hooks.Enforcement.controls
 	}
@@ -320,7 +324,24 @@ func (a TestAccess) SetStoppedRuntime(store *runtime.Store) error {
 }
 
 // SetJudge binds a fixture judge for test-controlled check selection.
-func (a TestAccess) SetJudge(j *jev.Judge) { a.s.jev = j }
+func (a TestAccess) SetJudge(j *jev.Judge) {
+	a.s.mu.Lock()
+	defer a.s.mu.Unlock()
+	a.s.jev = j
+	// Final reviewers retain the dependencies composed for their stages.
+	for _, p := range a.s.projects {
+		if p.pipeline == nil {
+			continue
+		}
+		for _, stage := range []*stages{p.pipeline.current.Load(), p.pipeline.next.Load()} {
+			if stage != nil {
+				if finals, ok := stage.runner.finals.(*delivery.FinalReviewer); ok {
+					finals.S.Jev = j
+				}
+			}
+		}
+	}
+}
 
 // RecoverWorkspaces restores fixture checkpoints through startup recovery for tests.
 func (a TestAccess) RecoverWorkspaces(ctx context.Context, cfg *config.Config) error {
@@ -339,9 +360,16 @@ func (a TestAccess) Holding(r *trace.Repository) func(config.WorkstreamID, corea
 }
 
 // ModelOperationLimit exposes the service's operation admission to stopped fixtures.
-func (a TestAccess) ModelOperationLimit(r *trace.Repository) func(coreadapter.Operation) (func(), bool) {
-	return a.s.modelOperationLimit(r, nil)
+func (a TestAccess) ModelOperationLimit(r *trace.Repository, other ...func(coreadapter.Operation) (func(), bool)) func(coreadapter.Operation) (func(), bool) {
+	var limit func(coreadapter.Operation) (func(), bool)
+	if len(other) > 0 {
+		limit = other[0]
+	}
+	return a.s.modelOperationLimit(r, limit)
 }
 
 // LifecycleController exposes the composed lifecycle controller to fixtures.
 func (a TestAccess) LifecycleController() *lifecycle.Controller { return a.s.lifecycle() }
+
+// SetPause records an owner pause and announces its runtime change.
+func (a TestAccess) SetPause(p runtime.Pause) error { return a.s.setPause(p) }

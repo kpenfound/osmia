@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -47,11 +48,7 @@ func passDrifts(t *testing.T, fm *foreman) {
 // service restart does.
 func restartTrace(t *testing.T, f *shedFixture, repository *trace.Repository) *trace.Repository {
 	t.Helper()
-	must(t, repository.Close())
-	reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	return reopened
+	return fixturekit.ReopenTrace(t, f.s.cfg, repository)
 }
 
 // sealedAt returns when the workstream's first seal was recorded.

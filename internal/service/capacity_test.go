@@ -14,20 +14,14 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // roleCapacity returns the role's entry of the capacity view.
 func roleCapacity(t *testing.T, c *CapacityStatus, role string) RoleCapacity {
-	t.Helper()
-	for _, r := range c.Roles {
-		if r.Role == role {
-			return r
-		}
-	}
-	t.Fatalf("capacity has no %s: %+v", role, c)
-	return RoleCapacity{}
+	return fixturekit.RoleCapacityEntry(t, c, role)
 }
 
 // Status reports the slots in use of each shared role kind and the queued

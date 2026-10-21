@@ -1,11 +1,11 @@
 package service
 
 import (
-	"time"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	config "github.com/kpenfound/osmia/internal/config"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 var recordActivity = fixturekit.RecordActivity
@@ -15,8 +15,6 @@ const handedDesign = intakefixture.HandedDesign
 const validSpec = intakefixture.ValidSpec
 
 const validPlan = intakefixture.ValidPlan
-
-const cyclicPlan = fixturekit.CyclicPlan
 
 var queueRoleTurn = fixturekit.QueueRoleTurn
 
@@ -34,8 +32,6 @@ const demoTimeout = intakefixture.DemoTimeout
 
 type demoClock = fixturekit.DemoClock
 
-type demoWorkspaces = fixturekit.DemoWorkspaces
-
 type demoTransport = fixturekit.DemoTransport
 
 type demoSessions = fixturekit.DemoSessions
@@ -52,25 +48,15 @@ type chiefTurns = fixturekit.ChiefTurns
 
 var jump = fixturekit.Jump
 
-type fakeTurn = intakefixture.FakeTurn
-
 type fixedClock = fixturekit.FixedClock
 
 type fakeIssues = fixturekit.FakeIssues
 
 const masonWrote = intakefixture.MasonWrote
 
-const commentedConfig = fixturekit.CommentedConfig
-
 var request = fixturekit.Request
 
 type fakePulls = fixturekit.FakePulls
-
-var configureDeliverySigner = fixturekit.ConfigureDeliverySigner
-
-var claimTurn = fixturekit.ClaimTurn
-
-type checkFunc = fixturekit.CheckFunc
 
 var passingChecks = fixturekit.PassingChecks
 
@@ -82,29 +68,17 @@ var must = intakefixture.Must
 
 var traceQuery = intakefixture.TraceQuery
 
-var traceExec = fixturekit.TraceExec
-
 var workstreamTraceDirectory = intakefixture.WorkstreamTraceDirectory
 
-var workstreamRecords = intakefixture.WorkstreamRecords
-
 var workstreamDocument = fixturekit.WorkstreamDocument
-
-var projectDocument = fixturekit.ProjectDocument
 
 var traceCommits = fixturekit.TraceCommits
 
 var traceFile = fixturekit.TraceFile
 
-type sessionEngine = fixturekit.SessionEngine
-
 type checkOutcome = fixturekit.CheckOutcome
 
 type fakeChecks = fixturekit.FakeChecks
-
-const passedReport = fixturekit.PassedReport
-
-var failedReport = fixturekit.FailedReport
 
 type fakeJJ = fixturekit.FakeJJ
 
@@ -114,8 +88,6 @@ func testOptions(cfg config.Options) Options {
 
 type blockingTurns = fixturekit.BlockingTurns
 
-var pauseOf = fixturekit.PauseOf
-
 type completedRunner = fixturekit.CompletedRunner
 
 type faults = intakefixture.Faults
@@ -123,7 +95,3 @@ type faults = intakefixture.Faults
 var amendmentOp = intakefixture.AmendmentOp
 
 var apiError = intakefixture.ApiError
-
-var passing = fixturekit.Passing
-
-var actionOperation = fixturekit.ActionOperation

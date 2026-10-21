@@ -1,95 +1,30 @@
 package service
 
 import (
-	"bufio"
-	"context"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
+	bufio "bufio"
+	context "context"
+	errors "errors"
+	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	io "io"
+	net "net"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 )
-
-// fakeTailnet stands in for the embedded Tailscale node with a loopback TCP
-// listener, so no test reaches a real tailnet. Leaving ends the connections
-// it accepted, as leaving a real tailnet does.
-type fakeTailnet struct {
-	net.Listener
-	hostname, dir string
-	names         []string
-	closed, left  atomic.Bool
-	mu            sync.Mutex
-	conns         []net.Conn
-	state         TailnetStatus
-}
-
-func (f *fakeTailnet) State(context.Context) TailnetStatus {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.state.State == "" {
-		return TailnetStatus{State: TailnetUp}
-	}
-	return f.state
-}
-
-func (f *fakeTailnet) setState(state TailnetStatus) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.state = state
-}
-
-// drop takes the tailnet away under the service: accepting fails and the
-// connections it accepted end.
-func (f *fakeTailnet) drop() {
-	f.Close()
-	f.Leave()
-}
-
-func (f *fakeTailnet) Names(context.Context) []string { return f.names }
-func (f *fakeTailnet) Accept() (net.Conn, error) {
-	conn, err := f.Listener.Accept()
-	if err == nil {
-		f.mu.Lock()
-		f.conns = append(f.conns, conn)
-		f.mu.Unlock()
-	}
-	return conn, err
-}
-func (f *fakeTailnet) Close() error {
-	f.closed.Store(true)
-	return f.Listener.Close()
-}
-func (f *fakeTailnet) Leave() error {
-	f.left.Store(true)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, conn := range f.conns {
-		conn.Close()
-	}
-	return nil
-}
 
 // withTailnet sets opts to join a fake tailnet that reports names, and
 // returns a pointer to the node the service joins.
 func withTailnet(t *testing.T, opts *Options, names ...string) **fakeTailnet {
 	t.Helper()
-	joined := new(*fakeTailnet)
-	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return nil, err
-		}
-		*joined = &fakeTailnet{Listener: l, hostname: hostname, dir: dir, names: names}
-		return *joined, nil
-	}
+	join, joined := fixturekit.TailnetJoiner(names...)
+	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) { return join(hostname, dir) }
 	return joined
 }
 
@@ -97,10 +32,7 @@ func withTailnet(t *testing.T, opts *Options, names ...string) **fakeTailnet {
 // top-level file.
 func withListen(t *testing.T, opts Options, body string) {
 	t.Helper()
-	path := filepath.Join(opts.Config.Root, "config.toml")
-	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("[listen]\n"+body)...), 0600))
+	fixturekit.WithListen(t, opts.Config.Root, body)
 }
 
 // Without listen.tailnet the service never joins a tailnet and no response
@@ -144,8 +76,8 @@ func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 	s, c := start(t, opts)
 	node := *joined
 	wantDir := filepath.Join(opts.Config.Root, "tailnet")
-	if node.hostname != "osmia" || node.dir != wantDir {
-		t.Fatalf("joined as %q with state in %q", node.hostname, node.dir)
+	if node.Hostname != "osmia" || node.Directory != wantDir {
+		t.Fatalf("joined as %q with state in %q", node.Hostname, node.Directory)
 	}
 	info, err := os.Stat(wantDir)
 	must(t, err)
@@ -218,7 +150,7 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	}
 	now, err := c.Configuration(ctx)
 	must(t, err)
-	if now.Effective.Listen.Tailnet != "osmia" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.TailnetAddr() != addr || *joined != node || node.closed.Load() || node.left.Load() {
+	if now.Effective.Listen.Tailnet != "osmia" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.TailnetAddr() != addr || *joined != node || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("after reload: %+v, bound %s", now, s.TailnetAddr())
 	}
 	if code, body := exchange(t, webHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", "osmia"); code != 200 {
@@ -228,7 +160,7 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1), files.projectText)
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
-	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.closed.Load() || node.left.Load() {
+	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("removed listen.tailnet: %+v, bound %s", reloaded, s.TailnetAddr())
 	}
 
@@ -256,7 +188,7 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		node := &fakeTailnet{Listener: l, hostname: hostname, dir: dir}
+		node := &fakeTailnet{Listener: l, Hostname: hostname, Directory: dir}
 		joined.Store(node)
 		return node, nil
 	}
@@ -313,7 +245,7 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		node := &fakeTailnet{Listener: l, hostname: hostname, dir: dir}
+		node := &fakeTailnet{Listener: l, Hostname: hostname, Directory: dir}
 		mu.Lock()
 		nodes = append(nodes, node)
 		mu.Unlock()
@@ -337,7 +269,7 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 	}
 
 	unreachable.Store(true)
-	first.drop()
+	first.Drop()
 	eventually(t, "tailnet never reported down", func() bool {
 		h, err := c.Health(ctx)
 		return err == nil && h.Tailnet != nil && h.Tailnet.State == TailnetDown
@@ -369,8 +301,8 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(nodes) != 2 || !first.left.Load() {
-		t.Fatalf("nodes %d, dropped node left %v", len(nodes), first.left.Load())
+	if len(nodes) != 2 || !first.Left.Load() {
+		t.Fatalf("nodes %d, dropped node left %v", len(nodes), first.Left.Load())
 	}
 }
 
@@ -390,7 +322,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 		{State: TailnetNeedsLogin},
 		{State: TailnetUp},
 	} {
-		node.setState(want)
+		node.SetState(want)
 		h, err := c.Health(ctx)
 		must(t, err)
 		st, err := c.Statuses(ctx)
@@ -436,13 +368,7 @@ func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
 		t.Fatal(resp.StatusCode)
 	}
 	must(t, s.Wait())
-	if node := *joined; !node.closed.Load() || !node.left.Load() {
-		t.Fatalf("after shutdown: closed %v, left %v", node.closed.Load(), node.left.Load())
+	if node := *joined; !node.Closed.Load() || !node.Left.Load() {
+		t.Fatalf("after shutdown: closed %v, left %v", node.Closed.Load(), node.Left.Load())
 	}
 }
-
-// tailscaleLogRecord is one line tailscaleLogf writes, decoded with explicit
-// json tags: slog's default keys (level, msg) and tailscaleLogf's own
-// attributes (component, message, login_url) use underscores that
-// encoding/json's case-insensitive field matching does not bridge on its
-// own, so a tag-less struct would silently read an empty login_url.

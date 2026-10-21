@@ -1,6 +1,7 @@
 package executionjourney
 
-const librarianContainer = `[roles.librarian]
-sandbox = "container"
-image = "fixture-image"
-`
+import (
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+)
+
+const librarianContainer = fixturekit.LibrarianContainer

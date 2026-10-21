@@ -1,11 +1,9 @@
 package executionjourney
 
 import (
-	testing "testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {

@@ -1,26 +1,22 @@
 package service
 
 import (
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"io"
-	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/ghlog"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/trace"
+	bytes "bytes"
+	context "context"
+	base64 "encoding/base64"
+	json "encoding/json"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	ghlog "github.com/kpenfound/osmia/internal/ghlog"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	io "io"
+	slog "log/slog"
+	http "net/http"
+	os "os"
+	filepath "path/filepath"
+	strings "strings"
+	testing "testing"
 )
 
 func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
@@ -418,15 +414,6 @@ func TestRecoveryDecisionDoesNotResetLoopGuard(t *testing.T) {
 	if !after.Equal(before) {
 		t.Fatal("a recovery instruction reset the no-progress budget")
 	}
-}
-
-// raiseFixtureContest records explicit escalation for owner-inbox fixtures.
-func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
-	t.Helper()
-	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
-		c, found, err := unitContest(r, stream, unit)
-		return c.Header, found, err
-	}, chiefActor, escalateContest, chiefContestPath)
 }
 
 func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {

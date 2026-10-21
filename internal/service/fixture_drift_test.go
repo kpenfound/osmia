@@ -48,8 +48,3 @@ func fileAt(t *testing.T, f *shedFixture, commit, path string) string {
 	t.Helper()
 	return demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "show", commit+":"+path)
 }
-
-func driftOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
-	t.Helper()
-	return intakefixture.DriftOperations(t, repository, stream, DriftAction)
-}

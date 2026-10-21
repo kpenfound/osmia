@@ -7,6 +7,11 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	config "github.com/kpenfound/osmia/internal/config"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 	io "io"
 	net "net"
 	http "net/http"
@@ -18,12 +23,6 @@ import (
 	syscall "syscall"
 	testing "testing"
 	time "time"
-
-	config "github.com/kpenfound/osmia/internal/config"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // writeCharter records content as the project's next charter revision
@@ -487,16 +486,4 @@ func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
 	defer syscall.Close(dup)
 	must(t, s.Close())
 	start(t, opts)
-}
-
-// committedPaths returns, for each commit of the trace in directory after
-// the first after commits, the record paths and document paths it wrote.
-func committedPaths(t *testing.T, directory string, after int) []string {
-	t.Helper()
-	var out []string
-	for _, seq := range traceQuery(t, directory, "SELECT CAST(seq AS TEXT) FROM commits WHERE seq > ? ORDER BY seq", after) {
-		paths := traceQuery(t, directory, "SELECT path || ' ' || coalesce(json_extract(body, '$.path'), '') FROM records WHERE commit_seq = ? ORDER BY seq", string(seq))
-		out = append(out, string(bytes.Join(paths, []byte("\n"))))
-	}
-	return out
 }

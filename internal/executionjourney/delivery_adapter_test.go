@@ -205,4 +205,3 @@ func (d *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 }
 
 var feedChecks = service.TestFeedChecks
-var feedSelection = service.TestFeedSelection

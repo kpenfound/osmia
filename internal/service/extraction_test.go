@@ -5,6 +5,15 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	kb "github.com/kpenfound/osmia/internal/kb"
+	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	http "net/http"
 	httptest "net/http/httptest"
 	os "os"
@@ -15,53 +24,12 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	kb "github.com/kpenfound/osmia/internal/kb"
-	scheduler "github.com/kpenfound/osmia/internal/scheduler"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // awaitExtraction polls status until the latest extraction is terminal.
 func awaitExtraction(t *testing.T, c *Client) ExtractionState {
 	t.Helper()
 	return intakefixture.AwaitExtraction(t, c.Configuration)
-}
-
-// awaitExtractionAcknowledged polls the librarian workstream until the latest
-// extraction operation is acknowledged. The reconcile controller records the
-// acknowledgement as a commit after the one carrying the result, so a terminal
-// extraction state is not yet the operation's last commit.
-func awaitExtractionAcknowledged(t *testing.T, s *Service) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if s.sole() != nil {
-			ops, err := s.sole().repository.Operations(librarianWorkstream(s.sole().repository.Project()))
-			must(t, err)
-			extractions, acknowledged := 0, 0
-			for _, o := range ops {
-				if o.Operation.Action != ExtractAction {
-					continue
-				}
-				extractions++
-				if o.Acknowledged {
-					acknowledged++
-				}
-			}
-			if extractions > 0 && extractions == acknowledged {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("extraction was not acknowledged")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 // librarianFixture is a project root, a clone with tracked and untracked files
@@ -74,64 +42,21 @@ type librarianFixture struct {
 	clock    *demoClock
 }
 
-// librarianContainer runs the librarian in a container, the only sandbox
-// the core executor accepts.
-const librarianContainer = `[roles.librarian]
-sandbox = "container"
-image = "fixture-image"
-`
+const librarianContainer = fixturekit.LibrarianContainer
 
 func newLibrarianFixture(t *testing.T) *librarianFixture {
 	t.Helper()
-	opts, clone := projectFixture(t)
-	home := filepath.Dir(clone)
-	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString(librarianContainer)
-	must(t, errors.Join(err, configFile.Close()))
-	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("# Agents\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, "secret.env"), []byte("TOKEN="+demoSecret+"\n"), 0600))
-	must(t, os.MkdirAll(filepath.Join(clone, "scratch"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "scratch", "notes.txt"), []byte("untracked\n"), 0600))
-	must(t, os.MkdirAll(filepath.Join(clone, "node_modules", "left-pad"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "node_modules", "left-pad", "index.js"), []byte("ignored\n"), 0600))
-	must(t, os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("node_modules/\n"), 0600))
-	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS", "AGENTS.md")
-	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
-	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
-		return coreadapter.ErrResumeUnavailable
-	}
-	clock := &demoClock{At: demoStart}
-	opts.Reconciliation.Now = clock.Now
-	opts.Librarian = &Librarian{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}}
-	return &librarianFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
+	data := fixturekit.NewLibrarianSetup(t)
+	opts := testOptions(data.Config)
+	opts.Workstreams = nil
+	opts.reviewChecks = fixturekit.PassingChecks
+	opts.Reconciliation.Now = data.Clock.Now
+	opts.Librarian = &Librarian{Engine: data.Engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: data.Sessions}}}
+	return &librarianFixture{opts: opts, clone: data.Clone, engine: data.Engine, sessions: data.Sessions, clock: data.Clock}
 }
 
-// script installs the fake librarian's behaviour for one turn: it writes the
-// given output files and returns a successful result.
-func (f *librarianFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		var err error
-		if check != nil {
-			err = check(ctx, req, verified, tools)
-		}
-		for path, content := range files {
-			if _, e := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); e != nil {
-				err = errors.Join(err, fmt.Errorf("write %s: %w", path, e))
-			}
-		}
-		if err != nil {
-			return nil, err
-		}
-		return &agent.Result{ClaudeID: "session-" + turn, ResultText: "Knowledge base written", SessionDir: req.SessionDir, NumTurns: 2}, nil
-	}
+func (f *librarianFixture) script(turn string, files map[string]string, check func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error) {
+	fixturekit.ScriptLibrarian(f.engine, turn, files, check)
 }
 
 // trackedSeed is the entity seed of the clone's tracked files alone: the

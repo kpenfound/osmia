@@ -14,3 +14,7 @@ func assertFeedAnnotations(t *testing.T, p *page, selector string, n int) {
 	t.Helper()
 	browsertest.AssertFeedAnnotations(t, p.Page, selector, n)
 }
+
+func openBrowser(t *testing.T) *page { t.Helper(); return &page{browsertest.OpenBrowser(t)} }
+
+var newLinkProxy = browsertest.NewLinkProxy

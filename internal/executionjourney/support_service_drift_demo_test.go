@@ -1,11 +1,9 @@
 package executionjourney
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	testing "testing"
-
 	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	testing "testing"
 )
 
 func (f *shedFixture) awaitMasonSettled(t *testing.T, stream config.WorkstreamID, unit string, turns int) {

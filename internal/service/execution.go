@@ -1,16 +1,16 @@
 package service
 
 import (
-	"context"
-	"time"
+	context "context"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/isolation"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	execution "github.com/kpenfound/osmia/internal/execution"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
 )
 
 var masonTurnID = execution.MasonTurnID
@@ -18,30 +18,35 @@ var masonTurnID = execution.MasonTurnID
 var interruption = execution.Interruption
 
 const DispatchStarted = execution.DispatchStarted
+
 const DispatchDeferred = execution.DispatchDeferred
+
 const DeferPaused = execution.DeferPaused
+
 const DeferBlocked = execution.DeferBlocked
+
 const DeferEntangled = execution.DeferEntangled
+
 const DeferWorkstreamCap = execution.DeferWorkstreamCap
+
 const DeferPriority = execution.DeferPriority
+
 const DeferCapacity = execution.DeferCapacity
 
 var dispatchDocument = execution.DispatchDocument
 
 var currentDeferral = execution.CurrentDeferral
-var unitBranch = execution.UnitBranch
 
 type UnitChange = execution.UnitChange
 
 var changeDocument = execution.ChangeDocument
+
 var viewPaths = execution.ViewPaths
 var turnViews = execution.TurnViews
 
 type retriedTurns = execution.RetriedTurns
 
 var mirror = execution.Mirror
-
-var questionDelivered = execution.QuestionDelivered
 
 const moveUnitTool = execution.MoveUnitTool
 
@@ -56,29 +61,29 @@ const checksRole = execution.ChecksRole
 var checksActor = execution.ChecksActor
 
 type checkInput = execution.CheckInput
-type UnitCheckRun = execution.UnitCheckRun
 
-var checkRuns = execution.CheckRuns
+type UnitCheckRun = execution.UnitCheckRun
 
 var checkDocumentID = execution.CheckDocumentID
 
-var checkPath = execution.CheckPath
 var checkPathPattern = execution.CheckPathPattern
-var checksSubject = execution.ChecksSubject
-
-var checkBlockedSubject = execution.CheckBlockedSubject
 
 var unitReviewerIdentity = execution.UnitReviewerIdentity
+
 var unitReviewerSelection = execution.UnitReviewerSelection
 
 const verdictTool = execution.VerdictTool
+
 const verdictOutcome = execution.VerdictOutcome
 
 var reviewerActor = execution.ReviewerActor
 
 type UnitVerdict = execution.UnitVerdict
+
 type UnitReviewResult = execution.UnitReviewResult
+
 type reviewerReports = execution.ReviewerReports
+
 type verdictTurns = execution.VerdictTurns
 
 var reviewTurnID = execution.ReviewTurnID
@@ -88,9 +93,11 @@ var staleReview = execution.StaleReview
 var masonContest = execution.MasonContest
 
 var latestContestedRuling = execution.LatestContestedRuling
+
 var rulerName = execution.RulerName
 
 const LandAction = execution.LandAction
+
 const landingTrailer = execution.LandingTrailer
 
 var foremanActor = execution.ForemanActor
@@ -98,7 +105,9 @@ var foremanActor = execution.ForemanActor
 type landInput = execution.LandInput
 
 var landingDocument = execution.LandingDocument
+
 var landIDs = execution.LandIDs
+
 var decodeLand = execution.DecodeLand
 
 const RebaseAction = execution.RebaseAction
@@ -108,10 +117,13 @@ var rebaseDocument = execution.RebaseDocument
 var decodeRebase = execution.DecodeRebase
 
 const doneTool = execution.DoneTool
+
 const masonDone = execution.MasonDone
+
 const reportPath = execution.ReportPath
 
 type MasonReport = execution.MasonReport
+
 type UnitReport = execution.UnitReport
 
 var reportDocument = execution.ReportDocument
@@ -131,8 +143,11 @@ const escalateContest = execution.EscalateContest
 var chiefContestPath = execution.ChiefContestPath
 
 var unitContest = execution.UnitContest
+
 var chiefDecisions = execution.ChiefDecisions
+
 var chiefRulingsLeft = execution.ChiefRulingsLeft
+
 var contestRaised = execution.ContestRaised
 
 const maxRecoveries = execution.MaxRecoveries
@@ -140,14 +155,13 @@ const maxRecoveries = execution.MaxRecoveries
 var interruptedInARow = execution.InterruptedInARow
 
 var failedReview = execution.FailedReview
+
 var checksContest = execution.ChecksContest
 
 type UnitCheckSelection = execution.UnitCheckSelection
 
-var checkSelectionDocument = execution.CheckSelectionDocument
-var checkSelectionPath = execution.CheckSelectionPath
-
 type building = execution.Building
+
 type masons struct {
 	s          *Service
 	cfg        *config.Config
@@ -189,8 +203,10 @@ type unitWorkspaces struct {
 func newUnitWorkspaces(cfg *config.Config, repo *trace.Repository) unitWorkspaces {
 	return unitWorkspaces{execution.NewUnitWorkspaces(cfg, repo), streamWorkspaces{Cfg: cfg, Repository: repo, Directory: unitsDirectory}}
 }
+
 func (u unitWorkspaces) driver() execution.UnitWorkspaces { return u.UnitWorkspaces }
-func (m *masons) Pass(ctx context.Context) error          { return m.driver().Pass(ctx) }
+
+func (m *masons) Pass(ctx context.Context) error { return m.driver().Pass(ctx) }
 
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	return m.driver().Read(stream)
@@ -199,6 +215,7 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
 	return m.driver().Bundle(ctx, stream, unit)
 }
+
 func (m *masons) start(ctx context.Context, b building, unit string) (started, blocked bool, err error) {
 	return m.driver().Start(ctx, b, unit)
 }
@@ -214,12 +231,15 @@ func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, un
 func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, bool, error) {
 	return u.driver().Find(ctx, stream, unit)
 }
+
 func (u unitWorkspaces) behind(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
 	return u.driver().Behind(ctx, stream, unit)
 }
+
 func (u unitWorkspaces) snapshot(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, string, error) {
 	return u.driver().Snapshot(ctx, stream, unit)
 }
+
 func (u unitWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
 	return u.driver().Acquire(ctx, req)
 }
@@ -237,6 +257,7 @@ func (c *checkers) Pass(ctx context.Context) error { return c.driver().Pass(ctx)
 func (c *checkers) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return c.driver().Inspect(ctx, op)
 }
+
 func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return c.driver().Apply(ctx, op)
 }
@@ -256,6 +277,7 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 }
 
 func (f *foreman) Pass(ctx context.Context) error { return f.driver().Pass(ctx) }
+
 func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int) (trace.Document, UnitReviewResult, bool, error) {
 	return f.driver().Approval(stream, unit, revision)
 }
@@ -263,6 +285,7 @@ func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int
 func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return f.driver().Inspect(ctx, op)
 }
+
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return f.driver().Apply(ctx, op)
 }
@@ -270,6 +293,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (time.Time, error) {
 	return f.driver().RequestedAt(stream, operation)
 }
+
 func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {
 	return f.driver().Current(ctx, stream, in, result)
 }
@@ -277,6 +301,7 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return r.driver().Inspect(ctx, op)
 }
+
 func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return r.driver().Apply(ctx, op)
 }
@@ -284,16 +309,13 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
 	return m.driver().Finish(ctx, b, unit)
 }
+
 func (m *masons) prepareUnitReview(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	return m.driver().PrepareUnitReview(ctx, stream, unit)
 }
 
 func (m *masons) candidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	return m.driver().CandidateEvidence(ctx, stream, unit)
-}
-
-func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest UnitCheckRun, runs []UnitCheckRun) (int, error) {
-	return c.driver().IncompleteSinceEntry(stream, unit, latest, runs)
 }
 
 func (f *foreman) request(ctx context.Context, stream config.WorkstreamID, unit string, review trace.Document, result UnitReviewResult) error {

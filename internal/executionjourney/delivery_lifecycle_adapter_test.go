@@ -10,6 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -31,8 +32,8 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return b.driver().Apply(ctx, op)
 }
 func conversationFixture(t *testing.T, key string) (Options, *config.Config) {
-	o, cfg := fixturekit.Conversation(t, key)
-	return Options{Options: service.Options{Config: o}}, cfg
+	o, cfg := servicetest.ConversationFixture(t, key)
+	return Options{Options: o}, cfg
 }
 func runtimeFor(r *trace.Repository) *activeProject {
 	return &activeProject{id: r.Project(), repository: r}

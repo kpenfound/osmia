@@ -1,10 +1,9 @@
 package executionjourney
 
 import (
+	config "github.com/kpenfound/osmia/internal/config"
 	testing "testing"
 	time "time"
-
-	config "github.com/kpenfound/osmia/internal/config"
 )
 
 func (f *shedFixture) raisedContests(t *testing.T, stream config.WorkstreamID) []InboxEntry {

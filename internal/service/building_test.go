@@ -5,7 +5,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -40,9 +40,6 @@ func (f *shedFixture) ratifiedBuild(t *testing.T, stream config.WorkstreamID) tr
 	t.Helper()
 	return f.scenario().RatifiedBuild(t, stream)
 }
-
-// checkUnits checks the unit states the status API lists for the workstream,
-// alone and in the list.
 
 func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
 	t.Helper()

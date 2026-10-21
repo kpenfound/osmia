@@ -2,14 +2,11 @@ package service
 
 import (
 	context "context"
-
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
-
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	sync "sync"
 	testing "testing"
 )
@@ -80,15 +77,6 @@ func (f *architectFixture) script(turn string, files map[string]string, check fu
 	f.scenario().Script(turn, files, check)
 }
 
-// delivered returns what each draft_write the scripted turn made returned.
-func (f *architectFixture) delivered(turn string) []draftStatus {
-	return f.scenario().Delivered(turn)
-}
-
-func (f *architectFixture) runs() []string {
-	return f.scenario().Runs()
-}
-
 // await polls the workstream's feature and draft states until want accepts
 // them.
 func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want func(feature, draft string) bool) {
@@ -103,29 +91,15 @@ func (f *architectFixture) documents(t *testing.T, stream config.WorkstreamID, i
 	return f.scenario().Documents(t, stream, id)
 }
 
-func (f *architectFixture) transitions(t *testing.T, stream config.WorkstreamID) []trace.Transition {
-	t.Helper()
-	return f.scenario().Transitions(t, stream)
-}
-
 func (f *architectFixture) draftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	return f.scenario().DraftOperations(t, stream)
-}
-
-// acknowledgedDraftOperations returns the draft operations once every one of
-// them is acknowledged, for assertions reached through an awaited state.
-func (f *architectFixture) acknowledgedDraftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
-	t.Helper()
-	return f.scenario().AcknowledgedDraftOperations(t, stream)
 }
 
 func (f *architectFixture) architectThread(t *testing.T, stream config.WorkstreamID) trace.Thread {
 	t.Helper()
 	return f.scenario().ArchitectThread(t, stream)
 }
-
-var readTool = intakefixture.ReadTool
 
 func (f *architectFixture) scenario() *intakefixture.ArchitectScenario {
 	f.scenarioOnce.Do(func() {

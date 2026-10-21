@@ -1,11 +1,9 @@
 package executionjourney
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/trace"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 func checkNoRetry(t *testing.T, op trace.OperationRecord, outcome string) {

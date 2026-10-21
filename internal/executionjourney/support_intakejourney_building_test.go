@@ -1,14 +1,11 @@
 package executionjourney
 
 import (
+	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 	testing "testing"
 	time "time"
-
-	config "github.com/kpenfound/osmia/internal/config"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 var allTransitions = intakefixture.AllTransitions

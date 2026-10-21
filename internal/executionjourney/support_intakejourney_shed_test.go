@@ -2,9 +2,7 @@ package executionjourney
 
 import (
 	config "github.com/kpenfound/osmia/internal/config"
-
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	testing "testing"
 )
 

@@ -11,12 +11,12 @@ import (
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	kb "github.com/kpenfound/osmia/internal/kb"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -383,12 +383,4 @@ func TestRefreshFoldsAWorkstreamsLandingsOnceItIsQuiet(t *testing.T) {
 }
 
 // completedEffect is a reconciler whose effect has always completed.
-type completedEffect struct{}
-
-func (completedEffect) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
-	return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "completed", Result: &coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}}, nil
-}
-
-func (completedEffect) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}, nil
-}
+type completedEffect = fixturekit.CompletedEffect

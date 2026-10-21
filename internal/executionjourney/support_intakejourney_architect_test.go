@@ -2,17 +2,13 @@ package executionjourney
 
 import (
 	context "context"
-
-	sync "sync"
-
-	testing "testing"
-
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
-
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	sync "sync"
+	testing "testing"
 )
 
 var readTool = intakefixture.ReadTool

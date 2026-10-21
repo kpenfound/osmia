@@ -32,19 +32,23 @@ allowed; they do not execute tests.
 
 | Boundary | Representative tests | What they establish |
 | --- | --- | --- |
-| Workflow and owner gates | [service](../internal/service) | Ratification, questions, amendments, checks before review, exact-candidate review, landing, final review and approved delivery |
-| Reviewer questions through assembly | `TestReviewerQuestionOwnerRulingReachesFinalReview` | Production ask, chief escalation, owner ruling and answer delivery lead to exact-candidate approval, all unit landings and final review, including delivered-answer and completed-verdict restarts. Unanswered questions keep the unit waiting. |
-| Recovery | [trace](../internal/trace), [reconcile](../internal/reconcile), service restart demonstrations | Atomic records, durable operations and reconciliation after interruptions |
-| Capacity and scheduling | [scheduler](../internal/scheduler), service parallel work tests | Slot accounting, priority, pauses and disjoint unit dispatch |
+| Workflow and owner gates | [intake](../internal/intake), [intakejourney](../internal/intakejourney), [execution](../internal/execution), [executionjourney](../internal/executionjourney), [delivery](../internal/delivery), [lifecycle](../internal/lifecycle) | Ratification, questions, amendments, checks before review, exact-candidate review, landing, final review and approved delivery |
+| Reviewer questions through assembly | [executionjourney](../internal/executionjourney/api_question_wait_end_to_end_test.go), `TestReviewerQuestionOwnerRulingReachesFinalReview` | Production ask, chief escalation, owner ruling and answer delivery lead to exact-candidate approval, all unit landings and final review, including delivered-answer and completed-verdict restarts. Unanswered questions keep the unit waiting. |
+| Recovery | [trace](../internal/trace), [reconcile](../internal/reconcile), [intakejourney](../internal/intakejourney), [executionjourney](../internal/executionjourney) and [lifecycle](../internal/lifecycle) restart demonstrations | Atomic records, durable operations and reconciliation after interruptions |
+| Capacity and scheduling | [scheduler](../internal/scheduler), [executionjourney](../internal/executionjourney) parallel work tests | Role and shared check-slot accounting, smart final-check selection across projects, priority, pauses and disjoint unit dispatch |
 | Agent boundary | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) | Scoped file views, grants, environment allowlist and execution policy checks |
-| Workspaces | [workspace](../internal/workspace), service Jujutsu demonstrations | Git and Jujutsu behavior, rebase and recovery using local repositories |
-| Operator interface | [cli](../internal/cli), service browser tests | Commands, API behavior, owner decisions and live page updates |
-| Jev judgments | [jev](../internal/jev), [thread](../internal/thread), [service](../internal/service), [checkselect](../internal/checkselect), [smartcheck](../cmd/smartcheck) | Fallback on every failure, cool-down, recorded decisions reused after restart, interrupted attempts, mason classification thresholds and evidence, check selection in the service and against local repositories, and the chief of staff's question signals with their fallbacks and reuse |
+| Workspaces | [workspace](../internal/workspace), [executionjourney](../internal/executionjourney) Jujutsu demonstrations | Git and Jujutsu behavior, rebase and recovery using local repositories |
+| Operator interface | [cli](../internal/cli), [browsertest](../internal/browsertest), [intakejourney](../internal/intakejourney), [executionjourney](../internal/executionjourney), [lifecycle](../internal/lifecycle) | Commands, API behavior, owner decisions and live page updates |
+| Jev judgments | [jev](../internal/jev), [thread](../internal/thread), [execution](../internal/execution), [executionjourney](../internal/executionjourney), [checkselect](../internal/checkselect), [smartcheck](../cmd/smartcheck) | Fallback on every failure, cool-down, recorded decisions reused after restart, interrupted attempts, mason classification thresholds and evidence, check selection in the service and against local repositories, and the chief of staff's question signals with their fallbacks and reuse |
+
+The [service](../internal/service) tests cover composition, startup, shutdown,
+project runtime bindings and HTTP dispatch. Workflow journeys use the same
+composition root, with fake execution boundaries and local repositories.
 
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
 
-`internal/service/scheduling_path_test.go` starts the service with real
+The [execution scheduling journeys](../internal/executionjourney/scheduling_path_test.go) start the service with real
 controllers over seeded approved units and local repositories. Gates hold a
 landing and a scheduling step while all three conversation APIs complete,
 hold a landing and a draft while another workstream merges, and establish
@@ -53,9 +57,10 @@ cases pin seal, build, landing, rebase, drift and publication effects, including
 completed work on a shared jj clone surviving another operation's interruption.
 The jj fixture kills a child service while its clone checkpoint is open, then
 restarts through `Start` and verifies the completed operation was not replayed.
-`conversation_path_test.go` covers captured replies and completion-hook effects;
-`model_operations_test.go` and `architect_test.go` cover model workflow recovery;
-`network_polls_test.go` covers interrupted polling and exactly one durable
+[conversation journeys](../internal/executionjourney/conversation_path_test.go) cover captured replies and completion-hook effects;
+[model operation journeys](../internal/executionjourney/model_operations_test.go) and
+[intake architect tests](../internal/intakejourney/architect_test.go) cover model workflow recovery;
+[network polling journeys](../internal/executionjourney/network_polls_test.go) cover interrupted polling and exactly one durable
 observation. These gates establish the interleavings without sleep-based timing.
 
 Code that asks Jev judgments tests with
@@ -78,14 +83,17 @@ Execution hooks and private fixture operations go through `service.TestHooks`,
 [`fixturekit`](../internal/servicetest/fixturekit) holds the service-independent
 fake agents, checks and GitHub clients, local repository and configuration
 builders, sealed-build inputs, clocks and test defaults. It never imports
-`internal/service`. Both `servicetest` and the in-package controller fixtures
-build on this lower layer. Each test package applies
+`internal/service`. Both `servicetest` and the white-box fixtures in controller
+and composition packages build on this lower layer.
+[intakefixture](../internal/servicetest/intakefixture) shares scripted workflow
+scenarios without importing the service. Each test package applies
 `fixturekit.ApplyServiceTestDefaults` in `TestMain` to enable shuffling unless
 the caller explicitly selects a shuffle setting.
 
 [`browsertest`](../internal/browsertest) runs browser tests through
-`servicetest` and owns the shared Chromium harness. Tests that need private
-controller fixtures stay with those controllers and share the same harness;
+`servicetest` and owns the shared Chromium harness. Browser scenarios in
+`intakejourney`, `executionjourney` and `lifecycle` use their subject's
+running-service fixtures and share the same harness;
 `TestMain` closes Chromium after each package's tests finish.
 
 ## Keep service tests focused
@@ -141,14 +149,14 @@ container's CPU and filesystem, so adding parallelism can increase contention.
 
 | Contract | Journey coverage | Focused coverage and fixture |
 | --- | --- | --- |
-| Intake and ratification | `TestHandInToRatifiedPlan` | Architect, shed, ratification and build tests exercise their own transitions. Implementation tests start with sealed builds. |
-| Review and revision | `TestExactReviewDemonstration` checks actionable findings, revised candidates, reviewer tool scope, questions and a restart | Review bundle, footprint, stale identity and interrupted-result tests start with a completed candidate. |
-| Landing and rebase | Landing, parallel-work and drift demonstrations check controller wiring | Landing interruption cases start with an approved candidate and drive the production reconciler with a controlled clock. Git and Jujutsu rebase fixtures prepare unit reports and local workspace changes. |
-| Final review and delivery | `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication | Final-review tests cover report decisions. Delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
-| Amendments | `TestAmendmentDemonstration` follows a mason request through approval and continuation across restarts | Draft, debate, decision and application tests cover the respective stage, including an architect question that parks the draft until its answer, rejection and stale owner decisions. |
-| Runtime controls | The reliability demonstration combines pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
-| Workspace backend compatibility | The Jujutsu delivery demonstration compares the delivered branch from both backends | Workspace and Jujutsu recovery tests cover backend operations and interruption points. |
-| Interfaces | Browser, notification and trace demonstrations check their actual transport and presentation paths | API, inbox and trace tests use records appropriate to the requested view. |
+| Intake and ratification | [intakejourney](../internal/intakejourney), `TestHandInToRatifiedPlan` | [intake](../internal/intake) and [intakejourney](../internal/intakejourney) architect, shed, ratification and build tests exercise their own transitions. Implementation tests start with sealed builds. |
+| Review and revision | [executionjourney](../internal/executionjourney), `TestExactReviewDemonstration` checks actionable findings, revised candidates, reviewer tool scope, questions and a restart | [execution](../internal/execution), [review](../internal/review) and [checks](../internal/checks) tests cover bundles, footprints, stale identity and interrupted results, starting with a completed candidate. |
+| Landing and rebase | [executionjourney](../internal/executionjourney) landing and parallel-work demonstrations and [lifecycle](../internal/lifecycle) drift demonstrations check controller wiring | [execution](../internal/execution) landing interruption cases start with an approved candidate and drive the production reconciler with a controlled clock. Git and Jujutsu rebase fixtures prepare unit reports and local workspace changes. |
+| Final review and delivery | [executionjourney](../internal/executionjourney), `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication | [delivery](../internal/delivery) tests cover report decisions. [executionjourney](../internal/executionjourney) delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
+| Amendments | [intakejourney](../internal/intakejourney), `TestAmendmentDemonstration` follows a mason request through approval and continuation across restarts | [intakejourney](../internal/intakejourney) draft, debate, decision and application tests cover the respective stage, including an architect question that parks the draft until its answer, rejection and stale owner decisions. |
+| Runtime controls | The [executionjourney](../internal/executionjourney) reliability demonstration combines pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
+| Workspace backend compatibility | The [executionjourney](../internal/executionjourney) Jujutsu delivery demonstration compares the delivered branch from both backends | Workspace and Jujutsu recovery tests cover backend operations and interruption points. |
+| Interfaces | [browsertest](../internal/browsertest) browser scenarios and [executionjourney](../internal/executionjourney) browser, notification, session and trace demonstrations check their actual transport and presentation paths | API, inbox and trace tests use records appropriate to the requested view. |
 
 Retain a matrix at the journey level when the comparison itself is the
 contract: Git/Jujutsu delivered-branch equivalence is an example. A fixture
@@ -169,15 +177,15 @@ and engine startup are separate from the durations printed by `go test`.
 
 Profile in the Go check's test container, which the `osmia-dev` module's
 `test-runtime` function returns. It has the pinned `jj` and Chromium installed
-and `/tmp` in memory. For example, this profiles a Git-backed service test and
-prints CPU and blocking summaries. The binary and profiles stay in the
+and `/tmp` in memory. For example, this profiles a Git-backed execution journey
+and prints CPU and blocking summaries. The binary and profiles stay in the
 container:
 
 ```sh
 dagger api call test-runtime \
   with-directory --path /src --source . --exclude .git,.bees,.dagger \
   with-workdir --path /src \
-  with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestMasonSessionsWithinCapacityRunAtOnce -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
+  with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestMasonSessionsWithinCapacityRunAtOnce -v -o /tmp/execution.test -cpuprofile=/tmp/execution.cpu -blockprofile=/tmp/execution.block ./internal/executionjourney && go tool pprof -top -cum /tmp/execution.cpu && go tool pprof -top /tmp/execution.block' \
   combined-output
 ```
 

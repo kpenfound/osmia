@@ -84,7 +84,14 @@ See
 
 | Part | Owns | Main code |
 | --- | --- | --- |
-| Service | API, project lifecycle, owner gates, workflow controllers, landing and delivery | [service](../internal/service) |
+| Service composition | Startup and shutdown, project runtimes, HTTP handling and the endpoint list | [service](../internal/service) |
+| Local API types | Request, response, event and activity JSON contracts | [api](../internal/api) |
+| Intake and owner gates | Hand-in, design, debate, ratification, questions, charter decisions and amendments | [intake](../internal/intake) |
+| Unit execution | Dispatch, checks, exact-candidate review, landing and rebase | [execution](../internal/execution) |
+| Final review and delivery | Final checks, follow-ups, delivery approval, publication and own-PR outcomes | [delivery](../internal/delivery) |
+| Workgroup lifecycle | Shared approvals, edges, archive cleanup, pull-request polling, base refresh and drift | [lifecycle](../internal/lifecycle) |
+| Runtime observations | Activity health, event subscriptions, bounded reads and tailnet connections | [activity](../internal/activity), [eventstream](../internal/eventstream), [readview](../internal/readview), [tailnet](../internal/tailnet) |
+| Review evidence | Review bundles, diffs, check reports and check selection records | [review](../internal/review), [checks](../internal/checks) |
 | Trace and reconciliation | Versioned records, recoverable transactions, outbox operations and retry | [trace](../internal/trace), [reconcile](../internal/reconcile) |
 | Scheduling | Readiness, capacity, priority and dispatch order across workstreams | [scheduler](../internal/scheduler) |
 | Durable threads | Queued turns, owned logs, continuation and replay | [thread](../internal/thread) |
@@ -120,13 +127,13 @@ approvals remain separate.
 Core reads bound their wait on the trace or runtime lock to short,
 validation-sized critical sections so they answer promptly whatever else is
 blocked; `/status` alone keeps a cached fallback (`coreReadBound`,
-[bounded_read.go](../internal/service/bounded_read.go)), answering with its
+[bounded.go](../internal/readview/bounded.go)), answering with its
 last snapshot, marked with the `X-Osmia-Stale: true` header, when a refresh
-cannot finish in time. `consistentRead`
-([consistent_read.go](../internal/service/consistent_read.go)) retries a
+cannot finish in time. `readview.Consistent`
+([consistent.go](../internal/readview/consistent.go)) retries a
 multi-read response from scratch rather than let it span two generations of
 the trace or the runtime store. The in-process activity record
-([activity.go](../internal/service/activity.go)) is a separately locked
+([activity.go](../internal/activity/activity.go)) is a separately locked
 structure that every long-running operation reports to and that `GET
 /health` and `GET /activity` read without touching the trace mutex or the
 operation lock a factory effect holds, so both stay prompt while the effect
@@ -135,7 +142,7 @@ accepted, rejected or temporarily unavailable, checks it against the
 revision its client saw, and gives it a stable identity so a resubmission,
 including one recovered after a restart, is never applied twice. Archive
 cleanup reports each pass and each background trace removal to the same
-record ([archive_cleanup.go](../internal/service/archive_cleanup.go)). The
+record ([archive_cleanup.go](../internal/lifecycle/archive_cleanup.go)). The
 [design](design.md#101-one-process) document defines the exact guarantees;
 this page only locates the code.
 

@@ -17,7 +17,6 @@ var ownPullRequestFinished = delivery.OwnPullRequestFinished
 
 type FinalRebase = delivery.FinalRebase
 
-var mirror = execution.Mirror
 var exhausted = execution.Exhausted
 var handInKey = intake.HandInKey
 var featureState = intake.FeatureState

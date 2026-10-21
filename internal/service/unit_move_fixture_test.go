@@ -1,8 +1,7 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -26,7 +25,5 @@ func newMoveFixture(t *testing.T, key string) *moveFixture {
 
 func (m *moveFixture) moveUnit(t *testing.T, input string) string {
 	t.Helper()
-	out, err := m.move.Handle(context.Background(), json.RawMessage(input))
-	must(t, err)
-	return string(out)
+	return intakefixture.Handle(t, m.move, input)
 }

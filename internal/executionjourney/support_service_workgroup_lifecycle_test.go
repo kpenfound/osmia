@@ -1,12 +1,10 @@
 package executionjourney
 
 import (
-	"context"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	"sync"
-	"testing"
+	context "context"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	sync "sync"
+	testing "testing"
 )
 
 type lifecycleCleanupGate struct {

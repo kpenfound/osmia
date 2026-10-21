@@ -100,7 +100,3 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 
 const FinalReportTool = delivery.FinalReportTool
 const FindingAdvisory = delivery.FindingAdvisory
-
-var ownPullRequestOutcomeAt = delivery.OwnPullRequestOutcomeAt
-
-var publications = delivery.Publications

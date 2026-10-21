@@ -32,8 +32,6 @@ const DeferWorkstreamCap = execution.DeferWorkstreamCap
 const DeferPriority = execution.DeferPriority
 const DeferCapacity = execution.DeferCapacity
 
-var dispatchDocument = execution.DispatchDocument
-
 var unitBranch = execution.UnitBranch
 
 var unitName = execution.UnitName

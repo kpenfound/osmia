@@ -1,10 +1,9 @@
 package executionjourney
 
 import (
-	testing "testing"
-
 	config "github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	testing "testing"
 )
 
 func (f *architectFixture) upstream(t *testing.T) string {

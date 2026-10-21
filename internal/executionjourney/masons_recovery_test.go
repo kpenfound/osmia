@@ -126,6 +126,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	must(t, err)
 	must(t, store.SetProfile(masonRole, "other"))
 	f.s.store = store
+	InspectForTest(f.s).SetRuntimeStore(store)
 	must(t, InspectForTest(f.s).SetStoppedRuntime(store))
 	defer store.Close()
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)

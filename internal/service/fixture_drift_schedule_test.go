@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/trace"
@@ -10,9 +11,5 @@ import (
 // service restart does.
 func restartTrace(t *testing.T, f *shedFixture, repository *trace.Repository) *trace.Repository {
 	t.Helper()
-	must(t, repository.Close())
-	reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	return reopened
+	return fixturekit.ReopenTrace(t, f.s.cfg, repository)
 }

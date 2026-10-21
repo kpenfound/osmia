@@ -2,18 +2,15 @@ package executionjourney
 
 import (
 	context "context"
-
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
-
 	questions "github.com/kpenfound/osmia/internal/questions"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"

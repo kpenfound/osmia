@@ -27,3 +27,19 @@ func (b *BlockingTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (co
 	}
 	return b.Fake.Run(context.WithoutCancel(ctx), p)
 }
+
+// Block makes the named turn signal entered and wait for release or for its
+// context to end.
+func (b *BlockingTurns) Block(turn string) (entered, release chan struct{}) {
+	entered, release = make(chan struct{}), make(chan struct{})
+	b.Mu.Lock()
+	b.Hooks[turn] = func(ctx context.Context) {
+		close(entered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	b.Mu.Unlock()
+	return entered, release
+}

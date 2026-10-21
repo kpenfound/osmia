@@ -1,9 +1,8 @@
 package executionjourney
 
 import (
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	testing "testing"
 )
 
 func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) string {

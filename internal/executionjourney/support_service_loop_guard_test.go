@@ -1,13 +1,10 @@
 package executionjourney
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
-
-	"github.com/kpenfound/osmia/internal/trace"
+	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	testing "testing"
 )
 
 func moveUnitNow(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit, to string) {

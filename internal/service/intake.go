@@ -1,16 +1,15 @@
 package service
 
 import (
-	"context"
-
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/shed"
-	"github.com/kpenfound/osmia/internal/trace"
+	context "context"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intake "github.com/kpenfound/osmia/internal/intake"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 const AbandonedState = intake.AbandonedState
@@ -41,8 +40,6 @@ const AmendmentRound = intake.AmendmentRound
 
 const AmendmentOverrule = intake.AmendmentOverrule
 
-const amendmentPresented = intake.AmendmentPresented
-
 const amendmentApproved = intake.AmendmentApproved
 
 const amendmentRejected = intake.AmendmentRejected
@@ -52,10 +49,6 @@ const amendmentResealed = intake.AmendmentResealed
 const amendmentUnapplied = intake.AmendmentUnapplied
 
 const amendmentRuled = intake.AmendmentRuled
-
-var amendmentDecisionID = intake.AmendmentDecisionID
-
-var amendmentRulingTurn = intake.AmendmentRulingTurn
 
 func (s *Service) amendmentView(raw string, id string) (AmendmentResponse, *APIError) {
 	return s.intake().AmendmentView(raw, id)
@@ -99,19 +92,9 @@ const draftSubject = intake.DraftSubject
 
 var architectActor = intake.ArchitectActor
 
-var draftingActor = intake.DraftingActor
-
 type Architect = intake.Architect
 
 type drafter = intake.Drafter
-
-const draftValid = intake.DraftValid
-
-const draftInvalid = intake.DraftInvalid
-
-type draftStatus = intake.DraftStatus
-
-var architectPrompt = intake.ArchitectPrompt
 
 const BuildAction = intake.BuildAction
 
@@ -219,11 +202,7 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 	return s.intake().StartDesignWorkgroup(ctx, raw)
 }
 
-const affectedReposTool = intake.AffectedReposTool
-
 const designStartSubject = intake.DesignStartSubject
-
-var designSelectionOf = intake.DesignSelectionOf
 
 func (s *Service) designStartBlocksDraft(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	return s.intake().DesignStartBlocksDraft(r, stream)
@@ -274,8 +253,6 @@ const AssembledState = intake.AssembledState
 var groupApprovalResponse = intake.GroupApprovalResponse
 
 const MaxHandedBytes = intake.MaxHandedBytes
-
-const handedDocument = intake.HandedDocument
 
 const HandedState = intake.HandedState
 
@@ -540,6 +517,7 @@ func (s *Service) intakeRuntimeOf(id config.ProjectID) (*config.Config, *intake.
 	}
 	return cfg, &intake.Project{ID: active.id, Repository: active.repository}
 }
+
 func (s *Service) intakeRuntimes() (*config.Config, []*intake.Project) {
 	cfg, projects := s.runtimes()
 	out := make([]*intake.Project, 0, len(projects))
@@ -548,13 +526,16 @@ func (s *Service) intakeRuntimes() (*config.Config, []*intake.Project) {
 	}
 	return cfg, out
 }
+
 func (s *Service) intakeBuildState(repo *trace.Repository, stream config.WorkstreamID) (intake.BuildState, bool, error) {
 	b, found, err := (&masons{s: s, cfg: s.about(repo), repository: repo}).read(stream)
 	return intake.BuildState{States: b.States(), Plan: b.Plan()}, found, err
 }
+
 func (s *Service) intakeMasonBundle(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
 	return (&masons{s: s, cfg: s.about(repo), repository: repo}).bundle(ctx, stream, unit)
 }
+
 func (s *Service) intakeBlockMason(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit, cause, reason string) error {
 	return (&masons{s: s, cfg: s.about(repo), repository: repo}).block(ctx, stream, unit, cause, reason)
 }

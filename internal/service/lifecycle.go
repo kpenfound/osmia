@@ -1,16 +1,16 @@
 package service
 
 import (
-	"context"
-	"time"
+	context "context"
+	time "time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	lifecycle "github.com/kpenfound/osmia/internal/lifecycle"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	workspace "github.com/kpenfound/osmia/internal/workspace"
 )
 
 func (s *Service) lifecycle() *lifecycle.Controller {
@@ -57,6 +57,7 @@ func (s *Service) lifecycle() *lifecycle.Controller {
 		ThreadRunner:          s.threadRunner,
 	})
 }
+
 func (s *Service) lifecycleRuntimeOf(id config.ProjectID) (*config.Config, *lifecycle.Project) {
 	cfg, p := s.runtimeOf(id)
 	if p == nil {
@@ -82,6 +83,7 @@ func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *tra
 }
 
 var dependentBaseChanged = lifecycle.DependentBaseChanged
+
 var baseWaiting = lifecycle.BaseWaiting
 
 func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) error {
@@ -89,6 +91,7 @@ func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) erro
 }
 
 var branchBase = lifecycle.BranchBase
+
 var errDriftAwaits = lifecycle.ErrDriftAwaits
 
 var driftWorkspaces = lifecycle.DriftWorkspaces
@@ -102,9 +105,13 @@ type resolutions = lifecycle.Resolutions
 var driftReviewerSelection = lifecycle.DriftReviewerSelection
 
 var resolvingMove = lifecycle.ResolvingMove
+
 var carriedOnto = lifecycle.CarriedOnto
+
 var carryDrift = lifecycle.CarryDrift
+
 var unitRebaseConflicts = lifecycle.UnitRebaseConflicts
+
 var unitDrift = lifecycle.UnitDrift
 
 var driftDiffTool = lifecycle.DriftDiffTool
@@ -118,10 +125,13 @@ func (s *Service) projectSpecRefreshPass(ctx context.Context, repository *trace.
 }
 
 const requestChangeTool = lifecycle.RequestChangeTool
+
 const decideChangeTool = lifecycle.DecideChangeTool
+
 const changeGuidance = lifecycle.ChangeGuidance
 
 type ChangeRequest = lifecycle.ChangeRequest
+
 type ChangeDecision = lifecycle.ChangeDecision
 
 type WorkgroupChange = lifecycle.WorkgroupChange
@@ -130,41 +140,26 @@ var workgroupChangeDocument = lifecycle.WorkgroupChangeDocument
 
 var readChanges = lifecycle.ReadChanges
 
-func (s *Service) saveChange(ctx context.Context, repo *trace.Repository, c *WorkgroupChange) error {
-	return s.lifecycle().SaveChange(ctx, repo, c)
-}
-func (s *Service) changeContext(ctx context.Context, raw string) (*trace.Repository, trace.Workgroup, config.WorkstreamID, func(), error) {
-	return s.lifecycle().ChangeContext(ctx, raw)
-}
-
-func (s *Service) requestChange(ctx context.Context, raw string, req ChangeRequest) (WorkgroupChange, *APIError) {
-	return s.lifecycle().RequestChange(ctx, raw, req)
-}
-
 var changeHeld = lifecycle.ChangeHeld
 
 var changeRepositoryHeld = lifecycle.ChangeRepositoryHeld
-
-const deltaDraftTool = lifecycle.DeltaDraftTool
 
 const deltaTurnAction = lifecycle.DeltaTurnAction
 
 type deltaRunner = lifecycle.DeltaRunner
 
 var decodeDeltaTurn = lifecycle.DecodeDeltaTurn
+
 var deltaTurnID = lifecycle.DeltaTurnID
 
 func (s *Service) changePass(ctx context.Context, repo *trace.Repository) error {
 	return s.lifecycle().ChangePass(ctx, repo)
 }
 
-func (s *Service) deltaTool(wt *trace.Repository, c WorkgroupChange, agent, name string) coreadapter.Tool {
-	return s.lifecycle().DeltaTool(wt, c, agent, name)
-}
-
 func (s *Service) chiefRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
 	return s.lifecycle().ChiefRepository(ctx, repository, stream)
 }
+
 func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 	return s.lifecycle().Archive(raw)
 }
@@ -172,6 +167,7 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 func (s *Service) unarchive(raw string) (ArchiveResponse, *APIError) {
 	return s.lifecycle().Unarchive(raw)
 }
+
 func (s *Service) archivedWorkstream(raw string) (runtime.Archive, bool) {
 	return s.lifecycle().ArchivedWorkstream(raw)
 }
@@ -181,6 +177,7 @@ var archivedIn = lifecycle.ArchivedIn
 type archiveCleanup = lifecycle.ArchiveCleanup
 
 var readMemberEvidence = lifecycle.ReadMemberEvidence
+
 var archiveResolved = lifecycle.ArchiveResolved
 
 func (s *Service) memberArchives() []runtime.Archive {
@@ -194,12 +191,15 @@ func (s *Service) installMemberLifecycle(repo *trace.Repository) {
 func (s *Service) liveWorkgroupLeader(g trace.Workgroup) (config.WorkstreamID, error) {
 	return s.lifecycle().LiveWorkgroupLeader(g)
 }
+
 func (s *Service) firstLiveWorkgroupMember(g trace.Workgroup) (config.WorkstreamID, error) {
 	return s.lifecycle().FirstLiveWorkgroupMember(g)
 }
+
 func (s *Service) workgroupFullyRetired(ctx context.Context, g trace.Workgroup) (bool, error) {
 	return s.lifecycle().WorkgroupFullyRetired(ctx, g)
 }
+
 func (s *Service) recoverArchiveLifecycle(ctx context.Context) {
 	s.lifecycle().RecoverArchiveLifecycle(ctx)
 }
@@ -227,6 +227,7 @@ const moveWorkstreamTool = lifecycle.MoveWorkstreamTool
 const workstreamMovePrefix = lifecycle.WorkstreamMovePrefix
 
 var reviewMoves = lifecycle.ReviewMoves
+
 var reopenHeld = lifecycle.ReopenHeld
 
 func (s *Service) ownerMoveWorkstream(ctx context.Context, raw string, req WorkstreamMoveRequest) (WorkstreamMoveResponse, *APIError) {
@@ -237,17 +238,20 @@ var turnDirectories = lifecycle.TurnDirectories
 
 type workspaceCleanup = lifecycle.WorkspaceCleanup
 
-type edgeMergeStatus = lifecycle.EdgeMergeStatus
-
 var edgeObservationAt = lifecycle.EdgeObservationAt
 
-var edgeWaitMessage = lifecycle.EdgeWaitMessage
 var edgeWaiting = lifecycle.EdgeWaiting
+
 var edgeWaitDisplay = lifecycle.EdgeWaitDisplay
+
 var pendingMergeOrderReferences = lifecycle.PendingMergeOrderReferences
+
 var edgePublicationWait = lifecycle.EdgePublicationWait
+
 var unresolvedMergeOrderEdge = lifecycle.UnresolvedMergeOrderEdge
+
 var workgroupMergeOrderResolved = lifecycle.WorkgroupMergeOrderResolved
+
 var workgroupEdgePending = lifecycle.WorkgroupEdgePending
 
 func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) error {
@@ -259,8 +263,11 @@ func (s *Service) edgeWaitPass(ctx context.Context, repo *trace.Repository) erro
 }
 
 const baseRefreshAction = lifecycle.BaseRefreshAction
+
 const deliveryReviewAction = lifecycle.DeliveryReviewAction
+
 const publishUpstreamAction = lifecycle.PublishUpstreamAction
+
 const baseObservationDocument = lifecycle.BaseObservationDocument
 
 type baseObservation = lifecycle.BaseObservation
@@ -270,6 +277,7 @@ type baseRefresher = lifecycle.BaseRefresher
 var baseObservationAt = lifecycle.BaseObservationAt
 
 var canonicalPublication = lifecycle.CanonicalPublication
+
 var upstreamDeliveryPending = lifecycle.UpstreamDeliveryPending
 
 const baseWaitSubject = lifecycle.BaseWaitSubject
@@ -279,9 +287,13 @@ func (s *Service) baseUpstream(ctx context.Context, raw string, req BaseUpstream
 }
 
 const DriftAction = lifecycle.DriftAction
+
 const driftSubject = lifecycle.DriftSubject
+
 const driftPath = lifecycle.DriftPath
+
 const driftDocument = lifecycle.DriftDocument
+
 const driftReplayed = lifecycle.DriftReplayed
 
 const driftRebased = lifecycle.DriftRebased
@@ -291,6 +303,7 @@ const driftHeld = lifecycle.DriftHeld
 type DriftRebase = lifecycle.DriftRebase
 
 var driftIDs = lifecycle.DriftIDs
+
 var driftNumber = lifecycle.DriftNumber
 
 type drifter struct{ *foreman }
@@ -306,6 +319,7 @@ const driftRequestSubject = lifecycle.DriftRequestSubject
 func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (ProjectRebaseResponse, *APIError) {
 	return s.lifecycle().RebaseProject(ctx, req)
 }
+
 func (s *Service) rebaseWorkstream(ctx context.Context, raw string) (WorkstreamRebaseResponse, *APIError) {
 	return s.lifecycle().RebaseWorkstream(ctx, raw)
 }
@@ -325,26 +339,27 @@ func (c *runtimeControls) lifecycle() *lifecycle.Controls {
 		return s.lifecycle()
 	}}
 }
+
 func (c *runtimeControls) ChangeControl(r *trace.Repository, scope coreadapter.Scope, decide bool) coreadapter.Tool {
 	return c.lifecycle().ChangeControl(r, scope, decide)
 }
+
 func (c *runtimeControls) MoveWorkstream(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return c.lifecycle().MoveWorkstream(r, scope)
 }
+
 func (c *runtimeControls) HandBackDrift(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return c.lifecycle().HandBackDrift(r, scope, now)
 }
+
 func (f *foreman) driftDriver() *lifecycle.Foreman {
 	d := lifecycle.NewForeman(f.s.lifecycle(), f.cfg, f.repository)
 	d.NextDrift = f.nextDrift
 	return d
 }
+
 func (d drifter) driftDriver() lifecycle.Drifter {
 	return lifecycle.NewDrifter(d.s.lifecycle(), d.cfg, d.repository)
-}
-
-func (s *Service) decideChange(ctx context.Context, raw, id string, decision ChangeDecision) (WorkgroupChange, *APIError) {
-	return s.lifecycle().DecideChange(ctx, raw, id, decision)
 }
 
 var driftBranch = lifecycle.DriftBranch

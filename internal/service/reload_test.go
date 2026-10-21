@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -24,26 +25,15 @@ import (
 // reloadFiles are the top-level and project configuration files of a fixture
 // with their original contents.
 type reloadFiles struct {
-	top, project         string
-	topText, projectText string
+	fixturekit.ReloadFiles
+	top, project, topText, projectText string
 }
 
 func configFiles(t *testing.T, opts Options) reloadFiles {
-	t.Helper()
-	f := reloadFiles{top: filepath.Join(opts.Config.Root, "config.toml"), project: filepath.Join(opts.Config.Root, "projects", string(project), "config.toml")}
-	top, err := os.ReadFile(f.top)
-	must(t, err)
-	p, err := os.ReadFile(f.project)
-	must(t, err)
-	f.topText, f.projectText = string(top), string(p)
-	return f
+	f := fixturekit.ConfigFiles(t, opts.Config.Root, project)
+	return reloadFiles{f, f.Top, f.Project, f.TopText, f.ProjectText}
 }
-
-func (f reloadFiles) write(t *testing.T, top, project string) {
-	t.Helper()
-	must(t, os.WriteFile(f.top, []byte(top), 0600))
-	must(t, os.WriteFile(f.project, []byte(project), 0600))
-}
+func (f reloadFiles) write(t *testing.T, top, project string) { f.ReloadFiles.Write(t, top, project) }
 
 func hasCode(ds []Diagnostic, field string, code Code) bool {
 	for _, d := range ds {

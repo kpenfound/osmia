@@ -1,7 +1,6 @@
 package lifecycle_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -39,17 +38,7 @@ var turn = intakefixture.Turn
 // block makes the named turn signal entered and wait for release or for its
 // context to end.
 func (f *twoProjectFixture) block(id config.ProjectID, name string) (entered, release chan struct{}) {
-	entered, release = make(chan struct{}), make(chan struct{})
-	f.turns.Mu.Lock()
-	f.turns.Hooks[turn(id, name)] = func(ctx context.Context) {
-		close(entered)
-		select {
-		case <-release:
-		case <-ctx.Done():
-		}
-	}
-	f.turns.Mu.Unlock()
-	return entered, release
+	return f.turns.Block(turn(id, name))
 }
 func (f *twoProjectFixture) repository(id config.ProjectID) *trace.Repository {
 	return f.scenario.Repository(id)

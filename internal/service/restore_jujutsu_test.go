@@ -44,13 +44,6 @@ func checkpoints(t *testing.T, f *shedFixture, directory string) []string {
 	return intakefixture.Checkpoints(t, jujutsuRepository(f, directory))
 }
 
-// checkpointEntry returns the operation-log entry of the one checkpoint an
-// interrupted attempt left in the workspaces under directory.
-func checkpointEntry(t *testing.T, f *shedFixture, directory string) string {
-	t.Helper()
-	return intakefixture.CheckpointEntry(t, directory, checkpoints(t, f, directory))
-}
-
 // operationLog returns the descriptions of the operations of the Jujutsu
 // repository of the workspaces under directory, newest first, each after
 // its ID.

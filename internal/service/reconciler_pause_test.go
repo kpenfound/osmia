@@ -16,6 +16,7 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	thread "github.com/kpenfound/osmia/internal/thread"
@@ -94,16 +95,7 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 }
 
 // operationRecord returns the workstream's one operation of the action.
-func operationRecord(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) trace.OperationRecord {
-	t.Helper()
-	ops, err := repository.Operations(stream)
-	must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
-	if len(ops) != 1 {
-		t.Fatalf("%s operations: %+v", action, ops)
-	}
-	return ops[0]
-}
+var operationRecord = fixturekit.OperationRecord
 
 var retries = intakefixture.Retries
 

@@ -27,6 +27,7 @@ import (
 )
 
 type Options struct {
+	conversationTicks <-chan time.Time
 	service.Options
 	boundary       func(context.Context, string) error
 	schedulePassed func()
@@ -38,7 +39,7 @@ type Options struct {
 }
 
 func (o Options) hooks() service.TestHooks {
-	h := service.TestHooks{Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks}
+	h := service.TestHooks{ConversationTicks: o.conversationTicks, Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks}
 	if o.controls != nil {
 		h.Enforcement = o.controls.binding
 	}
