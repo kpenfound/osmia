@@ -144,13 +144,15 @@ func DriftHandbackNote(repo *trace.Repository, stream config.WorkstreamID, k int
 // the owner's behalf with a recorded recovery decision; in a turn answering the
 // owner, it records the owner's own handback. A handback the service refuses
 // is an ordinary result, {"recorded":false,"reason":...}, and records
-// nothing.
+// nothing. A shared chief of staff names the member whose drift rebase it
+// hands back.
 func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: HandBackDriftTool, Effect: coreadapter.ToolMemory, Description: "Hand this workstream's held drift rebase back: the service asks for another drift rebase onto upstream, and its drift mason and drift reviewer receive your note. Use it when the drift rebase was held and you know what the mason or the reviewer should do differently; the reason it was held is in drift/rebase.json and the workstream's feed. " + "note: what the drift mason should resolve differently, or what the drift reviewer should take into account, which both receive. Hand back only when you are confident the note resolves the problem; otherwise leave the held drift rebase to the owner. owner_decided: true only when the owner asked for it in the message this turn answers, with the owner's words as the note.", InputSchema: json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["note"],"additionalProperties":false}`)}
+	tool := coreadapter.Tool{Name: HandBackDriftTool, Effect: coreadapter.ToolMemory, Description: "Hand this workstream's held drift rebase back: the service asks for another drift rebase onto upstream, and its drift mason and drift reviewer receive your note. Use it when the drift rebase was held and you know what the mason or the reviewer should do differently; the reason it was held is in drift/rebase.json and the workstream's feed. " + "note: what the drift mason should resolve differently, or what the drift reviewer should take into account, which both receive. Hand back only when you are confident the note resolves the problem; otherwise leave the held drift rebase to the owner. owner_decided: true only when the owner asked for it in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Note         string `json:"note"`
-			OwnerDecided bool   `json:"owner_decided"`
+			Note         string              `json:"note"`
+			OwnerDecided bool                `json:"owner_decided"`
+			Workstream   config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -167,8 +169,14 @@ func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		stream := config.WorkstreamID(scope.Workstream)
-		if gone, err := abandoned(repository, stream); err != nil {
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
+		if gone, err := abandoned(target, stream); err != nil {
 			return nil, err
 		} else if gone {
 			return priorityRefusal("an abandoned workstream takes no drift rebase")
@@ -184,7 +192,7 @@ func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter
 			}
 			actor = turn.Actor
 		}
-		k, api := s.HandBackDrift(ctx, repository, stream, input.Note, actor, scope.Turn, now())
+		k, api := s.HandBackDrift(ctx, target, stream, input.Note, actor, scope.Turn, now())
 		if api != nil {
 			if api.Code == Internal {
 				return nil, errors.New(api.Message)

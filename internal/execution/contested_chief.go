@@ -99,18 +99,20 @@ func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 // workstream on the owner's behalf, or explicitly escalates it
 // to the owner; in a turn answering the owner, it records the owner's own
 // ruling. A decision the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing.
+// {"recorded":false,"reason":...}, and records nothing. A shared chief of
+// staff names the member whose unit is contested.
 func (c *Controls) resolveContested(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: resolveContestedTool, Effect: coreadapter.ToolMemory,
 		Description: "Resolve a contested unit of this workstream. unit: its ID; decision: review (its reviewer reviews the candidate again), revise (its mason revises the unit) or escalate (the owner rules); note: for review and revise, what the resumed role must do differently, which it receives; for escalate, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they rule. " +
-			"Rule only when you are confident the ruling resolves the contest; otherwise escalate. owner_decided: true only when the owner ruled in the message this turn answers, with the owner's words as the note. The rulings a contest takes are in units/<unit>/activity.json.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"decision":{"type":"string","enum":["review","revise","escalate"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["unit","decision","note"],"additionalProperties":false}`)}
+			"Rule only when you are confident the ruling resolves the contest; otherwise escalate. owner_decided: true only when the owner ruled in the message this turn answers, with the owner's words as the note. The rulings a contest takes are in units/<unit>/activity.json. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"decision":{"type":"string","enum":["review","revise","escalate"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["unit","decision","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Unit         string `json:"unit"`
-			Decision     string `json:"decision"`
-			Note         string `json:"note"`
-			OwnerDecided bool   `json:"owner_decided"`
+			Unit         string              `json:"unit"`
+			Decision     string              `json:"decision"`
+			Note         string              `json:"note"`
+			OwnerDecided bool                `json:"owner_decided"`
+			Workstream   config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -127,12 +129,18 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		stream := config.WorkstreamID(scope.Workstream)
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
 		note := strings.TrimSpace(input.Note)
 		if note == "" {
 			return priorityRefusal("a note is required")
 		}
-		contest, contested, err := unitContest(repository, stream, input.Unit)
+		contest, contested, err := unitContest(target, stream, input.Unit)
 		if err != nil {
 			return nil, err
 		}
@@ -152,10 +160,10 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 				return priorityRefusal("the owner rules review or revise")
 			}
 			if bounceContest(contest, input.Unit) {
-				decision := chiefDecisionDocument(repository, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
+				decision := chiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
 				// The owner may be answering this chief's escalation. Retain
 				// that decision's identity and append its ruling revision.
-				docs, prior, err := chiefDecisions(repository, stream, input.Unit)
+				docs, prior, err := chiefDecisions(target, stream, input.Unit)
 				if err != nil {
 					return nil, err
 				}
@@ -164,14 +172,14 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 						decision.ID, decision.Path, decision.Revision = docs[i].ID, docs[i].Path, docs[i].Revision+1
 					}
 				}
-				return rulingResult(s.RecordContestedRuling(ctx, repository, stream, input.Unit, request, turn.Actor, decision))
+				return rulingResult(s.RecordContestedRuling(ctx, target, stream, input.Unit, request, turn.Actor, decision))
 			}
-			return rulingResult(s.RecordContestedRuling(ctx, repository, stream, input.Unit, request, turn.Actor))
+			return rulingResult(s.RecordContestedRuling(ctx, target, stream, input.Unit, request, turn.Actor))
 		}
 		if moveContest(contest, input.Unit) {
 			return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner rules on it", input.Unit))
 		}
-		_, decisions, err := chiefDecisions(repository, stream, input.Unit)
+		_, decisions, err := chiefDecisions(target, stream, input.Unit)
 		if err != nil {
 			return nil, err
 		}
@@ -179,13 +187,13 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner rules on it", contest.ID, input.Unit))
 		}
 
-		decision := chiefDecisionDocument(repository, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
+		decision := chiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
 		record := func() error {
 			if bounceContest(contest, input.Unit) {
-				_, err := repository.RecordDocumentsWith(ctx, []trace.Document{decision})
+				_, err := target.RecordDocumentsWith(ctx, []trace.Document{decision})
 				return err
 			}
-			return repository.RecordDocuments(ctx, []trace.Document{decision})
+			return target.RecordDocuments(ctx, []trace.Document{decision})
 		}
 		if input.Decision == escalateContest {
 			if err := record(); err != nil {
@@ -198,9 +206,9 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			}{true, input.Unit, "the contest is in the owner's inbox with your note"})
 		}
 		if bounceContest(contest, input.Unit) {
-			return rulingResult(s.RecordContestedRuling(ctx, repository, stream, input.Unit, request, chiefActor, decision))
+			return rulingResult(s.RecordContestedRuling(ctx, target, stream, input.Unit, request, chiefActor, decision))
 		}
-		out, api := s.RecordContestedRuling(ctx, repository, stream, input.Unit, request, chiefActor)
+		out, api := s.RecordContestedRuling(ctx, target, stream, input.Unit, request, chiefActor)
 		if api == nil {
 			if err := record(); err != nil {
 				return nil, err

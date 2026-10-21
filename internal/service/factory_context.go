@@ -15,24 +15,60 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// memberSchema is the closed object schema of properties, a JSON object's
+// members, plus a workstream property for a chief-of-staff turn, whose tool
+// can address any member sharing that chief of staff.
+func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
+	if scope.Role == trace.ChiefOfStaff {
+		properties += `,"workstream":{"type":"string"}`
+	}
+	return json.RawMessage(`{"type":"object","properties":{` + properties + `},"additionalProperties":false}`)
+}
+
+// chiefMember resolves the workstream a tool's workstream input names and
+// the project-level repository holding its trace: the turn's own workstream
+// on r when named is empty, or another member sharing a chief-of-staff
+// turn's chief. A non-empty refusal names a workstream the turn cannot
+// address.
+func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
+	own := config.WorkstreamID(scope.Workstream)
+	if named != "" && named != own && scope.Role != trace.ChiefOfStaff {
+		return nil, "", "only the chief of staff names another workstream", nil
+	}
+	return r.ChiefMember(own, named)
+}
+
 // factoryContext exposes workstream records independently of conversation replay.
+// A chief-of-staff turn may name any member of its workgroup.
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	description := "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and their latest revisions; a folder path such as discoveries lists the documents under it. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files."
+	if scope.Role == trace.ChiefOfStaff {
+		description += " workstream: a member workstream ID of your workgroup whose records to read; omit for this conversation's own workstream."
+	}
 	return coreadapter.Tool{Name: factoryContextTool, Effect: coreadapter.ToolRead,
-		Description: "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and their latest revisions; a folder path such as discoveries lists the documents under it. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"path":{"type":"string"},"revision":{"type":"integer","minimum":1},"start":{"type":"integer","minimum":1},"lines":{"type":"integer","minimum":1,"maximum":1000}},"additionalProperties":false}`),
+		Description: description,
+		InputSchema: memberSchema(scope, `"offset":{"type":"integer","minimum":0},"path":{"type":"string"},"revision":{"type":"integer","minimum":1},"start":{"type":"integer","minimum":1},"lines":{"type":"integer","minimum":1,"maximum":1000}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := r.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
 			var in struct {
-				Offset   int    `json:"offset"`
-				Path     string `json:"path"`
-				Revision int    `json:"revision"`
-				Start    int    `json:"start"`
-				Lines    int    `json:"lines"`
+				Offset     int                 `json:"offset"`
+				Path       string              `json:"path"`
+				Revision   int                 `json:"revision"`
+				Start      int                 `json:"start"`
+				Lines      int                 `json:"lines"`
+				Workstream config.WorkstreamID `json:"workstream"`
 			}
 			if err := json.Unmarshal(raw, &in); err != nil {
 				return nil, err
+			}
+			target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+			if err != nil {
+				return nil, err
+			}
+			if refusal != "" {
+				return priorityRefusal(refusal)
 			}
 			if in.Start == 0 {
 				in.Start = 1
@@ -43,7 +79,7 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 			if in.Offset < 0 || in.Start < 1 || in.Lines < 1 || in.Lines > 1000 {
 				return nil, errors.New("invalid range")
 			}
-			docs, err := trace.Read[trace.Document](r, config.WorkstreamID(scope.Workstream))
+			docs, err := trace.Read[trace.Document](target, stream)
 			if err != nil {
 				return nil, err
 			}

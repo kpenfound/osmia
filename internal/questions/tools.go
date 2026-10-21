@@ -41,6 +41,7 @@ const Guidance = "When a service event says a question is open, choose exactly o
 	"Log a judgment call you make within stated intent, rather than escalate or stay silent about it, with log_assumption: it appears in the affected workstreams' drafted pull request descriptions. Name affected members with workstreams; omit it for a workgroup-wide judgment. " +
 	"Never answer for the owner because time is passing; a question waits as long as it needs. " +
 	"Your workgroup may hold more than one workstream; a question number alone names one of your own workstream, and \"<workstream>:<number>\" names one of another member sharing you as its chief of staff. " +
+	"The tools that read or act on one workstream's records, units or code, such as factory_context, record_discovery, inspect_code, move_workstream, move_unit, resolve_contested, decide_amendment, resolve_objection and hand_back_drift, take workstream to name the member they concern; without it they act on this conversation's own workstream. " +
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
 	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
 	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it with the rule as the charter should state it; " +

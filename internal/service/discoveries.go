@@ -83,15 +83,23 @@ func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, erro
 	return false, nil
 }
 
+// recordDiscovery is the record_discovery tool of one turn. A chief-of-staff
+// turn may name any member of its workgroup, whose own trace holds the
+// discovery.
 func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	return coreadapter.Tool{Name: discoveryTool, Effect: coreadapter.ToolMemory, Description: "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination.", InputSchema: json.RawMessage(`{"type":"object","properties":{"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	description := "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination."
+	if scope.Role == trace.ChiefOfStaff {
+		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it; omit for this conversation's own workstream."
+	}
+	return coreadapter.Tool{Name: discoveryTool, Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		if err := r.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
 		var in struct {
 			workDiscovery
-			Key      string `json:"key"`
-			Revision int    `json:"revision"`
+			Key        string              `json:"key"`
+			Revision   int                 `json:"revision"`
+			Workstream config.WorkstreamID `json:"workstream"`
 		}
 		if err := json.Unmarshal(raw, &in); err != nil {
 			return nil, err
@@ -99,15 +107,22 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if scope.Role != trace.ChiefOfStaff && scope.Role != masonRole && scope.Role != reviewerRole {
 			return nil, errors.New("discovery recording is not granted")
 		}
-		stream := config.WorkstreamID(scope.Workstream)
-		st, err := r.Workflow(stream, trace.FeatureSubject)
+		target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
+		project := target.Project()
+		st, err := target.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
 			return nil, err
 		}
 		if st.Value == DeliveredState || st.Value == AbandonedState {
 			return priorityRefusal("terminal workstreams accept no discovered work")
 		}
-		docs, err := trace.Read[trace.Document](r, stream)
+		docs, err := trace.Read[trace.Document](target, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +149,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			if requestedID != "" {
 				return priorityRefusal("discovery not found; create it with a stable key, description and criterion")
 			}
-			if err := questions.Resolve(ctx, r, stream, in.Criterion); err != nil || !strings.HasPrefix(in.Criterion, "spec#") {
+			if err := questions.Resolve(ctx, target, stream, in.Criterion); err != nil || !strings.HasPrefix(in.Criterion, "spec#") {
 				return priorityRefusal("discovery requires an existing spec criterion")
 			}
 		}
@@ -176,7 +191,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}
 		var assignment trace.WorkflowState
 		if in.Disposition == "assigned" {
-			st, err := r.Workflow(stream, trace.UnitSubject(in.Unit))
+			st, err := target.Workflow(stream, trace.UnitSubject(in.Unit))
 			if err != nil {
 				return nil, err
 			}
@@ -187,8 +202,8 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}
 		data, _ := json.MarshalIndent(in.workDiscovery, "", "  ")
 		rev := prior.Revision + 1
-		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: in.ID, Revision: rev, Project: r.Project(), Workstream: stream, At: now(), Actor: trace.Actor{Kind: "agent", ID: scope.Thread}, Cause: scope.Turn}, Path: "discoveries/" + in.ID + ".json", Content: string(data) + "\n"}
-		tx := trace.Transaction{ExpectedVersion: uint64(prior.Revision), Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("%s-%d", in.ID, rev), Revision: 1, Project: r.Project(), Workstream: stream, At: now(), Actor: doc.Actor, Cause: scope.Turn}, Subject: in.ID, To: in.Disposition, Reason: in.Description + "; " + in.Reason}, Events: []trace.Event{trace.Notice(fmt.Sprintf("%s-%d", in.ID, rev), "discovery", in.Description+"; disposition: "+in.Disposition)}}
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: in.ID, Revision: rev, Project: project, Workstream: stream, At: now(), Actor: trace.Actor{Kind: "agent", ID: scope.Thread}, Cause: scope.Turn}, Path: "discoveries/" + in.ID + ".json", Content: string(data) + "\n"}
+		tx := trace.Transaction{ExpectedVersion: uint64(prior.Revision), Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("%s-%d", in.ID, rev), Revision: 1, Project: project, Workstream: stream, At: now(), Actor: doc.Actor, Cause: scope.Turn}, Subject: in.ID, To: in.Disposition, Reason: in.Description + "; " + in.Reason}, Events: []trace.Event{trace.Notice(fmt.Sprintf("%s-%d", in.ID, rev), "discovery", in.Description+"; disposition: "+in.Disposition)}}
 		if prior.Revision > 0 {
 			var old workDiscovery
 			_ = json.Unmarshal([]byte(prior.Content), &old)
@@ -201,7 +216,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			h.Unit = in.Unit
 			txs = append(txs, trace.Transaction{ExpectedVersion: assignment.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(in.Unit), From: assignment.Value, To: assignment.Value, Reason: "Necessary work assigned: " + in.Description}})
 		}
-		if _, err := r.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
+		if _, err := target.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 			return nil, err
 		}
 		return json.Marshal(map[string]any{"recorded": true, "id": in.ID, "revision": rev})

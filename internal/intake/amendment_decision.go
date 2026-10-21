@@ -338,19 +338,21 @@ const AmendmentGuidance = "When the owner's message decides an amendment you pre
 // chief-of-staff turn. It records the same decision as POST
 // /amendment/<workstream>/<n> on the turn's workstream. Delegated engineering
 // decisions identify the chief; relayed decisions identify the owner. A refusal is an
-// ordinary result, {"recorded":false,"reason":...}, and records nothing.
+// ordinary result, {"recorded":false,"reason":...}, and records nothing. A
+// shared chief of staff names the member whose amendment it decides.
 func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: DecideAmendmentTool, Effect: coreadapter.ToolMemory,
 		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round) or overrule (approve over the objections that stand); note: engineering reasoning, or the owner's words when relaying an owner decision. " +
-			"Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
+			"Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Amendment    string `json:"amendment"`
-			Packet       int    `json:"packet"`
-			Decision     string `json:"decision"`
-			Note         string `json:"note"`
-			OwnerDecided bool   `json:"owner_decided"`
+			Amendment    string              `json:"amendment"`
+			Packet       int                 `json:"packet"`
+			Decision     string              `json:"decision"`
+			Note         string              `json:"note"`
+			OwnerDecided bool                `json:"owner_decided"`
+			Workstream   config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -368,6 +370,13 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		if err != nil {
 			return nil, err
 		}
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return PriorityRefusal(refusal)
+		}
 		if input.OwnerDecided && !owner {
 			return PriorityRefusal("this turn does not answer an owner message")
 		}
@@ -375,7 +384,7 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		if input.OwnerDecided {
 			actor = request.Actor
 		}
-		out, api := s.RecordAmendmentDecision(ctx, repository.Project(), config.WorkstreamID(scope.Workstream), repository, input.Amendment,
+		out, api := s.RecordAmendmentDecision(ctx, target.Project(), stream, target, input.Amendment,
 			AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}, actor, request.ID)
 		if api != nil {
 			if api.Code == Internal {

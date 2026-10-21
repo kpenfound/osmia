@@ -251,6 +251,30 @@ func (r *Repository) ChiefQuestionTarget(host config.WorkstreamID, id string) (c
 	return config.WorkstreamID(stream), local, nil
 }
 
+// ChiefMember resolves the workstream a chief-of-staff tool's workstream
+// input names, and the project-level repository holding that workstream's
+// trace: own on r itself when named is empty or own, or another member
+// sharing own's chief of staff, on that member's own repo. A non-empty
+// refusal names a workstream that does not share it. r must be the
+// project's own repository.
+func (r *Repository) ChiefMember(own, named config.WorkstreamID) (*Repository, config.WorkstreamID, string, error) {
+	if named == "" || named == own {
+		return r, own, "", nil
+	}
+	members, err := r.WorkgroupMembers(own)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if !slices.Contains(members, named) {
+		return nil, "", fmt.Sprintf("workstream %s does not share this chief of staff", named), nil
+	}
+	project, err := r.ProjectFor(named)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return project, named, "", nil
+}
+
 // WorkgroupResolutionsPath is the project document holding every workgroup
 // already recorded resolved, and WorkgroupResolutionsDocument its record ID.
 const (

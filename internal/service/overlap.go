@@ -259,10 +259,13 @@ func (o *overlaps) warn(ctx context.Context, mine, other sealedStream, overlap f
 // overlapAdvisories returns the advisories of the workstream that are still
 // active: the workstream and the other are building or assembled on the seals
 // the latest warning compared. Subjects are the workstream's workflow states.
+// A warning about a workstream whose trace is gone, such as an archived one,
+// is no longer active.
 func overlapAdvisories(repository *trace.Repository, stream config.WorkstreamID, subjects map[string]trace.WorkflowState) ([]OverlapAdvisory, error) {
 	out := []OverlapAdvisory{}
 	var mine sealedStream
 	var m *kb.Map
+	var present []config.WorkstreamID
 	var names []string
 	for s := range subjects {
 		if strings.HasPrefix(s, overlapPrefix) {
@@ -289,6 +292,12 @@ func overlapAdvisories(repository *trace.Repository, stream config.WorkstreamID,
 				return nil, err
 			}
 			m = &loaded
+			if present, err = repository.Workstreams(); err != nil {
+				return nil, err
+			}
+		}
+		if !slices.Contains(present, other) {
+			continue
 		}
 		theirs, found, err := sealedBuild(repository, other)
 		if err != nil {

@@ -375,14 +375,16 @@ func (s *Controller) OwnerMoveWorkstream(ctx context.Context, raw string, req Wo
 // assembled on its own judgment. Every other target stands for an owner
 // decision: in a turn answering the owner, it records the owner's own move. A
 // Move the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing.
+// {"recorded":false,"reason":...}, and records nothing. A shared chief of
+// staff names the member that moves.
 func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Move this workstream to another feature state when the state machine leaves it stuck or wrong. to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land, so file the revision that repairs it next), " + "assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " + "or, only to record an owner decision, sketched (the architect redrafts with the note), in-shed (one more round of debate), ratified (ratify the latest packet), delivered (return a reopened workstream whose branch is unchanged since its pull request was published) or abandoned. " + "A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["to","note"],"additionalProperties":false}`)}
+	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Move this workstream to another feature state when the state machine leaves it stuck or wrong. to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land, so file the revision that repairs it next), " + "assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " + "or, only to record an owner decision, sketched (the architect redrafts with the note), in-shed (one more round of debate), ratified (ratify the latest packet), delivered (return a reopened workstream whose branch is unchanged since its pull request was published) or abandoned. " + "A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["to","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			To           string `json:"to"`
-			Note         string `json:"note"`
-			OwnerDecided bool   `json:"owner_decided"`
+			To           string              `json:"to"`
+			Note         string              `json:"note"`
+			OwnerDecided bool                `json:"owner_decided"`
+			Workstream   config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -399,9 +401,15 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		stream := config.WorkstreamID(scope.Workstream)
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
 		request := WorkstreamMoveRequest{To: input.To, Note: input.Note}
-		if gone, err := abandoned(repository, stream); err != nil {
+		if gone, err := abandoned(target, stream); err != nil {
 			return nil, err
 		} else if gone {
 			return priorityRefusal("an abandoned workstream does not move")
@@ -414,13 +422,13 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 			if !owner {
 				return priorityRefusal("owner_decided is only for a move the owner asked for in the message this turn answers")
 			}
-			return WorkstreamMoveResult(s.MoveWorkstream(ctx, repository, stream, request, turn.Actor, scope.Turn))
+			return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, turn.Actor, scope.Turn))
 		}
 		if !slices.Contains(ChiefMoveTargets, input.To) {
 			return priorityRefusal(fmt.Sprintf("a move to %s is the owner's decision; present it to the owner, and record it with owner_decided once the owner asks for it", input.To))
 		}
 		if input.To == BuildingState {
-			rounds, err := finalRoundsWithBlocking(repository, stream)
+			rounds, err := finalRoundsWithBlocking(target, stream)
 			if err != nil {
 				return nil, err
 			}
@@ -428,7 +436,7 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 				return priorityRefusal(fmt.Sprintf("final reviews have found blocking problems %d times; reopening the workstream for further revisions is the owner's decision", rounds))
 			}
 		}
-		return WorkstreamMoveResult(s.MoveWorkstream(ctx, repository, stream, request, chiefActor, scope.Turn))
+		return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, chiefActor, scope.Turn))
 	}
 	return tool
 }

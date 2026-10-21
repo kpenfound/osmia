@@ -272,19 +272,20 @@ func (s *Controller) OwnerMove(ctx context.Context, raw, unit string, req UnitMo
 // holds, or one it already decided, is the owner's to move. In a turn
 // answering the owner, it records the owner's own move. A move the service
 // refuses is an ordinary result, {"recorded":false,"reason":...}, and records
-// nothing.
+// nothing. A shared chief of staff names the member whose unit moves.
 func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: moveUnitTool, Effect: coreadapter.ToolMemory,
 		Description: "Move a unit of this workstream to another state when the state machine leaves it stuck or wrong. unit: its ID; to: implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (only to record an explicit owner approval of the candidate) or contested (hold the unit for the owner); " +
 			"note: for the mason or reviewer, what to do differently, which it receives; for approved, why the candidate holds; for contested, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they do. Moving a unit to the state it is in restarts that stage. " +
-			"Move only when you are confident the move resolves the problem; otherwise move it to contested. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. The unit's state and recent transitions are in units/<unit>/activity.json.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"to":{"type":"string","enum":["implementing","checking","reviewing","approved","contested"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["unit","to","note"],"additionalProperties":false}`)}
+			"Move only when you are confident the move resolves the problem; otherwise move it to contested. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. The unit's state and recent transitions are in units/<unit>/activity.json. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"to":{"type":"string","enum":["implementing","checking","reviewing","approved","contested"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["unit","to","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Unit         string `json:"unit"`
-			To           string `json:"to"`
-			Note         string `json:"note"`
-			OwnerDecided bool   `json:"owner_decided"`
+			Unit         string              `json:"unit"`
+			To           string              `json:"to"`
+			Note         string              `json:"note"`
+			OwnerDecided bool                `json:"owner_decided"`
+			Workstream   config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -301,9 +302,15 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		stream := config.WorkstreamID(scope.Workstream)
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
 		request := UnitMoveRequest{To: input.To, Note: input.Note}
-		if gone, err := abandoned(repository, stream); err != nil {
+		if gone, err := abandoned(target, stream); err != nil {
 			return nil, err
 		} else if gone {
 			return priorityRefusal("an abandoned workstream's units do not move")
@@ -316,15 +323,15 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 			if !owner {
 				return priorityRefusal("owner_decided is only for a move the owner asked for in the message this turn answers")
 			}
-			return moveResult(s.MoveUnit(ctx, repository, stream, input.Unit, request, turn.Actor, scope.Turn))
+			return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, turn.Actor, scope.Turn))
 		}
-		if contest, contested, err := unitContest(repository, stream, input.Unit); err != nil {
+		if contest, contested, err := unitContest(target, stream, input.Unit); err != nil {
 			return nil, err
 		} else if contested {
 			if moveContest(contest, input.Unit) {
 				return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner moves it", input.Unit))
 			}
-			_, decisions, err := chiefDecisions(repository, stream, input.Unit)
+			_, decisions, err := chiefDecisions(target, stream, input.Unit)
 			if err != nil {
 				return nil, err
 			}
@@ -336,7 +343,7 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 			return priorityRefusal("engineering recovery cannot bypass independent review; request reviewing instead")
 		}
 
-		return moveResult(s.MoveUnit(ctx, repository, stream, input.Unit, request, chiefActor, scope.Turn))
+		return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, chiefActor, scope.Turn))
 	}
 	return tool
 }

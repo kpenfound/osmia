@@ -127,17 +127,19 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 // chief-of-staff turn. The chief of staff dismisses a committee objection at
 // the ratification gate on the owner's behalf, or escalates it to the owner.
 // A decision the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing.
+// {"recorded":false,"reason":...}, and records nothing. A shared chief of
+// staff names the member whose debate the objection belongs to.
 func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: ResolveObjectionTool, Effect: coreadapter.ToolMemory,
 		Description: "Decide a committee objection that stands once this workstream's debate concluded, before the owner sees the ratification packet. objection: its ID; decision: dismiss (the record answers it: it no longer blocks and is not put to the owner) or escalate (the owner rules on it); " +
-			"note: for dismiss, what answers the objection, citing the architect's reply, the spec, the plan, the charter or the knowledge base; for escalate, in a few short sentences for the owner, what the objection is about, the finding that matters and what you recommend. Dismiss only when you are confident the record answers it; otherwise escalate. The owner's own objections are the owner's.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"objection":{"type":"string"},"decision":{"type":"string","enum":["dismiss","escalate"]},"note":{"type":"string"}},"required":["objection","decision","note"],"additionalProperties":false}`)}
+			"note: for dismiss, what answers the objection, citing the architect's reply, the spec, the plan, the charter or the knowledge base; for escalate, in a few short sentences for the owner, what the objection is about, the finding that matters and what you recommend. Dismiss only when you are confident the record answers it; otherwise escalate. The owner's own objections are the owner's. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"objection":{"type":"string"},"decision":{"type":"string","enum":["dismiss","escalate"]},"note":{"type":"string"},"workstream":{"type":"string"}},"required":["objection","decision","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Objection string `json:"objection"`
-			Decision  string `json:"decision"`
-			Note      string `json:"note"`
+			Objection  string              `json:"objection"`
+			Decision   string              `json:"decision"`
+			Note       string              `json:"note"`
+			Workstream config.WorkstreamID `json:"workstream"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -154,6 +156,13 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return PriorityRefusal(refusal)
+		}
 		decision := shed.Decide(input.Decision)
 		if decision != shed.Dismiss && decision != shed.Escalate {
 			return PriorityRefusal("a decision is dismiss or escalate")
@@ -162,7 +171,7 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 		if note == "" {
 			return PriorityRefusal("a note is required")
 		}
-		entry, api := s.DecideObjection(ctx, repository, config.WorkstreamID(scope.Workstream), ObjectionDecisionRequest{Objection: strings.TrimSpace(input.Objection), Decision: decision, Note: note, Turn: scope.Turn})
+		entry, api := s.DecideObjection(ctx, target, stream, ObjectionDecisionRequest{Objection: strings.TrimSpace(input.Objection), Decision: decision, Note: note, Turn: scope.Turn})
 		if api != nil {
 			if api.Code == Internal {
 				return nil, errors.New(api.Message)

@@ -20,8 +20,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// inspectCode is the inspect_code tool of one chief-of-staff or architect
+// turn. A chief-of-staff turn may name any member of its workgroup, whose
+// feature branch, unit candidates and clone it then reads.
 func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	return coreadapter.Tool{Name: "inspect_code", Effect: coreadapter.ToolMemory, Description: "Read committed project code or list a directory. Set unit to inspect that mason's latest recorded candidate, or captured true to inspect unfinished changes since its last report; captured inspection waits for the unit's writer to finish its turn. If it has no completed report, the service snapshots its captured workspace after the writer finishes; the returned commit identifies that evidence. Use the returned inspection citation when answering from code; this queues a librarian knowledge-gap refresh. The service owns snapshot creation. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).", InputSchema: json.RawMessage(`{"type":"object","properties":{"captured":{"type":"boolean"},"unit":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	description := "Read committed project code or list a directory. Set unit to inspect that mason's latest recorded candidate, or captured true to inspect unfinished changes since its last report; captured inspection waits for the unit's writer to finish its turn. If it has no completed report, the service snapshots its captured workspace after the writer finishes; the returned commit identifies that evidence. Use the returned inspection citation when answering from code; this queues a librarian knowledge-gap refresh. The service owns snapshot creation. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000)."
+	if scope.Role == trace.ChiefOfStaff {
+		description += " workstream: a member workstream ID of your workgroup whose code and units to read; omit for this conversation's own workstream."
+	}
+	return coreadapter.Tool{Name: "inspect_code", Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, `"captured":{"type":"boolean"},"unit":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		if scope.Role != trace.ChiefOfStaff && scope.Role != architectRole {
 			return nil, errors.New("code inspection is not granted")
 		}
@@ -29,16 +36,28 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 			return nil, err
 		}
 		var in struct {
-			Captured bool   `json:"captured"`
-			Unit     string `json:"unit"`
-			Path     string `json:"path"`
-			Start    int    `json:"start"`
-			Lines    int    `json:"lines"`
+			Captured   bool                `json:"captured"`
+			Unit       string              `json:"unit"`
+			Path       string              `json:"path"`
+			Start      int                 `json:"start"`
+			Lines      int                 `json:"lines"`
+			Workstream config.WorkstreamID `json:"workstream"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&in); err != nil {
 			return nil, err
+		}
+		target, stream, refusal, err := chiefMember(repo, scope, in.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != "" {
+			return priorityRefusal(refusal)
+		}
+		project := cfg
+		if target != repo {
+			project = cfg.For(target.Project())
 		}
 		if in.Captured && in.Unit == "" {
 			return nil, errors.New("captured workspace inspection requires a unit")
@@ -55,16 +74,16 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 		if !fs.ValidPath(in.Path) || in.Start < 1 || in.Lines < 1 || in.Lines > 1000 {
 			return nil, errors.New("invalid code range")
 		}
-		g, err := featureWorkspaces(cfg, repo).Of(config.WorkstreamID(scope.Workstream))
+		g, err := featureWorkspaces(project, target).Of(stream)
 		if err != nil {
 			return nil, err
 		}
-		commit, exists, err := g.Branch(ctx, featureBranch(config.WorkstreamID(scope.Workstream)))
+		commit, exists, err := g.Branch(ctx, featureBranch(stream))
 		if err != nil {
 			return nil, err
 		}
 		if !exists {
-			cmd := exec.CommandContext(ctx, "git", "-C", cfg.Project.Clone, "rev-parse", "--verify", "HEAD^{commit}")
+			cmd := exec.CommandContext(ctx, "git", "-C", project.Project.Clone, "rev-parse", "--verify", "HEAD^{commit}")
 			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
 			out, err := cmd.Output()
 			if err != nil {
@@ -73,10 +92,10 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 			commit = strings.TrimSpace(string(out))
 		}
 		if in.Unit != "" {
-			if _, err := config.ParseWorkstreamID(scope.Workstream); err != nil {
+			if _, err := config.ParseWorkstreamID(string(stream)); err != nil {
 				return nil, err
 			}
-			docs, err := trace.Read[trace.Document](repo, config.WorkstreamID(scope.Workstream))
+			docs, err := trace.Read[trace.Document](target, stream)
 			if err != nil {
 				return nil, err
 			}
@@ -89,14 +108,14 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 				}
 			}
 			if report.Candidate == "" || in.Captured {
-				idle, err := revisionWorkersIdle(repo, config.WorkstreamID(scope.Workstream), []string{in.Unit})
+				idle, err := revisionWorkersIdle(target, stream, []string{in.Unit})
 				if err != nil {
 					return nil, err
 				}
 				if !idle {
 					return nil, errors.New("unit writer is still running; inspect its durable activity with factory_context and retry when it finishes")
 				}
-				_, _, commit, err = newUnitWorkspaces(cfg, repo).snapshot(ctx, config.WorkstreamID(scope.Workstream), in.Unit)
+				_, _, commit, err = newUnitWorkspaces(project, target).snapshot(ctx, stream, in.Unit)
 				if err != nil {
 					return nil, err
 				}
@@ -109,7 +128,7 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 			return nil, err
 		}
 		defer os.RemoveAll(dir)
-		if err := copyCommit(ctx, cfg.Project.Clone, commit, dir); err != nil {
+		if err := copyCommit(ctx, project.Project.Clone, commit, dir); err != nil {
 			return nil, err
 		}
 		root, err := os.OpenRoot(dir)

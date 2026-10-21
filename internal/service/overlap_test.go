@@ -308,3 +308,52 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	must(t, repo.Close())
 	p.run(func() { check(second, nil) })
 }
+
+// TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive covers status after the
+// other workstream of a recorded warning lost its trace, as archive cleanup
+// leaves it: the warning is no longer active, and reading it is no error.
+func TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		a config.WorkstreamID = "w_00000000000000000000000000000001"
+		b config.WorkstreamID = "w_00000000000000000000000000000002"
+	)
+	root, err := config.ResolveRoot(filepath.Join(t.TempDir(), "osmia"), "")
+	must(t, err)
+	p := &overlapPlanted{t: t, clock: &fixedClock{At: demoStart}}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	planted := config.Project{ID: project, Clone: t.TempDir()}
+	repo, err := trace.Create(ctx, root, planted, p.clock.Now(), owner)
+	must(t, err)
+	must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), librarianActor, "planted"))
+	for _, stream := range []config.WorkstreamID{a, b} {
+		must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
+		p.plant(repo, stream, 1, "internal.trace")
+		p.feature(repo, stream, BuildingState)
+	}
+	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: p.header(repo, a, "osmia.trace.transition", "overlap-"+string(b)+"-1-1", 1), Subject: overlapSubject(b), To: "seals-1-1", Reason: "planted"}})
+	must(t, err)
+	advisories := func(repo *trace.Repository) []OverlapAdvisory {
+		t.Helper()
+		subjects, err := repo.WorkflowStates(a)
+		must(t, err)
+		out, err := overlapAdvisories(repo, a, subjects)
+		must(t, err)
+		return out
+	}
+	if got := advisories(repo); len(got) != 1 || got[0].Workstream != b {
+		t.Fatalf("active advisories: %+v", got)
+	}
+	must(t, repo.Close())
+
+	gone, err := root.WorkstreamTrace(planted.ID, b)
+	must(t, err)
+	must(t, os.RemoveAll(gone))
+	repo, err = trace.Open(root, planted)
+	must(t, err)
+	t.Cleanup(func() { repo.Close() })
+	if got := advisories(repo); len(got) != 0 {
+		t.Fatalf("advisories about a gone workstream: %+v", got)
+	}
+}
