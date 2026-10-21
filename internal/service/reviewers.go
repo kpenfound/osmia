@@ -10,11 +10,13 @@ import (
 	"strings"
 	"sync"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/gitdiff"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -391,7 +393,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. A material finding names the task or acceptance item that does not hold and what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, workstreamDiffTool, gitdiff.ChangedFiles(req.Diff), checkEvidence(run))
+	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. A material finding names the task or acceptance item that does not hold and what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, reviewtools.DiffToolName, gitdiff.ChangedFiles(req.Diff), checkEvidence(run))
 	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
 	if err != nil {
 		return err
@@ -563,7 +565,7 @@ func (r *reviewers) turnIdentity(stream config.WorkstreamID, unit string, turn t
 	if err != nil {
 		return UnitReviewIdentity{}, err
 	}
-	return reviewIdentityInPrompt(origin.Request.Prompt)
+	return reviewtools.IdentityInPrompt(origin.Request.Prompt)
 }
 
 func (r *reviewers) answerOrigin(stream config.WorkstreamID, unit string, turn trace.QueuedTurn) (trace.QueuedTurn, error) {
@@ -717,23 +719,6 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		return r.enqueueFindings(ctx, stream, unit, result)
 	}
 	return nil
-}
-
-// reviewIdentityInPrompt reads the candidate identity a review prompt pins:
-// the indented JSON after its introduction, up to the first blank line.
-func reviewIdentityInPrompt(prompt string) (UnitReviewIdentity, error) {
-	const start = "The candidate identity is:\n"
-	_, body, ok := strings.Cut(prompt, start)
-	if !ok {
-		return UnitReviewIdentity{}, errors.New("review turn lacks candidate identity")
-	}
-	body, _, ok = strings.Cut(body, "\n\n")
-	if !ok {
-		return UnitReviewIdentity{}, errors.New("review turn lacks the end of its candidate identity")
-	}
-	var identity UnitReviewIdentity
-	err := json.Unmarshal([]byte(body), &identity)
-	return identity, err
 }
 
 func staleReview(reviewed, current UnitReviewIdentity) string {
@@ -911,7 +896,7 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 			return err
 		}
 		if i := slices.IndexFunc(runs, func(run UnitCheckRun) bool { return run.Unit == unit && run.Run == result.Checks }); i >= 0 {
-			prompt += outputEvidence(runs[i].Output, runs[i].OutputPath, runs[i].OutputRevision, runs[i].Truncated)
+			prompt += checkrun.OutputEvidence(runs[i].Output, runs[i].OutputPath, runs[i].OutputRevision, runs[i].Truncated)
 		}
 	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}

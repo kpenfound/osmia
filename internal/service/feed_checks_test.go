@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -32,9 +33,9 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 			must(t, err)
 			defer func() { repo.Close() }()
 			listed := 115
-			selection := CheckSelection{Mode: selectionSelected, Links: []string{"dag://a", "dag://b", "dag://c"}, Candidates: 113, Listed: &listed}
+			selection := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a", "dag://b", "dag://c"}, Candidates: 113, Listed: &listed}
 			if status == ChecksSuperseded {
-				selection = fullSelection("disabled", "the boost is off")
+				selection = checkrun.FullSelection("disabled", "the boost is off")
 			}
 			started, chosen, finished := demoStart, demoStart.Add(time.Minute), demoStart.Add(2*time.Minute)
 			feedDocument(t, repo, stream, checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, chosen, UnitCheckSelection{Unit: "upload", Run: 1, Selection: selection, StartedAt: started})
@@ -85,7 +86,7 @@ func TestFeedLegacyUnitCheckRunsDoNotInventListedTotals(t *testing.T) {
 	must(t, err)
 	defer repo.Close()
 	// These JSON records omit listed, as traces recorded before totals do.
-	selection := CheckSelection{Mode: selectionSelected, Links: []string{"dag://a"}, Candidates: 113}
+	selection := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a"}, Candidates: 113}
 	feedDocument(t, repo, stream, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, demoStart, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, Selection: &selection, StartedAt: demoStart, FinishedAt: demoStart})
 	feedDocument(t, repo, stream, checkDocumentID("upload", 2), "units/upload/checks-2.json", 1, demoStart.Add(time.Minute), UnitCheckRun{Unit: "upload", Run: 2, Status: ChecksFailed, Failed: []string{"dag://b"}, StartedAt: demoStart, FinishedAt: demoStart.Add(time.Minute)})
 	entries, err := feedEntries(repo, repo, stream)
@@ -263,7 +264,7 @@ func TestEventStreamAnnouncesFeedCheckAndReviewRecords(t *testing.T) {
 		revision int
 		value    any
 	}{
-		{checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, UnitCheckSelection{Unit: "upload", Run: 1, Selection: fullSelection("disabled", "boost off"), StartedAt: at}},
+		{checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, UnitCheckSelection{Unit: "upload", Run: 1, Selection: checkrun.FullSelection("disabled", "boost off"), StartedAt: at}},
 		{checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, StartedAt: at, FinishedAt: at}},
 		{finalCheckAttemptDocument(1, 1), finalCheckAttemptPath(1, 1), 1, FinalCheckAttempt{Review: 1, Attempt: 1, StartedAt: at}},
 		{finalChecksDocument(1), finalChecksPath(1), 1, FinalCheckRun{Review: 1, Attempt: 1, Status: ChecksIncomplete, Error: "timeout", StartedAt: at, FinishedAt: at}},

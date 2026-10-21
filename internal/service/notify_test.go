@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -143,7 +144,7 @@ func (f *fakeInbox) set(entries ...InboxEntry) {
 	s := f.s
 	f.mu.Unlock()
 	if s != nil {
-		s.hub.publish(Event{Kind: EventInbox})
+		s.hub.Publish(Event{Kind: EventInbox})
 	}
 }
 
@@ -795,10 +796,10 @@ func TestNotifyWakesOnRuntimeChanges(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	hook := newFakeWebhook(t)
 	s, _, repo, clock := dailyBudgetService(t, 0, nil)
-	s.hub = newHub()
+	s.hub = eventstream.New()
 	n, _ := budgetNotifier(t, s, hook.hook())
 	s.notifier = n
-	s.store.Observe(func() { s.hub.publish(Event{Kind: EventRuntime}) })
+	s.store.Observe(func() { s.hub.Publish(Event{Kind: EventRuntime}) })
 	go n.run(ctx)
 	t.Cleanup(func() { cancel(); <-n.done })
 	soon(t, "the first pass", func() bool {
@@ -808,18 +809,8 @@ func TestNotifyWakesOnRuntimeChanges(t *testing.T) {
 	})
 	// A new subscriber starts with a resync pending, which wakes the
 	// notifier whatever the event; let an unrelated event use it up.
-	s.hub.publish(Event{Kind: EventSpend})
-	soon(t, "the pending resync consumed", func() bool {
-		s.hub.mu.Lock()
-		defer s.hub.mu.Unlock()
-		for sub := range s.hub.subs {
-			sub.mu.Lock()
-			idle := !sub.resync && len(sub.pending) == 0
-			sub.mu.Unlock()
-			return idle
-		}
-		return false
-	})
+	s.hub.Publish(Event{Kind: EventSpend})
+	soon(t, "the pending resync consumed", s.hub.Idle)
 	appendDayCost(t, repo, stream, "spent", clock.Now(), 1.25, true)
 	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 	if got := hook.await(t, 1); !strings.Contains(got[0], "Spend: USD 1.25") {

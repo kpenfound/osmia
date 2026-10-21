@@ -18,6 +18,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -219,7 +220,7 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 		}
 		var run FinalCheckRun
 		must(t, json.Unmarshal([]byte(docs[len(docs)-1].Content), &run))
-		return run.Status == ChecksPassed && run.Selection != nil && run.Selection.Mode == selectionSelected &&
+		return run.Status == ChecksPassed && run.Selection != nil && run.Selection.Mode == checkrun.SelectionSelected &&
 			slices.Equal(run.Selection.Links, checks.links[:1]) && run.Selection.Judgment != "" &&
 			strings.HasSuffix(strings.Join(run.Command, " "), checks.links[0])
 	})

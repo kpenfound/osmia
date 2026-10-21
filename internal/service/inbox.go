@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -40,12 +41,12 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 		}
 		// projectInbox makes many separate repository and runtime-store
 		// reads per workstream (statuses, escalations, operations, outbox,
-		// the loop guard's pause, ...). consistentRead retries the whole
+		// the loop guard's pause, ...). readview.Consistent retries the whole
 		// project's inbox from scratch when a commit or runtime mutation
 		// lands partway through, so the response never mixes entries read
 		// from one trace or runtime generation with entries read from
 		// another.
-		entries, err := consistentRead(func() ([]InboxEntry, error) {
+		entries, err := readview.Consistent(func() ([]InboxEntry, error) {
 			es, api := s.projectInbox(ctx, active)
 			if api != nil {
 				return nil, apiErrAsError{api}

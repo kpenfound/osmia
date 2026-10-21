@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -37,18 +38,6 @@ const checkRetryDelay = 10 * time.Minute
 // fail to complete, since the unit last moved into checking, before the unit
 // is contested instead of its checks running again.
 const maxIncompleteChecks = 3
-
-// The statuses of a check run.
-const (
-	ChecksPassed = "passed"
-	ChecksFailed = "failed"
-	// ChecksIncomplete is a run that reported no result for its checks: the
-	// export, the engine or Dagger failed, or the run timed out.
-	ChecksIncomplete = "incomplete"
-	// ChecksSuperseded is a run whose candidate was replaced, or whose unit
-	// left checking, before it ran.
-	ChecksSuperseded = "superseded"
-)
 
 // checkInput is a check operation's input: the run and the candidate it is
 // bound to, from the unit's report revision Report.
@@ -306,7 +295,7 @@ func (c *checkers) request(ctx context.Context, stream config.WorkstreamID, in c
 // pass moves a unit whose candidate's checks passed to reviewing.
 func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), UnitReviewing, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), describeSelection(*run.Selection))
+	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.DescribeSelection(*run.Selection))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.now(), Actor: checksActor, Cause: checkDocumentID(unit, run.Run)}
 	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitReviewing, Reason: reason},
@@ -360,7 +349,7 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 		to = UnitContested
 	}
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), to, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkExcerpt(strings.Join(run.Failed, ", "), 2048), describeSelection(*run.Selection))
+	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelection(*run.Selection))
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
@@ -381,9 +370,9 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 // checkVerdict is the send-back a failed check run records: one finding for
 // each failed check.
 func checkVerdict(run UnitCheckRun) UnitVerdict {
-	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, describeSelection(*run.Selection))}
+	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, checkrun.DescribeSelection(*run.Selection))}
 	for _, link := range run.Failed {
-		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkLinkLabel(link), checkPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkLinkLabel(link))})
+		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkrun.CheckLinkLabel(link), checkPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkrun.CheckLinkLabel(link))})
 	}
 	return v
 }
@@ -604,31 +593,14 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
 	captured, run.ExitCode = result.Output, result.ExitCode
-	run.Output, run.Truncated = summarizeCheckOutput(result.Output, result.ExitCode)
+	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
-	run.OutputPath = checkOutputPath(checkPath(in.Unit, in.Run))
+	run.OutputPath = checkrun.CheckOutputPath(checkPath(in.Unit, in.Run))
 	run.OutputRevision = 1
-	if run.Status, run.Failed, err = classifyChecks(result, err); run.Status == ChecksIncomplete {
+	if run.Status, run.Failed, err = checkrun.ClassifyChecks(result, err); run.Status == ChecksIncomplete {
 		return incomplete(err)
 	}
 	return c.record(ctx, in, run, captured)
-}
-
-// classifyChecks classifies a finished dagger check from its result and the
-// error it ran with: passed on exit 0, failed with the links Dagger's report
-// shows failed, and otherwise incomplete with the reason.
-func classifyChecks(result CheckResult, err error) (status string, failed []string, reason error) {
-	failed = failedChecks(result.Output)
-	switch {
-	case err != nil:
-		return ChecksIncomplete, failed, err
-	case result.ExitCode == 0:
-		return ChecksPassed, nil, nil
-	case len(failed) > 0:
-		return ChecksFailed, failed, nil
-	default:
-		return ChecksIncomplete, failed, fmt.Errorf("dagger check exited %d without reporting a failed check", result.ExitCode)
-	}
 }
 
 // superseded returns why a run no longer checks its unit's candidate: the
@@ -774,11 +746,11 @@ func latestRunFor(repo *trace.Repository, stream config.WorkstreamID, unit strin
 
 // checkEvidence is how a review prompt carries a check run.
 func checkEvidence(run UnitCheckRun) string {
-	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, describeSelection(*run.Selection), checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
+	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelection(*run.Selection), checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
 	if len(run.Failed) > 0 {
-		out += "\nFailed: " + checkExcerpt(strings.Join(run.Failed, ", "), 2048)
+		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}
-	return out + outputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
+	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }
 
 // quoteLinks quotes the arguments of a command that a shell would split.

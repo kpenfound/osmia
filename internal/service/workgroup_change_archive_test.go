@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -872,7 +873,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 	chief, _, _, closeChief, err := f.s.chiefRepository(ctx, repo, f.stream1)
 	must(t, err)
 	defer closeChief()
-	matching, err := consistentRead(func() (bool, error) {
+	matching, err := readview.Consistent(func() (bool, error) {
 		var entries []ConversationEntry
 		var feed []FeedEntry
 		for i, member := range []config.WorkstreamID{f.origin, f.stream1, f.stream2, addition} {

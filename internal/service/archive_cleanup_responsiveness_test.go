@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -67,7 +68,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}}
-	s.activity = newActivityRegistry(s.now)
+	s.activity = activity.New(s.now)
 	s.setSole(runtimeFor(repo))
 	must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: stream, Title: "fixture workstream", State: AbandonedState, ArchivedAt: demoStart}))
 	started := make(chan struct{}, 1)

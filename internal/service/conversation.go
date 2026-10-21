@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -169,7 +170,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeTarget()
-	entries, err := consistentRead(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
+	entries, err := readview.Consistent(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
 	if err != nil {
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}

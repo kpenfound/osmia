@@ -425,7 +425,7 @@ func (a sharedConversationAdapter) Apply(ctx context.Context, op coreadapter.Ope
 // those views without reading member repositories under the trace write lock.
 func (s *Service) observeSharedConversation(trace.Commit) {
 	s.conversationSignal.wake()
-	s.hub.publish(Event{Kind: EventResync})
+	s.hub.Publish(Event{Kind: EventResync})
 }
 
 // A bound workgroup aggregate lists real members; its conversation belongs to

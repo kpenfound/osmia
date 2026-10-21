@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/status"
@@ -95,7 +96,7 @@ var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file
 // record its verdict. The service runs the candidate's checks before review.
 // The drift reviewer holds the same tools, over the resolved candidate it
 // reads instead of a unit's.
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, workstreamDiffTool}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, reviewtools.DiffToolName}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
 // and image with the role's skills, and for a mason with the Dagger engine the

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -393,7 +394,7 @@ func TestSavedBounceRulingsRecoverAndDeliverOnce(t *testing.T) {
 				c := &checkers{masons: r.masons}
 				state, err := repo.Workflow(stream, trace.UnitSubject(bounceUnit))
 				must(t, err)
-				must(t, c.fail(context.Background(), stream, bounceUnit, state, UnitCheckRun{Unit: bounceUnit, Run: 1, Candidate: identity.Candidate.Revision, Base: identity.Candidate.BaseRevision, DiffSHA256: identity.DiffSHA256, Status: ChecksFailed, Selection: &CheckSelection{Mode: selectionFull}, Failed: []string{bounceCheck}}))
+				must(t, c.fail(context.Background(), stream, bounceUnit, state, UnitCheckRun{Unit: bounceUnit, Run: 1, Candidate: identity.Candidate.Revision, Base: identity.Candidate.BaseRevision, DiffSHA256: identity.DiffSHA256, Status: ChecksFailed, Selection: &CheckSelection{Mode: checkrun.SelectionFull}, Failed: []string{bounceCheck}}))
 				result, ok, err := r.storedResult(stream, bounceUnit, trace.WorkflowState{})
 				must(t, err)
 				b.findings = result.Verdict.Findings

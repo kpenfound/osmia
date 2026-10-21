@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -215,9 +216,9 @@ func TestReviewerQuestionLaterVerdictReconcilesAfterRestart(t *testing.T) {
 				if !last.CompletedAt.IsZero() {
 					t.Fatal("reviewing without a queued review")
 				}
-				oldID, err := reviewIdentityInPrompt(req.Prompt)
+				oldID, err := reviewtools.IdentityInPrompt(req.Prompt)
 				must(t, err)
-				newID, err := reviewIdentityInPrompt(last.Request.Prompt)
+				newID, err := reviewtools.IdentityInPrompt(last.Request.Prompt)
 				must(t, err)
 				if staleReview(oldID, newID) != "" {
 					t.Fatal("candidate changed during question wait")
@@ -542,9 +543,9 @@ func TestReviewerEarlyAnswerWithoutVerdictQueuesFreshReview(t *testing.T) {
 	if state.Value != UnitReviewing || len(th.Turns) != 3 || !last.CompletedAt.IsZero() {
 		t.Fatalf("no fresh review after answer: %+v, %+v", state, th)
 	}
-	origin, err := reviewIdentityInPrompt(th.Turns[0].Request.Prompt)
+	origin, err := reviewtools.IdentityInPrompt(th.Turns[0].Request.Prompt)
 	must(t, err)
-	fresh, err := reviewIdentityInPrompt(last.Request.Prompt)
+	fresh, err := reviewtools.IdentityInPrompt(last.Request.Prompt)
 	must(t, err)
 	if staleReview(origin, fresh) != "" {
 		t.Fatal("fresh review changed the candidate")

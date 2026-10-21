@@ -48,7 +48,7 @@ func (d dailyBudget) Pass(ctx context.Context) error {
 		var changed bool
 		spend, changed = d.s.spends.total(d.repository.Project(), day.date, own, members)
 		if changed {
-			d.s.hub.publish(Event{Kind: EventSpend})
+			d.s.hub.Publish(Event{Kind: EventSpend})
 		}
 	}
 	return d.enforce(day, limitText, spend)

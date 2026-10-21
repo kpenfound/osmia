@@ -19,21 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// UnitReviewIdentity is the durable identity of a prepared review. A returned
-// review must match Candidate and DiffSHA256 before its verdict can be used.
-type UnitReviewIdentity struct {
-	Discoveries string                `json:"discoveries,omitempty"`
-	Subject     string                `json:"subject"`
-	Candidate   coreadapter.Candidate `json:"candidate"`
-	DiffSHA256  string                `json:"diff_sha256"`
-	Report      string                `json:"report"`
-	Seal        int                   `json:"seal"`
-}
-
-func (i UnitReviewIdentity) Matches(result coreadapter.ReviewResult) bool {
-	return result.Subject == i.Subject && result.Candidate == i.Candidate && result.DiffSHA256 == i.DiffSHA256
-}
-
 func reviewDocument(unit string) string { return trace.UnitSubject(unit) + "-review" }
 
 // prepareUnitReview reads only recorded evidence. It records the identity

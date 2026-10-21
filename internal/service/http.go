@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/tailnet"
 	"github.com/kpenfound/osmia/internal/web"
 )
 
@@ -204,7 +206,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/stop" {
-		if arrivedOn(r) != 0 {
+		if tailnet.ArrivedOn(r) != 0 {
 			fail(w, Forbidden)
 			return
 		}
@@ -236,7 +238,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			// the runtime store (status.go); a request whose view cannot
 			// refresh within coreReadBound answers with the last one
 			// instead of blocking past it (bounded_read.go, boundedView).
-			out, stale := boundedView(r.Context(), &s.statusViews, coreReadBound, s.statusList)
+			out, stale := readview.Bounded(r.Context(), &s.statusViews, coreReadBound, s.statusList)
 			out.Tailnet = s.tailnetStatus(r.Context())
 			if stale {
 				w.Header().Set(StaleHeader, "true")

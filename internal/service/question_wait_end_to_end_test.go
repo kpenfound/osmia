@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -174,7 +175,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 					if reviewCalls.Add(1) != 1 {
 						return nil, fmt.Errorf("duplicate review of resume: %s", req.Name)
 					}
-					identity, err := reviewIdentityInPrompt(req.Prompt)
+					identity, err := reviewtools.IdentityInPrompt(req.Prompt)
 					if err != nil {
 						return nil, err
 					}

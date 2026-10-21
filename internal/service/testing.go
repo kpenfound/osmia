@@ -84,21 +84,21 @@ func (a TestAccess) RefreshRuntime() error { return a.s.refreshRuntime() }
 // Changes subscribes before the caller's first read. The wait must be released.
 // Notifications are hints; a timer also wakes reads of unannounced trace state.
 func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
-	sub, ok := a.s.hub.subscribe()
+	sub, ok := a.s.hub.Subscribe()
 	if !ok {
 		return nil, nil, false
 	}
 	ticker := time.NewTicker(time.Second)
 	return func() error {
 		select {
-		case <-sub.wake:
-			sub.take()
+		case <-sub.Wake():
+			sub.Take()
 		case <-ticker.C:
-		case <-a.s.hub.done:
+		case <-a.s.hub.Done():
 			return context.Canceled
 		}
 		return nil
-	}, func() { ticker.Stop(); a.s.hub.unsubscribe(sub) }, true
+	}, func() { ticker.Stop(); a.s.hub.Unsubscribe(sub) }, true
 }
 
 // Now returns the service's configured fixture clock.

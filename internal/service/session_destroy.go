@@ -117,7 +117,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		if err := s.refreshRuntime(); err != nil {
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
-		s.hub.publish(Event{Kind: EventRuntime})
+		s.hub.Publish(Event{Kind: EventRuntime})
 		return SessionDestroyResponse{Project: p.id, Workstream: id, Destroyed: true}, nil
 	}
 	return SessionDestroyResponse{}, &APIError{Code: NotFound, Message: "session not found"}
@@ -175,18 +175,18 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 	if err := store.ForgetSession(project, stream); err != nil {
 		return err
 	}
-	s.activity.forgetSession(project, stream)
+	s.activity.ForgetSession(project, stream)
 	s.forgetSessionStatus(project, stream)
 	return trace.FinishSessionDestroy(cfg.Root, project, stream)
 }
 
 func (s *Service) forgetSessionStatus(project config.ProjectID, stream config.WorkstreamID) {
-	s.statusViews.mu.Lock()
 	// A status read that already captured this session must not restore it
 	// to the cache when its background refresh eventually finishes.
-	s.statusViews.generation++
-	s.statusViews.value.Workstreams = slices.DeleteFunc(slices.Clone(s.statusViews.value.Workstreams), func(w WorkstreamStatus) bool { return w.Project == project && w.Workstream == stream })
-	s.statusViews.mu.Unlock()
+	s.statusViews.Invalidate(func(value StatusResponse) StatusResponse {
+		value.Workstreams = slices.DeleteFunc(slices.Clone(value.Workstreams), func(w WorkstreamStatus) bool { return w.Project == project && w.Workstream == stream })
+		return value
+	})
 }
 
 func forgetDestroyedSessionOpen(root config.Root, project config.ProjectID, stream config.WorkstreamID) error {

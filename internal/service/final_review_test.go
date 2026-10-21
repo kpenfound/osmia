@@ -16,12 +16,14 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/jev"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -234,11 +236,11 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 				problems = append(problems, fmt.Errorf("%s holds %q: %v", path, got, err))
 			}
 		}
-		diff, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{})
+		diff, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{})
 		if err != nil || !strings.Contains(diff, "internal/trace/resume.go") || !strings.Contains(diff, "internal/trace/dedupe.go") || strings.Contains(diff, "UPSTREAM.md") {
 			problems = append(problems, fmt.Errorf("branch diff %q: %v", diff, err))
 		}
-		if listed, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"files_only": true, "paths": []string{"internal/trace/dedupe.go"}}); err != nil || !strings.Contains(listed, `"path":"internal/trace/dedupe.go"`) || strings.Contains(listed, "resume.go") {
+		if listed, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"files_only": true, "paths": []string{"internal/trace/dedupe.go"}}); err != nil || !strings.Contains(listed, `"path":"internal/trace/dedupe.go"`) || strings.Contains(listed, "resume.go") {
 			problems = append(problems, fmt.Errorf("branch files %q: %v", listed, err))
 		}
 		if report, err := readTool(ctx, tools, "units/resume/report.json"); err == nil {
@@ -453,7 +455,7 @@ func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 	}
 	var problems []error
 	f.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		if since, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "since", "files_only": true}); err != nil || !strings.Contains(since, "internal/trace/upload.go") || strings.Contains(since, "dedupe.go") {
+		if since, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "since", "files_only": true}); err != nil || !strings.Contains(since, "internal/trace/upload.go") || strings.Contains(since, "dedupe.go") {
 			problems = append(problems, fmt.Errorf("the change since review 1 %q: %v", since, err))
 		}
 		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dedupe is still not wired in.", "findings": []any{
@@ -902,10 +904,10 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			var selected []string
 			if mode == "selected" {
 				selected = links[:1]
-				if selection.Mode != selectionSelected || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 || selection.Judgment == "" {
+				if selection.Mode != checkrun.SelectionSelected || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 || selection.Judgment == "" {
 					t.Fatalf("selected evidence: %+v", selection)
 				}
-			} else if selection.Mode != selectionFull || selection.Reason != mode || len(selection.Links) != 0 {
+			} else if selection.Mode != checkrun.SelectionFull || selection.Reason != mode || len(selection.Links) != 0 {
 				t.Fatalf("full evidence: %+v, want %s", selection, mode)
 			}
 			if runs := checks.Runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
@@ -945,13 +947,13 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			reader, err := repo.Thread(stream, committeeAgent(1))
 			must(t, err)
 			request := reader.Turns[len(reader.Turns)-1].Request
-			if !strings.Contains(request.Prompt, describeSelection(*selection)) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
+			if !strings.Contains(request.Prompt, checkrun.DescribeSelection(*selection)) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
 				t.Fatalf("reader lacks selection: %s\n%s", request.SystemPrompt, request.Prompt)
 			}
 			entries, err := feedChecks(repo, stream)
 			must(t, err)
 			i := slices.IndexFunc(entries, func(e FeedEntry) bool { return e.FinalChecks != nil })
-			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != describeSelection(*selection) {
+			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != checkrun.DescribeSelection(*selection) {
 				t.Fatalf("feed selection: %+v", entries)
 			}
 		})

@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -310,10 +311,10 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	d.mu.Lock()
 	d.reviewedTip, d.reviewPrompt = tip, req.Prompt
 	d.mu.Unlock()
-	if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "resolution", "paths": []string{masonWrote}}); err != nil || !strings.Contains(body, "+// resume uses the upstream reservation") {
+	if body, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "resolution", "paths": []string{masonWrote}}); err != nil || !strings.Contains(body, "+// resume uses the upstream reservation") {
 		return nil, fmt.Errorf("resolution diff %s: %v", body, err)
 	}
-	if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+masonWrote+`"`) {
+	if body, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+masonWrote+`"`) {
 		return nil, fmt.Errorf("feature files %s: %v", body, err)
 	}
 	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})

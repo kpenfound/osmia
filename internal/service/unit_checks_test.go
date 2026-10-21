@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
@@ -112,7 +113,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	report := currentReport(t, repository, stream, "resume")
 	run := onlyRun(t, repository, stream)
-	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != selectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || run.Selection.Listed != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--failfast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
+	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || run.Selection.Listed != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--failfast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
 		t.Fatalf("check run %+v", run)
 	}
 	// The boost is off: every check runs on the exact candidate, in an
@@ -165,7 +166,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
-	if run.Selection.Mode != selectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
+	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
 		t.Fatalf("check run %+v", run)
 	}
 	requests := p.Requests()
@@ -190,7 +191,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
 	must(t, err)
 	again := c.selectChecks(context.Background(), ops[0].input, t.TempDir(), diff, checks)
-	if again.Mode != selectionSelected || !slices.Equal(again.Links, selected) || again.Judgment != run.Selection.Judgment || len(p.Requests()) != 1 {
+	if again.Mode != checkrun.SelectionSelected || !slices.Equal(again.Links, selected) || again.Judgment != run.Selection.Judgment || len(p.Requests()) != 1 {
 		t.Fatalf("the recorded selection was not reused: %+v after %d requests", again, len(p.Requests()))
 	}
 }
@@ -211,9 +212,9 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 	}{
 		{"rate limited", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, string(jev.ReasonRateLimited), true},
 		{"no check likely", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1), "check-1": jevtest.Noul(0.05)}}}, string(jev.ReasonDeclined), true},
-		{"no checks", &fakeChecks{}, jevtest.Result{}, selectionNoChecks, false},
-		{"unlisted", &fakeChecks{ListErr: errors.New("engine unreachable")}, jevtest.Result{}, selectionUnlisted, false},
-		{"too many checks", &fakeChecks{Links: many}, jevtest.Result{}, selectionTooMany, false},
+		{"no checks", &fakeChecks{}, jevtest.Result{}, checkrun.SelectionNoChecks, false},
+		{"unlisted", &fakeChecks{ListErr: errors.New("engine unreachable")}, jevtest.Result{}, checkrun.SelectionUnlisted, false},
+		{"too many checks", &fakeChecks{Links: many}, jevtest.Result{}, checkrun.SelectionTooMany, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -226,7 +227,7 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 				t.Fatalf("unit is %s, want reviewing", got)
 			}
 			run := onlyRun(t, repository, stream)
-			if ran := c.checks.Runs(); len(ran) != 1 || ran[0] != nil || run.Selection.Mode != selectionFull || run.Selection.Reason != c.reason {
+			if ran := c.checks.Runs(); len(ran) != 1 || ran[0] != nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != c.reason {
 				t.Fatalf("checks ran %q with selection %+v, want every check for %s", ran, run.Selection, c.reason)
 			}
 			if c.checks.ListErr != nil {

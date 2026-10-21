@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -963,7 +964,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.selectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, workstreamDiffTool}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, reviewtools.DiffToolName}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !strings.HasPrefix(scope.Turn, finalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -984,14 +985,14 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 					return g.Diff(ctx, from, to)
 				}
 			}
-			branch := pinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit, Read: read(report.Upstream.Commit, report.Commit)}
+			branch := reviewtools.PinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit, Read: read(report.Upstream.Commit, report.Commit)}
 			previous, found, err := previousFinalReport(a.repository, stream, in.Review)
 			if err != nil || !found {
-				return []coreadapter.Tool{tool, diffTool(branch)}, err
+				return []coreadapter.Tool{tool, reviewtools.DiffTool(branch)}, err
 			}
 			branch.Name = "branch"
-			since := pinnedDiff{Name: "since", About: fmt.Sprintf("what changed since final review %d read %s, including any upstream change a rebase brought in", previous.Review, previous.Commit), From: previous.Commit, To: report.Commit, Read: read(previous.Commit, report.Commit)}
-			return []coreadapter.Tool{tool, diffTool(branch, since)}, nil
+			since := reviewtools.PinnedDiff{Name: "since", About: fmt.Sprintf("what changed since final review %d read %s, including any upstream change a rebase brought in", previous.Review, previous.Commit), From: previous.Commit, To: report.Commit, Read: read(previous.Commit, report.Commit)}
+			return []coreadapter.Tool{tool, reviewtools.DiffTool(branch, since)}, nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -1650,10 +1651,10 @@ func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 			fmt.Fprintf(&served, "- %s: %s\n", c.Criterion, c.Evidence)
 		}
 	}
-	diff := fmt.Sprintf("Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.", workstreamDiffTool)
+	diff := fmt.Sprintf("Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.", reviewtools.DiffToolName)
 	earlier := ""
 	if previous.Review > 0 {
-		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff. The change since includes whatever upstream changed in between, which a rebase brought in: that is upstream's change, not the feature's, so judge it only where it breaks the feature.", workstreamDiffTool, previous.Review)
+		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff. The change since includes whatever upstream changed in between, which a rebase brought in: that is upstream's change, not the feature's, so judge it only where it breaks the feature.", reviewtools.DiffToolName, previous.Review)
 		var b strings.Builder
 		fmt.Fprintf(&b, "\nFinal review %d read %s and found:\n", previous.Review, previous.Commit)
 		blocking := reportBlocking(previous)

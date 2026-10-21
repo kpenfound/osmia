@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -182,7 +183,7 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 			s := refresh.s
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
-			s.hub = newHub()
+			s.hub = eventstream.New()
 			_, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream, quiet}, demoStart, ownerActor, "fixture")
 			must(t, err)
 			p := deliverWithPullRequest(t, repo, cfg, 42)
@@ -387,7 +388,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			clock := &fixedClock{At: demoStart}
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
-			s.hub = newHub()
+			s.hub = eventstream.New()
 			group, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream, quiet}, demoStart, ownerActor, "fixture")
 			must(t, err)
 			must(t, trace.RecordProjectSpec(ctx, repo, group, trace.ProjectSpec{Behavior: "Dependency waits for merge", Graph: []trace.Edge{{From: quiet, To: stream, Type: trace.EdgeHardBlock}}}, demoStart, ownerActor, "fixture"))

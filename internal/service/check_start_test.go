@@ -15,6 +15,7 @@ import (
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -107,10 +108,10 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 				t.Fatalf("running selection %+v, runner links %v", selection, ran)
 			}
 			if full {
-				if selection.Mode != selectionFull || selection.Reason != string(jev.ReasonDeclined) || selection.Detail == "" || len(ran) != 0 {
+				if selection.Mode != checkrun.SelectionFull || selection.Reason != string(jev.ReasonDeclined) || selection.Detail == "" || len(ran) != 0 {
 					t.Fatalf("full selection %+v", selection)
 				}
-			} else if selection.Mode != selectionSelected || len(ran) != 1 {
+			} else if selection.Mode != checkrun.SelectionSelected || len(ran) != 1 {
 				t.Fatalf("selected selection %+v", selection)
 			}
 			if observed, err := c.Inspect(ctx, op); err != nil || observed.State != coreadapter.EffectAbsent || observed.Result != nil {
@@ -290,7 +291,7 @@ func TestLegacyUnitCheckSelectionStillMovesToReview(t *testing.T) {
 	_, err := c.record(ctx, checkInput{Workstream: stream, Unit: "resume", Run: 1}, run, "")
 	must(t, err)
 	decoded := onlyRun(t, repo, stream)
-	if decoded.Selection.Listed != nil || decoded.Selection.Candidates != 37 || decoded.Selection.Mode != selectionSelected {
+	if decoded.Selection.Listed != nil || decoded.Selection.Candidates != 37 || decoded.Selection.Mode != checkrun.SelectionSelected {
 		t.Fatalf("legacy selection: %+v", decoded.Selection)
 	}
 	must(t, c.Pass(ctx))
@@ -379,7 +380,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 		t.Fatal("incomplete check attempt succeeded")
 	}
 	f.s.boundary = nil
-	if len(provider.Requests()) != 1 || starts[0].Selection == nil || starts[0].Selection.Mode != selectionSelected {
+	if len(provider.Requests()) != 1 || starts[0].Selection == nil || starts[0].Selection.Mode != checkrun.SelectionSelected {
 		t.Fatalf("initial judgment: %d requests, starts %+v", len(provider.Requests()), starts)
 	}
 	docs := streamDocuments(t, repo, stream, finalChecksDocument(1))

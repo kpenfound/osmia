@@ -394,11 +394,11 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 	await := func(s *Service, r *trace.Repository, phase string, ready func() bool) {
 		t.Helper()
-		sub, ok := s.hub.subscribe()
+		sub, ok := s.hub.Subscribe()
 		if !ok {
 			t.Fatalf("%s: cannot subscribe to stopped service: %v", phase, s.Wait())
 		}
-		defer s.hub.unsubscribe(sub)
+		defer s.hub.Unsubscribe(sub)
 		deadline := time.NewTimer(demoTimeout)
 		defer deadline.Stop()
 		poll := time.NewTicker(time.Second)
@@ -458,8 +458,8 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			}
 			select {
 			case ticks <- clock.Now():
-			case <-sub.wake:
-				sub.take()
+			case <-sub.Wake():
+				sub.Take()
 			case <-poll.C:
 			case <-s.done:
 				diagnose("service stopped")

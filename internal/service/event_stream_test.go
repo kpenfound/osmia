@@ -4,13 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,47 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// eventStream reads c's event stream until the test ends, and returns the
-// events received and a channel that yields Events' result once it returns.
-func eventStream(t *testing.T, c *Client) (<-chan Event, <-chan error) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	events, done := make(chan Event, 1024), make(chan error, 1)
-	go func() {
-		done <- c.Events(ctx, func(e Event) error {
-			events <- e
-			return nil
-		})
-	}()
-	t.Cleanup(cancel)
-	return events, done
-}
-
-// nextEvent returns the stream's next event.
-func nextEvent(t *testing.T, events <-chan Event) Event {
-	t.Helper()
-	select {
-	case e := <-events:
-		return e
-	case <-time.After(10 * time.Second):
-		t.Fatal("no event within 10s")
-		return Event{}
-	}
-}
-
-// awaitEvents reads the stream until it has seen every one of want, in any
-// order, and returns everything it read.
-func awaitEvents(t *testing.T, events <-chan Event, want ...Event) []Event {
-	t.Helper()
-	var seen []Event
-	for missing := slices.Clone(want); len(missing) > 0; {
-		e := nextEvent(t, events)
-		seen = append(seen, e)
-		missing = slices.DeleteFunc(missing, func(w Event) bool { return w == e })
-	}
-	return seen
-}
 
 // Adding and removing a project each ask open streams to read everything.
 func TestEventStreamResyncsWhenTheProjectChanges(t *testing.T) {
@@ -172,157 +126,6 @@ func TestEventStreamAnnouncesTraceChanges(t *testing.T) {
 	_, err := s.sole().repository.SetFeatureState(ctx, h, "handed", "Owner handed the feature in")
 	must(t, err)
 	awaitEvents(t, events, Event{Kind: EventWorkstream, Project: project, Workstream: stream}, Event{Kind: EventInbox, Project: project, Workstream: stream})
-}
-
-// A commit announces only the views its paths hold, once each, and a
-// workflow commit announces the conversation only when the chief of staff's
-// thread in it changed.
-func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
-	t.Parallel()
-	h := newHub()
-	sub, _ := h.subscribe()
-	sub.take()
-	observe := h.traceEvents(project)
-	prefix := "workstreams/" + string(stream) + "/"
-	ws := Event{Kind: EventWorkstream, Project: project, Workstream: stream}
-	chat := Event{Kind: EventConversation, Project: project, Workstream: stream}
-	inbox := Event{Kind: EventInbox, Project: project, Workstream: stream}
-	spend := Event{Kind: EventSpend, Project: project}
-	wf := prefix + "workflow.json"
-	librarian := "workstreams/" + string(librarianWorkstream(project)) + "/"
-	for _, c := range []struct {
-		name   string
-		commit trace.Commit
-		want   []Event
-	}{
-		{"status", trace.Commit{Paths: []string{prefix + "status.jsonl"}}, []Event{ws}},
-		{"question", trace.Commit{Paths: []string{prefix + "questions/1/question.jsonl", prefix + "questions/1/rulings.jsonl", wf}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}}}, []Event{ws, inbox, chat}},
-		{"another thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason"}}}, []Event{ws}},
-		{"chief thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason", trace.ChiefOfStaff}}}, []Event{ws, chat}},
-		// An acknowledged event can raise a contest to the owner's inbox.
-		{"deliveries", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Deliveries: true}}, []Event{ws, inbox}},
-		{"transactions only", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{}}, []Event{ws}},
-		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []Event{ws, chat}},
-		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []Event{ws, inbox}},
-		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []Event{ws, inbox}},
-		{"cost", trace.Commit{Paths: []string{prefix + "ledger.jsonl"}}, []Event{spend, ws}},
-		{"librarian", trace.Commit{Paths: []string{librarian + "ledger.jsonl", librarian + "workflow.json", librarian + "questions/1/question.jsonl"}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}, Deliveries: true}}, []Event{spend, {Kind: EventConfig, Project: project}}},
-		{"project files", trace.Commit{Paths: []string{"charter.md", "documents.jsonl", "kb/entities.json"}}, []Event{{Kind: EventConfig, Project: project}}},
-		{"charter", trace.Commit{Paths: []string{"charter.md"}}, []Event{{Kind: EventConfig, Project: project}}},
-		{"extraction result", trace.Commit{Paths: []string{"documents.jsonl"}}, []Event{{Kind: EventConfig, Project: project}}},
-		{"knowledge files", trace.Commit{Paths: []string{"kb/entities.json"}}, nil},
-	} {
-		observe(c.commit)
-		if got := sub.take(); !reflect.DeepEqual(got, c.want) {
-			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
-		}
-	}
-}
-
-// Events already waiting are not queued twice, and the event beyond the
-// queue's bound replaces what waits with a resync, which later events follow.
-func TestSubscriberQueueIsBoundedAndCoalesced(t *testing.T) {
-	t.Parallel()
-	h := newHub()
-	sub, _ := h.subscribe()
-	if got := sub.take(); !reflect.DeepEqual(got, []Event{{Kind: EventResync}}) {
-		t.Fatalf("first take: %+v", got)
-	}
-	numbered := func(i int) Event {
-		return Event{Kind: EventWorkstream, Project: project, Workstream: config.WorkstreamID(fmt.Sprintf("w_%032x", i))}
-	}
-	var full []Event
-	for i := range eventQueue {
-		full = append(full, numbered(i))
-	}
-	h.publish(full...)
-	h.publish(full...)
-	if got := sub.take(); !reflect.DeepEqual(got, full) {
-		t.Fatalf("a full queue: %d events", len(got))
-	}
-	h.publish(full...)
-	h.publish(numbered(eventQueue), numbered(eventQueue+1))
-	if got := sub.take(); !reflect.DeepEqual(got, []Event{{Kind: EventResync}, numbered(eventQueue + 1)}) {
-		t.Fatalf("an overflowing queue: %+v", got)
-	}
-	h.publish(numbered(1), Event{Kind: EventResync}, numbered(2))
-	if got := sub.take(); !reflect.DeepEqual(got, []Event{{Kind: EventResync}, numbered(2)}) {
-		t.Fatalf("a published resync: %+v", got)
-	}
-}
-
-// stalledWriter is a stream response whose reader stopped reading: every write
-// after the first blocks until its write deadline passes. It closes wrote once
-// the first write returns.
-type stalledWriter struct {
-	header   http.Header
-	wrote    chan struct{}
-	mu       sync.Mutex
-	deadline time.Time
-	writes   int
-}
-
-func (w *stalledWriter) Header() http.Header { return w.header }
-func (w *stalledWriter) WriteHeader(int)     {}
-func (w *stalledWriter) Write(b []byte) (int, error) {
-	w.mu.Lock()
-	w.writes++
-	first, deadline := w.writes == 1, w.deadline
-	w.mu.Unlock()
-	if first {
-		close(w.wrote)
-		return len(b), nil
-	}
-	if deadline.IsZero() {
-		select {}
-	}
-	time.Sleep(time.Until(deadline))
-	return 0, os.ErrDeadlineExceeded
-}
-func (w *stalledWriter) FlushError() error { return nil }
-func (w *stalledWriter) SetReadDeadline(time.Time) error {
-	return nil
-}
-func (w *stalledWriter) SetWriteDeadline(d time.Time) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.deadline = d
-	return nil
-}
-
-// A reader that stops reading neither delays publishers nor another
-// subscriber, and its stream ends once a write outlasts the write timeout.
-func TestStalledEventReaderIsDroppedWithoutBlockingOthers(t *testing.T) {
-	t.Parallel()
-	s := &Service{hub: newHub(), options: Options{WriteTimeout: 200 * time.Millisecond}}
-	other, _ := s.hub.subscribe()
-	served, stalled := make(chan struct{}), &stalledWriter{header: http.Header{}, wrote: make(chan struct{})}
-	go func() {
-		s.streamEvents(stalled, httptest.NewRequest("GET", Prefix+"/events", nil))
-		close(served)
-	}()
-	// The stream has subscribed once its resync is written.
-	<-stalled.wrote
-	began := time.Now()
-	for i := range 10 * eventQueue {
-		s.hub.publish(Event{Kind: EventWorkstream, Project: project, Workstream: config.WorkstreamID(fmt.Sprintf("w_%032x", i))})
-	}
-	if elapsed := time.Since(began); elapsed > time.Second {
-		t.Fatalf("publishing past a stalled reader took %s", elapsed)
-	}
-	if got := other.take(); got[0] != (Event{Kind: EventResync}) || len(got) > 1+eventQueue {
-		t.Fatalf("the other subscriber: %d events, first %+v", len(got), got[0])
-	}
-	select {
-	case <-served:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the stalled stream outlasted its write timeout")
-	}
-	s.hub.mu.Lock()
-	defer s.hub.mu.Unlock()
-	if _, ok := s.hub.subs[other]; !ok || len(s.hub.subs) != 1 {
-		t.Fatalf("subscribers after the stalled stream ended: %d", len(s.hub.subs))
-	}
 }
 
 // A stream outlives the server's read and write timeouts while it is idle.

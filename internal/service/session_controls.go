@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -290,7 +291,7 @@ func nextSessionCheckRun(repo *trace.Repository, stream config.WorkstreamID) (in
 // sessionCheckKind reports the owner-facing word for a check selection: a
 // smart run selected checks through Jev, a full run ran every check.
 func sessionCheckKind(sel CheckSelection) string {
-	if sel.Mode == selectionSelected {
+	if sel.Mode == checkrun.SelectionSelected {
 		return "smart"
 	}
 	return "full"
@@ -407,7 +408,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	cause := sessionCheckDocumentID(run)
 	startedAt := s.now()
 	scope := coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: sessionChecksThread, Turn: cause, Role: sessionChecksRole}
-	selection := selectChecksFor(ctx, s.jev, repository, scope, cause, nil, dir, diff, checks)
+	selection := checkrun.Select(ctx, s.jev, repository, scope, cause, nil, dir, diff, checks)
 	timeout := s.about(repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	result, checkErr := checks.Check(bounded, dir, selection.Links)
@@ -415,7 +416,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if errors.Is(checkErr, context.DeadlineExceeded) {
 		checkErr = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
-	status, failed, classifyErr := classifyChecks(result, checkErr)
+	status, failed, classifyErr := checkrun.ClassifyChecks(result, checkErr)
 	sr := SessionCheckRun{
 		Run: run, Commit: head, Kind: sessionCheckKind(selection), Checks: selection.Links, Selection: &selection,
 		Command:   append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...),
@@ -427,15 +428,15 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if classifyErr != nil {
 		sr.Error = classifyErr.Error()
 	}
-	sr.Output, sr.Truncated = summarizeCheckOutput(result.Output, result.ExitCode)
+	sr.Output, sr.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	sr.Truncated = sr.Truncated || result.Truncated
-	sr.OutputPath = checkOutputPath(sessionCheckRecordPath(run))
+	sr.OutputPath = checkrun.CheckOutputPath(sessionCheckRecordPath(run))
 	sr.OutputRevision = 1
 	sr.FinishedAt = s.now()
 	if err := recordSessionCheckRun(ctx, repository, project, stream, sr, result.Output); err != nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check run of session %s; check the trace repository: %v", stream, err)}
 	}
-	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, describeSelection(selection))
+	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, checkrun.DescribeSelection(selection))
 	if err := recordSessionEntry(ctx, repository, project, stream, cause+"-entry", sr.FinishedAt, summary); err != nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check entry of session %s; check the trace repository", stream)}
 	}

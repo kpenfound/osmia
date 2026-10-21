@@ -26,7 +26,7 @@ func drivePass(t *testing.T, s *Service, repo *trace.Repository, pass func() err
 // hints; the timer also wakes reads of state the event stream does not expose.
 func serviceChanges(t *testing.T, s *Service) (wait func(), close func()) {
 	t.Helper()
-	sub, ok := s.hub.subscribe()
+	sub, ok := s.hub.Subscribe()
 	if !ok {
 		t.Fatal("cannot wait on a stopped service")
 	}
@@ -34,15 +34,15 @@ func serviceChanges(t *testing.T, s *Service) (wait func(), close func()) {
 	return func() {
 			t.Helper()
 			select {
-			case <-sub.wake:
-				sub.take()
+			case <-sub.Wake():
+				sub.Take()
 			case <-ticker.C:
-			case <-s.hub.done:
+			case <-s.hub.Done():
 				t.Fatal("service stopped while waiting for state")
 			}
 		}, func() {
 			ticker.Stop()
-			s.hub.unsubscribe(sub)
+			s.hub.Unsubscribe(sub)
 		}
 }
 

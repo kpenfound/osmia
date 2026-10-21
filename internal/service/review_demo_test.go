@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -62,14 +63,14 @@ func TestExactReviewDemonstration(t *testing.T) {
 				names = append(names, tool.Name)
 			}
 			slices.Sort(names)
-			if !slices.Equal(names, []string{questions.AskTool, "factory_context", "file_read", "project_context", "record_discovery", verdictTool, workstreamDiffTool}) {
+			if !slices.Equal(names, []string{questions.AskTool, "factory_context", "file_read", "project_context", "record_discovery", verdictTool, reviewtools.DiffToolName}) {
 				return nil, fmt.Errorf("reviewer tools %+v", listed.Tools)
 			}
-			identity, err := reviewIdentityInPrompt(req.Prompt)
+			identity, err := reviewtools.IdentityInPrompt(req.Prompt)
 			if err != nil {
 				return nil, err
 			}
-			if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"paths": []string{masonWrote}}); err != nil || !strings.Contains(body, identity.Candidate.Revision) || !strings.Contains(body, "+++ b/"+masonWrote) {
+			if body, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"paths": []string{masonWrote}}); err != nil || !strings.Contains(body, identity.Candidate.Revision) || !strings.Contains(body, "+++ b/"+masonWrote) {
 				return nil, fmt.Errorf("workstream_diff %s: %v", body, err)
 			}
 			n := reviews.Add(1)

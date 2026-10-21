@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -60,7 +61,7 @@ func (d *landingDemo) reviewed(unit string) []UnitReviewIdentity {
 
 // review approves the exact candidate a review turn names.
 func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
-	identity, err := reviewIdentityInPrompt(req.Prompt)
+	identity, err := reviewtools.IdentityInPrompt(req.Prompt)
 	if err != nil {
 		return nil, err
 	}

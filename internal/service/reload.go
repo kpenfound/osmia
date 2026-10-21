@@ -103,7 +103,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.mu.Lock()
 		s.reloadErr = failed
 		s.mu.Unlock()
-		s.hub.publish(Event{Kind: EventConfig})
+		s.hub.Publish(Event{Kind: EventConfig})
 		s.log().Error("reload failed", "error", failed.Message)
 		return ReloadResponse{}, &APIError{Code: Validation, Message: failed.Message + "; the loaded configuration is unchanged"}
 	}
@@ -207,7 +207,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	if len(next.Projects) == 0 {
 		events = append(events, Event{Kind: EventSpend})
 	}
-	s.hub.publish(events...)
+	s.hub.Publish(events...)
 	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0, "added", len(added), "removed", len(removed))
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }

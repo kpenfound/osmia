@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -402,7 +403,7 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	}
 	scoped, err = turns.Scoped(ctx, answer2Scope)
 	must(t, err)
-	diff := askTool(t, scoped, workstreamDiffTool)
+	diff := askTool(t, scoped, reviewtools.DiffToolName)
 	for _, change := range []string{"feature", "resolution"} {
 		out, err := diff.Handle(ctx, json.RawMessage(fmt.Sprintf(`{"change":%q}`, change)))
 		must(t, err)

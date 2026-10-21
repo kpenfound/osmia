@@ -66,11 +66,11 @@ func TestOwnerActionOnTheBlockedWorkstreamRespondsWithinBound(t *testing.T) {
 	requestFactoryOperation(t, repository, stream, "command-admission-blocked")
 
 	select {
-	case <-blocking.started:
+	case <-blocking.Started:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the fake factory operation never started")
 	}
-	defer close(blocking.release)
+	defer close(blocking.Release)
 
 	ctx := context.Background()
 	started := time.Now()

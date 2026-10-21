@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -83,9 +84,9 @@ func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 				must(t, store.SetArchived(a))
 			}
 			s := &Service{cfg: cfg, store: store, options: opts}
-			s.activity = newActivityRegistry(s.now)
+			s.activity = activity.New(s.now)
 			notifications := 0
-			s.activity.notify = func() { notifications++ }
+			s.activity.Notify = func() { notifications++ }
 			if scenario == "another project" {
 				cfg.Project.ID = "p_other"
 			}
@@ -96,7 +97,7 @@ func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 			if notifications != 0 {
 				t.Fatalf("idle cleanup announced %d activity changes", notifications)
 			}
-			if entries := s.activity.snapshot(); len(entries) != 0 {
+			if entries := s.activity.View(); len(entries) != 0 {
 				t.Fatalf("idle cleanup recorded activity: %+v", entries)
 			}
 		})

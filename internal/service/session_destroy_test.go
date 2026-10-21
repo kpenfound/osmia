@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -74,12 +75,12 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 	if exists {
 		t.Fatal("local session branch remains")
 	}
-	for _, entry := range s.activity.snapshot() {
+	for _, entry := range s.activity.View() {
 		if entry.Workstream == stream {
 			t.Fatal("activity retains the session")
 		}
 	}
-	if cached, ok := s.statusViews.get(); ok {
+	if cached, ok := s.statusViews.Get(); ok {
 		for _, w := range cached.Workstreams {
 			if w.Workstream == stream {
 				t.Fatal("status cache retains the session")
@@ -110,7 +111,7 @@ func seedSessionState(t *testing.T, s *Service, project config.ProjectID, stream
 	t.Helper()
 	must(t, s.refreshRuntime())
 	s.StartActivity("historical-session-failure", ActivityAgentTurn, project, stream, "previous turn").Finish(errors.New("old failure"))
-	s.statusViews.set(s.statusList())
+	s.statusViews.Set(s.statusList())
 	for _, kind := range append(slices.Clone(turnDirectories), "design", "session-models") {
 		dir := filepath.Join(s.current().Root.String(), kind, string(project), string(stream))
 		must(t, os.MkdirAll(dir, 0700))
@@ -197,7 +198,7 @@ func TestDestroySessionDoesNotRestoreStatusCache(t *testing.T) {
 	defer unblock()
 	finished := make(chan struct{})
 	go func() {
-		boundedView(context.Background(), &s.statusViews, time.Minute, func() StatusResponse {
+		readview.Bounded(context.Background(), &s.statusViews, time.Minute, func() StatusResponse {
 			close(entered)
 			<-release
 			return snapshot
@@ -257,7 +258,7 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 				if !pending {
 					t.Fatal("interruption lost destroy intent")
 				}
-				if cached, ok := s.statusViews.get(); ok && slices.ContainsFunc(cached.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream }) {
+				if cached, ok := s.statusViews.Get(); ok && slices.ContainsFunc(cached.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream }) {
 					t.Fatal("pending destroy remains in the status cache")
 				}
 				if stage == "session-destroy-recorded" {

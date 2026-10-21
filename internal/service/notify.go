@@ -100,10 +100,10 @@ func newNotifier(s *Service, retry time.Duration, inbox func(context.Context) (I
 func (n *notifier) run(ctx context.Context) {
 	defer close(n.done)
 	var wake <-chan struct{}
-	sub, ok := n.s.hub.subscribe()
+	sub, ok := n.s.hub.Subscribe()
 	if ok {
-		defer n.s.hub.unsubscribe(sub)
-		wake = sub.wake
+		defer n.s.hub.Unsubscribe(sub)
+		wake = sub.Wake()
 	}
 	timer := time.NewTimer(notifyPoll)
 	defer timer.Stop()
@@ -121,7 +121,7 @@ func (n *notifier) run(ctx context.Context) {
 			case <-timer.C:
 				waiting = false
 			case <-wake:
-				waiting = !slices.ContainsFunc(sub.take(), func(e Event) bool {
+				waiting = !slices.ContainsFunc(sub.Take(), func(e Event) bool {
 					return e.Kind == EventInbox || e.Kind == EventRuntime || e.Kind == EventConfig || e.Kind == EventResync
 				})
 			}

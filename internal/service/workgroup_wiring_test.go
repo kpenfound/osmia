@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -681,7 +682,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		stream config.WorkstreamID
 	}{{repo1, f.stream1}, {repo2, f.stream2}} {
 		unit := fmt.Sprintf("feed-member-%d", i)
-		feedDocument(t, member.repo, member.stream, checkSelectionDocument(unit, 1), checkSelectionPath(unit, 1), 1, demoStart, UnitCheckSelection{Unit: unit, Run: 1, StartedAt: demoStart, Selection: fullSelection("disabled", "boost off")})
+		feedDocument(t, member.repo, member.stream, checkSelectionDocument(unit, 1), checkSelectionPath(unit, 1), 1, demoStart, UnitCheckSelection{Unit: unit, Run: 1, StartedAt: demoStart, Selection: checkrun.FullSelection("disabled", "boost off")})
 		feedDocument(t, member.repo, member.stream, finalReportDocument, finalReportPath, 1, demoStart, FinalReport{Review: i + 1, Outcome: finalFailed, Failure: unit})
 	}
 

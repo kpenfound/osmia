@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -131,10 +132,10 @@ func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 		return FinalCheckRun{}, ctx.Err()
 	}
 	run.ExitCode = result.ExitCode
-	run.Output, run.Truncated = summarizeCheckOutput(result.Output, result.ExitCode)
+	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
-	run.OutputPath = checkOutputPath(finalChecksPath(report.Review))
-	run.Status, run.Failed, err = classifyChecks(result, err)
+	run.OutputPath = checkrun.CheckOutputPath(finalChecksPath(report.Review))
+	run.Status, run.Failed, err = checkrun.ClassifyChecks(result, err)
 	if err != nil {
 		run.Error = err.Error()
 	}
@@ -217,7 +218,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	// when a stopped service left only an unfinished start record.
 	cause := fmt.Sprintf("final-checks-%d-%s", report.Review, report.Commit)
 	scope := coreadapter.Scope{Project: string(a.repository.Project()), Workstream: string(stream), Thread: finalReviewSubject, Turn: cause, Role: checksRole}
-	selection := selectChecksFor(ctx, a.s.jev, a.repository, scope, cause, nil, dir, diff, checks)
+	selection := checkrun.Select(ctx, a.s.jev, a.repository, scope, cause, nil, dir, diff, checks)
 	run.Selection = &selection
 	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
 	timeout := cfg.Project.CheckTimeout()
@@ -271,13 +272,13 @@ func incompleteFinalChecks(repository *trace.Repository, stream config.Workstrea
 func finalCheckEvidence(run FinalCheckRun) string {
 	out := fmt.Sprintf("The service ran checks on this exact commit before your read, recorded in %s; you do not run them. The run %s.", finalChecksPath(run.Review), run.Status)
 	if run.Selection != nil {
-		out += "\n" + describeSelection(*run.Selection) + "."
+		out += "\n" + checkrun.DescribeSelection(*run.Selection) + "."
 	}
 	if len(run.Command) > 0 {
-		out += "\nCommand: " + checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)
+		out += "\nCommand: " + checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)
 	}
 	if len(run.Failed) > 0 {
-		out += "\nFailed: " + checkExcerpt(strings.Join(run.Failed, ", "), 2048)
+		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}
-	return out + outputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
+	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }

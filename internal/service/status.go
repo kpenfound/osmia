@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -37,7 +38,7 @@ type statusesRead struct {
 // in unreadable, by workstream.
 
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
-	snapshot, err := consistentRead(func() (statusesRead, error) {
+	snapshot, err := readview.Consistent(func() (statusesRead, error) {
 		list, unreadable, api := s.statusesSnapshot()
 		return statusesRead{list, unreadable, api}, nil
 	}, s.groupApprovalGeneration)
@@ -101,7 +102,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 		// this project's trace-read rows: a racing archive, or any other
 		// runtime mutation, forces the whole attempt to retry rather than
 		// land in a response assembled from two different moments.
-		found, err := consistentRead(func() (projectStatusResult, error) {
+		found, err := readview.Consistent(func() (projectStatusResult, error) {
 			state, _ := s.effective()
 			list, projectUnreadable, api := s.projectStatuses(active)
 			if api != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -771,7 +772,7 @@ func driftMasonSystemPrompt(p config.Project) string {
 // turn that reads a resolution of a drift rebase's conflicts against the
 // sealed spec.
 func driftReviewerSystemPrompt() string {
-	return fmt.Sprintf("You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Your view holds the resolved candidate's files, read-only: you cannot edit it. Read only the supplied evidence: call %s to read the feature branch's change and the resolution. %s Call %s with your decision. When you need a decision you cannot make from your context, call %s to ask the workstream's chief of staff about the drift rebase you review; the answer arrives as your next turn on this thread.", workstreamDiffTool, driftReviewChecks, verdictTool, questions.AskTool)
+	return fmt.Sprintf("You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Your view holds the resolved candidate's files, read-only: you cannot edit it. Read only the supplied evidence: call %s to read the feature branch's change and the resolution. %s Call %s with your decision. When you need a decision you cannot make from your context, call %s to ask the workstream's chief of staff about the drift rebase you review; the answer arrives as your next turn on this thread.", reviewtools.DiffToolName, driftReviewChecks, verdictTool, questions.AskTool)
 }
 
 // driftAmendGuidance tells a drift mason how to raise an upstream change to
@@ -904,13 +905,13 @@ A mason resolved the conflicts, and the resolved branch is candidate %s. The fea
 Read both changes with %s, whole or by file and line range. Their changed files, with added and removed lines:
 
 %s
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, driftReviewChecks, handback, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, driftReviewChecks, handback, reviewtools.DiffToolName, strings.Join(changes, "\n"), spec), nil
 }
 
 // driftDiffs are the two changes a drift review reads: the feature branch's
 // change before the rebase, from its merge base with upstream, and the
 // resolved candidate's change on upstream.
-func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, rebase DriftRebase) ([]pinnedDiff, error) {
+func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, rebase DriftRebase) ([]reviewtools.PinnedDiff, error) {
 	g, err := driftWorkspaces(cfg, repository).of(stream)
 	if err != nil {
 		return nil, err
@@ -922,7 +923,7 @@ func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repos
 	read := func(from, to string) func(context.Context) (string, error) {
 		return func(ctx context.Context) (string, error) { return g.Diff(ctx, from, to) }
 	}
-	return []pinnedDiff{
+	return []reviewtools.PinnedDiff{
 		{Name: "feature", About: "the feature branch's change before the rebase, from its merge base with upstream", From: base, To: rebase.Before, Read: read(base, rebase.Before)},
 		{Name: "resolution", About: "the resolved candidate's change on the upstream commit it was rebased onto", From: rebase.Upstream.Commit, To: rebase.Candidate, Read: read(rebase.Upstream.Commit, rebase.Candidate)},
 	}, nil
@@ -999,5 +1000,5 @@ func driftDiffTool(ctx context.Context, cfg *config.Config, repository *trace.Re
 	if err != nil {
 		return coreadapter.Tool{}, err
 	}
-	return diffTool(diffs...), nil
+	return reviewtools.DiffTool(diffs...), nil
 }
