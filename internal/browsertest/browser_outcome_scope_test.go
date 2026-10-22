@@ -21,7 +21,7 @@ import (
 // openOutcomePage holds only explicitly named responses, after the real
 // service has answered. Each URL has its own release, so simultaneous sends
 // can complete independently. The page's EventSource remains the refresh path.
-func openOutcomePage(t *testing.T, s *Service) *page {
+func openOutcomePage(t *testing.T, s *Service, scripts ...string) *page {
 	t.Helper()
 	p := openBrowser(t)
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
@@ -51,7 +51,15 @@ func openOutcomePage(t *testing.T, s *Service) *page {
     }
     return response;
    };`).Do(ctx)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, script := range scripts {
+			if _, err := cdppage.AddScriptToEvaluateOnNewDocument(script).Do(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
 	}), chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	return p
