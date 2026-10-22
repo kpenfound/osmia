@@ -6,6 +6,7 @@ import (
 	fmt "fmt"
 	chromedp "github.com/chromedp/chromedp"
 	agent "github.com/kpenfound/agentcore/agent"
+	api "github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
 	questions "github.com/kpenfound/osmia/internal/questions"
@@ -71,7 +72,7 @@ func TestBrowserProjectPaneStatesAndSingleMemberDrilldown(t *testing.T) {
 }
 
 // This drives the one existing owner start from the actual design chat,
-// then follows each allocated member to the adopted shared conversation.
+// then opens each allocated member while the workgroup retains the design chat.
 func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) {
 	t.Parallel()
 	f := newProductionDesignFixture(t)
@@ -149,7 +150,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	}
 	p.Run(chromedp.Reload())
 	sidebarGroup := `#workstream-list [data-sidebar-workgroup="` + string(selected.Group) + `"]`
-	p.Await("both same-titled members in one sidebar workgroup", `document.querySelectorAll('#workstream-list > li').length === 1 && document.querySelectorAll(`+quote(sidebarGroup+` [data-select]`)+`).length === 2`)
+	p.Await("both repo-labelled members in one sidebar workgroup", `document.querySelectorAll('#workstream-list > li').length === 1 && document.querySelectorAll(`+quote(sidebarGroup+` [data-select]`)+`).length === 2`)
 	p.Await("the design host is absent from the sidebar", `document.querySelector('[data-select="`+string(f.origin)+`"]') === null`)
 	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
 		repoName := "dagger"
@@ -157,14 +158,32 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 			repoName = "client"
 		}
 		selector := sidebarGroup + ` [data-select="` + string(id) + `"]`
-		p.AwaitText(selector+` [data-field=goal]`, "Ship resumable uploads.")
+		p.AwaitText(selector+` [data-field=goal]`, "dagger / "+repoName)
 		p.AwaitText(selector+` [data-field=project]`, "dagger / "+repoName)
 	}
 	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
-	p.Await("the continued chat opens its member without a reload", `!document.querySelector('[data-view="workstream"]').hidden && [`+quote(string(f.stream1))+`,`+quote(string(f.stream2))+`].includes(document.querySelector('#workstream-head').dataset.workstream)`)
-	p.AwaitText("#workstreams", "acknowledged offset")
+	p.Await("the continued chat opens its workgroup without a reload", `!document.querySelector('[data-view="workgroup"]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))
+	p.Click(`[data-open-member="` + string(f.stream1) + `"]`)
+	assertSharedDesignConversation := func() {
+		t.Helper()
+		// The design agent's reply contains the brief. After adoption it
+		// belongs to the shared conversation, rather than either member's activity.
+		var shared api.WorkgroupFeedResponse
+		must(t, f.c.Do(context.Background(), "GET", Prefix+"/workgroups/"+string(selected.Group)+"/feed", nil, &shared))
+		var found bool
+		for _, entry := range shared.Entries {
+			if entry.Kind == "response" && strings.Contains(entry.Text, "acknowledged offset") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("workgroup feed lost the adopted design reply: %+v", shared.Entries)
+		}
+		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstreams [data-kind="transition"]') !== null && !document.querySelector('#workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"], #workstreams [data-kind="session"][data-role="chief_of_staff"]')`)
+	}
+	assertSharedDesignConversation()
 	upstream, err := f.s.repository(f.project)
 	must(t, err)
 	publication := DeliveryPublication{Status: publicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: featureBranch(f.stream1), PullRequest: 123, URL: "https://example.invalid/dagger/dagger/pull/123"}
@@ -192,11 +211,11 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	for _, id := range []config.WorkstreamID{f.stream1, f.stream2} {
 		p.Click(`[data-drilldown="` + string(id) + `"]`)
 		p.Await("the member's existing view", `!document.querySelector('[data-view="workstream"]').hidden && document.querySelector('#workstream-head').dataset.workstream === `+quote(string(id)))
-		p.AwaitText("#workstreams", "acknowledged offset")
+		assertSharedDesignConversation()
 		p.Click("#project-home")
 	}
-	// A single shared inbox entry is offered from either member using the
-	// workgroup's original project/number pins, even from the second repo.
+	// The workgroup offers its shared inbox entry using the original
+	// project and number pins after opening it from the second repo.
 	var escalated atomic.Bool
 	f.engine.Mu.Lock()
 	f.engine.Turns["pane-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -244,13 +263,16 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.Click("#project-home")
 	p.Await("one shared decision in the project pane", `document.querySelectorAll('[data-group-inbox]').length === 1`)
 	p.Click(`[data-group-inbox]`)
-	p.AwaitText("#workstreams [data-kind=escalation]", "May the acknowledged offset contract change?")
+	p.Await("the project inbox opens the workgroup", `!document.querySelector('[data-view=workgroup]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))
+	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
 	p.Click("#project-home")
 	p.Click(`[data-drilldown="` + string(f.stream2) + `"]`)
-	p.AwaitText("#workstreams [data-kind=escalation]", "May the acknowledged offset contract change?")
-	p.TypeInto("#workstreams [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
-	p.Click("#workstreams [data-kind=escalation] button[type=submit]")
-	f.wait(t, "the server accepts the shared decision from the second repo", func() bool {
+	p.Await("the member excludes the shared decision and composer", `!document.querySelector('[data-view=workstream]').hidden && !document.querySelector('#workstreams [data-kind=escalation], #workstreams .composer')`)
+	p.Click("#workstream-head [data-ask-chief]")
+	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
+	p.TypeInto("#workgroup-content [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
+	p.Click("#workgroup-content [data-kind=escalation] button[type=submit]")
+	f.wait(t, "the server accepts the shared decision from the workgroup", func() bool {
 		var result struct{ Outcome, Text string }
 		p.Eval(`({Outcome: document.querySelector('#inbox-result').dataset.outcome, Text: document.querySelector('#inbox-result').textContent})`, &result)
 		if result.Outcome == "error" || result.Outcome == "unavailable" {

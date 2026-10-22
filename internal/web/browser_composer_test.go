@@ -17,7 +17,7 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// chatAPI extends the ordinary fake API with the three conversation kinds
+// chatAPI extends the ordinary fake API with the conversation kinds
 // and records messages at their real endpoints, without running agents.
 type chatAPI struct {
 	base     *fakeAPI
@@ -37,14 +37,15 @@ type chatView struct{ name, id, form, endpoint, result string }
 
 var chatViews = []chatView{
 	{"workstream", "w_000", `[data-workstream="w_000"] form[data-field=send]`, "/v1/conversation/w_000", "Sent; the chief of staff answers in its next turn (pending)."},
+	{"workgroup", "g_test", `[data-view="workgroup"] form[data-field=send]`, "/v1/workgroups/g_test/conversation", "Sent; the chief of staff answers in its next turn (pending)."},
 	{"session", "w_001", "#session-form", "/v1/sessions/w_001/message", "Sent; the agent answers in its next turn (pending)."},
 	{"design", "w_002", "#design-form", "/v1/design/w_002/message", "Sent; the design agent answers in its next turn (pending)."},
 }
 
 func newChatAPI() *chatAPI {
-	a := &chatAPI{base: newFakeAPI(3), entries: make(map[string][]map[string]any)}
+	a := &chatAPI{base: newFakeAPI(5), entries: make(map[string][]map[string]any)}
 	text := strings.Repeat("The conversation should use the available space beside the workstream picker. This is a longer message with several sentences so the owner can read the full explanation comfortably. ", 8)
-	for _, id := range []string{"w_000", "w_002"} {
+	for _, id := range []string{"w_000", "w_002", "g_test"} {
 		a.entries[id] = []map[string]any{
 			{"turn": "owner", "kind": "message", "text": text, "state": "done", "at": "2026-01-01T00:00:00Z"},
 			{"turn": "agent", "kind": "response", "text": text, "state": "done", "at": "2026-01-01T00:00:01Z"},
@@ -68,6 +69,9 @@ func (a *chatAPI) handler() http.Handler {
 		session := streams[1].(map[string]any)
 		session["kind"], session["state"], session["profile"], session["title"] = "session", "idle", "fake", "Exploration"
 		streams[2].(map[string]any)["kind"] = "design"
+		group := map[string]any{"id": "g_test", "members": []string{"w_003", "w_004"}, "edges": []any{}}
+		streams[4].(map[string]any)["workgroup"] = group
+		streams[3].(map[string]any)["workgroup"] = group
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(status)
 	})
@@ -80,6 +84,11 @@ func (a *chatAPI) handler() http.Handler {
 			entries = []map[string]any{}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"workstream": id, "entries": entries})
+	})
+	mux.HandleFunc("/v1/workgroups/g_test/feed", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"workgroup": "g_test", "entries": a.entries["g_test"], "members": []any{}})
 	})
 	mux.HandleFunc("/v1/design/w_002/conversation", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
@@ -129,7 +138,7 @@ func openChatPage(t *testing.T, width, height int64, browserOptions ...chromedp.
 	// Set only the viewport metrics: EmulateViewport also resets touch and
 	// pointer capabilities, which the keyboard and touch tests set explicitly.
 	p.run(emulation.SetDeviceMetricsOverride(width, height, 1, false), chromedp.Navigate(server.URL+"/"))
-	p.await("the three conversations", `document.querySelectorAll('#workstream-list [data-select]').length === 3`)
+	p.await("the conversations", `document.querySelectorAll('#workstream-list [data-select]').length === 5`)
 	return p, a
 }
 
@@ -139,7 +148,11 @@ func (p *page) selectChat(view chatView, phone bool) {
 		p.click("#picker-toggle")
 		p.awaitVisible("the picker", "#sidebar")
 	}
-	p.click(`[data-select="` + view.id + `"]`)
+	if view.name == "workgroup" {
+		p.click(`[data-select-workgroup="` + view.id + `"]`)
+	} else {
+		p.click(`[data-select="` + view.id + `"]`)
+	}
 	p.awaitVisible(view.name+" conversation", `[data-view="`+view.name+`"]`)
 	p.awaitVisible("the composer", view.form)
 }
@@ -275,9 +288,13 @@ func TestBrowserChatComposersClickAndKeyboard(t *testing.T) {
 		}
 		p.run(chromedp.Focus(textarea, chromedp.ByQuery))
 		p.await(view.name+" focused desktop composer", `document.activeElement === document.querySelector(`+quote(textarea)+`) && matchMedia('(pointer: fine)').matches`)
+		settleEnter := sync.OnceFunc(a.action.holdResponse())
+		t.Cleanup(settleEnter)
 		p.run(chromedp.KeyEvent(kb.Enter))
 		count++
 		assertChatMessage(t, a, count, view, "Enter", "First line\nSecond line")
+		p.awaitText(result, "Sending…")
+		settleEnter()
 		p.awaitText(result, view.result)
 		p.await("the cleared input after Enter", `document.querySelector(`+quote(textarea)+`).value === ''`)
 

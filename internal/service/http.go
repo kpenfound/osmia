@@ -205,6 +205,29 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if web.Serve(w, r) {
 		return
 	}
+	if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/workgroups/"); ok {
+		id, action, valid := strings.Cut(path, "/")
+		if valid && action == "feed" && r.Method == http.MethodGet {
+			if out, api := s.workgroupFeed(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if valid && action == "conversation" && r.Method == http.MethodPost {
+			var req SendRequest
+			if !decode(w, r, &req) {
+				return
+			}
+			if out, api := s.workgroupSend(r.Context(), id, req); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/stop" {
 		if tailnet.ArrivedOn(r) != 0 {
 			fail(w, Forbidden)

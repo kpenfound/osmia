@@ -514,7 +514,7 @@ svg {
   padding: 0 1.25rem;
 }
 
-.view:not([data-view="workstream"]) {
+.view:not(:is([data-view="workstream"], [data-view="workgroup"])) {
   max-width: 48rem;
 }
 
@@ -1217,7 +1217,7 @@ button:disabled {
 
 /* Conversations use the desktop pane, with a gutter at either edge. */
 @media (min-width: 761px) {
-  .view:is([data-view="workstream"], [data-view="session"], [data-view="design"]) {
+  .view:is([data-view="workstream"], [data-view="workgroup"], [data-view="session"], [data-view="design"]) {
     max-width: 120rem;
   }
 
@@ -1316,3 +1316,26 @@ button:disabled {
 .managed-repo dt { font-weight: 600; }
 .managed-repo dd { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
 #charter-changed { color: var(--accent); }
+
+#workgroup-goal { padding-top: 0.75rem; overflow-wrap: anywhere; }
+.workgroup-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.75rem; }
+.workgroup-summary { min-width: 0; margin-bottom: 1rem; }
+.member-card { min-width: 0; padding: 0.75rem; border: 1px solid var(--line); border-radius: 0.5rem; overflow-wrap: anywhere; }
+.member-open { display: flex; flex-wrap: wrap; gap: 0.5rem; width: 100%; text-align: left; }
+.workgroup-graph { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .workgroup-members { grid-template-columns: minmax(0, 1fr); }
+}
+
+.member-chief-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1rem;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: .875rem;
+}
+.member-chief-line span { overflow-wrap: anywhere; }
+.composer-about:empty { display: none; }
+.composer-about { margin-bottom: .4rem; }
+.composer-about button { padding: 0 .35rem; }

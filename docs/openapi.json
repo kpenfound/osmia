@@ -1283,7 +1283,7 @@
     },
     "/v1/feed/{workstream}": {
       "get": {
-        "summary": "List a workstream's conversation, statuses, sessions, all state changes, check runs and final reviews in time order",
+        "summary": "List member sessions, state changes, checks and final reviews; shared chief entries and turns are included only for single-member workgroups",
         "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. Captured check output remains in the trace.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
         "operationId": "getFeedByWorkstream",
         "parameters": [
@@ -3331,6 +3331,95 @@
           }
         }
       }
+    },
+    "/v1/workgroups/{id}/conversation": {
+      "post": {
+        "summary": "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note",
+        "operationId": "postWorkgroupsByIdConversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workgroups/{id}/feed": {
+      "get": {
+        "summary": "List shared chief conversation, statuses, actions and member summaries for a single-member or multi-member workgroup",
+        "operationId": "getWorkgroupsByIdFeed",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkgroupFeedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5101,6 +5190,9 @@
           "queued_reason": {
             "type": "string"
           },
+          "repo": {
+            "type": "string"
+          },
           "session": {
             "$ref": "#/components/schemas/FeedSession"
           },
@@ -5121,6 +5213,9 @@
           },
           "unit_checks": {
             "$ref": "#/components/schemas/FeedUnitChecks"
+          },
+          "workstream": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -7952,6 +8047,73 @@
           },
           "unknown_costs": {
             "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkgroupFeedResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FeedEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/WorkgroupMemberSummary"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workgroup": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkgroupMemberSummary": {
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "display_state": {
+            "type": "string"
+          },
+          "pr_link": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "wait": {
+            "type": "string"
           },
           "workstream": {
             "type": "string"

@@ -544,6 +544,24 @@ Open it in any OpenAPI viewer, such as Swagger UI, Redoc or Scalar, or generate
 a client from it. The command line's `--json` output is built from these
 responses; see the [command line](cli.md) for each command's shape.
 
+`GET /v1/workgroups/{id}/feed` returns the shared chief conversation,
+statuses and actions in `entries`, and one current summary per member in
+`members`. Each summary includes `workstream`, `repo`, `state`,
+`display_state`, unit counts by state in `units`, `wait`, `pr_link`,
+`running` and `archived`. Archived cards use pinned archive facts; their
+unit counts are empty. Entries about one member include its `workstream`
+and `repo`. `POST /v1/workgroups/{id}/conversation` accepts `{"text":"..."}`
+and acknowledges the message after it is durable, without a member-address
+note. These endpoints support both single-member and multi-member groups.
+Authority locks and membership or retirement holds return an error.
+
+For a member of a multi-member workgroup, `GET /v1/feed/{workstream}`
+contains only member activity: transitions, worker sessions, checks and final
+reviews. Shared chief conversation, statuses, actions and chief sessions
+belong to the workgroup feed. Single-member feeds also contain those chief
+entries. `GET` and `POST /v1/conversation/{workstream}` keep the member's
+conversation address and member note for CLI and API clients.
+
 Project views include repo lists; member status includes workgroup membership.
 Workstream status separates the stored workflow `state` from `display_state`
 and its named `wait`;

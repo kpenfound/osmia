@@ -4,6 +4,7 @@ import (
 	context "context"
 	errors "errors"
 	agent "github.com/kpenfound/agentcore/agent"
+	api "github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
@@ -485,12 +486,16 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	sent, err := f.c.Send(ctx, f.stream2, "What is the current status of both repos?")
 	must(t, err)
 	f.owner, f.ownerAddress = sent, f.stream2
+	memberRepo, err := f.s.repository(f.project)
+	must(t, err)
+	workgroup, err := memberRepo.CrossRepoWorkgroupOf(f.stream1)
+	must(t, err)
 	f.wait(t, "owner status", func() bool {
-		feed, api := f.s.feedList(string(f.stream1))
-		if api != nil {
-			t.Fatal(api)
-		}
-		return slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool { return e.Kind == "status" && e.Status.Goal == "Implement resumable uploads." })
+		var feed api.WorkgroupFeedResponse
+		must(t, f.c.Do(ctx, "GET", Prefix+"/workgroups/"+string(workgroup)+"/feed", nil, &feed))
+		return slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
+			return e.Kind == "status" && e.Status != nil && e.Status.Goal == "Implement resumable uploads."
+		})
 	})
 	enqueue := func(p config.ProjectID, m config.WorkstreamID, id, turn string) {
 		repo, err := f.s.repository(p)

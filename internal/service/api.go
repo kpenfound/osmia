@@ -457,3 +457,6 @@ type WorkstreamMoveRequest = api.WorkstreamMoveRequest
 type WorkstreamMove = api.WorkstreamMove
 
 type WorkstreamMoveResponse = api.WorkstreamMoveResponse
+
+type WorkgroupFeedResponse = api.WorkgroupFeedResponse
+type WorkgroupMemberSummary = api.WorkgroupMemberSummary

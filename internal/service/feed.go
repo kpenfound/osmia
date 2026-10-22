@@ -10,9 +10,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// feedList reads a workstream's feed: its conversation with the chief of
-// staff, statuses, every claimed agent turn, every workflow transition,
-// unit checks and final reviews, oldest first.
+// feedList reads member activity, oldest first. Single-member workgroups
+// also include their chief conversation, statuses and turns.
 func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	_, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
@@ -37,6 +36,51 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 // unless stream belongs to a cross-repo workgroup, whose shared thread
 // lives only in that workgroup's own trace.
 func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+	group, err := paneWorkgroup(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	shared := group != nil && len(group.Members) > 1
+	out := []FeedEntry{}
+	if !shared {
+		out, err = chiefFeedEntries(chief, stream)
+		if err != nil {
+			return nil, err
+		}
+	}
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range transitions {
+		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason}})
+	}
+	threads, err := repository.Threads(stream)
+	if err != nil {
+		return nil, err
+	}
+	for _, th := range threads {
+		if shared && (th.Identity.ID == trace.ChiefOfStaff || th.Identity.Role == trace.ChiefOfStaff) {
+			continue
+		}
+		for _, q := range th.Turns {
+			if q.Claim == nil {
+				continue
+			}
+			out = append(out, FeedEntry{Kind: "session", At: q.Claim.At, Session: feedSession(th, q)})
+		}
+	}
+	checks, err := feedChecks(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, checks...)
+	slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
+	return out, nil
+}
+
+// chiefFeedEntries reads the shared conversation and chief statuses.
+func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	conversation, err := conversationEntries(chief, stream)
 	if err != nil {
 		return nil, err
@@ -56,31 +100,6 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 	for _, st := range statuses {
 		out = append(out, FeedEntry{Kind: "status", At: st.At, Status: &StatusView{Goal: st.Goal, Attention: st.Attention, Note: st.Note, Agents: st.Agents, Revision: st.Revision, UpdatedAt: st.At}})
 	}
-	transitions, err := trace.Read[trace.Transition](repository, stream)
-	if err != nil {
-		return nil, err
-	}
-	for _, t := range transitions {
-		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason}})
-	}
-	threads, err := repository.Threads(stream)
-	if err != nil {
-		return nil, err
-	}
-	for _, th := range threads {
-		for _, q := range th.Turns {
-			if q.Claim == nil {
-				continue
-			}
-			out = append(out, FeedEntry{Kind: "session", At: q.Claim.At, Session: feedSession(th, q)})
-		}
-	}
-	checks, err := feedChecks(repository, stream)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, checks...)
-	slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
 	return out, nil
 }
 
