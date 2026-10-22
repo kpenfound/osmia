@@ -328,7 +328,13 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 				if retired {
 					// The adopted source remains a locator after all real members
 					// retire. Authority is retained, but grants no member effects.
-					s.Log().Warn("workgroup changes remain held", "workgroup", cross, "member", group.Members[1], "error", "no live member remains to reconcile pending project decisions")
+					pending, err := s.RetiredChangesPending(cross, group)
+					if err != nil {
+						return err
+					}
+					if pending {
+						s.Log().Warn("workgroup changes remain held", "workgroup", cross, "member", group.Members[1], "error", "no live member remains to reconcile pending project decisions")
+					}
 					continue
 				}
 			}
@@ -373,6 +379,38 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		}
 	}
 	return nil
+}
+
+// RetiredChangesPending reports whether a workgroup's retained authority
+// holds a project decision that no member remains to settle: an unsettled
+// change, or an amendment request not yet drafted into a change.
+func (s *Controller) RetiredChangesPending(id config.WorkgroupID, g trace.Workgroup) (bool, error) {
+	wt, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
+	if err != nil {
+		if wt != nil {
+			wt.Close()
+		}
+		return false, err
+	}
+	defer wt.Close()
+	requests, _, err := trace.ProjectAmendments(wt)
+	if err != nil {
+		return false, err
+	}
+	changes, err := ReadChanges(wt, g.Members[0])
+	if err != nil {
+		return false, err
+	}
+	if slices.ContainsFunc(changes, func(c WorkgroupChange) bool {
+		return c.State != "applied" && c.State != "rejected" && c.State != "failed"
+	}) {
+		return true, nil
+	}
+	return slices.ContainsFunc(requests, func(r trace.ProjectAmendment) bool {
+		return r.Workgroup == g.ID && !slices.ContainsFunc(changes, func(c WorkgroupChange) bool {
+			return c.ID == "contract-"+r.ID
+		})
+	}), nil
 }
 func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g trace.Workgroup) error {
 	// An idle pass takes no group lock. Re-read pending work under the lock

@@ -326,10 +326,16 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	}
 	check()
 	f.stop(t)
+	logged, logger := captureLog(t)
+	f.opts.Logger = logger
 	observe.Store(true)
 	f.start(t)
 	lifecycleAwait(t, f, "retired group controller passes", func() bool { return passes.Load() >= 4 })
 	check()
+	// Only a pending decision is held; a settled group passes quietly.
+	if held := strings.Contains(logged.String(), "workgroup changes remain held"); held != pending {
+		t.Fatalf("held warning logged=%v with pending decision=%v", held, pending)
+	}
 	if !f.s.ready.Load() || f.s.lifetime.Err() != nil {
 		t.Fatal("fully retired group stopped service recovery")
 	}
