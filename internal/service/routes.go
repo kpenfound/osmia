@@ -88,7 +88,9 @@ var Routes = []Route{
 
 	{Method: http.MethodGet, Path: api.Prefix + "/conversation/{workstream}", Summary: "List a workstream's conversation with the chief of staff", Response: api.ConversationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/conversation/{workstream}", Summary: "Send a message to a workstream's chief of staff", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
-	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List a workstream's conversation, statuses, sessions, all state changes, check runs and final reviews in time order", Response: api.FeedResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List member sessions, state changes, checks and final reviews; shared chief entries and turns are included only for single-member workgroups", Response: api.FeedResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/workgroups/{id}/feed", Summary: "List shared chief conversation, statuses, actions and member summaries for a single-member or multi-member workgroup", Response: api.WorkgroupFeedResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/workgroups/{id}/conversation", Summary: "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/inbox", Summary: "List open owner decisions", Response: api.InboxResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/inbox/{number}", Summary: "Answer an inbox entry", Request: api.AnswerRequest{}, Response: api.AnswerResponse{}},
 

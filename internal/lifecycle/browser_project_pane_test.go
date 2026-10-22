@@ -6,6 +6,7 @@ import (
 	fmt "fmt"
 	chromedp "github.com/chromedp/chromedp"
 	agent "github.com/kpenfound/agentcore/agent"
+	api "github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
 	questions "github.com/kpenfound/osmia/internal/questions"
@@ -71,7 +72,7 @@ func TestBrowserProjectPaneStatesAndSingleMemberDrilldown(t *testing.T) {
 }
 
 // This drives the one existing owner start from the actual design chat,
-// then follows each allocated member to the adopted shared conversation.
+// then opens each allocated member while the workgroup retains the design chat.
 func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) {
 	t.Parallel()
 	f := newProductionDesignFixture(t)
@@ -164,7 +165,24 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	must(t, err)
 	f.awaitApproved(t)
 	p.Await("the continued chat opens its member without a reload", `!document.querySelector('[data-view="workstream"]').hidden && [`+quote(string(f.stream1))+`,`+quote(string(f.stream2))+`].includes(document.querySelector('#workstream-head').dataset.workstream)`)
-	p.AwaitText("#workstreams", "acknowledged offset")
+	assertSharedDesignConversation := func() {
+		t.Helper()
+		// The design agent's reply contains the brief. After adoption it
+		// belongs to the shared conversation, rather than either member's activity.
+		var shared api.WorkgroupFeedResponse
+		must(t, f.c.Do(context.Background(), "GET", Prefix+"/workgroups/"+string(selected.Group)+"/feed", nil, &shared))
+		var found bool
+		for _, entry := range shared.Entries {
+			if entry.Kind == "response" && strings.Contains(entry.Text, "acknowledged offset") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("workgroup feed lost the adopted design reply: %+v", shared.Entries)
+		}
+		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstreams [data-kind="transition"]') !== null && !document.querySelector('#workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"], #workstreams [data-kind="session"][data-role="chief_of_staff"]')`)
+	}
+	assertSharedDesignConversation()
 	upstream, err := f.s.repository(f.project)
 	must(t, err)
 	publication := DeliveryPublication{Status: publicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: featureBranch(f.stream1), PullRequest: 123, URL: "https://example.invalid/dagger/dagger/pull/123"}
@@ -192,7 +210,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	for _, id := range []config.WorkstreamID{f.stream1, f.stream2} {
 		p.Click(`[data-drilldown="` + string(id) + `"]`)
 		p.Await("the member's existing view", `!document.querySelector('[data-view="workstream"]').hidden && document.querySelector('#workstream-head').dataset.workstream === `+quote(string(id)))
-		p.AwaitText("#workstreams", "acknowledged offset")
+		assertSharedDesignConversation()
 		p.Click("#project-home")
 	}
 	// A single shared inbox entry is offered from either member using the

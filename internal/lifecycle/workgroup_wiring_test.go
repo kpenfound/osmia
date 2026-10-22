@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
+	apiTypes "github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -626,8 +627,8 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		feedDocument(t, member.repo, member.stream, finalReportDocument, finalReportPath, 1, demoStart, FinalReport{Review: i + 1, Outcome: finalFailed, Failure: unit})
 	}
 
-	// Each member's own conversation and feed resolve to the one shared
-	// thread: both see both messages, in order.
+	// Member conversation addresses resolve to the shared thread. Member feeds
+	// contain only their own activity; the workgroup feed owns both messages.
 	checkShared := func(t *testing.T) {
 		t.Helper()
 		for _, m := range []config.WorkstreamID{f.stream1, f.stream2} {
@@ -663,14 +664,24 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 				t.Fatalf("member activity missing: checks=%d outcomes=%d", checks, outcomes)
 			}
 
-			var sawFirst, sawSecond bool
 			for _, e := range feed.Entries {
-				sawFirst = sawFirst || e.Turn == sent1.Turn
-				sawSecond = sawSecond || e.Turn == sent2.Turn
+				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.ChiefOfStaff {
+					t.Fatalf("workstream %s's member feed contains a shared chief entry: %+v", m, e)
+				}
 			}
-			if !sawFirst || !sawSecond {
-				t.Fatalf("workstream %s's feed does not resolve to the shared thread: %+v", m, feed.Entries)
+		}
+		var shared apiTypes.WorkgroupFeedResponse
+		must(t, f.c.Do(ctx, "GET", Prefix+"/workgroups/"+string(id)+"/feed", nil, &shared))
+		var sawFirst, sawSecond bool
+		for _, e := range shared.Entries {
+			sawFirst = sawFirst || e.Turn == sent1.Turn
+			sawSecond = sawSecond || e.Turn == sent2.Turn
+			if e.UnitChecks != nil || e.FinalReview != nil || e.Transition != nil || e.Session != nil {
+				t.Fatalf("shared feed contains member activity: %+v", e)
 			}
+		}
+		if !sawFirst || !sawSecond || len(shared.Members) != 2 {
+			t.Fatalf("shared feed lost the conversation or member summaries: %+v", shared)
 		}
 	}
 	checkShared(t)
@@ -709,8 +720,8 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	}
 
 	// Nothing is duplicated: the workgroup record is still exactly the
-	// host and the two real members, and the owner's conversation and
-	// feed for each member still show the same two messages, not four.
+	// host and the two real members. The shared conversation and workgroup
+	// feed retain the same two messages, and member feeds retain only activity.
 	checkWorkgroupRecord(t)
 	checkShared(t)
 }

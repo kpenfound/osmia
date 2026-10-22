@@ -1039,6 +1039,28 @@ type ConversationEntry struct {
 	State        TurnState `json:"state"`
 }
 
+// WorkgroupFeedResponse lists shared chief entries and current member summaries.
+// Both single-member and multi-member workgroups can use this endpoint.
+type WorkgroupFeedResponse struct {
+	Workgroup config.WorkgroupID       `json:"workgroup"`
+	Entries   []FeedEntry              `json:"entries"`
+	Members   []WorkgroupMemberSummary `json:"members"`
+}
+
+// WorkgroupMemberSummary presents a member from live facts or its pinned archive.
+// Archived unit counts are empty because archived history is not consulted.
+type WorkgroupMemberSummary struct {
+	Workstream   config.WorkstreamID `json:"workstream"`
+	Repo         config.ProjectID    `json:"repo"`
+	State        *string             `json:"state"`
+	DisplayState string              `json:"display_state"`
+	Units        map[string]int      `json:"units"`
+	Wait         string              `json:"wait"`
+	PRLink       string              `json:"pr_link"`
+	Running      bool                `json:"running"`
+	Archived     bool                `json:"archived"`
+}
+
 // FeedResponse lists a workstream's feed, oldest first.
 type FeedResponse struct {
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -1055,18 +1077,20 @@ type FeedResponse struct {
 // a final review outcome. At is when the entry first became observable;
 // sessions and final check attempts use their recorded start time.
 type FeedEntry struct {
-	QueuedReason string           `json:"queued_reason,omitempty"`
-	Kind         string           `json:"kind"`
-	At           time.Time        `json:"at"`
-	Turn         string           `json:"turn,omitempty"`
-	Text         string           `json:"text,omitempty"`
-	State        TurnState        `json:"state,omitempty"`
-	Status       *StatusView      `json:"status,omitempty"`
-	Session      *FeedSession     `json:"session,omitempty"`
-	Transition   *FeedTransition  `json:"transition,omitempty"`
-	UnitChecks   *FeedUnitChecks  `json:"unit_checks,omitempty"`
-	FinalChecks  *FeedFinalChecks `json:"final_checks,omitempty"`
-	FinalReview  *FeedFinalReview `json:"final_review,omitempty"`
+	Workstream   config.WorkstreamID `json:"workstream,omitempty"`
+	Repo         config.ProjectID    `json:"repo,omitempty"`
+	QueuedReason string              `json:"queued_reason,omitempty"`
+	Kind         string              `json:"kind"`
+	At           time.Time           `json:"at"`
+	Turn         string              `json:"turn,omitempty"`
+	Text         string              `json:"text,omitempty"`
+	State        TurnState           `json:"state,omitempty"`
+	Status       *StatusView         `json:"status,omitempty"`
+	Session      *FeedSession        `json:"session,omitempty"`
+	Transition   *FeedTransition     `json:"transition,omitempty"`
+	UnitChecks   *FeedUnitChecks     `json:"unit_checks,omitempty"`
+	FinalChecks  *FeedFinalChecks    `json:"final_checks,omitempty"`
+	FinalReview  *FeedFinalReview    `json:"final_review,omitempty"`
 }
 
 // FeedSession is one agent turn. State is running, done, waiting (the turn
