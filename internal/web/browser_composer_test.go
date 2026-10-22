@@ -43,7 +43,7 @@ var chatViews = []chatView{
 }
 
 func newChatAPI() *chatAPI {
-	a := &chatAPI{base: newFakeAPI(4), entries: make(map[string][]map[string]any)}
+	a := &chatAPI{base: newFakeAPI(5), entries: make(map[string][]map[string]any)}
 	text := strings.Repeat("The conversation should use the available space beside the workstream picker. This is a longer message with several sentences so the owner can read the full explanation comfortably. ", 8)
 	for _, id := range []string{"w_000", "w_002", "g_test"} {
 		a.entries[id] = []map[string]any{
@@ -69,8 +69,8 @@ func (a *chatAPI) handler() http.Handler {
 		session := streams[1].(map[string]any)
 		session["kind"], session["state"], session["profile"], session["title"] = "session", "idle", "fake", "Exploration"
 		streams[2].(map[string]any)["kind"] = "design"
-		group := map[string]any{"id": "g_test", "members": []string{"w_000", "w_003"}, "edges": []any{}}
-		streams[0].(map[string]any)["workgroup"] = group
+		group := map[string]any{"id": "g_test", "members": []string{"w_003", "w_004"}, "edges": []any{}}
+		streams[4].(map[string]any)["workgroup"] = group
 		streams[3].(map[string]any)["workgroup"] = group
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(status)
@@ -138,7 +138,7 @@ func openChatPage(t *testing.T, width, height int64, browserOptions ...chromedp.
 	// Set only the viewport metrics: EmulateViewport also resets touch and
 	// pointer capabilities, which the keyboard and touch tests set explicitly.
 	p.run(emulation.SetDeviceMetricsOverride(width, height, 1, false), chromedp.Navigate(server.URL+"/"))
-	p.await("the conversations", `document.querySelectorAll('#workstream-list [data-select]').length === 4`)
+	p.await("the conversations", `document.querySelectorAll('#workstream-list [data-select]').length === 5`)
 	return p, a
 }
 

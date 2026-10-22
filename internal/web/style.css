@@ -1326,3 +1326,16 @@ button:disabled {
 @media (max-width: 760px) {
   .workgroup-members { grid-template-columns: minmax(0, 1fr); }
 }
+
+.member-chief-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1rem;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: .875rem;
+}
+.member-chief-line span { overflow-wrap: anywhere; }
+.composer-about:empty { display: none; }
+.composer-about { margin-bottom: .4rem; }
+.composer-about button { padding: 0 .35rem; }

@@ -150,7 +150,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	}
 	p.Run(chromedp.Reload())
 	sidebarGroup := `#workstream-list [data-sidebar-workgroup="` + string(selected.Group) + `"]`
-	p.Await("both same-titled members in one sidebar workgroup", `document.querySelectorAll('#workstream-list > li').length === 1 && document.querySelectorAll(`+quote(sidebarGroup+` [data-select]`)+`).length === 2`)
+	p.Await("both repo-labelled members in one sidebar workgroup", `document.querySelectorAll('#workstream-list > li').length === 1 && document.querySelectorAll(`+quote(sidebarGroup+` [data-select]`)+`).length === 2`)
 	p.Await("the design host is absent from the sidebar", `document.querySelector('[data-select="`+string(f.origin)+`"]') === null`)
 	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
 		repoName := "dagger"
@@ -158,13 +158,14 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 			repoName = "client"
 		}
 		selector := sidebarGroup + ` [data-select="` + string(id) + `"]`
-		p.AwaitText(selector+` [data-field=goal]`, "Ship resumable uploads.")
+		p.AwaitText(selector+` [data-field=goal]`, "dagger / "+repoName)
 		p.AwaitText(selector+` [data-field=project]`, "dagger / "+repoName)
 	}
 	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
 	f.awaitApproved(t)
-	p.Await("the continued chat opens its member without a reload", `!document.querySelector('[data-view="workstream"]').hidden && [`+quote(string(f.stream1))+`,`+quote(string(f.stream2))+`].includes(document.querySelector('#workstream-head').dataset.workstream)`)
+	p.Await("the continued chat opens its workgroup without a reload", `!document.querySelector('[data-view="workgroup"]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))
+	p.Click(`[data-open-member="` + string(f.stream1) + `"]`)
 	assertSharedDesignConversation := func() {
 		t.Helper()
 		// The design agent's reply contains the brief. After adoption it
@@ -213,8 +214,8 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		assertSharedDesignConversation()
 		p.Click("#project-home")
 	}
-	// A single shared inbox entry is offered from either member using the
-	// workgroup's original project/number pins, even from the second repo.
+	// The workgroup offers its shared inbox entry using the original
+	// project and number pins after opening it from the second repo.
 	var escalated atomic.Bool
 	f.engine.Mu.Lock()
 	f.engine.Turns["pane-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -266,10 +267,12 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
 	p.Click("#project-home")
 	p.Click(`[data-drilldown="` + string(f.stream2) + `"]`)
-	p.AwaitText("#workstreams [data-kind=escalation]", "May the acknowledged offset contract change?")
-	p.TypeInto("#workstreams [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
-	p.Click("#workstreams [data-kind=escalation] button[type=submit]")
-	f.wait(t, "the server accepts the shared decision from the second repo", func() bool {
+	p.Await("the member excludes the shared decision and composer", `!document.querySelector('[data-view=workstream]').hidden && !document.querySelector('#workstreams [data-kind=escalation], #workstreams .composer')`)
+	p.Click("#workstream-head [data-ask-chief]")
+	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
+	p.TypeInto("#workgroup-content [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
+	p.Click("#workgroup-content [data-kind=escalation] button[type=submit]")
+	f.wait(t, "the server accepts the shared decision from the workgroup", func() bool {
 		var result struct{ Outcome, Text string }
 		p.Eval(`({Outcome: document.querySelector('#inbox-result').dataset.outcome, Text: document.querySelector('#inbox-result').textContent})`, &result)
 		if result.Outcome == "error" || result.Outcome == "unavailable" {

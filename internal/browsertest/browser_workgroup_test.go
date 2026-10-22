@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
@@ -23,6 +24,7 @@ import (
 )
 
 type workgroupPageFixture struct {
+	opts  service.Options
 	s     *service.Service
 	c     *service.Client
 	repo  *trace.Repository
@@ -31,6 +33,10 @@ type workgroupPageFixture struct {
 }
 
 func newWorkgroupPageFixture(t *testing.T, edges bool) *workgroupPageFixture {
+	return newMemberPageFixture(t, edges, true)
+}
+
+func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture {
 	t.Helper()
 	ctx := context.Background()
 	opts, cfg := servicetest.ConversationFixture(t, "workgroup-page-")
@@ -42,7 +48,11 @@ func newWorkgroupPageFixture(t *testing.T, edges bool) *workgroupPageFixture {
 	fixturekit.SeedPage(t, cfg)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
-	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream, quiet}, demoStart, ownerActor, "fixture")
+	members := []config.WorkstreamID{stream}
+	if multi {
+		members = append(members, quiet)
+	}
+	g, err := trace.CreateWorkgroup(ctx, repo, members, demoStart, ownerActor, "fixture")
 	must(t, err)
 	if edges {
 		spec := trace.ProjectSpec{Behavior: "Share the upload interface.", Graph: []trace.Edge{{From: stream, To: quiet, Type: trace.EdgeMergeOrder}}, Slices: []trace.Slice{{Workstream: stream, Spec: fixturekit.ValidSpec, Plan: `{"version":1,"units":[]}`}, {Workstream: quiet, Spec: fixturekit.ValidSpec, Plan: `{"version":1,"units":[]}`}}}
@@ -62,14 +72,14 @@ func newWorkgroupPageFixture(t *testing.T, edges bool) *workgroupPageFixture {
 	_, err = live.SetStatus(ctx, trace.ChiefOfStaff, chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	// A worker session, checks and review are real member-feed facts.
-	fixturekit.QueueRoleTurn(t, live, stream, "group-worker", "mason", "upload", demoStart)
-	_, err = live.ClaimTurn(ctx, stream, "group-worker", "group-worker-token", t.TempDir(), demoStart)
+	fixturekit.QueueRoleTurn(t, live, stream, intake.MasonAgent("upload"), "mason", "upload", demoStart)
+	_, err = live.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "group-worker-token", t.TempDir(), demoStart)
 	must(t, err)
 	fixturekit.FeedDocument(t, live, stream, "unit-upload-checks-1", "units/upload/checks-1.json", 1, demoStart, service.UnitCheckRun{Unit: "upload", Run: 1, Status: "passed", StartedAt: demoStart, FinishedAt: demoStart})
 	fixturekit.FeedDocument(t, live, stream, "final-report", "final/report.json", 1, demoStart, api.FinalReport{Review: 1, Outcome: "reviewed", Reader: "reader", Turn: "review"})
 	_, err = c.MoveUnit(ctx, stream, "upload", "contested", "Choose the upload approach.")
 	must(t, err)
-	return &workgroupPageFixture{s: s, c: c, repo: live, group: g, chief: chief}
+	return &workgroupPageFixture{opts: opts, s: s, c: c, repo: live, group: g, chief: chief}
 }
 
 func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
@@ -128,6 +138,17 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Click(`[data-open-member="` + string(stream) + `"]`)
 	p.Await("the member card opens its member", `!document.querySelector('[data-view=workstream]').hidden && location.hash === `+quote("#workstream="+string(stream)))
 	p.Await("the member actually has detail events", `document.querySelector('#workstreams [data-kind=session]') !== null && document.querySelector('#workstreams [data-kind=transition]') !== null && document.querySelector('#workstreams [data-kind=unit_checks]') !== null && document.querySelector('#workstreams [data-kind=final_review]') !== null`)
+	p.AwaitText("#workstream-head [data-field=chief-status]", "The chief coordinates both repos.")
+	p.AwaitText("#workstream-head [data-ask-chief]", "Ask the chief about this repo")
+	p.Await("the member has only its own decisions and no chat", `!document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=action], #workstreams [data-kind=status], #workstreams [data-kind=escalation]') && document.querySelector('#workstreams [data-kind=contested]') !== null`)
+	for _, tab := range []string{"documents", "trace", "feed"} {
+		p.Click(`[data-tab="` + tab + `"]`)
+		p.Await("the member tab remains available", `document.querySelector('[data-panel="`+tab+`"]')?.hidden === false`)
+	}
+	p.AwaitText(`[data-select="`+string(stream)+`"] .title`, "Uploads repo")
+	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "1")
+	p.Await("the other member does not count the shared question", `!document.querySelector('[data-select="`+string(quiet)+`"] [data-field=needs]')`)
+
 	openWorkgroup(p, f.group.ID)
 	p.Eval(`window.groupEventKind = "workstream"`, nil)
 	_, statusErr := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "Both members now have a shared plan.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
@@ -188,14 +209,19 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 
 func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	f := newWorkgroupPageFixture(t, false)
-	first, second := f.question(t, 1), f.question(t, 2)
+	first, second := entriesOf(t, f.c, api.InboxContested)[0], f.question(t, 2)
 	p := openOutcomePage(t, f.s)
 	p.SelectWorkstream(stream)
 	answer := func(e api.InboxEntry, text string) {
 		card := decisionCard(e)
 		p.AwaitText(card, e.Question)
 		holdOutcome(p, e.Answer.Path)
-		p.TypeInto(card+"textarea", text)
+		if e.Kind == api.InboxContested {
+			p.Choose(card+"select[name=decision]", "revise")
+			p.TypeInto(card+"input[name=note]", text)
+		} else {
+			p.TypeInto(card+"textarea", text)
+		}
 		p.Click(card + "[type=submit]")
 		p.AwaitGone("the optimistically dismissed shared decision", card)
 		assertOutcome(p, "#inbox-result", "pending", "Sending…")
@@ -207,7 +233,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	settleWorkgroupAction(p)
 	p.Await("the originating member receives the completion", `document.querySelector('#inbox-result').dataset.outcome === '' && typeof releaseOutcome[`+quote(first.Answer.Path)+`] === 'function'`)
 	p.SelectWorkstream(stream)
-	assertOutcome(p, "#inbox-result", "ok", fmt.Sprintf("Answered inbox entry %d.", first.Number))
+	assertOutcome(p, "#inbox-result", "ok", "Ruled revise on unit upload.")
 	openWorkgroup(p, f.group.ID)
 	answer(second, "Keep the second interface.")
 	p.SelectWorkstream(quiet)
@@ -222,11 +248,11 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	}
 	p.Await("one dispatch per recorded shared answer", `outcomeRequests[`+quote(first.Answer.Path)+`] === 1 && outcomeRequests[`+quote(second.Answer.Path)+`] === 1`)
 	p.Await("no graph without edges", `!document.querySelector('#workgroup-content .workgroup-graph')`)
-	_, err := f.repo.ProposeCharter(context.Background(), trace.ChiefOfStaff, f.chief, first.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
+	_, err := f.repo.ProposeCharter(context.Background(), trace.ChiefOfStaff, f.chief, second.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
 	must(t, err)
 	p.AwaitText("#workgroup-content [data-proposal]", "Keep upload interfaces compatible.")
 	p.AwaitText("#workgroup-content [data-proposal] [data-group-decision-repo]", "Uploads repo")
-	p.AwaitText(`[data-select-workgroup="`+string(f.group.ID)+`"] [data-field=needs]`, "2")
+	p.AwaitText(`[data-select-workgroup="`+string(f.group.ID)+`"] [data-field=needs]`, "1")
 	p.Click("#workgroup-content [data-proposal] [data-field=ratify]")
 	assertOutcome(p, "#inbox-result", "ok", "Charter decision recorded.")
 	p.AwaitGone("the ratified charter decision", "#workgroup-content [data-proposal]")
