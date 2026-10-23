@@ -25,7 +25,7 @@ func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
 		if release := awaitCheck(t, next); release != nil {
 			release()
 		}
-		if st := p.status(); st.Used != 0 || len(st.Waiting) != 0 {
+		if st := p.status(); st.Used != 0 || len(st.Waiting) != 0 || len(st.Active) != 0 {
 			t.Fatalf("leaked capacity: %+v", st)
 		}
 	}

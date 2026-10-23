@@ -1228,7 +1228,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
+		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository, cfg: cfg}
 		dispatch, err := s.dispatcher(cfg, repository)
 		if err != nil {
 			return nil, err

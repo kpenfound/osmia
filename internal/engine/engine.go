@@ -87,7 +87,9 @@ func (e *NotApplicableError) Error() string {
 	return fmt.Sprintf("engine %s: not applicable to this mode (%s)", e.Action, e.Mode)
 }
 
-func (c *Controller) applicable(action string) error {
+// Applicable checks whether a lifecycle action applies, without probing or
+// modifying the engine. Admission gates call it before checking for busy work.
+func (c *Controller) Applicable(action string) error {
 	if c.config.Mode != config.DaggerEngineManaged {
 		return &NotApplicableError{Mode: c.config.Mode, Action: action}
 	}
@@ -146,7 +148,7 @@ func (c *Controller) Ensure(ctx context.Context) error {
 // Restart recreates the managed container at the expected version, preserving
 // its named cache volume. Callers must exclude active engine work throughout.
 func (c *Controller) Restart(ctx context.Context) error {
-	if err := c.applicable("restart"); err != nil {
+	if err := c.Applicable("restart"); err != nil {
 		return err
 	}
 	version, err := c.ExpectedVersion(ctx)
@@ -183,7 +185,7 @@ func (c *Controller) Restart(ctx context.Context) error {
 // Prune releases all reclaimable cache entries on the managed engine. Callers
 // must exclude active engine work throughout. It does not start a stopped engine.
 func (c *Controller) Prune(ctx context.Context) error {
-	if err := c.applicable("prune"); err != nil {
+	if err := c.Applicable("prune"); err != nil {
 		return err
 	}
 	container, err := c.inspect(ctx)

@@ -8,7 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// CheckSlotRun identifies a service check run waiting for factory capacity.
+// CheckSlotRun identifies a service check run waiting for or holding capacity.
 // Exactly one of Unit, Review or Session identifies the kind of run.
 type CheckSlotRun struct {
 	Project    config.ProjectID
@@ -23,6 +23,7 @@ type CheckSlotStatus struct {
 	Limit   int
 	Used    int
 	Waiting []CheckSlotRun
+	Active  []CheckSlotRun
 }
 
 // CheckSlots reads check capacity without opening any project's trace.
@@ -38,6 +39,11 @@ type checkSlotPool struct {
 	used    int
 	waiting []*checkSlotWait
 	changed func()
+	held    map[*checkSlotWait]struct{}
+	// maintenance excludes admission and Dagger turn dispatch, without holding
+	// mu during engine commands or blocking capacity snapshots.
+	maintenance chan struct{}
+	turns       map[*EngineTurn]struct{}
 }
 
 type checkSlotWait struct {
@@ -53,6 +59,7 @@ func (p *checkSlotPool) status() CheckSlotStatus {
 	for _, w := range p.waiting {
 		out.Waiting = append(out.Waiting, w.run)
 	}
+	out.Active = p.activeChecks()
 	return out
 }
 
@@ -65,10 +72,17 @@ func (p *checkSlotPool) notify() {
 // admit must be called with mu held. Lowering the limit never interrupts
 // executing runs; they release capacity before any further admission.
 func (p *checkSlotPool) admit() {
+	if p.maintenance != nil {
+		return
+	}
 	for p.used < p.limit && len(p.waiting) > 0 {
 		w := p.waiting[0]
 		p.waiting = slices.Delete(p.waiting, 0, 1)
 		w.granted = true
+		if p.held == nil {
+			p.held = make(map[*checkSlotWait]struct{})
+		}
+		p.held[w] = struct{}{}
 		p.used++
 		close(w.ready)
 	}
@@ -98,6 +112,7 @@ func (p *checkSlotPool) acquire(ctx context.Context, run CheckSlotRun) (func(), 
 			p.mu.Lock()
 			if w.granted {
 				p.used--
+				delete(p.held, w)
 			} else {
 				i := slices.Index(p.waiting, w)
 				p.waiting = slices.Delete(p.waiting, i, i+1)
