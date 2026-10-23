@@ -408,17 +408,19 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	cause := sessionCheckDocumentID(run)
 	startedAt := s.now()
 	scope := coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: sessionChecksThread, Turn: cause, Role: sessionChecksRole}
-	selection := checkrun.Select(ctx, s.jev, repository, scope, cause, nil, dir, diff, checks)
+	identity := checkrun.Identity{Candidate: head, Branch: sessionBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: cfg.Project.Clone}
+	selection := checkrun.Select(ctx, s.jev, repository, scope, cause, nil, dir, diff, identity, checks)
 	timeout := s.about(repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, checkErr := checks.Check(bounded, dir, selection.Links)
+	result, checkErr := checks.Check(bounded, dir, identity, selection.Links)
 	cancel()
 	if errors.Is(checkErr, context.DeadlineExceeded) {
 		checkErr = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
 	status, failed, classifyErr := checkrun.ClassifyChecks(result, checkErr)
 	sr := SessionCheckRun{
-		Run: run, Commit: head, Kind: sessionCheckKind(selection), Checks: selection.Links, Selection: &selection,
+		CIIdentityFallback: result.CIIdentityFallback,
+		Run:                run, Commit: head, Kind: sessionCheckKind(selection), Checks: selection.Links, Selection: &selection,
 		Command:   append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...),
 		Status:    status,
 		ExitCode:  result.ExitCode,

@@ -36,9 +36,11 @@ type FakeChecks struct {
 	Files []string
 }
 
-func (f *FakeChecks) List(context.Context, string) ([]string, error) { return f.Links, f.ListErr }
+func (f *FakeChecks) List(context.Context, string, api.CheckIdentity) ([]string, error) {
+	return f.Links, f.ListErr
+}
 
-func (f *FakeChecks) Check(ctx context.Context, dir string, links []string) (api.CheckResult, error) {
+func (f *FakeChecks) Check(ctx context.Context, dir string, _ api.CheckIdentity, links []string) (api.CheckResult, error) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	data, _ := os.ReadFile(filepath.Join(dir, MasonWrote))

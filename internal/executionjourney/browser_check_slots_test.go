@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,13 +33,13 @@ type capacityChecks struct {
 	used, peak int
 }
 
-func (c *capacityChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
+func (c *capacityChecks) Check(ctx context.Context, dir string, identity api.CheckIdentity, links []string) (CheckResult, error) {
 	c.mu.Lock()
 	c.used++
 	c.peak = max(c.peak, c.used)
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); c.used--; c.mu.Unlock() }()
-	return c.heldChecks.Check(ctx, dir, links)
+	return c.heldChecks.Check(ctx, dir, identity, links)
 }
 
 func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) {

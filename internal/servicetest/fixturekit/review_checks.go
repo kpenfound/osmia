@@ -9,9 +9,11 @@ import (
 // CheckFunc runs every check with its function, and lists no links.
 type CheckFunc func(context.Context, string) (api.CheckResult, error)
 
-func (f CheckFunc) List(context.Context, string) ([]string, error) { return nil, nil }
+func (f CheckFunc) List(context.Context, string, api.CheckIdentity) ([]string, error) {
+	return nil, nil
+}
 
-func (f CheckFunc) Check(ctx context.Context, dir string, _ []string) (api.CheckResult, error) {
+func (f CheckFunc) Check(ctx context.Context, dir string, _ api.CheckIdentity, _ []string) (api.CheckResult, error) {
 	return f(ctx, dir)
 }
 

@@ -6647,6 +6647,9 @@
             },
             "type": "array"
           },
+          "ci_identity_fallback": {
+            "type": "string"
+          },
           "command": {
             "items": {
               "type": "string"

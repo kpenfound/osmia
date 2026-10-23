@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // ReviewChecks lists and runs the project's checks in a disposable export of
@@ -25,26 +26,39 @@ import (
 type ReviewChecks interface {
 	// List returns the link of every check, with collections expanded to
 	// their items.
-	List(ctx context.Context, dir string) ([]string, error)
+	List(ctx context.Context, dir string, identity Identity) ([]string, error)
 	// Check runs the checks the links select, or every check without links,
 	// until ctx ends; callers bound it by the project's checks_timeout.
-	Check(ctx context.Context, dir string, links []string) (CheckResult, error)
+	Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error)
 }
 
 // DaggerChecks runs the project's Dagger checks through the service's engine.
 // The agent receives neither the engine endpoint nor command selection.
-type DaggerChecks struct{}
+type DaggerChecks struct {
+	// CIIdentityExport requests real candidate metadata in check exports.
+	CIIdentityExport bool
+}
+
+// Identity names the candidate checked by a unit, final review or session.
+type Identity = api.CheckIdentity
+
+// Preparation describes whether the check export carries the candidate identity.
+// FallbackReason is empty when identity was not requested or was prepared.
+type Preparation struct {
+	CIIdentity     bool
+	FallbackReason string
+}
 
 type CheckResult = api.CheckResult
 
 // listOutputLimit bounds the check links read from a listing.
 const listOutputLimit = 4 << 20
 
-func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
+func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	output := &checkOutput{limit: listOutputLimit}
-	exit, err := dagger(ctx, dir, output, "list", "checks", "--all", "--format=link")
+	exit, _, err := d.dagger(ctx, dir, identity, false, output, "list", "checks", "--all", "--format=link")
 	if err != nil {
 		return nil, err
 	}
@@ -54,29 +68,43 @@ func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
 	return checkselect.Links(output.String()), nil
 }
 
-func (DaggerChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
+func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
 	output := &bytes.Buffer{}
-	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
-	return CheckResult{ExitCode: exit, Output: output.String()}, err
+	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport, output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
+	return CheckResult{ExitCode: exit, Output: output.String(), CIIdentityFallback: preparation.FallbackReason}, err
 }
 
 // dagger runs the Dagger CLI in dir with args and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
-func dagger(ctx context.Context, dir string, output io.Writer, args ...string) (int, error) {
+func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (int, Preparation, error) {
 	home, err := os.MkdirTemp("", "osmia-check-home-")
 	if err != nil {
-		return -1, err
+		return -1, Preparation{}, err
 	}
 	defer os.RemoveAll(home)
 	// Dagger's report colors its output even off a terminal; agents read it
 	// and FailedChecks parses it as plain text.
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
-	// Dagger finds the workspace, and with it dagger.toml, at the enclosing
-	// Git root. The export carries no repository, so it becomes its own root.
-	initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
-	initialise.Env = env
-	if out, err := initialise.CombinedOutput(); err != nil {
-		return -1, fmt.Errorf("git init: %w: %s", err, out)
+	preparation := Preparation{}
+	if withIdentity {
+		if err := prepareIdentity(ctx, dir, env, identity); err != nil {
+			preparation.FallbackReason = err.Error()
+			if removeErr := os.RemoveAll(filepath.Join(dir, ".git")); removeErr != nil {
+				return -1, preparation, fmt.Errorf("remove export metadata for anonymous checks: %w", removeErr)
+			}
+			ghlog.Logger(ctx).WarnContext(ctx, "check export uses anonymous Git identity", "candidate", identity.Candidate, "reason", preparation.FallbackReason)
+		} else {
+			preparation.CIIdentity = true
+		}
+	}
+	// Dagger finds dagger.toml at the enclosing Git root. Anonymous exports
+	// need their own root; identity exports already have one.
+	if !preparation.CIIdentity {
+		initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
+		initialise.Env = env
+		if out, err := initialise.CombinedOutput(); err != nil {
+			return -1, preparation, fmt.Errorf("git init: %w: %s", err, out)
+		}
 	}
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
@@ -103,13 +131,13 @@ func dagger(ctx context.Context, dir string, output io.Writer, args ...string) (
 		exit = cmd.ProcessState.ExitCode()
 	}
 	if ctx.Err() != nil {
-		return exit, ctx.Err()
+		return exit, preparation, ctx.Err()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exit, nil
+		return exit, preparation, nil
 	}
-	return exit, err
+	return exit, preparation, err
 }
 
 // checkOutput keeps the last limit bytes written to it, starting at a whole

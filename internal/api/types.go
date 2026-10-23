@@ -845,22 +845,23 @@ type SessionCommitResponse struct {
 // whether it was a smart or a full run and, for a smart run, the checks it
 // selected, its status, exit code and output.
 type SessionCheckRun struct {
-	Run            int             `json:"run"`
-	Commit         string          `json:"commit"`
-	Kind           string          `json:"kind"`
-	Checks         []string        `json:"checks,omitempty"`
-	Selection      *CheckSelection `json:"selection,omitempty"`
-	Command        []string        `json:"command,omitempty"`
-	Status         string          `json:"status"`
-	ExitCode       int             `json:"exit_code"`
-	Output         string          `json:"output,omitempty"`
-	OutputRevision int             `json:"output_revision,omitempty"`
-	OutputPath     string          `json:"output_path,omitempty"`
-	Truncated      bool            `json:"truncated,omitempty"`
-	Failed         []string        `json:"failed,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     time.Time       `json:"finished_at"`
+	Run                int             `json:"run"`
+	Commit             string          `json:"commit"`
+	Kind               string          `json:"kind"`
+	Checks             []string        `json:"checks,omitempty"`
+	Selection          *CheckSelection `json:"selection,omitempty"`
+	Command            []string        `json:"command,omitempty"`
+	Status             string          `json:"status"`
+	ExitCode           int             `json:"exit_code"`
+	Output             string          `json:"output,omitempty"`
+	OutputRevision     int             `json:"output_revision,omitempty"`
+	OutputPath         string          `json:"output_path,omitempty"`
+	Truncated          bool            `json:"truncated,omitempty"`
+	Failed             []string        `json:"failed,omitempty"`
+	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	StartedAt          time.Time       `json:"started_at"`
+	FinishedAt         time.Time       `json:"finished_at"`
 }
 
 // SessionPushResponse is the result of pushing a session branch.

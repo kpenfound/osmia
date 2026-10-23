@@ -54,11 +54,11 @@ func FullSelection(reason, detail string) api.CheckSelection {
 // waits for the project's modules to load, so it is skipped while the boost
 // is off. Unit, final-review and session check runs all ask through this
 // function and use its selection and fallback rules.
-func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, checks ReviewChecks) (selection api.CheckSelection) {
+func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, identity Identity, checks ReviewChecks) (selection api.CheckSelection) {
 	if j.Status().Mode == jev.ModeDisabled {
 		return FullSelection(string(jev.ReasonDisabled), "")
 	}
-	links, err := checks.List(ctx, dir)
+	links, err := checks.List(ctx, dir, identity)
 	if err != nil {
 		return FullSelection(SelectionUnlisted, err.Error())
 	}

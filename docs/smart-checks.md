@@ -65,6 +65,15 @@ links to Dagger; every fallback runs all checks with the same reason a unit
 run records. An owner's explicit full session run remains a full run.
 If the run cannot read the change's diff, it stops before executing checks.
 
+When the check runner requests CI identity, the export carries the exact pinned
+Git commit, its real branch name, and the configured upstream as a credential-free
+HTTPS `origin`. This also applies to Git commits from Jujutsu workspaces. Only
+existing tags on that candidate are copied. The runner verifies that the exported
+files match the commit's tree before attaching its Git metadata. If identity
+preparation fails, checks still run on the anonymous export; the check record's
+optional `ci_identity_fallback` field explains why, and the service logs a warning.
+Without that option the export remains anonymous.
+
 ## What a run records
 
 As soon as a unit run chooses its checks, before `dagger check` starts, it

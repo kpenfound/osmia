@@ -32,8 +32,10 @@ func (fakeSessionEngine) Enforcer(coreadapter.ExecutionSettings) (agent.Enforcer
 // Dagger engine, so the session check command can be exercised end to end.
 type fakeSessionChecks struct{}
 
-func (fakeSessionChecks) List(context.Context, string) ([]string, error) { return nil, nil }
-func (fakeSessionChecks) Check(context.Context, string, []string) (wire.CheckResult, error) {
+func (fakeSessionChecks) List(context.Context, string, wire.CheckIdentity) ([]string, error) {
+	return nil, nil
+}
+func (fakeSessionChecks) Check(context.Context, string, wire.CheckIdentity, []string) (wire.CheckResult, error) {
 	return wire.CheckResult{ExitCode: 0, Output: "CHECKS all passed\n"}, nil
 }
 

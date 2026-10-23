@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -119,7 +120,7 @@ type heldDestroyChecks struct {
 	started, release chan struct{}
 }
 
-func (c heldDestroyChecks) Check(ctx context.Context, _ string, _ []string) (service.CheckResult, error) {
+func (c heldDestroyChecks) Check(ctx context.Context, _ string, _ api.CheckIdentity, _ []string) (service.CheckResult, error) {
 	close(c.started)
 	select {
 	case <-c.release:

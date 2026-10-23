@@ -12,5 +12,9 @@ import (
 // the project's modules to load, so it is skipped while the boost is off.
 func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff string, runner ReviewChecks) CheckSelection {
 	return checkrun.Select(ctx, c.s.Jev, c.repository, c.scope(in), checkRequestID(in.Unit, in.Run),
-		[]jev.Source{{Kind: "unit-report", ID: reportDocument(in.Unit), Revision: in.Report}}, dir, diff, runner)
+		[]jev.Source{{Kind: "unit-report", ID: reportDocument(in.Unit), Revision: in.Report}}, dir, diff, c.checkIdentity(in), runner)
+}
+
+func (c *checkers) checkIdentity(in checkInput) checkrun.Identity {
+	return checkrun.Identity{Candidate: in.Candidate, Branch: unitBranch(in.Workstream, in.Unit), Remote: "https://github.com/" + c.cfg.Project.Upstream, Repository: c.cfg.Project.Clone}
 }
