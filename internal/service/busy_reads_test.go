@@ -270,14 +270,14 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 	// from before the commit and some from after it.
 	attempts := 0
 	var raceOnce sync.Once
-	s.boundary = func(name string) error {
+	s.setBoundary(func(name string) error {
 		if name == "status-agents" {
 			attempts++
 			raceOnce.Do(func() { featureTransition(t, repository, stream, "building", demoStart.Add(2*time.Minute)) })
 		}
 		return nil
-	}
-	defer func() { s.boundary = nil }()
+	})
+	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Statuses(context.Background())
 	must(t, err)
@@ -315,7 +315,7 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 
 	attempts := 0
 	var raceOnce sync.Once
-	s.boundary = func(name string) error {
+	s.setBoundary(func(name string) error {
 		if name == "status-agents" {
 			attempts++
 			raceOnce.Do(func() {
@@ -325,8 +325,8 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 			})
 		}
 		return nil
-	}
-	defer func() { s.boundary = nil }()
+	})
+	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Statuses(context.Background())
 	must(t, err)
@@ -367,7 +367,7 @@ func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 
 	attempts := 0
 	var raceOnce sync.Once
-	s.boundary = func(name string) error {
+	s.setBoundary(func(name string) error {
 		if name == "inbox-decisions" {
 			attempts++
 			raceOnce.Do(func() {
@@ -378,8 +378,8 @@ func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 			})
 		}
 		return nil
-	}
-	defer func() { s.boundary = nil }()
+	})
+	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Inbox(context.Background())
 	must(t, err)

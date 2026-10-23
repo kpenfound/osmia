@@ -10,6 +10,10 @@ import (
 )
 
 func (s *Service) delivery() *delivery.Controller {
+	return s.deliveryWithChecks(s.configuredChecks(s.current()))
+}
+
+func (s *Service) deliveryWithChecks(checks ReviewChecks) *delivery.Controller {
 	return delivery.New(delivery.Dependencies{
 		Now: s.now, About: s.about, Current: s.current, Effective: s.effective,
 		ConversationTrace: s.conversationTrace, Execution: s.execution, ResolveBase: s.resolveBase,
@@ -19,7 +23,7 @@ func (s *Service) delivery() *delivery.Controller {
 		TrackTurn: s.turns.add, AgentProfile: s.agentProfile, RoleExecution: s.roleExecution,
 		ContextFor: s.contextFor, Stoppable: s.stoppable, ThreadRunner: s.threadRunner,
 		Held: s.held, ContinueStopped: s.continueStopped, MemoryTurns: memoryTurns, Step: s.step,
-		Committee: s.options.Committee, Checks: s.options.reviewChecks, PullRequests: s.options.PullRequests, Jev: s.jev,
+		Committee: s.options.Committee, Checks: checks, PullRequests: s.options.PullRequests, Jev: s.jev,
 		AcquireReviewCheckSlot: func(ctx context.Context, p config.ProjectID, w config.WorkstreamID, review int, operation string) (func(), error) {
 			return s.acquireReviewCheckSlot(ctx, CheckSlotRun{Project: p, Workstream: w, Review: review}, operation)
 		},

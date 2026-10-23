@@ -26,10 +26,19 @@ type pendingProject struct {
 }
 
 func (s *Service) step(name string) error {
-	if s.boundary != nil {
-		return s.boundary(name)
+	s.boundaryMu.RLock()
+	boundary := s.boundary
+	s.boundaryMu.RUnlock()
+	if boundary != nil {
+		return boundary(name)
 	}
 	return nil
+}
+
+func (s *Service) setBoundary(boundary func(string) error) {
+	s.boundaryMu.Lock()
+	s.boundary = boundary
+	s.boundaryMu.Unlock()
 }
 
 func projectView(root config.Root, p config.Project) ProjectView {

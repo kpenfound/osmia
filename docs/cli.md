@@ -1009,3 +1009,22 @@ state
 `--json` prints the checks as a JSON array of `group`, `name`, `status`
 (`pass`, `warn` or `fail`), `detail` and `remediation`. Doctor exits 1 when a
 check failed and 0 when only warnings are present.
+
+## Dagger engine
+
+`osmia engine status|restart|prune [--json]` uses the running service's loaded
+`[dagger]` configuration. Status reports the mode, address, reachability, running
+and configured versions, any mismatch with the host CLI, and cache size when
+available. Status works in every engine mode.
+
+Restart recreates the managed engine at the configured version and preserves
+its named cache volume. Prune clears reclaimable cache entries. Both actions
+apply only to `engine = "managed"`. While a check run or a Dagger-enabled mason
+turn is active, they report temporarily unavailable and name the work blocking
+them. Retry after that work settles. New checks and Dagger turns wait while an
+idle engine is being restarted or pruned.
+
+Startup and reload only create a missing managed engine or start a stopped
+one. A running engine keeps its version across reloads; status reports a
+configuration mismatch until an idle `osmia engine restart` applies the new
+version.

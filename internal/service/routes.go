@@ -24,6 +24,9 @@ type Route struct {
 
 // Routes lists every endpoint Service.handle serves under api.Prefix.
 var Routes = []Route{
+	{Method: http.MethodGet, Path: api.Prefix + "/engine/status", Summary: "Report Dagger engine mode, reachability, versions and cache size", Response: api.EngineStatus{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/engine/restart", Summary: "Restart the managed Dagger engine when no checks or Dagger turns are active", Response: api.MutationResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/engine/prune", Summary: "Prune the managed Dagger engine cache when idle", Response: api.MutationResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/health", Summary: "Report API availability, backend readiness, API version and build identity", Response: api.HealthResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/activity", Summary: "List the backend operations the activity record holds", Response: api.ActivityResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/stop", Summary: "Stop the service; refused on the web and tailnet listeners", Response: api.StopResponse{}, Status: http.StatusAccepted},
@@ -88,7 +91,7 @@ var Routes = []Route{
 
 	{Method: http.MethodGet, Path: api.Prefix + "/conversation/{workstream}", Summary: "List a workstream's conversation with the chief of staff", Response: api.ConversationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/conversation/{workstream}", Summary: "Send a message to a workstream's chief of staff", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
-	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List member sessions, state changes, checks and final reviews; shared chief entries and turns are included only for single-member workgroups", Response: api.FeedResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List member sessions, state changes, unit, final and session checks and final reviews; shared chief entries and turns are included only for single-member workgroups", Response: api.FeedResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/workgroups/{id}/feed", Summary: "List shared chief conversation, statuses, actions and member summaries for a single-member or multi-member workgroup", Response: api.WorkgroupFeedResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/workgroups/{id}/conversation", Summary: "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/inbox", Summary: "List open owner decisions", Response: api.InboxResponse{}},

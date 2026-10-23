@@ -94,12 +94,12 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 	// follows does not replace that diagnostic.
 	agentsMessage := "cannot read the agent turns of workstream " + string(stream) + "; check the trace repository"
 	for _, failing := range [][]string{{"status-agents"}, {"status-agents", "status-units"}} {
-		s.boundary = func(name string) error {
+		s.setBoundary(func(name string) error {
 			if slices.Contains(failing, name) {
 				return errors.New("unreadable")
 			}
 			return nil
-		}
+		})
 		list, unreadable, api := s.statuses()
 		if api != nil || len(list) != 1 || list[0].Agents != nil || unreadable[stream] != (Diagnostic{Field: "agents", Code: Internal, Message: agentsMessage}) {
 			t.Fatalf("failing %v: %+v %+v %v", failing, list, unreadable, api)
@@ -108,7 +108,7 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 			t.Fatalf("failing %v: workstream status %v", failing, api)
 		}
 	}
-	s.boundary = nil
+	s.setBoundary(nil)
 
 	must(t, repo.AbandonTurn(ctx, stream, actor.ID, "two", started.Add(9*time.Second)))
 	if got, err := agentStatuses(repo, stream, started.Add(10*time.Second)); err != nil || len(got) != 0 {

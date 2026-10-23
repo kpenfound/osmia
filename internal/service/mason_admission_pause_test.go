@@ -46,18 +46,18 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 				t.Fatal("building workstream missing")
 			}
 			interrupted := errors.New("stop before the first turn is queued")
-			f.s.boundary = func(name string) error {
+			f.s.setBoundary(func(name string) error {
 				if name == "mason-implementing:"+string(hi)+":resume" {
 					return interrupted
 				}
 				return nil
-			}
+			})
 			_, _, err = m.start(context.Background(), b, "resume")
 			if !errors.Is(err, interrupted) {
 				t.Fatalf("start: %v", err)
 			}
 			changed := false
-			f.s.boundary = func(name string) error {
+			f.s.setBoundary(func(name string) error {
 				if name != "mason-turn-queued:"+string(hi)+":resume" {
 					return nil
 				}
@@ -66,8 +66,8 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 					return f.s.store.SetPause(pause)
 				}
 				return f.s.store.ClearPause(pause.Target, "owner")
-			}
-			defer func() { f.s.boundary = nil }()
+			})
+			defer func() { f.s.setBoundary(nil) }()
 			must(t, m.Pass(context.Background()))
 			if !changed {
 				t.Fatal("pause did not change during the mason scan")

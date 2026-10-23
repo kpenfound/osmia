@@ -150,6 +150,9 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 		// DAGGER_ENGINE takes precedence over the deprecated runner and Cloud
 		// variables; none of the host's engine selectors are inherited here.
 		cmd.Env = append(cmd.Env, "DAGGER_ENGINE="+d.Engine)
+		if d.Engine != "cloud" {
+			cmd.Env = append(cmd.Env, "_EXPERIMENTAL_DAGGER_RUNNER_HOST="+d.Engine)
+		}
 		if release := os.Getenv("DAGGER_X_RELEASE"); release != "" {
 			cmd.Env = append(cmd.Env, "DAGGER_X_RELEASE="+release)
 		}

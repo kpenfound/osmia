@@ -376,7 +376,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if err != nil || !exists {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
-	checks := s.options.reviewChecks
+	checks := s.configuredChecks(cfg)
 	if checks == nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: "the candidate check runner is unavailable"}
 	}

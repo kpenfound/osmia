@@ -28,7 +28,7 @@ import (
 // step, the first time it is reached, as the service stopping there does.
 func stopAt(t *testing.T, s *Service, step string) context.Context {
 	t.Helper()
-	return intakefixture.StopAt(t, step, func(h func(string) error) { s.boundary = h })
+	return intakefixture.StopAt(t, step, func(h func(string) error) { s.setBoundary(h) })
 }
 
 // jujutsuRepository returns the Jujutsu repository of the fixture project's
@@ -260,7 +260,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			bOp := landOperations(t, repository, b)[0].Operation
 			stopped, cancel := context.WithCancel(ctx)
 			defer cancel()
-			f.s.boundary = func(step string) error {
+			f.s.setBoundary(func(step string) error {
 				if step == "land-advanced" {
 					if cancelled {
 						cancel()
@@ -268,7 +268,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 					return errors.New("interrupted local step")
 				}
 				return nil
-			}
+			})
 			_, err := lands.Apply(stopped, aOp)
 			if err == nil || !strings.Contains(err.Error(), "interrupted local step") {
 				t.Fatalf("A: %v", err)
@@ -276,7 +276,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			if left := checkpoints(t, f, branchesDirectory); len(left) != 0 {
 				t.Fatalf("A unlocked with checkpoints %v", left)
 			}
-			f.s.boundary = nil
+			f.s.setBoundary(nil)
 			bResult := settleOperation(t, f.s, repository, b, bOp, lands)
 			if bResult.Outcome != "succeeded" {
 				t.Fatalf("B: %+v", bResult)
@@ -299,13 +299,13 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			}
 			// A resumes from the landed branch effect; neither landing commits again.
 			commits := 0
-			f.s.boundary = func(step string) error {
+			f.s.setBoundary(func(step string) error {
 				if step == "land-committing" {
 					commits++
 				}
 				return nil
-			}
-			t.Cleanup(func() { f.s.boundary = nil })
+			})
+			t.Cleanup(func() { f.s.setBoundary(nil) })
 			if result := settleOperation(t, f.s, repository, a, aOp, lands); result.Outcome != "succeeded" {
 				t.Fatalf("A retry: %+v", result)
 			}

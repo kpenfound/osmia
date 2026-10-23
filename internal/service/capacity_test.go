@@ -246,12 +246,12 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 		t.Fatalf("claude after the reset %+v", claude)
 	}
 
-	s.boundary = func(name string) error {
+	s.setBoundary(func(name string) error {
 		if name == "status-provider-usage" {
 			return errors.New("injected")
 		}
 		return nil
-	}
+	})
 	got = s.statusList()
 	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(project) + "; check the trace repository"}) {
 		t.Fatalf("unreadable provider usage: %+v %+v", got.ProviderUsage, got.Diagnostics)

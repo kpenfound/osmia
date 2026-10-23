@@ -54,13 +54,13 @@ func TestStatusAnswersWithinBoundAndMarksAFallbackSnapshotStale(t *testing.T) {
 	featureTransition(t, active.repository, stream, "pending", demoStart.Add(time.Minute))
 
 	release := make(chan struct{})
-	s.boundary = func(name string) error {
+	s.setBoundary(func(name string) error {
 		if name == "status-agents" {
 			<-release
 		}
 		return nil
-	}
-	defer func() { s.boundary = nil }()
+	})
+	defer func() { s.setBoundary(nil) }()
 
 	started := time.Now()
 	code, headers := httpStatus(t, s)

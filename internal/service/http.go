@@ -202,6 +202,9 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 const sessionCheckWriteMargin = time.Minute
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
+	if s.engineHTTP(w, r) {
+		return
+	}
 	if web.Serve(w, r) {
 		return
 	}

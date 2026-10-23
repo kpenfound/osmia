@@ -48,7 +48,9 @@ and retry delays do not imply running checks. Historical results without start
 evidence have no attempt or started_at; each result revision remains visible.
 final_review gives each review's outcome, reader and turn, blocking finding and
 uncovered criterion counts, or its failure reason. Reader turns also appear as
-sessions. Captured check output remains in the trace.
+sessions. session_checks summarizes each completed exploratory session check run.
+Unit, final and session check entries carry trace_url when the CLI reported a
+Dagger Cloud trace. Captured check output remains in the trace.
 
 A started entry keeps its original place when its result arrives. Unfinished
 starts survive restart without implying success or failure. Workstream events

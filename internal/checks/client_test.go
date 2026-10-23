@@ -91,6 +91,9 @@ func TestDaggerClientEnvironment(t *testing.T) {
 							want["_EXPERIMENTAL_DAGGER_RUNNER_HOST"] = "tcp://host-runner:1234"
 						} else {
 							want["DAGGER_ENGINE"] = engine
+							if engine != "cloud" {
+								want["_EXPERIMENTAL_DAGGER_RUNNER_HOST"] = engine
+							}
 						}
 						if token != "" && (operation == "check" || engine == "cloud") {
 							want["DAGGER_CLOUD_TOKEN"] = token

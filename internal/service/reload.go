@@ -155,6 +155,10 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		}
 	}
 	projects = append(projects, removed...)
+	if err := s.ensureEngine(context.Background(), next); err != nil {
+		rollback()
+		return failUnchanged()
+	}
 	s.mu.Lock()
 	if err := s.resolveRuntime(next, projects); err != nil {
 		s.mu.Unlock()
