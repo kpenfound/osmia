@@ -1015,7 +1015,10 @@ check failed and 0 when only warnings are present.
 `osmia engine status|restart|prune [--json]` uses the running service's loaded
 `[dagger]` configuration. Status reports the mode, address, reachability, running
 and configured versions, any mismatch with the host CLI, and cache size when
-available. Status works in every engine mode.
+available. Status works in every engine mode. The web cog menu shows the same
+status and offers restart and prune, with the service’s refusal reason when an
+action cannot run. Each unit, final and session check entry in the owner’s feed
+links to its Dagger Cloud trace when the run recorded one.
 
 Restart recreates the managed engine at the configured version and preserves
 its named cache volume. Prune clears reclaimable cache entries. Both actions

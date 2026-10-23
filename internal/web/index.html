@@ -73,6 +73,14 @@
 <div id="settings-menu" class="popover menu" popover data-anchor="settings-button">
   <button type="button" data-open="project-add">Create project</button>
   <button type="button" data-open="projects">Project management</button>
+  <section id="engine-controls" aria-labelledby="engine-title">
+    <h3 id="engine-title">Dagger engine</h3>
+    <div id="engine-status" role="status"></div>
+    <button type="button" id="engine-restart">Restart engine</button>
+    <p id="engine-restart-result" class="result" role="status"></p>
+    <button type="button" id="engine-prune">Prune engine cache</button>
+    <p id="engine-prune-result" class="result" role="status"></p>
+  </section>
   <button type="button" data-open="priority">Priority</button>
   <button type="button" data-open="profiles">Profiles and usage</button>
   <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>

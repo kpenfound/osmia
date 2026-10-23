@@ -1339,3 +1339,18 @@ button:disabled {
 .composer-about:empty { display: none; }
 .composer-about { margin-bottom: .4rem; }
 .composer-about button { padding: 0 .35rem; }
+
+#engine-controls {
+  border-block: 1px solid var(--line);
+  padding: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+#engine-status p {
+  margin-block: 0.35rem;
+  font-size: 0.85rem;
+}
+
+#engine-controls .result:empty {
+  display: none;
+}
