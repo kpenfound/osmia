@@ -481,7 +481,10 @@
           }
           if (ui.initial === null && location.hash.startsWith('#workstream=')) {
             const w = streams().find(w => w.workstream === ui.selected);
-            if (w) ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
+            if (w) {
+              ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
+              if (w.kind === 'design') dirty.add('design/' + w.workstream + '/conversation');
+            }
           }
           for (const w of streams()) {
             if (w.kind !== 'design' && w.state && designIds.has(w.workstream)) {
@@ -1481,10 +1484,10 @@
     setPicker(false);
     const session = isSessionId(id);
     const design = !session && isDesignId(id);
+    ui.toEnd = true;
     openView(session ? 'session' : design ? 'design' : 'workstream');
     if (changed) {
       clearWorkstreamForms();
-      ui.toEnd = true;
     }
     if (streams().some((w) => w.workstream === id && w.archived)) {
       byId('archived').open = true;
@@ -1521,24 +1524,20 @@
     const changed = ui.view !== view;
     if (changed && ['project-pane', 'workstream', 'workgroup', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
     ui.view = view;
+    if (changed) ui.toEnd = true;
     if (view === 'project-pane') history.replaceState(null, '', location.pathname + location.search);
     setPicker(false);
     render();
-    if (changed) {
-      byId('main').scrollTop = view === 'workstream' ? byId('main').scrollHeight : 0;
-    }
+    if (changed && !shownFeed()) byId('main').scrollTop = 0;
   }
 
   function setTab(tab) {
     const changed = ui.tab !== tab;
     ui.tab = tab;
+    if (changed && tab === 'feed') ui.toEnd = true;
     render();
     if (changed && tab === 'documents') {
       readWorkstreamDocuments();
-    }
-    if (changed && tab === 'feed') {
-      ui.toEnd = true;
-      render();
     }
   }
 
@@ -1562,7 +1561,6 @@
     const path = group && !member ? '/workgroups/' + id + '/conversation' : '/conversation/' + (member?.workstream || id);
     act(c.result, c.button, () => request('POST', path, { text }), (entry) => {
       c.text.value = '';
-      ui.toEnd = true;
       mark([group ? groupFeed(id) : 'feed/' + id]);
       return 'Sent; the chief of staff answers in its next turn (' + entry.state + ').';
     });
@@ -1924,14 +1922,8 @@
       box.after(inboxResult);
       return;
     }
-    const main = byId('main');
-    const atEnd = main.scrollHeight - main.scrollTop - main.clientHeight < 48;
     renderHead(w);
     place(box, [renderWorkstream(w)]);
-    if (ui.view === 'workstream' && ui.tab === 'feed' && (ui.toEnd || atEnd)) {
-      main.scrollTop = main.scrollHeight;
-      ui.toEnd = false;
-    }
   }
 
   // sessionEchoes holds, per session, the owner's own sent messages by turn
@@ -2034,7 +2026,10 @@
       if (ui.selected === id) form.elements.text.value = '';
       sessionEchoesFor(id).set(entry.turn, entry);
       mark(['status', 'feed/' + id]);
-      if (ui.selected === id) renderSessionFeed(id);
+      if (ui.selected === id) {
+        renderSessionFeed(id);
+        snapFeed();
+      }
       return 'Sent; the agent answers in its next turn (' + entry.state + ').';
     });
   }
@@ -3745,6 +3740,53 @@
       el('dt', {}, name.replaceAll('_', ' ')), el('dd', {}, traceTree(content))]));
   }
 
+  // shownFeed names only the visible conversation, and waits for its read
+  // before treating a placeholder as a rendered feed.
+  function shownFeed() {
+    let key, box;
+    if (ui.view === 'workstream' && ui.tab === 'feed' && shown()) {
+      key = 'feed/' + shown().workstream;
+      box = byId('workstreams').querySelector('.feed');
+    } else if (ui.view === 'workgroup') {
+      key = groupFeed(ui.workgroup);
+      box = byId('workgroup-content').querySelector('.feed');
+    } else if (ui.view === 'session' && shownSession()) {
+      key = 'feed/' + shownSession().workstream;
+      box = byId('session-feed');
+    } else if (ui.view === 'design' && shownDesign()) {
+      key = 'design/' + shownDesign().workstream + '/conversation';
+      box = byId('design-feed');
+    }
+    return box ? { key, box, ready: !!views[key] } : null;
+  }
+
+  let renderedFeed = null;
+  let feedSnap = 0;
+
+  // Count the displayed entries, including session echoes merged by turn.
+  // Updating an entry in place does not count as a new message. Scrolling
+  // after layout also lets a send's result finish painting beside its echo.
+  function snapFeed() {
+    const feed = shownFeed();
+    if (!feed) return;
+    const count = feed.box.querySelectorAll(':scope > ol > li').length;
+    if (!feed.ready && count === 0) return;
+    const snap = ui.toEnd || renderedFeed?.key !== feed.key || count > renderedFeed.count;
+    renderedFeed = { key: feed.key, count };
+    if (!snap) return;
+    ui.toEnd = false;
+    const pending = ++feedSnap;
+    requestAnimationFrame(() => {
+      const current = shownFeed();
+      if (pending !== feedSnap || current?.key !== feed.key) return;
+      const main = byId('main');
+      // Session controls follow the chat; land at the conversation's end
+      // with its composer visible, leaving those controls below it.
+      const end = feed.box.closest('.thread');
+      main.scrollTop += end.getBoundingClientRect().bottom - main.getBoundingClientRect().bottom;
+    });
+  }
+
   function render() {
     renderOutcomes();
     forget();
@@ -3770,6 +3812,7 @@
     renderProfiles();
     renderProviders();
     renderConfig();
+    snapFeed();
   }
 
   setupOutcomeScopes();
