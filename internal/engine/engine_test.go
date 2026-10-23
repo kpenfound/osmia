@@ -60,9 +60,9 @@ set -eu
 cd "$(dirname "$0")"
 printf 'dagger %s\n' "$*" >> commands
 case "$*" in
- version) echo 'version: v1.0.0-beta.17'; exit 0 ;;
+ version) echo "version: ${DAGGER_X_RELEASE:-v1.0.0-beta.17}"; exit 0 ;;
 esac
-printf '%s\n' "DAGGER_ENGINE=${DAGGER_ENGINE-}" "DAGGER_CLOUD_ENGINE=${DAGGER_CLOUD_ENGINE-}" "_EXPERIMENTAL_DAGGER_RUNNER_HOST=${_EXPERIMENTAL_DAGGER_RUNNER_HOST-}" "DAGGER_CLOUD_TOKEN=${DAGGER_CLOUD_TOKEN-}" "CI=${CI-}" "GITHUB_TOKEN=${GITHUB_TOKEN-}" > probe-env
+printf '%s\n' "DAGGER_ENGINE=${DAGGER_ENGINE-}" "DAGGER_CLOUD_ENGINE=${DAGGER_CLOUD_ENGINE-}" "_EXPERIMENTAL_DAGGER_RUNNER_HOST=${_EXPERIMENTAL_DAGGER_RUNNER_HOST-}" "DAGGER_CLOUD_TOKEN=${DAGGER_CLOUD_TOKEN-}" "DAGGER_X_RELEASE=${DAGGER_X_RELEASE-}" "CI=${CI-}" "GITHUB_TOKEN=${GITHUB_TOKEN-}" > probe-env
 if [ -f unreachable ]; then echo "connection refused ${DAGGER_CLOUD_TOKEN-}" >&2; exit 1; fi
 case "$*" in
  'core version')
@@ -185,6 +185,31 @@ func TestExpectedVersionDefaultsToCLI(t *testing.T) {
 	}
 }
 
+func TestHostReleaseSelectionInEveryMode(t *testing.T) {
+	for _, mode := range []string{"managed", "auto", "tcp://engine:1234", "cloud"} {
+		t.Run(mode, func(t *testing.T) {
+			o, dir := fakeHost(t)
+			running(t, dir, "v0.22.0-beta.3", true)
+			baseGetenv := o.Getenv
+			o.Getenv = func(name string) string {
+				switch name {
+				case "DAGGER_X_RELEASE":
+					return "v0.22.0-beta.3"
+				case "MY_CLOUD_TOKEN":
+					return "private-probe-token"
+				}
+				return baseGetenv(name)
+			}
+			cfg := config.DaggerConfig{Engine: mode, CloudTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
+			s, err := New(cfg, o).Status(context.Background())
+			must(t, err)
+			if s.CLIVersion != "v0.22.0-beta.3" || s.ExpectedVersion != "v0.22.0-beta.3" || s.Version != "v0.22.0-beta.3" || s.VersionMismatch || s.ConfiguredVersionMismatch {
+				t.Fatalf("%+v", s)
+			}
+		})
+	}
+}
+
 func TestEnsureInspectionFailureLeavesContainerUntouched(t *testing.T) {
 	o, dir := fakeHost(t)
 	put(t, dir, "docker-error", "yes")
@@ -212,7 +237,7 @@ func TestStatusEveryMode(t *testing.T) {
 			cfg := config.DaggerConfig{Engine: mode, Version: "v1.0.0-beta.17", CloudTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
 			s, err := New(cfg, o).Status(context.Background())
 			must(t, err)
-			if s.Mode != cfg.Mode || s.Address != cfg.Address || !s.Reachable || s.Version != "v0.20.5" || s.CLIVersion != "v1.0.0-beta.17" || !s.VersionMismatch || !s.ConfiguredVersionMismatch || s.CacheSizeBytes == nil || *s.CacheSizeBytes != 4096 {
+			if s.Mode != cfg.Mode || s.Address != cfg.Address || !s.Reachable || s.Version != "v0.20.5" || s.CLIVersion != "v0.1.0" || !s.VersionMismatch || !s.ConfiguredVersionMismatch || s.CacheSizeBytes == nil || *s.CacheSizeBytes != 4096 {
 				t.Fatalf("%+v", s)
 			}
 			commands := read(t, dir, "commands")
@@ -234,7 +259,7 @@ func TestStatusEveryMode(t *testing.T) {
 				cloud = "DAGGER_CLOUD_ENGINE=1"
 				token = "DAGGER_CLOUD_TOKEN=private-probe-token"
 			}
-			wantEnv := strings.Join([]string{selection, cloud, legacy, token, "CI=", "GITHUB_TOKEN="}, "\n")
+			wantEnv := strings.Join([]string{selection, cloud, legacy, token, "DAGGER_X_RELEASE=v0.1.0", "CI=", "GITHUB_TOKEN="}, "\n")
 			if gotEnv != wantEnv {
 				t.Fatalf("probe env %q, want %q", gotEnv, wantEnv)
 			}

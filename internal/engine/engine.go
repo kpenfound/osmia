@@ -323,7 +323,9 @@ func (c *Controller) invoke(ctx context.Context, name string, engine bool, args 
 
 func (c *Controller) environment(engine bool) []string {
 	var env []string
-	for _, name := range []string{"PATH", "HOME", "USER", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "SSH_AUTH_SOCK"} {
+	// DAGGER_X_RELEASE selects the CLI release in every mode, so the reported
+	// and defaulted CLI version matches the one check runs use.
+	for _, name := range []string{"PATH", "HOME", "USER", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "SSH_AUTH_SOCK", "DAGGER_X_RELEASE"} {
 		if value := c.options.Getenv(name); value != "" {
 			env = append(env, name+"="+value)
 		}
@@ -333,7 +335,7 @@ func (c *Controller) environment(engine bool) []string {
 	}
 	switch c.config.Mode {
 	case config.DaggerEngineAuto:
-		for _, name := range []string{"DAGGER_ENGINE", "DAGGER_CLOUD_ENGINE", "_EXPERIMENTAL_DAGGER_RUNNER_HOST", "DAGGER_X_RELEASE"} {
+		for _, name := range []string{"DAGGER_ENGINE", "DAGGER_CLOUD_ENGINE", "_EXPERIMENTAL_DAGGER_RUNNER_HOST"} {
 			if value := c.options.Getenv(name); value != "" {
 				env = append(env, name+"="+value)
 			}
