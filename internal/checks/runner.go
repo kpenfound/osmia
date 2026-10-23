@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/redact"
 )
 
 // ReviewChecks lists and runs the project's checks in a disposable export of
@@ -34,7 +35,14 @@ type ReviewChecks interface {
 
 // DaggerChecks runs the project's Dagger checks through the service's engine.
 // The agent receives neither the engine endpoint nor command selection.
+// Its zero value preserves anonymous checks and host engine selection.
 type DaggerChecks struct {
+	// Engine selects "auto" (also the empty value), "cloud", or a resolved
+	// runner address. An address overrides host engine selection.
+	Engine string
+	// CloudToken authenticates checks, requesting candidate CI identity too.
+	// Listings receive it only when Engine is "cloud".
+	CloudToken string `json:"-"`
 	// CIIdentityExport requests real candidate metadata in check exports.
 	CIIdentityExport bool
 }
@@ -63,20 +71,33 @@ func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) (
 		return nil, err
 	}
 	if exit != 0 || output.truncated {
-		return nil, fmt.Errorf("dagger list checks exited %d: %s", exit, lastLines(output.String(), 5))
+		return nil, fmt.Errorf("dagger list checks exited %d: %s", exit, lastLines(redact.Secrets(output.String(), redact.KnownSecrets()...), 5))
 	}
-	return checkselect.Links(output.String()), nil
+	return checkselect.Links(redact.Secrets(output.String(), redact.KnownSecrets()...)), nil
 }
 
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
 	output := &bytes.Buffer{}
-	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport, output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
-	return CheckResult{ExitCode: exit, Output: output.String(), CIIdentityFallback: preparation.FallbackReason}, err
+	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
+	clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
+	return CheckResult{ExitCode: exit, Output: clean, TraceURL: cloudTraceURL(clean), CIIdentityFallback: preparation.FallbackReason}, err
 }
 
 // dagger runs the Dagger CLI in dir with args and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
-func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (int, Preparation, error) {
+func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (exitCode int, preparation Preparation, runErr error) {
+	redact.Register(d.CloudToken)
+	defer func() {
+		if runErr != nil {
+			clean := redact.Secrets(runErr.Error(), redact.KnownSecrets()...)
+			if clean != runErr.Error() {
+				runErr = &redactedError{message: clean, cause: runErr}
+			}
+		}
+	}()
+	if d.Engine == "cloud" && d.CloudToken == "" {
+		return -1, Preparation{}, errors.New("cloud engine requires a Dagger Cloud token")
+	}
 	home, err := os.MkdirTemp("", "osmia-check-home-")
 	if err != nil {
 		return -1, Preparation{}, err
@@ -85,14 +106,14 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 	// Dagger's report colors its output even off a terminal; agents read it
 	// and FailedChecks parses it as plain text.
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
-	preparation := Preparation{}
+	preparation = Preparation{}
 	if withIdentity {
 		if err := prepareIdentity(ctx, dir, env, identity); err != nil {
-			preparation.FallbackReason = err.Error()
+			preparation.FallbackReason = redact.Secrets(err.Error(), redact.KnownSecrets()...)
 			if removeErr := os.RemoveAll(filepath.Join(dir, ".git")); removeErr != nil {
 				return -1, preparation, fmt.Errorf("remove export metadata for anonymous checks: %w", removeErr)
 			}
-			ghlog.Logger(ctx).WarnContext(ctx, "check export uses anonymous Git identity", "candidate", identity.Candidate, "reason", preparation.FallbackReason)
+			ghlog.Logger(ctx).WarnContext(ctx, "check export uses anonymous Git identity", "candidate", redact.Secrets(identity.Candidate, redact.KnownSecrets()...), "reason", preparation.FallbackReason)
 		} else {
 			preparation.CIIdentity = true
 		}
@@ -109,20 +130,36 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
-	// Engine selection belongs to the service. No project or provider secrets
-	// and no SSH agent are inherited by the check client.
-	for _, name := range []string{"DOCKER_HOST", "_EXPERIMENTAL_DAGGER_RUNNER_HOST", "DAGGER_X_RELEASE"} {
-		if value := os.Getenv(name); value != "" {
-			cmd.Env = append(cmd.Env, name+"="+value)
-		}
-	}
-	if os.Getenv("DOCKER_HOST") == "" {
-		if hostHome, err := os.UserHomeDir(); err == nil {
-			socket := filepath.Join(hostHome, ".docker", "run", "docker.sock")
-			if info, err := os.Stat(socket); err == nil && info.Mode()&os.ModeSocket != 0 {
-				cmd.Env = append(cmd.Env, "DOCKER_HOST=unix://"+socket)
+	// Only the explicit allow-list reaches the CLI. Git preparation above
+	// never receives the Cloud token or engine settings.
+	if d.Engine == "" || d.Engine == "auto" {
+		for _, name := range []string{"DOCKER_HOST", "_EXPERIMENTAL_DAGGER_RUNNER_HOST", "DAGGER_X_RELEASE"} {
+			if value := os.Getenv(name); value != "" {
+				cmd.Env = append(cmd.Env, name+"="+value)
 			}
 		}
+		if os.Getenv("DOCKER_HOST") == "" {
+			if hostHome, err := os.UserHomeDir(); err == nil {
+				socket := filepath.Join(hostHome, ".docker", "run", "docker.sock")
+				if info, err := os.Stat(socket); err == nil && info.Mode()&os.ModeSocket != 0 {
+					cmd.Env = append(cmd.Env, "DOCKER_HOST=unix://"+socket)
+				}
+			}
+		}
+	} else {
+		// DAGGER_ENGINE takes precedence over the deprecated runner and Cloud
+		// variables; none of the host's engine selectors are inherited here.
+		cmd.Env = append(cmd.Env, "DAGGER_ENGINE="+d.Engine)
+		if release := os.Getenv("DAGGER_X_RELEASE"); release != "" {
+			cmd.Env = append(cmd.Env, "DAGGER_X_RELEASE="+release)
+		}
+	}
+	isCheck := len(args) > 0 && args[0] == "check"
+	if d.CloudToken != "" && (isCheck || d.Engine == "cloud") {
+		cmd.Env = append(cmd.Env, "DAGGER_CLOUD_TOKEN="+d.CloudToken)
+	}
+	if isCheck && d.CloudToken != "" && preparation.CIIdentity {
+		cmd.Env = append(cmd.Env, "CI=true")
 	}
 	cmd.Stdout, cmd.Stderr = output, output
 	err = cmd.Run()
@@ -169,3 +206,12 @@ func lastLines(text string, n int) string {
 	lines := slices.DeleteFunc(strings.Split(strings.TrimSpace(text), "\n"), func(l string) bool { return strings.TrimSpace(l) == "" })
 	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
 }
+
+// redactedError keeps cancellation and other typed errors discoverable.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e *redactedError) Error() string { return e.message }
+func (e *redactedError) Unwrap() error { return e.cause }

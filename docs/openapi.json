@@ -6700,6 +6700,9 @@
           "status": {
             "type": "string"
           },
+          "trace_url": {
+            "type": "string"
+          },
           "truncated": {
             "type": "boolean"
           }

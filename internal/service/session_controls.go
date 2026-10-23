@@ -419,6 +419,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	}
 	status, failed, classifyErr := checkrun.ClassifyChecks(result, checkErr)
 	sr := SessionCheckRun{
+		TraceURL:           result.TraceURL,
 		CIIdentityFallback: result.CIIdentityFallback,
 		Run:                run, Commit: head, Kind: sessionCheckKind(selection), Checks: selection.Links, Selection: &selection,
 		Command:   append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...),

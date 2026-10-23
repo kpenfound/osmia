@@ -27,6 +27,7 @@ type candidateExportChecks struct {
 	calls    int
 	listed   int
 	fallback string
+	traceURL string
 }
 
 func (c *candidateExportChecks) List(ctx context.Context, dir string, identity checkrun.Identity) ([]string, error) {
@@ -55,7 +56,11 @@ func (c *candidateExportChecks) Check(ctx context.Context, dir string, identity 
 	if c.mode == "fallback" {
 		identity.Repository = filepath.Join(t.TempDir(), "unavailable-clone")
 	}
-	result, err := (checkrun.DaggerChecks{CIIdentityExport: c.mode != "anonymous"}).Check(ctx, dir, identity, links)
+	token := ""
+	if c.mode != "anonymous" {
+		token = "caller-cloud-output-secret"
+	}
+	result, err := (checkrun.DaggerChecks{CloudToken: token}).Check(ctx, dir, identity, links)
 	if err != nil {
 		return result, err
 	}
@@ -63,6 +68,14 @@ func (c *candidateExportChecks) Check(ctx context.Context, dir string, identity 
 		return fail("fake dagger exited %d: %s", result.ExitCode, result.Output)
 	}
 	c.fallback = result.CIIdentityFallback
+	c.traceURL = result.TraceURL
+	expectedTrace := ""
+	if token != "" {
+		expectedTrace = "https://dagger.cloud/example/traces/caller123"
+	}
+	if c.traceURL != expectedTrace || (token != "" && strings.Contains(result.Output, token)) {
+		return fail("trace capture or token redaction failed")
+	}
 	if (c.fallback != "") != (c.mode == "fallback") {
 		return fail("fallback %q in mode %s", c.fallback, c.mode)
 	}
@@ -85,7 +98,20 @@ func (c *candidateExportChecks) Check(ctx context.Context, dir string, identity 
 // providers produce Git commit identities; sessions use their Git branch head.
 func TestCheckExportsPreserveCallerCandidates(t *testing.T) {
 	bin := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(fixturekit.CheckExportDagger), 0700))
+	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(strings.Replace(fixturekit.CheckExportDagger,
+		`[ -z "${CI-}${DAGGER_CLOUD_TOKEN-}${GITHUB_TOKEN-}" ] || exit 90`,
+		`[ -z "${GITHUB_TOKEN-}" ] || exit 90
+if [ "$1" = list ]; then
+ [ -z "${DAGGER_CLOUD_TOKEN-}${CI-}" ] || exit 93
+elif [ -n "${DAGGER_CLOUD_TOKEN-}" ]; then
+ if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  [ "${CI-}" = true ] || exit 94
+ else
+  [ -z "${CI-}" ] || exit 95
+ fi
+ printf '%s\n' "$DAGGER_CLOUD_TOKEN" >&2
+ echo 'View trace at https://dagger.cloud/example/traces/caller123' >&2
+fi`, 1)), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	enableListing := func(s *Service) {
 		boostJev(s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1)}}}}})
@@ -123,9 +149,10 @@ func TestCheckExportsPreserveCallerCandidates(t *testing.T) {
 				enableListing(f.s)
 				runChecks(t, f.s, repo, stream)
 				run := onlyRun(t, repo, stream)
-				if checks.calls != 1 || checks.listed != 1 || run.Candidate != candidate || run.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback {
+				if checks.calls != 1 || checks.listed != 1 || run.Candidate != candidate || run.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || run.TraceURL != checks.traceURL {
 					t.Fatalf("persisted unit run %+v, runner %+v", run, checks)
 				}
+				assertCheckTraceRedacted(t, repo, stream)
 			})
 			t.Run(backend+"/"+mode+"/final", func(t *testing.T) {
 				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, "", nil)
@@ -146,9 +173,10 @@ func TestCheckExportsPreserveCallerCandidates(t *testing.T) {
 					t.Fatalf("final check records: %+v", docs)
 				}
 				must(t, json.Unmarshal([]byte(docs[0].Content), &saved))
-				if checks.calls != 1 || checks.listed != 1 || saved.Commit != candidate || saved.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || saved.CIIdentityFallback != checks.fallback {
+				if checks.calls != 1 || checks.listed != 1 || saved.Commit != candidate || saved.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || saved.CIIdentityFallback != checks.fallback || saved.TraceURL != checks.traceURL || run.TraceURL != checks.traceURL {
 					t.Fatalf("persisted final run %+v, runner %+v", saved, checks)
 				}
+				assertCheckTraceRedacted(t, repo, stream)
 			})
 		}
 	}
@@ -174,9 +202,21 @@ func TestCheckExportsPreserveCallerCandidates(t *testing.T) {
 				t.Fatalf("session check records: %+v", docs)
 			}
 			must(t, json.Unmarshal([]byte(docs[0].Content), &saved))
-			if checks.calls != 1 || checks.listed != 1 || run.Commit != committed.Commit || run.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || saved.CIIdentityFallback != checks.fallback {
+			if checks.calls != 1 || checks.listed != 1 || run.Commit != committed.Commit || run.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || saved.CIIdentityFallback != checks.fallback || saved.TraceURL != checks.traceURL || run.TraceURL != checks.traceURL {
 				t.Fatalf("persisted session run %+v, runner %+v", saved, checks)
 			}
+			assertCheckTraceRedacted(t, repo, stream)
 		})
+	}
+}
+
+func assertCheckTraceRedacted(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) {
+	t.Helper()
+	docs, err := trace.Read[trace.Document](repo, stream)
+	must(t, err)
+	for _, doc := range docs {
+		if strings.Contains(doc.Content, "caller-cloud-output-secret") {
+			t.Fatalf("Cloud token leaked into %s", doc.Path)
+		}
 	}
 }

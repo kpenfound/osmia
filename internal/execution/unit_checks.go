@@ -72,6 +72,7 @@ type UnitCheckRun struct {
 	OutputPath         string          `json:"output_path,omitempty"`
 	Truncated          bool            `json:"truncated,omitempty"`
 	Failed             []string        `json:"failed,omitempty"`
+	TraceURL           string          `json:"trace_url,omitempty"`
 	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
 	Error              string          `json:"error,omitempty"`
 	StartedAt          time.Time       `json:"started_at"`
@@ -593,6 +594,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
+	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
 	captured, run.ExitCode = result.Output, result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)

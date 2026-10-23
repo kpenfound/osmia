@@ -2,10 +2,12 @@ package api
 
 // CheckResult records the exit status and complete combined stdout/stderr
 // emitted by a candidate check. Truncated indicates an incomplete capture.
+// TraceURL is the Dagger Cloud trace link printed by the CLI, when present.
 // CIIdentityFallback explains why a requested Git identity could not be used.
 type CheckResult struct {
 	ExitCode           int    `json:"exit_code"`
 	Output             string `json:"output"`
+	TraceURL           string `json:"trace_url,omitempty"`
 	CIIdentityFallback string `json:"ci_identity_fallback,omitempty"`
 	Truncated          bool   `json:"truncated"`
 }

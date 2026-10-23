@@ -858,6 +858,7 @@ type SessionCheckRun struct {
 	OutputPath         string          `json:"output_path,omitempty"`
 	Truncated          bool            `json:"truncated,omitempty"`
 	Failed             []string        `json:"failed,omitempty"`
+	TraceURL           string          `json:"trace_url,omitempty"`
 	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
 	Error              string          `json:"error,omitempty"`
 	StartedAt          time.Time       `json:"started_at"`
