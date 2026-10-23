@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,9 +35,11 @@ func newHeldChecks() *heldChecks {
 	return &heldChecks{entered: make(chan []string, 1), release: make(chan checkOutcome, 1)}
 }
 
-func (c *heldChecks) List(context.Context, string) ([]string, error) { return c.links, nil }
+func (c *heldChecks) List(context.Context, string, api.CheckIdentity) ([]string, error) {
+	return c.links, nil
+}
 
-func (c *heldChecks) Check(ctx context.Context, _ string, links []string) (CheckResult, error) {
+func (c *heldChecks) Check(ctx context.Context, _ string, _ api.CheckIdentity, links []string) (CheckResult, error) {
 	return intakefixture.HeldCheck(ctx, links, c.entered, c.release)
 }
 

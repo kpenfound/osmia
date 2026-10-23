@@ -32,6 +32,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   serve [--detach]
   stop
   doctor [--json]
+  engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
   project add-repo <project-id> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
@@ -249,6 +250,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch cmd {
 	case "serve", "stop", "doctor":
 		valid = len(a) == 0
+	case "engine":
+		valid = len(a) == 1 && slices.Contains([]string{"status", "restart", "prune"}, a[0])
 	case "status":
 		valid = len(a) <= 1
 	case "send", "abandon", "upstream":
@@ -348,8 +351,31 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
+	if cmd == "engine" {
+		if a[0] == "status" {
+			status, err := c.EngineStatus(ctx)
+			if err != nil {
+				return reportEngine(stderr, err)
+			}
+			if o.json {
+				return output(stdout, stderr, status)
+			}
+			showEngine(stdout, status)
+		} else {
+			result, err := c.EngineAction(ctx, a[0])
+			if err != nil {
+				return reportEngine(stderr, err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			fmt.Fprintln(stdout, "Engine "+a[0]+" completed")
+		}
+		return 0
+	}
+
 	if cmd == "edit" {
 		return runEdit(ctx, c, a[0], a[1], o.from, stdin, stdout, stderr)
 	}
@@ -2065,4 +2091,29 @@ func report(w io.Writer, err error, project bool) int {
 	}
 	fmt.Fprintf(w, "%s: %s\n", api.Code, msg)
 	return code
+}
+
+func reportEngine(w io.Writer, err error) int {
+	var api *wire.APIError
+	if errors.As(err, &api) && api.Message != "" {
+		fmt.Fprintln(w, api.Error())
+		if api.Code == wire.Unavailable {
+			return 3
+		}
+		return 5
+	}
+	return report(w, err, true)
+}
+
+func showEngine(w io.Writer, s wire.EngineStatus) {
+	fmt.Fprintf(w, "Engine: mode=%s address=%s reachable=%t\n", s.Mode, s.Address, s.Reachable)
+	fmt.Fprintf(w, "Version: %s configured=%s cli=%s mismatch=%t configured_mismatch=%t\n", s.Version, s.ExpectedVersion, s.CLIVersion, s.VersionMismatch, s.ConfiguredVersionMismatch)
+	if s.CacheSizeBytes != nil {
+		fmt.Fprintf(w, "Cache: %d bytes\n", *s.CacheSizeBytes)
+	} else {
+		fmt.Fprintln(w, "Cache: unknown")
+	}
+	if s.ReachabilityError != "" {
+		fmt.Fprintln(w, s.ReachabilityError)
+	}
 }

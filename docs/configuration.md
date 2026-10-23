@@ -618,6 +618,38 @@ tool-call and inspection records.
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
 execution.
 
+### Dagger engine
+
+The top-level `[dagger]` section selects the service's engine:
+
+```toml
+[dagger]
+engine = "managed"
+version = "v0.20.5"
+cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
+```
+
+| Key | Default | Validation/meaning |
+| --- | --- | --- |
+| `engine` | `"auto"` | `auto`, `managed`, `cloud` or an explicit `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` address |
+| `version` | Host Dagger CLI release, resolved at runtime | Expected engine release, such as `v0.20.5` or `0.20.5`; a mismatch is reported rather than enforced |
+| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` |
+
+`auto` lets the host CLI choose an engine. `managed` selects Osmia's
+`osmia-dagger-engine` container at
+`docker-container://osmia-dagger-engine`. An explicit address selects an
+engine the owner operates. `cloud` selects a Dagger Cloud engine for service
+checks; masons cannot use a Cloud engine.
+
+Cloud authentication is independent of engine selection: a token can
+authenticate checks using `auto`, `managed` or an explicit address as well.
+The setting names an environment variable, never the token itself. Loading
+configuration does not read the variable or contact an engine. Only the
+service's check client receives the token; mason execution settings and
+sandboxes never receive it. Code under check can probably read the check
+client's environment, for example through `env://`, and with it the Cloud
+token. Use a dedicated, narrowly scoped token.
+
 ### Dagger for masons
 
 A mason in `sbx` can run the project's Dagger checks and functions while it
@@ -635,7 +667,12 @@ engine = "docker-container://dagger-engine-v0.20.5"  # or tcp://<host>:<port>, u
 | Key | Validation/meaning |
 | --- | --- |
 | `version` | Required. A Dagger release such as `v0.20.5` or `0.20.5`, installed in each mason sandbox whose template lacks it |
-| `engine` | Required. `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` of an engine on the host |
+| `engine` | Optional under top-level `dagger.engine = "managed"` or an explicit address: defaults to `docker-container://osmia-dagger-engine` or that address. Required under `auto` or `cloud`. An override must be `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>`; `cloud` is rejected |
+
+The mason receives Dagger only when its own `[roles.mason.dagger]` section is
+present. Its CLI `version` remains required and independent of the top-level
+engine version. With no top-level `[dagger]` section, the engine selection is
+`auto` and a mason must specify its engine.
 
 Each mason turn asks its sandbox for `dagger version`. A template that already
 has the configured release keeps it, so baking the CLI into the mason's `image`

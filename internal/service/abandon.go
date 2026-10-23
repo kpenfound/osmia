@@ -169,6 +169,7 @@ type abandonable struct {
 	coreadapter.Reconciler
 	s          *Service
 	repository *trace.Repository
+	cfg        *config.Config
 }
 
 func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
@@ -201,6 +202,15 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 	}
 	role, profile, unit := describeQueuedTurn(th, in.Turn)
+	// Sessions use the mason's execution settings, including its Dagger
+	// sandbox. Bind this decision to the same config as the turn reconciler.
+	if a.cfg != nil && (role == masonRole || role == sessionRole) && a.cfg.Roles[masonRole].Dagger != nil {
+		release, err := a.s.checkSlots.startEngineTurn(ctx, EngineTurn{Project: running.project, Workstream: in.Workstream, Unit: unit, Agent: in.Agent, Turn: in.Turn})
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		defer release()
+	}
 	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", role, "profile", profile}
 	if unit != "" {
 		attrs = append(attrs, "unit", unit)

@@ -41,7 +41,10 @@ func (h host) lookPath(name string) (string, error) {
 	return "/bin/" + name, nil
 }
 
-func (host) command(_ context.Context, path string, _ ...string) (string, error) {
+func (host) command(_ context.Context, path string, args ...string) (string, error) {
+	if filepath.Base(path) == "dagger" && strings.Join(args, " ") == "core engine local-cache entry-set disk-space-bytes" {
+		return "4096\n", nil
+	}
 	return filepath.Base(path) + " 1.0.0\n", nil
 }
 

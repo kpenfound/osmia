@@ -33,6 +33,7 @@ type Config struct {
 	Listen         Listen             `toml:"listen" json:"listen"`
 	Capacity       Capacity           `toml:"capacity" json:"capacity"`
 	Budget         Budget             `toml:"budget" json:"budget"`
+	Dagger         DaggerConfig       `toml:"dagger" json:"dagger"`
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
@@ -362,6 +363,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 		return nil, err
 	}
 	c := &Config{Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c.Dagger.Engine = string(DaggerEngineAuto)
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -457,6 +459,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 		if !decimalUSD.MatchString(value.amount) || err != nil || n <= 0 || math.IsInf(n, 0) {
 			return nil, fieldError(path, "budget."+value.field, "must be a positive decimal USD string")
 		}
+	}
+	if err := c.Dagger.validate(path, md.IsDefined("dagger", "version")); err != nil {
+		return nil, err
 	}
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
@@ -771,6 +776,9 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
+	if key[0] == "dagger" {
+		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env"}, key[1])
+	}
 	// A leftover [beekeeper] section from the removed Beekeeper feature is
 	// accepted and ignored, never decoded into any field, so a top-level
 	// configuration that still has one keeps loading without effect.
@@ -914,10 +922,20 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 				return fieldError(path, prefix+".dagger", "dagger requires the sbx sandbox")
 			}
 			if err := agent.CheckDaggerVersion(r.Dagger.Version); err != nil {
-				return fieldError(path, prefix+".dagger.version", err.Error())
+				return fieldError(path, prefix+".dagger.version", "must be a release such as v0.20.5")
+			}
+			if !md.IsDefined("roles", name, "dagger", "engine") {
+				engine := c.Dagger.Resolve()
+				if engine.Address == "" {
+					return fieldError(path, prefix+".dagger.engine", "is required unless dagger.engine is managed or an explicit address")
+				}
+				r.Dagger.Engine = engine.Address
+			}
+			if r.Dagger.Engine == "cloud" {
+				return fieldError(path, prefix+".dagger.engine", "masons cannot use a cloud engine")
 			}
 			if err := agent.CheckDaggerEngine(r.Dagger.Engine); err != nil {
-				return fieldError(path, prefix+".dagger.engine", err.Error())
+				return fieldError(path, prefix+".dagger.engine", "must be unix://<absolute socket path>, tcp://<host>:<port> or docker-container://<container name>")
 			}
 		}
 		names := map[string]bool{}

@@ -6,6 +6,7 @@ import (
 	agent "github.com/kpenfound/agentcore/agent"
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	systemone "github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
@@ -332,9 +333,11 @@ type checkCapture struct {
 	result CheckResult
 }
 
-func (c *checkCapture) List(context.Context, string) ([]string, error) { return c.links, nil }
+func (c *checkCapture) List(context.Context, string, api.CheckIdentity) ([]string, error) {
+	return c.links, nil
+}
 
-func (c *checkCapture) Check(_ context.Context, dir string, _ []string) (CheckResult, error) {
+func (c *checkCapture) Check(_ context.Context, dir string, _ api.CheckIdentity, _ []string) (CheckResult, error) {
 	if c.file != "" {
 		_, err := os.Stat(filepath.Join(dir, c.file))
 		c.found = err == nil

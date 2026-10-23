@@ -211,6 +211,7 @@ type Service struct {
 	err         error
 	ready       atomic.Bool
 	requests    sync.WaitGroup
+	boundaryMu  sync.RWMutex
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *eventstream.Hub
@@ -289,6 +290,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	if err := s.ensureEngine(ctx, cfg); err != nil {
+		return nil, err
+	}
 	s.activity = activity.New(s.now)
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
@@ -441,7 +445,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	if opts.boundary != nil {
-		s.boundary = func(step string) error { return opts.boundary(s.lifetime, step) }
+		s.setBoundary(func(step string) error { return opts.boundary(s.lifetime, step) })
 	}
 	hostname := cfg.Listen.Tailnet
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1201,21 +1205,22 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 // repository. Building them runs no hook and applies no operation.
 func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*stages, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
+	checkClient := s.configuredChecks(cfg)
 	draft := &drafter{S: s.intake().DrafterDependencies(), Repository: repository}
 	rounds := &debate{S: s.intake().DebateDependencies(), Repository: repository}
 	seals := &sealer{S: s.intake().SealerDependencies(), Repository: repository}
 	build := &builder{S: s.intake().BuilderDependencies(), Repository: repository}
 	overlap := &overlaps{s: s, repository: repository}
 	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
-	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
+	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
-	finals := &delivery.FinalReviewer{S: s.delivery(), Repository: repository}
-	publish := &delivery.Publisher{S: s.delivery(), Repository: repository}
+	finals := &delivery.FinalReviewer{S: s.deliveryWithChecks(checkClient), Repository: repository}
+	publish := &delivery.Publisher{S: s.deliveryWithChecks(checkClient), Repository: repository}
 	amend := &amendmentDrafter{Drafter: draft}
 	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
-	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
+	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient}}
 	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
 	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
@@ -1228,7 +1233,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
+		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository, cfg: cfg}
 		dispatch, err := s.dispatcher(cfg, repository)
 		if err != nil {
 			return nil, err
@@ -1244,7 +1249,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		units := &masons{s: s, cfg: cfg, repository: repository}
+		units := &masons{s: s, cfg: cfg, repository: repository, checks: checkClient}
 		reviews := &reviewers{masons: units}
 		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}

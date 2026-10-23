@@ -130,7 +130,7 @@ func BaseRefreshForTest(s *Service, repo *trace.Repository, now func() time.Time
 	if now != nil {
 		s.options.Reconciliation.Now = now
 	}
-	s.boundary = boundary
+	s.setBoundary(boundary)
 	return &baseRefresher{S: s.lifecycle(), Repository: repo}
 }
 

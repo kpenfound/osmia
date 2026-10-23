@@ -217,7 +217,7 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 			body += "- " + strings.TrimSpace(a.Text) + "\n"
 		}
 	}
-	return title, body, nil
+	return withoutCheckTraces(title), withoutCheckTraces(body) + "\n", nil
 }
 
 func (s *Controller) DeliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
@@ -355,6 +355,9 @@ func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req Delive
 	if req.Description != nil {
 		description = *req.Description
 	}
+	if privateCheckTrace(description) || privateCheckTrace(presented.Title) {
+		return DeliveryApproval{}, &APIError{Code: Validation, Message: "pull request titles and descriptions must not include private Dagger Cloud trace links"}
+	}
 	if strings.TrimSpace(description) == "" {
 		return DeliveryApproval{}, &APIError{Code: Validation, Message: "description must not be empty"}
 	}
@@ -428,6 +431,9 @@ func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req Delive
 // deliveryGate checks the approval against the current review and the exact
 // description publication proposes to send.
 func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
+	if privateCheckTrace(description) {
+		return DeliveryApproval{}, "pull request descriptions must not include private Dagger Cloud trace links", nil
+	}
 	if wait, err := s.EdgePublicationWait(repository, stream); err != nil || wait != "" {
 		return DeliveryApproval{}, wait, err
 	}
@@ -456,6 +462,9 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 	}
 	if approval == nil {
 		return DeliveryApproval{}, "no owner delivery approval is recorded", nil
+	}
+	if privateCheckTrace(PublishedTitle(*approval, stream)) {
+		return *approval, "pull request titles must not include private Dagger Cloud trace links", nil
 	}
 	if approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.Seal != report.Seal || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter {
 		return *approval, "the owner approval is stale; review and approve the current branch", nil

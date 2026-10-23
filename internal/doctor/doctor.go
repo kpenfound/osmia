@@ -21,6 +21,7 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -69,6 +70,9 @@ type Options struct {
 	// Command runs an executable doctor found and returns its standard
 	// output.
 	Command func(ctx context.Context, path string, args ...string) (string, error)
+	// EngineCommand runs engine probes with an explicit environment. When nil,
+	// a supplied Command also handles these probes; otherwise the host is used.
+	EngineCommand engine.Command
 	// CheckJJ checks the jj on PATH.
 	CheckJJ func(context.Context) (string, error)
 	// Token is the GitHub token the service reads from GITHUB_TOKEN.
@@ -94,6 +98,11 @@ const lockFile = ".service.lock"
 // trace and the runtime state the way serve does on startup; while one does,
 // those checks are left to the running service.
 func Run(ctx context.Context, o Options) []Check {
+	if o.EngineCommand == nil && o.Command != nil {
+		o.EngineCommand = func(ctx context.Context, path string, _ []string, args ...string) (string, error) {
+			return o.Command(ctx, path, args...)
+		}
+	}
 	if o.LookPath == nil {
 		o.LookPath = exec.LookPath
 	}
@@ -119,6 +128,9 @@ func Run(ctx context.Context, o Options) []Check {
 	}
 	cfg, projects := r.config()
 	r.toolchain(ctx, cfg)
+	if cfg != nil {
+		r.engine(ctx, cfg)
+	}
 	r.socket(cfg)
 	r.web(cfg)
 	r.jev(cfg)

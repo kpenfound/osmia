@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,10 @@ type slotChecks struct {
 func newSlotChecks() *slotChecks {
 	return &slotChecks{entered: make(chan time.Duration, 16), release: make(chan checkOutcome, 16)}
 }
-func (c *slotChecks) List(context.Context, string) ([]string, error) { return nil, nil }
-func (c *slotChecks) Check(ctx context.Context, _ string, _ []string) (CheckResult, error) {
+func (c *slotChecks) List(context.Context, string, api.CheckIdentity) ([]string, error) {
+	return nil, nil
+}
+func (c *slotChecks) Check(ctx context.Context, _ string, _ api.CheckIdentity, _ []string) (CheckResult, error) {
 	c.mu.Lock()
 	c.used++
 	c.peak = max(c.peak, c.used)

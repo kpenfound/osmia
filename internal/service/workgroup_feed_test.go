@@ -357,12 +357,12 @@ func TestWorkgroupEndpointsHoldAuthorityAndCloseHandles(t *testing.T) {
 				defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 			}
 			if scenario == "read-error" {
-				s.boundary = func(step string) error {
+				s.setBoundary(func(step string) error {
 					if step == "status-units" {
 						return errors.New("cannot read units")
 					}
 					return nil
-				}
+				})
 			}
 			var feed WorkgroupFeedResponse
 			code := feedHTTP(t, s, http.MethodGet, Prefix+"/workgroups/"+string(g.ID)+"/feed", "", &feed)

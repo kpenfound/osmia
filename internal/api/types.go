@@ -7,6 +7,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -845,22 +846,24 @@ type SessionCommitResponse struct {
 // whether it was a smart or a full run and, for a smart run, the checks it
 // selected, its status, exit code and output.
 type SessionCheckRun struct {
-	Run            int             `json:"run"`
-	Commit         string          `json:"commit"`
-	Kind           string          `json:"kind"`
-	Checks         []string        `json:"checks,omitempty"`
-	Selection      *CheckSelection `json:"selection,omitempty"`
-	Command        []string        `json:"command,omitempty"`
-	Status         string          `json:"status"`
-	ExitCode       int             `json:"exit_code"`
-	Output         string          `json:"output,omitempty"`
-	OutputRevision int             `json:"output_revision,omitempty"`
-	OutputPath     string          `json:"output_path,omitempty"`
-	Truncated      bool            `json:"truncated,omitempty"`
-	Failed         []string        `json:"failed,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     time.Time       `json:"finished_at"`
+	Run                int             `json:"run"`
+	Commit             string          `json:"commit"`
+	Kind               string          `json:"kind"`
+	Checks             []string        `json:"checks,omitempty"`
+	Selection          *CheckSelection `json:"selection,omitempty"`
+	Command            []string        `json:"command,omitempty"`
+	Status             string          `json:"status"`
+	ExitCode           int             `json:"exit_code"`
+	Output             string          `json:"output,omitempty"`
+	OutputRevision     int             `json:"output_revision,omitempty"`
+	OutputPath         string          `json:"output_path,omitempty"`
+	Truncated          bool            `json:"truncated,omitempty"`
+	Failed             []string        `json:"failed,omitempty"`
+	TraceURL           string          `json:"trace_url,omitempty"`
+	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	StartedAt          time.Time       `json:"started_at"`
+	FinishedAt         time.Time       `json:"finished_at"`
 }
 
 // SessionPushResponse is the result of pushing a session branch.
@@ -1077,20 +1080,21 @@ type FeedResponse struct {
 // a final review outcome. At is when the entry first became observable;
 // sessions and final check attempts use their recorded start time.
 type FeedEntry struct {
-	Workstream   config.WorkstreamID `json:"workstream,omitempty"`
-	Repo         config.ProjectID    `json:"repo,omitempty"`
-	QueuedReason string              `json:"queued_reason,omitempty"`
-	Kind         string              `json:"kind"`
-	At           time.Time           `json:"at"`
-	Turn         string              `json:"turn,omitempty"`
-	Text         string              `json:"text,omitempty"`
-	State        TurnState           `json:"state,omitempty"`
-	Status       *StatusView         `json:"status,omitempty"`
-	Session      *FeedSession        `json:"session,omitempty"`
-	Transition   *FeedTransition     `json:"transition,omitempty"`
-	UnitChecks   *FeedUnitChecks     `json:"unit_checks,omitempty"`
-	FinalChecks  *FeedFinalChecks    `json:"final_checks,omitempty"`
-	FinalReview  *FeedFinalReview    `json:"final_review,omitempty"`
+	Workstream    config.WorkstreamID `json:"workstream,omitempty"`
+	Repo          config.ProjectID    `json:"repo,omitempty"`
+	QueuedReason  string              `json:"queued_reason,omitempty"`
+	Kind          string              `json:"kind"`
+	At            time.Time           `json:"at"`
+	Turn          string              `json:"turn,omitempty"`
+	Text          string              `json:"text,omitempty"`
+	State         TurnState           `json:"state,omitempty"`
+	Status        *StatusView         `json:"status,omitempty"`
+	Session       *FeedSession        `json:"session,omitempty"`
+	Transition    *FeedTransition     `json:"transition,omitempty"`
+	SessionChecks *FeedSessionChecks  `json:"session_checks,omitempty"`
+	UnitChecks    *FeedUnitChecks     `json:"unit_checks,omitempty"`
+	FinalChecks   *FeedFinalChecks    `json:"final_checks,omitempty"`
+	FinalReview   *FeedFinalReview    `json:"final_review,omitempty"`
 }
 
 // FeedSession is one agent turn. State is running, done, waiting (the turn
@@ -1138,6 +1142,7 @@ type FeedCheckSelection struct {
 // FeedUnitChecks is one run, observable once its selection is recorded.
 // Only a recorded result can change running to a terminal state.
 type FeedUnitChecks struct {
+	TraceURL   string              `json:"trace_url,omitempty"`
 	Unit       string              `json:"unit"`
 	Run        int                 `json:"run"`
 	State      string              `json:"state" enum:"running,passed,failed,incomplete,superseded"`
@@ -1152,6 +1157,7 @@ type FeedUnitChecks struct {
 // Attempt and StartedAt are absent without durable attempt start evidence;
 // such entries describe recorded results only, never running checks.
 type FeedFinalChecks struct {
+	TraceURL   string              `json:"trace_url,omitempty"`
 	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
 	Review     int                 `json:"review"`
 	Attempt    int                 `json:"attempt,omitempty"`
@@ -1160,6 +1166,20 @@ type FeedFinalChecks struct {
 	Error      string              `json:"error,omitempty"`
 	StartedAt  *time.Time          `json:"started_at,omitempty"`
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
+}
+
+// FeedSessionChecks summarizes one completed exploratory session check run.
+type FeedSessionChecks struct {
+	Run        int                 `json:"run"`
+	Commit     string              `json:"commit"`
+	Kind       string              `json:"kind"`
+	State      string              `json:"state" enum:"passed,failed,incomplete"`
+	Selection  *FeedCheckSelection `json:"selection,omitempty"`
+	Failed     []string            `json:"failed,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	TraceURL   string              `json:"trace_url,omitempty"`
+	StartedAt  time.Time           `json:"started_at"`
+	FinishedAt time.Time           `json:"finished_at"`
 }
 
 // FeedFinalReview is a recorded review outcome. Reader and Turn identify its
@@ -1205,3 +1225,6 @@ type Event struct {
 	Project    config.ProjectID    `json:"project,omitempty"`
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 }
+
+// EngineStatus reports the configured Dagger engine and its probes.
+type EngineStatus = engine.Status

@@ -654,7 +654,12 @@
     }
   }
 
+  let engineOpening = 0;
+
   function setupOutcomeScopes() {
+    for (const action of ['restart', 'prune']) {
+      scopeOutcome(byId('engine-' + action + '-result'), () => engineOpening, [byId('engine-' + action)]);
+    }
     const selected = () => ui.selected;
     for (const [result, buttons] of [
       ['#design-result', '#design-form button'],
@@ -719,6 +724,55 @@
         delete button.dataset.busy;
         button.disabled = button.dataset.blocked === 'true';
       }
+    }
+  }
+
+  let engineStatusRead = 0;
+
+  async function readEngine(opening) {
+    const reading = ++engineStatusRead;
+    const box = byId('engine-status');
+    box.textContent = 'Reading engine status…';
+    try {
+      const status = await request('GET', '/engine/status');
+      if (opening !== engineOpening || reading !== engineStatusRead) return;
+      const field = (name, label, value) => el('p', {}, label + ': ', el('span', { 'data-field': name }, value));
+      box.replaceChildren(...[
+        field('mode', 'Mode', status.mode),
+        status.address ? field('address', 'Address', status.address) : null,
+        field('reachable', 'Reachability', status.reachable ? 'Reachable' : 'Unreachable'),
+        status.reachability_error ? field('reachability-error', 'Reason', status.reachability_error) : null,
+        field('version', 'Engine version', status.version || 'Unknown'),
+        field('expected-version', 'Configured version', status.expected_version || 'Unknown'),
+        field('cli-version', 'Host CLI version', status.cli_version || 'Unknown'),
+        field('mismatch', 'Version mismatch', [
+          status.version_mismatch ? 'Engine differs from host CLI' : '',
+          status.configured_version_mismatch ? 'Running engine differs from configured version' : ''
+        ].filter(Boolean).join('; ') || 'None'),
+        field('cache-size', 'Cache size', status.cache_size_bytes == null ? 'Unknown' : status.cache_size_bytes.toLocaleString() + ' bytes')].filter(Boolean));
+    } catch (err) {
+      if (opening === engineOpening && reading === engineStatusRead) box.textContent = err.message;
+    }
+  }
+
+  function setupEngine() {
+    byId('settings-menu').addEventListener('beforetoggle', event => {
+      if (event.newState !== 'open') return;
+      engineOpening++;
+      // Each opening owns its outcomes; discard results from earlier openings.
+      for (const action of ['restart', 'prune']) outcomeScopes.get(byId('engine-' + action + '-result')).entries.clear();
+      renderOutcomes();
+      readEngine(engineOpening);
+    });
+    for (const action of ['restart', 'prune']) {
+      byId('engine-' + action).addEventListener('click', () => {
+        const opening = engineOpening;
+        act(byId('engine-' + action + '-result'), byId('engine-' + action),
+          () => request('POST', '/engine/' + action), () => {
+            if (opening === engineOpening) readEngine(opening);
+            return action === 'restart' ? 'Engine restarted.' : 'Engine cache pruned.';
+          });
+      });
     }
   }
 
@@ -1747,16 +1801,18 @@
 
   function renderChecks(e) {
     const unit = e.kind === 'unit_checks';
-    const run = unit ? e.unit_checks : e.final_checks;
-    const label = unit ? 'Unit ' + run.unit + ' · check run ' + run.run : 'Final review ' + run.review + ' · checks' + (run.attempt ? ' · attempt ' + run.attempt : '');
+    const session = e.kind === 'session_checks';
+    const run = unit ? e.unit_checks : session ? e.session_checks : e.final_checks;
+    const label = unit ? 'Unit ' + run.unit + ' · check run ' + run.run : session ? 'Session · check run ' + run.run + ' · ' + run.kind : 'Final review ' + run.review + ' · checks' + (run.attempt ? ' · attempt ' + run.attempt : '');
     return el('li', { class: 'entry event check-entry', 'data-kind': e.kind, 'data-unit': run.unit || '', 'data-run': run.run || '', 'data-review': run.review || '', 'data-attempt': run.attempt || '', 'data-state': run.state },
       el('div', { class: 'event-line' },
         el('span', { class: 'dot', 'aria-hidden': 'true' }),
         el('strong', { 'data-field': 'checks', 'data-ann': 'role' }, label),
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, checkState(run.state)),
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
+      run.trace_url ? el('p', {}, el('a', { href: run.trace_url, 'data-field': 'trace-url', target: '_blank', rel: 'noopener noreferrer' }, 'View Dagger Cloud trace')) : null,
       checkSelection(run.selection, run.state === 'running'),
-      !unit && run.selection ? el('p', { 'data-field': 'selection-description' }, run.selection.description) : null,
+      !unit && !session && run.selection ? el('p', { 'data-field': 'selection-description' }, run.selection.description) : null,
       run.failed && run.failed.length ? el('ul', { class: 'notes', 'data-field': 'failed' }, ...run.failed.map(link => el('li', {}, link))) : null,
       run.error ? el('p', { 'data-field': 'error' }, run.error) : null);
   }
@@ -1808,6 +1864,7 @@
           return renderTransition(e);
         case 'unit_checks':
         case 'final_checks':
+        case 'session_checks':
           return renderChecks(e);
         case 'final_review':
           return renderFinalReview(e);
@@ -1970,6 +2027,10 @@
     const seen = new Set();
     if (feed) {
       for (const e of feed.entries) {
+        if (e.kind === 'session_checks') {
+          out.push(e);
+          continue;
+        }
         if (e.kind !== 'session') {
           continue;
         }
@@ -2005,7 +2066,7 @@
     if (entries.length === 0) {
       box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
     } else {
-      box.replaceChildren(el('ol', {}, ...entries.map((e) => renderConversationEntry(e, 'Agent'))));
+      box.replaceChildren(el('ol', {}, ...entries.map((e) => e.kind === 'session_checks' ? renderChecks(e) : renderConversationEntry(e, 'Agent'))));
     }
   }
 
@@ -3817,6 +3878,7 @@
 
   setupOutcomeScopes();
   setupLayout();
+  setupEngine();
   setupOwnerForms();
   setupSessionForms();
   setupDesignForms();

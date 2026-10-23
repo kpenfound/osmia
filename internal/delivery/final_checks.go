@@ -24,22 +24,24 @@ import (
 // Error says why. Attempt links the result to its start evidence, and is zero
 // for older records and failures before the checks started.
 type FinalCheckRun struct {
-	Review         int             `json:"review"`
-	Attempt        int             `json:"attempt,omitempty"`
-	Operation      string          `json:"operation"`
-	Commit         string          `json:"commit"`
-	Status         string          `json:"status"`
-	Command        []string        `json:"command,omitempty"`
-	Selection      *CheckSelection `json:"selection,omitempty"`
-	ExitCode       int             `json:"exit_code"`
-	Output         string          `json:"output,omitempty"`
-	OutputRevision int             `json:"output_revision,omitempty"`
-	OutputPath     string          `json:"output_path,omitempty"`
-	Truncated      bool            `json:"truncated,omitempty"`
-	Failed         []string        `json:"failed,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     time.Time       `json:"finished_at"`
+	Review             int             `json:"review"`
+	Attempt            int             `json:"attempt,omitempty"`
+	Operation          string          `json:"operation"`
+	Commit             string          `json:"commit"`
+	Status             string          `json:"status"`
+	Command            []string        `json:"command,omitempty"`
+	Selection          *CheckSelection `json:"selection,omitempty"`
+	ExitCode           int             `json:"exit_code"`
+	Output             string          `json:"output,omitempty"`
+	OutputRevision     int             `json:"output_revision,omitempty"`
+	OutputPath         string          `json:"output_path,omitempty"`
+	Truncated          bool            `json:"truncated,omitempty"`
+	Failed             []string        `json:"failed,omitempty"`
+	TraceURL           string          `json:"trace_url,omitempty"`
+	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	StartedAt          time.Time       `json:"started_at"`
+	FinishedAt         time.Time       `json:"finished_at"`
 }
 
 func FinalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k) }
@@ -131,6 +133,8 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 	if ctx.Err() != nil {
 		return FinalCheckRun{}, ctx.Err()
 	}
+	run.TraceURL = result.TraceURL
+	run.CIIdentityFallback = result.CIIdentityFallback
 	run.ExitCode = result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
@@ -218,7 +222,8 @@ func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, strea
 	// when a stopped service left only an unfinished start record.
 	cause := fmt.Sprintf("final-checks-%d-%s", report.Review, report.Commit)
 	scope := coreadapter.Scope{Project: string(a.Repository.Project()), Workstream: string(stream), Thread: FinalReviewSubject, Turn: cause, Role: checksRole}
-	selection := checkrun.Select(ctx, a.S.Jev, a.Repository, scope, cause, nil, dir, diff, checks)
+	identity := checkrun.Identity{Candidate: report.Commit, Branch: featureBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: cfg.Project.Clone}
+	selection := checkrun.Select(ctx, a.S.Jev, a.Repository, scope, cause, nil, dir, diff, identity, checks)
 	run.Selection = &selection
 	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
 	timeout := cfg.Project.CheckTimeout()
@@ -227,7 +232,7 @@ func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, strea
 	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := checks.Check(bounded, dir, selection.Links)
+	result, err := checks.Check(bounded, dir, identity, selection.Links)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}

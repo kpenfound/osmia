@@ -56,25 +56,27 @@ type checkInput struct {
 // and the path of its captured output. Failed lists the check links Dagger's
 // report shows failed.
 type UnitCheckRun struct {
-	Unit           string          `json:"unit"`
-	Run            int             `json:"run"`
-	Operation      string          `json:"operation"`
-	Candidate      string          `json:"candidate"`
-	Base           string          `json:"base"`
-	DiffSHA256     string          `json:"diff_sha256"`
-	Report         int             `json:"report"`
-	Status         string          `json:"status"`
-	Selection      *CheckSelection `json:"selection,omitempty"`
-	Command        []string        `json:"command,omitempty"`
-	ExitCode       int             `json:"exit_code"`
-	Output         string          `json:"output,omitempty"`
-	OutputRevision int             `json:"output_revision,omitempty"`
-	OutputPath     string          `json:"output_path,omitempty"`
-	Truncated      bool            `json:"truncated,omitempty"`
-	Failed         []string        `json:"failed,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     time.Time       `json:"finished_at"`
+	Unit               string          `json:"unit"`
+	Run                int             `json:"run"`
+	Operation          string          `json:"operation"`
+	Candidate          string          `json:"candidate"`
+	Base               string          `json:"base"`
+	DiffSHA256         string          `json:"diff_sha256"`
+	Report             int             `json:"report"`
+	Status             string          `json:"status"`
+	Selection          *CheckSelection `json:"selection,omitempty"`
+	Command            []string        `json:"command,omitempty"`
+	ExitCode           int             `json:"exit_code"`
+	Output             string          `json:"output,omitempty"`
+	OutputRevision     int             `json:"output_revision,omitempty"`
+	OutputPath         string          `json:"output_path,omitempty"`
+	Truncated          bool            `json:"truncated,omitempty"`
+	Failed             []string        `json:"failed,omitempty"`
+	TraceURL           string          `json:"trace_url,omitempty"`
+	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	StartedAt          time.Time       `json:"started_at"`
+	FinishedAt         time.Time       `json:"finished_at"`
 }
 
 // matches reports whether the run checked the identity's candidate, base and
@@ -584,7 +586,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
 	timeout := c.s.About(c.repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, err := checks.Check(bounded, dir, selection.Links)
+	result, err := checks.Check(bounded, dir, c.checkIdentity(in), selection.Links)
 	cancel()
 	if ctx.Err() != nil {
 		return coreadapter.OperationResult{}, ctx.Err()
@@ -592,6 +594,8 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
+	run.TraceURL = result.TraceURL
+	run.CIIdentityFallback = result.CIIdentityFallback
 	captured, run.ExitCode = result.Output, result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated

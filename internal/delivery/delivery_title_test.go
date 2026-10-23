@@ -117,3 +117,29 @@ func TestDraftDeliveryNoClosingReferenceForFileOrStdin(t *testing.T) {
 		})
 	}
 }
+
+func TestDraftDeliveryOmitsPrivateCheckTraceLinks(t *testing.T) {
+	t.Parallel()
+	cfg, repo, drafts, report := draftFixture(t)
+	defer repo.Close()
+	const link = "https://dagger.cloud/private-org/traces/check123"
+	fixturekit.SetStatusGoal(t, repo, stream, "Resumable uploads "+link, time.Now().UTC())
+	docs, err := trace.Read[trace.Document](repo, stream)
+	fixturekit.Must(t, err)
+	for _, doc := range docs {
+		if doc.Path == "spec.md" {
+			doc.Revision++
+			doc.Content = "# Resumable uploads\n\nResume uploads. Check evidence: " + link + "\n"
+			report.Spec = doc.Revision
+			fixturekit.Must(t, repo.RecordDocuments(t.Context(), []trace.Document{doc}))
+		}
+	}
+	title, body, err := drafts.DraftDelivery(cfg, repo, stream, report)
+	fixturekit.Must(t, err)
+	if strings.Contains(title, "dagger.cloud") || strings.Contains(body, "dagger.cloud") || !strings.Contains(body, "Resume uploads") {
+		t.Fatalf("private delivery text: %q %q", title, body)
+	}
+	if _, reason, err := drafts.DeliveryGate(t.Context(), repo, stream, "Check evidence: "+link); err != nil || !strings.Contains(reason, "private Dagger Cloud") {
+		t.Fatalf("publication gate: %q %v", reason, err)
+	}
+}

@@ -666,3 +666,20 @@ func (c *Client) DestroyDesign(ctx context.Context, id config.WorkstreamID) (Ses
 	err := c.Do(ctx, "POST", Prefix+"/design/"+url.PathEscape(string(id))+"/destroy", nil, &v)
 	return v, err
 }
+
+// EngineStatus probes the engine selected by the loaded service configuration.
+func (c *Client) EngineStatus(ctx context.Context) (api.EngineStatus, error) {
+	var out api.EngineStatus
+	err := c.do(ctx, "GET", api.Prefix+"/engine/status", nil, &out, engineActionTimeout)
+	return out, err
+}
+
+// EngineAction restarts or prunes the managed engine through its busy gate.
+func (c *Client) EngineAction(ctx context.Context, action string) (api.MutationResponse, error) {
+	var out api.MutationResponse
+	if action != "restart" && action != "prune" {
+		return out, fmt.Errorf("unknown engine action")
+	}
+	err := c.do(ctx, "POST", api.Prefix+"/engine/"+action, nil, &out, engineActionTimeout)
+	return out, err
+}

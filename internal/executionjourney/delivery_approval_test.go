@@ -163,3 +163,18 @@ func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
 		t.Fatalf("criterion change: %q %v", reason, err)
 	}
 }
+
+func TestDeliveryApprovalRejectsPrivateCheckTraceLinks(t *testing.T) {
+	t.Parallel()
+	f, w, repo, _ := deliveryFixture(t)
+	defer repo.Close()
+	p, api := f.s.deliveryPresentation(t.Context(), string(w))
+	if api != nil {
+		t.Fatal(api)
+	}
+	text := p.Draft + "\nhttps://dagger.cloud/private-org/traces/check123\n"
+	_, api = f.s.approveDelivery(t.Context(), string(w), DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash, Description: &text})
+	if api == nil || api.Code != Validation || !strings.Contains(api.Message, "private Dagger Cloud") {
+		t.Fatalf("private description accepted: %v", api)
+	}
+}

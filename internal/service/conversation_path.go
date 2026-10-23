@@ -414,11 +414,12 @@ func (a sharedConversationAdapter) Inspect(ctx context.Context, op coreadapter.O
 	return bound.Inspect(ctx, op)
 }
 func (a sharedConversationAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
-	bound, err := a.s.options.Threads(a.repository, a.s.current())
+	cfg := a.s.current()
+	bound, err := a.s.options.Threads(a.repository, cfg)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return (abandonable{Reconciler: bound, s: a.s, repository: a.repository}).Apply(ctx, op)
+	return (abandonable{Reconciler: bound, s: a.s, repository: a.repository, cfg: cfg}).Apply(ctx, op)
 }
 
 // A shared chief has addresses in several member views. Resync invalidates

@@ -33,7 +33,7 @@ exit 3
 	t.Setenv("EXPECTED_HOST_HOME", os.Getenv("HOME"))
 	dir := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate"), 0600))
-	result, err := (DaggerChecks{}).Check(context.Background(), dir, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"})
+	result, err := (DaggerChecks{}).Check(context.Background(), dir, Identity{}, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"})
 	must(t, err)
 	if result.ExitCode != 3 || result.Truncated || len(result.Output) < 140000 || !strings.Contains(result.Output, "version mismatch") {
 		t.Fatalf("result: exit=%d truncated=%t bytes=%d", result.ExitCode, result.Truncated, len(result.Output))
@@ -56,13 +56,13 @@ echo 'dag+check://release/version'
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GITHUB_TOKEN", "delivery-secret")
-	links, err := (DaggerChecks{}).List(context.Background(), t.TempDir())
+	links, err := (DaggerChecks{}).List(context.Background(), t.TempDir(), Identity{})
 	must(t, err)
 	if !slices.Equal(links, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"}) {
 		t.Fatalf("links %q", links)
 	}
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\necho 'Error: no workspace'\nexit 1\n"), 0700))
-	if _, err := (DaggerChecks{}).List(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "no workspace") {
+	if _, err := (DaggerChecks{}).List(context.Background(), t.TempDir(), Identity{}); err == nil || !strings.Contains(err.Error(), "no workspace") {
 		t.Fatalf("a failed listing returned %v", err)
 	}
 }

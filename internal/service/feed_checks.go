@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
 	"regexp"
 	"strings"
 
@@ -70,7 +71,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 				return nil, err
 			}
 			key := checkDocumentID(run.Unit, run.Run)
-			entry := FeedEntry{Kind: "unit_checks", At: d.At, UnitChecks: &FeedUnitChecks{Unit: run.Unit, Run: run.Run, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, StartedAt: run.StartedAt, FinishedAt: &run.FinishedAt}}
+			entry := FeedEntry{Kind: "unit_checks", At: d.At, UnitChecks: &FeedUnitChecks{TraceURL: run.TraceURL, Unit: run.Unit, Run: run.Run, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, StartedAt: run.StartedAt, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[key]; ok {
 				entry.At = out[i].At
 				entry.UnitChecks.StartedAt = out[i].UnitChecks.StartedAt
@@ -85,7 +86,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			// Results without start evidence (including preparation failures and
 			// legacy attempts) remain distinct by document revision.
 			key := finalCheckAttemptDocument(run.Review, run.Attempt)
-			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{Review: run.Review, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, FinishedAt: &run.FinishedAt}}
+			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{TraceURL: run.TraceURL, Review: run.Review, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[key]; ok && run.Attempt > 0 {
 				entry.At = out[i].At
 				entry.FinalChecks.Attempt = run.Attempt
@@ -97,6 +98,12 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 				key = fmt.Sprintf("%s-result-%d", d.ID, d.Revision)
 			}
 			put(key, entry)
+		case sessionCheckRecordPattern.MatchString(d.Path) && d.Revision == latest[d.ID]:
+			var run SessionCheckRun
+			if err := decode(d, &run); err != nil {
+				return nil, err
+			}
+			put(d.ID, FeedEntry{Kind: "session_checks", At: run.FinishedAt, SessionChecks: &api.FeedSessionChecks{Run: run.Run, Commit: run.Commit, Kind: run.Kind, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Error: run.Error, TraceURL: run.TraceURL, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt}})
 		case d.Path == finalReportPath:
 			var report FinalReport
 			if err := decode(d, &report); err != nil {

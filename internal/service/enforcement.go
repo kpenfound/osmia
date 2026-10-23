@@ -42,7 +42,6 @@ func CoreEnforcement(root config.Root) Enforcement {
 	return Enforcement{
 		Engine: coreadapter.CoreEngine{Runner: agent.Runner{Skills: cache, SkillMountDirs: []string{cache.Dir}}},
 		Skills: cache,
-		Checks: DaggerChecks{},
 		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine), Sbx: coreadapter.SbxTransport()},
 	}
 }
