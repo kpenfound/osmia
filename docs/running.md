@@ -235,6 +235,11 @@ From the page you can:
   PR title and editing its description and commit message. Draft publication,
   updates and marking ready each require that member's own fresh approval and
   service-owned signing; there is no group-wide publication approval.
+- Opening a workgroup, workstream, design or exploratory conversation shows
+  its newest entry, including direct links and returning to Feed. New entries
+  scroll the shown conversation to its end even while reading older history.
+  Refreshes without new entries keep your scroll position; your composer draft
+  and keyboard focus stay in place.
 - Send a message in a workstream's conversation. Enter sends where there is a
   keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.
