@@ -949,7 +949,7 @@ the root and the configuration directly, the way `serve` does.
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
 | `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound. |
-| `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning. |
+| `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
 | `state` | Per project: the trace opens; `runtime.json` opens. |
@@ -957,7 +957,10 @@ the root and the configuration directly, the way `serve` does.
 A failure (`✗`) is something that stops the service from starting or its work
 from running. A warning (`!`) will probably bite but stops nothing. Every
 warning and failure prints its fix on the next line. Configuration errors name
-the file and field, never a value read from the file.
+the file and field, never a value read from the file. Engine reachability and
+release mismatches are warnings. An unset `[dagger].version` expects the host
+CLI release. Cache size is reported as unknown when the engine or CLI cannot
+expose it. Doctor probes engines without restarting or pruning them.
 
 Checks that need something an earlier check found missing are left out: with
 no root only the toolchain and GitHub checks run, and with a configuration
