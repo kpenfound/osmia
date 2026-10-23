@@ -4039,6 +4039,9 @@
           "committee": {
             "$ref": "#/components/schemas/ConfigCommittee"
           },
+          "dagger": {
+            "$ref": "#/components/schemas/ConfigDaggerConfig"
+          },
           "events": {
             "$ref": "#/components/schemas/ConfigEvents"
           },
@@ -4161,6 +4164,20 @@
       },
       "ConfigDagger": {
         "properties": {
+          "engine": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigDaggerConfig": {
+        "properties": {
+          "cloud_token_env": {
+            "type": "string"
+          },
           "engine": {
             "type": "string"
           },
