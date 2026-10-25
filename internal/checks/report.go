@@ -11,7 +11,8 @@ import (
 const ReportLimit = 16 * 1024
 
 var reportColor = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
-var reportCheck = regexp.MustCompile(`^([ \t]*)([✘✔⊘◌]) (dag(?:\+check)?://\S+)(.*)$`)
+var reportHeading = regexp.MustCompile(`^(?:CHECKS|== CHECKS ==)(?:[ \t]|$)`)
+var reportCheck = regexp.MustCompile(`^([ \t]*)([✘✔⊘◌])[ \t]+(dag(?:\+check)?://\S+)(.*)$`)
 
 type checkFailure struct {
 	link       string
@@ -28,7 +29,7 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 	inChecks := false
 	checkIndent := 0
 	for i, line := range lines {
-		if strings.HasPrefix(line, "== CHECKS ==") {
+		if reportHeading.MatchString(line) {
 			heading, inChecks, active = line, true, -1
 			checkIndent = 0
 			continue
@@ -37,7 +38,7 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 			continue
 		}
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
-		if strings.HasPrefix(strings.TrimSpace(line), "== CHECKS ==") && indent <= checkIndent+2 {
+		if reportHeading.MatchString(strings.TrimSpace(line)) && indent <= checkIndent+2 {
 			checkIndent = indent
 			active = -1
 			continue

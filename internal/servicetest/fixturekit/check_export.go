@@ -9,7 +9,7 @@ if [ "$1" = list ]; then
   echo 'dag+check://go/test'
   exit 0
 fi
-[ "$*" = 'check --progress=report --fail-fast' ] || exit 91
+[ "$*" = 'check --progress=report --fail-fast --parallel 4' ] || exit 91
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
   echo EXPORT_HEAD
   git rev-parse HEAD
@@ -32,5 +32,5 @@ find . -type f ! -path './.git/*' | sort | while IFS= read -r file; do
   printf '%s\n' "$file"
   cat "$file"
 done
-printf '\n== CHECKS ==  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
+printf '\nCHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 `

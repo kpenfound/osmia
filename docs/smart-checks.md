@@ -55,8 +55,9 @@ requested tests exist and exercise the behaviour.
    judgment shares.
 7. **Accept.** The links whose probability is at least 0.5 are selected. A
    response that selects none is declined, and the run checks everything.
-8. **Run.** `dagger check --progress=report` runs with the selected links, or
-   with none to run every check, bounded by the project's `checks_timeout`.
+8. **Run.** `dagger check --progress=report --fail-fast --parallel 4` runs with
+   the selected links, or with none to run every check, bounded by the
+   project's `checks_timeout`. At most four checks run concurrently.
 
 Unit, final-review and session check runs all use this selection. Before a
 final review, the service judges the rebased feature branch commit against
@@ -147,13 +148,16 @@ When narrowing reduced the list, `listed` also explains that those 37 were
 narrowed from 214 listed links. An absent total stays unknown; no total is
 inferred for older runs.
 
-The factory runs checks with `--progress=report --fail-fast`. It records the
+The factory runs checks with `--progress=report --fail-fast --parallel 4`. It records the
 complete combined output beside the check record in `checks-<n>-output.txt`
 and names that document in `output_path` with its `output_revision`. The
 agent-facing `output` holds up to 16 KiB of extracted failure diagnostics, excluding passing check blocks
 and rerun commands. Oversized excerpts are marked `truncated`; agents can
 read the captured output in chunks through `factory_context`. Classification
-uses the complete output, independently of the excerpt limit.
+uses the complete output, independently of the excerpt limit. A non-zero exit
+with a failed check under the report's `CHECKS` heading is recorded as failed.
+A non-zero exit without a failed check remains incomplete, including a session
+shutdown error after all checks passed.
 
 ## Restarts and new runs
 
