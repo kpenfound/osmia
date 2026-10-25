@@ -90,7 +90,7 @@ func TestDaggerCandidateExport(t *testing.T) {
 					_, err = d.List(ctx, dir, id)
 					must(t, err)
 					var output bytes.Buffer
-					exit, prep, err := d.dagger(ctx, dir, id, d.CIIdentityExport, &output, "check", "--progress=report", "--failfast")
+					exit, prep, err := d.dagger(ctx, dir, id, d.CIIdentityExport, &output, "check", "--progress=report", "--fail-fast")
 					must(t, err)
 					if exit != 0 {
 						t.Fatalf("fake check exited %d: %s", exit, output.String())

@@ -225,7 +225,7 @@ func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, strea
 	identity := checkrun.Identity{Candidate: report.Commit, Branch: featureBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: cfg.Project.Clone}
 	selection := checkrun.Select(ctx, a.S.Jev, a.Repository, scope, cause, nil, dir, diff, identity, checks)
 	run.Selection = &selection
-	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
+	run.Command = append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selection.Links...)
 	timeout := cfg.Project.CheckTimeout()
 	if err := a.StartCheckAttempt(ctx, stream, run); err != nil {
 		return CheckResult{ExitCode: -1}, err

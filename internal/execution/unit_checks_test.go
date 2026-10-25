@@ -78,7 +78,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	report := currentReport(t, repository, stream, "resume")
 	run := onlyRun(t, repository, stream)
-	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || run.Selection.Listed != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--failfast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
+	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || run.Selection.Listed != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
 		t.Fatalf("check run %+v", run)
 	}
 
@@ -130,7 +130,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
-	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
+	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selected...)) {
 		t.Fatalf("check run %+v", run)
 	}
 	requests := p.Requests()
