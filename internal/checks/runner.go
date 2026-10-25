@@ -78,7 +78,7 @@ func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) (
 
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
 	output := &bytes.Buffer{}
-	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
+	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, append([]string{"check", "--progress=report", "--fail-fast"}, links...)...)
 	clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
 	return CheckResult{ExitCode: exit, Output: clean, TraceURL: cloudTraceURL(clean), CIIdentityFallback: preparation.FallbackReason}, err
 }

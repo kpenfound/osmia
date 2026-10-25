@@ -583,7 +583,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.OperationResult{}, err
 	}
 	run.Selection = &selection
-	run.Command = append([]string{"dagger", "check", "--progress=report", "--failfast"}, selection.Links...)
+	run.Command = append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selection.Links...)
 	timeout := c.s.About(c.repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	result, err := checks.Check(bounded, dir, c.checkIdentity(in), selection.Links)

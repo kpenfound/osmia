@@ -9,7 +9,7 @@ if [ "$1" = list ]; then
   echo 'dag+check://go/test'
   exit 0
 fi
-[ "$*" = 'check --progress=report --failfast' ] || exit 91
+[ "$*" = 'check --progress=report --fail-fast' ] || exit 91
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
   echo EXPORT_HEAD
   git rev-parse HEAD
