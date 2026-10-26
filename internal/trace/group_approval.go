@@ -3,8 +3,9 @@ package trace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
+	"io/fs"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -37,18 +38,16 @@ type GroupApproval struct {
 }
 
 func ReadGroupApproval(r *Repository, host config.WorkstreamID) (GroupApproval, Document, bool, error) {
-	docs, err := Read[Document](r, host)
+	d, err := r.latestDocumentByID(host, GroupApprovalDocument, GroupApprovalPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return GroupApproval{}, Document{}, false, nil
+	}
 	if err != nil {
 		return GroupApproval{}, Document{}, false, err
 	}
-	for _, d := range slices.Backward(docs) {
-		if d.ID == GroupApprovalDocument {
-			var decision GroupApproval
-			err := json.Unmarshal([]byte(d.Content), &decision)
-			return decision, d, true, err
-		}
-	}
-	return GroupApproval{}, Document{}, false, nil
+	var decision GroupApproval
+	err = json.Unmarshal([]byte(d.Content), &decision)
+	return decision, d, true, err
 }
 
 // RecordGroupApproval permits a single immutable decision followed by its

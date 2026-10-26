@@ -310,8 +310,8 @@ func ResolvedWorkgroups(r *Repository) ([]config.WorkgroupID, int, error) {
 // satisfies resolved (typically: has reached a resolved feature state,
 // delivered or abandoned). It returns the IDs newly recorded resolved by
 // this call. Calling it again, including after a crash mid-way, changes
-// nothing further and marks nothing twice: a workgroup is never recorded
-// resolved more than once, and resolving one workgroup never affects
+// nothing further and marks nothing twice: a workgroup is recorded
+// once per resolution period, and resolving one workgroup never affects
 // another's record.
 //
 // This is the distinct trigger other units retire workgroup-level documents
@@ -327,6 +327,7 @@ func MarkWorkgroupsResolved(ctx context.Context, r *Repository, groups []Workgro
 	already := map[config.WorkgroupID]bool{}
 	for _, id := range existing {
 		already[id] = true
+		r.cacheWorkgroupResolution(id, true)
 	}
 	var newly []config.WorkgroupID
 	for _, g := range groups {
@@ -362,6 +363,9 @@ func MarkWorkgroupsResolved(ctx context.Context, r *Repository, groups []Workgro
 		Content: string(data),
 	}); err != nil {
 		return nil, err
+	}
+	for _, id := range newly {
+		r.cacheWorkgroupResolution(id, true)
 	}
 	return newly, nil
 }

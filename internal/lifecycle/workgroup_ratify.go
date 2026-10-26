@@ -759,6 +759,9 @@ func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if a, archived := s.ArchivedWorkstream(string(stream)); archived && ArchiveResolved(a) {
+			continue
+		}
 		id, err := repository.CrossRepoWorkgroupOf(stream)
 		if err != nil {
 			return fmt.Errorf("workstream %s cross-repo workgroup: %w", stream, err)

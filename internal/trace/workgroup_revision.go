@@ -3,6 +3,8 @@ package trace
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"slices"
 	"time"
 
@@ -20,11 +22,14 @@ type WorkgroupRevision struct {
 // ApprovedWorkgroupRevision is the published outcome of an owner-approved
 // delta. The initial group approval remains immutable historical evidence.
 func ApprovedWorkgroupRevision(r *Repository, host config.WorkstreamID) (WorkgroupRevision, bool, error) {
-	docs, err := Read[Document](r, host)
+	d, err := r.latestDocumentByID(host, WorkgroupRevisionDocument, WorkgroupRevisionPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return WorkgroupRevision{}, false, nil
+	}
 	if err != nil {
 		return WorkgroupRevision{}, false, err
 	}
-	return approvedWorkgroupRevision(docs)
+	return approvedWorkgroupRevision([]Document{d})
 }
 
 func approvedWorkgroupRevision(docs []Document) (WorkgroupRevision, bool, error) {
@@ -52,16 +57,11 @@ func RecordWorkgroupRevision(ctx context.Context, r *Repository, g Workgroup, ch
 		}
 		return nil
 	}
-	docs, err := Read[Document](r, g.Members[0])
-	if err != nil {
+	doc, err := r.latestDocumentByID(g.Members[0], WorkgroupRevisionDocument, WorkgroupRevisionPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	revision := 1
-	for _, d := range docs {
-		if d.ID == WorkgroupRevisionDocument {
-			revision = max(revision, d.Revision+1)
-		}
-	}
+	revision := doc.Revision + 1
 	data, err := json.Marshal(WorkgroupRevision{Change: change, Spec: spec})
 	if err != nil {
 		return err
@@ -72,6 +72,7 @@ func RecordWorkgroupRevision(ctx context.Context, r *Repository, g Workgroup, ch
 // AddWorkgroupMember extends the same workgroup for follow-up work after a
 // merged member. The original member and its merge remain historical facts.
 func AddWorkgroupMember(ctx context.Context, r *Repository, id config.WorkgroupID, member config.WorkstreamID, at time.Time, actor Actor, cause string) error {
+	defer r.cacheWorkgroupResolution(id, false)
 	groups, revision, err := Workgroups(r)
 	if err != nil {
 		return err
@@ -92,6 +93,7 @@ func AddWorkgroupMember(ctx context.Context, r *Repository, id config.WorkgroupI
 }
 
 func ReopenWorkgroup(ctx context.Context, r *Repository, id config.WorkgroupID, at time.Time, actor Actor, cause string) error {
+	defer r.cacheWorkgroupResolution(id, false)
 	resolved, revision, err := ResolvedWorkgroups(r)
 	if err != nil {
 		return err
