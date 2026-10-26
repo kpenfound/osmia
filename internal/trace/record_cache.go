@@ -206,6 +206,38 @@ func (r *Repository) latestDocument(ctx context.Context, q querier, scope config
 	return d, nil
 }
 
+// latestDocumentByID selects by stored identity, so even malformed JSON in
+// the latest revision is decoded and reported instead of hiding that revision.
+// The unique (path, id, revision) index supports this lookup without the
+// document-path index's dependency on a valid JSON body.
+func (r *Repository) latestDocumentByID(scope config.WorkstreamID, id, path string) (Document, error) {
+	target, err := r.scoped(scope)
+	if err != nil {
+		return Document{}, err
+	}
+	if target.reads == nil {
+		return Document{}, fmt.Errorf("%w: trace repository is closed", ErrLocked)
+	}
+	var body string
+	var revision int
+	err = target.reads.QueryRowContext(context.Background(), "SELECT body, revision FROM records WHERE schema = 'osmia.trace.document' AND path = ? AND id = ? ORDER BY seq DESC LIMIT 1", scopePath(Header{Workstream: scope})+"documents.jsonl", id).Scan(&body, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Document{}, fs.ErrNotExist
+	}
+	if err != nil {
+		return Document{}, err
+	}
+	v, err := target.decodeRow(body)
+	if err != nil {
+		return Document{}, err
+	}
+	d, ok := v.(Document)
+	if !ok || d.ID != id || d.Revision != revision || d.Workstream != scope || d.Project != target.Project() || d.Path != path {
+		return Document{}, fmt.Errorf("%s: document identity does not match its trace path", path)
+	}
+	return d, nil
+}
+
 // recordedIDs returns which of ids have a record committed at path.
 func recordedIDs(ctx context.Context, q querier, path string, ids []string) (map[string]bool, error) {
 	found := map[string]bool{}

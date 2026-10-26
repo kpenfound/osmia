@@ -235,35 +235,55 @@ func (w *WorkgroupResolver) ResolveCrossRepoWorkgroups(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	seen := map[config.WorkgroupID]bool{}
-	for _, a := range w.S.MemberArchives() {
-		if a.Project != w.Repository.Project() || a.Workgroup == "" || seen[a.Workgroup] {
-			continue
-		}
-		seen[a.Workgroup] = true
-		if err := w.ResolveCrossRepoWorkgroup(ctx, a.Workgroup); err != nil {
-			return err
-		}
-	}
+	// Collect stream locators before archives so a new live member always
+	// overrides the cached resolution, including before its amendment finishes.
+	ids := make(map[config.WorkstreamID]config.WorkgroupID, len(streams))
+	active := map[config.WorkgroupID]bool{}
 	for _, stream := range streams {
 		if err := ctx.Err(); err != nil {
-			// A resolution interrupted by the service stopping is not a
-			// failure of this pass; it resumes on the next start or pass.
 			return err
 		}
 		id, err := w.Repository.CrossRepoWorkgroupOf(stream)
 		if err != nil {
 			return fmt.Errorf("workstream %s cross-repo workgroup: %w", stream, err)
 		}
+		ids[stream] = id
+		if a, archived := w.S.ArchivedWorkstream(string(stream)); !archived || !ArchiveResolved(a) {
+			active[id] = true
+		}
+	}
+	archives := w.S.MemberArchives()
+	for _, a := range archives {
+		if a.Workgroup != "" && !ArchiveResolved(a) {
+			active[a.Workgroup] = true
+		}
+	}
+	seen := map[config.WorkgroupID]bool{}
+	resolve := func(id config.WorkgroupID) error {
 		if id == "" || seen[id] {
-			continue
+			return nil
 		}
 		seen[id] = true
-		if err := w.ResolveCrossRepoWorkgroup(ctx, id); err != nil {
+		if !active[id] && trace.WorkgroupResolutionCurrent(id) {
+			return nil
+		}
+		return w.ResolveCrossRepoWorkgroup(ctx, id)
+	}
+	for _, a := range archives {
+		if a.Project != w.Repository.Project() {
+			continue
+		}
+		if err := resolve(a.Workgroup); err != nil {
+			return err
+		}
+	}
+	for _, stream := range streams {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		id := ids[stream]
+		if err := resolve(id); err != nil {
 			if errors.Is(err, trace.ErrLocked) || errors.Is(err, trace.ErrMembershipChanged) {
-				// The workgroup trace is busy with another member's own
-				// pass, or a member joined since the membership was read;
-				// try again next pass.
 				continue
 			}
 			return fmt.Errorf("workgroup %s: %w", id, err)

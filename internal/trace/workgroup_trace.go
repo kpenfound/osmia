@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -214,6 +215,9 @@ type sharedWorkgroupTrace struct {
 	sync.Mutex
 	repo *Repository
 	refs int
+	// resolved survives handle closure and is cleared by resolution-invalidating writes.
+	resolved atomic.Bool
+	opens    atomic.Uint64
 }
 
 // workgroupTraces holds one *sharedWorkgroupTrace per workgroup ID this
@@ -245,6 +249,7 @@ func sharedWorkgroupTraceFor(id config.WorkgroupID) *sharedWorkgroupTrace {
 // directory, once the count reaches zero.
 func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members map[config.WorkstreamID]CrossRepoMember) (*Repository, error) {
 	shared := sharedWorkgroupTraceFor(id)
+	shared.opens.Add(1)
 	shared.Lock()
 	defer shared.Unlock()
 	if shared.repo != nil {
@@ -301,9 +306,8 @@ var workgroupLocks sync.Map
 
 // workgroupProcessLock returns the one mutex this process uses to serialize
 // every attempt, from any of its own goroutines, to acquire the workgroup
-// id's own trace: a cross-repo workgroup's own trace is opened and closed
-// afresh by every member's own pass and by every direct read
-// (CrossRepoProjectSpec), and those calls run concurrently, often on the
+// id's own trace. Member passes and direct reads (CrossRepoProjectSpec)
+// can open and close the shared authority concurrently, often on the
 // same reconciliation cadence. Handing the OS-level flock off through this
 // in-process mutex, rather than having every caller poll and back off
 // against the others at the OS level, avoids a standing collision a shared
@@ -314,8 +318,7 @@ func workgroupProcessLock(id config.WorkgroupID) *sync.Mutex {
 }
 
 // acquireWorkgroupTrace acquires r's exclusive lock: a cross-repo
-// workgroup's own trace, unlike a project's own trace, is opened and
-// closed afresh by every member's own pass and by every direct read, so
+// workgroup's own trace can be opened and closed by several callers, so
 // contention between this process's own goroutines is expected, not a
 // second process racing for the same trace. It first takes this process's
 // own mutex for r's workgroup, blocking until whichever of this process's
@@ -429,4 +432,17 @@ func createWorkgroupTraceDirectory(ctx context.Context, root config.Root, id con
 	shared.repo, shared.refs = r, 1
 	ok = true
 	return r, nil
+}
+
+// WorkgroupResolutionCurrent reports a resolution observed in this process.
+// Unknown groups return false until a resolution pass reads their authority.
+// Reopening a group or adding a member invalidates this hint immediately.
+func WorkgroupResolutionCurrent(id config.WorkgroupID) bool {
+	return sharedWorkgroupTraceFor(id).resolved.Load()
+}
+
+func (r *Repository) cacheWorkgroupResolution(id config.WorkgroupID, resolved bool) {
+	if r.Project() == crossRepoProject(id) {
+		sharedWorkgroupTraceFor(id).resolved.Store(resolved)
+	}
 }
