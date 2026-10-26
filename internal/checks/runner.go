@@ -76,9 +76,15 @@ func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) (
 	return checkselect.Links(redact.Secrets(output.String(), redact.KnownSecrets()...)), nil
 }
 
+// Command builds the check invocation recorded and run for unit, final review
+// and session checks. Empty links select every check.
+func Command(links []string) []string {
+	return append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, links...)
+}
+
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
 	output := &bytes.Buffer{}
-	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, append([]string{"check", "--progress=report", "--fail-fast"}, links...)...)
+	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, Command(links)[1:]...)
 	clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
 	return CheckResult{ExitCode: exit, Output: clean, TraceURL: cloudTraceURL(clean), CIIdentityFallback: preparation.FallbackReason}, err
 }

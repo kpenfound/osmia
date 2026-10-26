@@ -6,12 +6,80 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
+
+func TestCheckReportClassifiesLifecycleFailureAndKeepsDiagnostics(t *testing.T) {
+	t.Parallel()
+	for _, styling := range []string{"plain", "ansi", "spacing"} {
+		t.Run(styling, func(t *testing.T) {
+			raw := fixturekit.LifecycleFailureOutput()
+			switch styling {
+			case "ansi":
+				raw = strings.ReplaceAll(raw, "CHECKS", "\x1b[1mCHECKS\x1b[0m")
+				raw = strings.ReplaceAll(raw, "✘", "\x1b[31m✘\x1b[0m")
+			case "spacing":
+				raw = strings.ReplaceAll(raw, "CHECKS  ✘", "CHECKS\t ✘")
+				raw = strings.ReplaceAll(raw, "✘ dag://", "✘  dag://")
+			}
+			status, failed, err := ClassifyChecks(CheckResult{ExitCode: 1, Output: raw}, nil)
+			if err != nil || status != ChecksFailed || !slices.Equal(failed, []string{"dag://?check=test&go-package=internal/lifecycle"}) {
+				t.Fatalf("classification: %s, %v, %v", status, failed, err)
+			}
+			report, truncated := SummarizeCheckOutput(raw, 1)
+			if truncated || !strings.Contains(report, "lifecycle_test.go:42: expected pending change to apply") ||
+				!strings.Contains(report, "TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader FAIL") ||
+				strings.Contains(report, "progress ") || strings.Contains(report, "passing output") || strings.Contains(report, "\x1b") {
+				t.Fatalf("diagnostics (truncated=%t): %s", truncated, report)
+			}
+		})
+	}
+}
+
+func TestClassifyChecksRequiresFailedCheckForNonzeroExit(t *testing.T) {
+	t.Parallel()
+	for name, raw := range map[string]string{
+		"engine":         "Error: engine unavailable\n",
+		"cli":            "Error: unknown flag: --unrecognised\n",
+		"pending":        "CHECKS\n◌ dag://?check=test pending\n",
+		"summary only":   "CHECKS  ✘ 1 failed\n",
+		"shutdown":       fixturekit.PassedReport + "Error: session shutdown: connection reset\n",
+		"outside report": "! exit code 1\n✘ dag://not-a-report 1s ERROR\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, exit := range []int{-1, 1, 3, 137} {
+				status, failed, err := ClassifyChecks(CheckResult{ExitCode: exit, Output: raw}, nil)
+				if status != ChecksIncomplete || len(failed) != 0 || err == nil || !strings.Contains(err.Error(), "without reporting a failed check") {
+					t.Fatalf("exit %d: %s, %v, %v", exit, status, failed, err)
+				}
+			}
+		})
+	}
+	for _, raw := range []string{"", fixturekit.PassedReport, fixturekit.LifecycleFailureOutput()} {
+		status, failed, err := ClassifyChecks(CheckResult{Output: raw}, nil)
+		if status != ChecksPassed || len(failed) != 0 || err != nil {
+			t.Fatalf("exit 0: %s, %v, %v", status, failed, err)
+		}
+	}
+}
+
+func TestCheckReportReadsDecoratedHeading(t *testing.T) {
+	t.Parallel()
+	raw := "== CHECKS ==  ✘ 1 failed\n✘ dag://check 1s ERROR\n    assertion failed\n== RUN LOCALLY ==\nrerun\n"
+	if got := FailedChecks(raw); !slices.Equal(got, []string{"dag://check"}) {
+		t.Fatalf("failures: %v", got)
+	}
+	report, _ := SummarizeCheckOutput(raw, 1)
+	if !strings.Contains(report, "assertion failed") || strings.Contains(report, "rerun") {
+		t.Fatalf("diagnostics: %s", report)
+	}
+}
 
 func TestCheckReportManyFailuresRetainsDiagnosticsAndFullClassification(t *testing.T) {
 	t.Parallel()
 	var raw strings.Builder
-	raw.WriteString("== CHECKS ==  ✘ 1000 failed\n")
+	raw.WriteString("CHECKS  ✘ 1000 failed\n")
 	for i := range 1000 {
 		fmt.Fprintf(&raw, "✘ dag://check-%d 1s ERROR\n    assertion %d failed\n", i, i)
 	}
@@ -45,7 +113,7 @@ func TestCheckReportKeepsFailuresBeforeLargePassingAndRerunOutput(t *testing.T) 
 
 func TestCheckReportSharesSpaceBetweenFailures(t *testing.T) {
 	t.Parallel()
-	raw := "== CHECKS ==  ✘ 2 failed\n✘ dag://first 1s ERROR\n    first assertion\n" +
+	raw := "CHECKS  ✘ 2 failed\n✘ dag://first 1s ERROR\n    first assertion\n" +
 		strings.Repeat("é", 50000) + "\n    first stack tail\n✘ dag://second 1s ERROR\n    second assertion\n"
 	report, truncated := SummarizeCheckOutput(raw, 1)
 	if !truncated || len(report) > ReportLimit || !utf8.ValidString(report) {
@@ -64,7 +132,7 @@ func TestCheckReportSharesSpaceBetweenFailures(t *testing.T) {
 
 func TestCheckReportReadsNestedFailuresAndColors(t *testing.T) {
 	t.Parallel()
-	raw := "== CHECKS ==  ✘ 1 failed\n\x1b[31m✘ dag://parent 1s ERROR\x1b[0m\n  == CHECKS ==\n  ✘ dag+check://child 1s ERROR\n    compiler: missing symbol\n  ✔ dag://sibling 1s OK\n    passing detail\n✔ dag://other 1s OK\n== RUN LOCALLY ==\nrerun\n"
+	raw := "CHECKS  ✘ 1 failed\n\x1b[31m✘ dag://parent 1s ERROR\x1b[0m\n  CHECKS\n  ✘ dag+check://child 1s ERROR\n    compiler: missing symbol\n  ✔ dag://sibling 1s OK\n    passing detail\n✔ dag://other 1s OK\nRUN LOCALLY\nrerun\n"
 	if got := FailedChecks(raw); !slices.Equal(got, []string{"dag://parent", "dag+check://child"}) {
 		t.Fatalf("failures: %v", got)
 	}
@@ -79,7 +147,7 @@ func TestCheckReportKeepsUnrecognizedAndInfrastructureOutput(t *testing.T) {
 	for _, raw := range []string{
 		"Error: engine unavailable\n",
 		"compiler: undefined symbol\n" + strings.Repeat("verbose detail\n", 10000) + "exit code 1\n",
-		"== CHECKS ==  ◌ 1 pending\nengine disconnected\n",
+		"CHECKS  ◌ 1 pending\nengine disconnected\n",
 	} {
 		report, truncated := SummarizeCheckOutput(raw, 1)
 		if len(report) > ReportLimit || truncated != (len(raw) > ReportLimit) || !strings.HasPrefix(report, strings.Split(raw, "\n")[0]) || !strings.HasSuffix(report, strings.Split(raw, "\n")[len(strings.Split(raw, "\n"))-2]+"\n") {

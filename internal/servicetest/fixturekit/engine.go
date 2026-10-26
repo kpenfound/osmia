@@ -58,7 +58,7 @@ else
 fi
 if [ -n "${DAGGER_CLOUD_TOKEN-}" ]; then printf '%%s\n' "$DAGGER_CLOUD_TOKEN" >&2; fi
 echo 'View trace at https://dagger.cloud/example/traces/service123' >&2
-printf '\n== CHECKS ==  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
+printf '\nCHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 `, f.Version, f.Version)
 	Must(t, os.WriteFile(filepath.Join(dir, "docker"), []byte(docker), 0700))
 	Must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(dagger), 0700))

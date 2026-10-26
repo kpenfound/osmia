@@ -129,7 +129,7 @@ func TestDaggerClientRedactsOutputAndCapturesTrace(t *testing.T) {
 	script := `#!/bin/sh
 printf '%s\n' "$DAGGER_CLOUD_TOKEN" >&2
 printf 'View trace at https://dagger.cloud/example/traces/abc123\n' >&2
-printf '== CHECKS ==  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
+printf 'CHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 `
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
 	var logs bytes.Buffer

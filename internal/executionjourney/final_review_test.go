@@ -170,7 +170,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	var run FinalCheckRun
 	runs := streamDocuments(t, repository, stream, finalChecksDocument(1))
 	if len(runs) != 1 || runs[0].Path != "final/checks-1.json" || json.Unmarshal([]byte(runs[0].Content), &run) != nil ||
-		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) {
+		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}) {
 		t.Fatalf("the final check run %+v", runs)
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
@@ -788,7 +788,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			} else if selection.Mode != checkrun.SelectionFull || selection.Reason != mode || len(selection.Links) != 0 {
 				t.Fatalf("full evidence: %+v, want %s", selection, mode)
 			}
-			if runs := checks.Runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selected...)) {
+			if runs := checks.Runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, selected...)) {
 				t.Fatalf("runner links %v, command %v", runs, run.Command)
 			}
 			starts := finalCheckStarts(t, repo, stream)

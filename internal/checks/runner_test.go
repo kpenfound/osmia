@@ -9,11 +9,21 @@ import (
 	"testing"
 )
 
+func TestCheckCommandPreservesSelectionAndLimitsParallelism(t *testing.T) {
+	t.Parallel()
+	for _, links := range [][]string{nil, {"dag://?check=test&go-package=internal/checks", "dag+check://release/version"}} {
+		want := append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, links...)
+		if got := Command(links); !slices.Equal(got, want) {
+			t.Fatalf("command: %q, want %q", got, want)
+		}
+	}
+}
+
 // serial: sets PATH, GITHUB_TOKEN, ANTHROPIC_API_KEY, SSH_AUTH_SOCK and EXPECTED_HOST_HOME via t.Setenv
 func TestDaggerChecksCaptureOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
-[ "$#" = 5 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = --fail-fast ] && [ "$4" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$5" = dag+check://release/version ] || exit 91
+[ "$#" = 7 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = --fail-fast ] && [ "$4" = --parallel ] && [ "$5" = 4 ] && [ "$6" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$7" = dag+check://release/version ] || exit 91
 [ -z "$GITHUB_TOKEN$ANTHROPIC_API_KEY$SSH_AUTH_SOCK" ] || exit 92
 [ -d "$HOME" ] && [ "$HOME" = "$TMPDIR" ] || exit 93
 [ -z "$EXPECTED_HOST_HOME" ] || exit 95
@@ -21,7 +31,7 @@ func TestDaggerChecksCaptureOutputWithholdCredentialsAndDisableColor(t *testing.
 [ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 96
 [ "$NO_COLOR" = 1 ] || exit 97
 head -c 70000 /dev/zero | tr '\000' x
-printf '\n== CHECKS ==  ✘ 1 failed\n✘ dag://release/version 1.0s ERROR\n    version mismatch\n✔ dag://passing 1s OK\n'
+printf '\nCHECKS  ✘ 1 failed\n✘ dag://release/version 1.0s ERROR\n    version mismatch\n✔ dag://passing 1s OK\n'
 head -c 70000 /dev/zero | tr '\000' y
 exit 3
 `
@@ -72,13 +82,13 @@ func TestFailedChecksReadTheReport(t *testing.T) {
 	report := `== TRACE ==  ✘ FAILED
 ! dag://go/packages/tests/test?go-package=p&go-test=TestAdd: Go tests in p: exit code: 1
 
-== CHECKS ==  ✘ 1 failed  ✔ 1 passed
+CHECKS  ✘ 1 failed  ✔ 1 passed
 ✘ dag://go/packages/tests/test?go-package=p&go-test=TestAdd&go-test=TestOK 4.8s ERROR
-  == TESTS ==
+  TESTS
     ✘ example.com/failrepo/p › TestAdd FAIL
 ✔ dag://go/packages/generate/stale?go-package=p 1.8s OK
 
-== RUN LOCALLY ==
+RUN LOCALLY
 dagger check "dag://go/packages/tests/test?go-package=p&go-test=TestAdd&go-test=TestOK"
 `
 	if got := FailedChecks(report); !slices.Equal(got, []string{"dag://go/packages/tests/test?go-package=p&go-test=TestAdd&go-test=TestOK"}) {

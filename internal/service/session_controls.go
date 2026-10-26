@@ -422,7 +422,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 		TraceURL:           result.TraceURL,
 		CIIdentityFallback: result.CIIdentityFallback,
 		Run:                run, Commit: head, Kind: sessionCheckKind(selection), Checks: selection.Links, Selection: &selection,
-		Command:   append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selection.Links...),
+		Command:   checkrun.Command(selection.Links),
 		Status:    status,
 		ExitCode:  result.ExitCode,
 		Failed:    failed,

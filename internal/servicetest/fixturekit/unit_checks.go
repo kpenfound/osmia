@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/api"
@@ -63,10 +64,34 @@ func (f *FakeChecks) Runs() [][]string {
 	return slices.Clone(f.Ran)
 }
 
-const PassedReport = "== CHECKS ==  ✔ 2 passed\n✔ dag://go/packages/tests/test 2.0s OK\n✔ dag://release/version-round-trip 1.0s OK\n"
+const PassedReport = "CHECKS  ✔ 2 passed\n✔ dag://go/packages/tests/test 2.0s OK\n✔ dag://release/version-round-trip 1.0s OK\n"
 
 func FailedReport(link string) string {
-	return fmt.Sprintf("== TRACE ==  ✘ FAILED\n\n== CHECKS ==  ✘ 1 failed\n✘ %s 1.0s ERROR\n    ✘ TestBuilt FAIL\n        built_test.go:9: wrong chunk\n", link)
+	return fmt.Sprintf("! exit code 1\n\nCHECKS  ✘ 1 failed\n✘ %s 1.0s ERROR\n  TESTS\n    ✘ TestBuilt FAIL\n        built_test.go:9: wrong chunk\n", link)
 }
 
 func Passing() []CheckOutcome { return []CheckOutcome{{Result: api.CheckResult{Output: PassedReport}}} }
+
+// LifecycleFailedReport is the report excerpt supplied by the owner from a
+// Dagger lifecycle check run. The summary, check link and TESTS lines retain
+// the supplied text.
+const LifecycleFailedReport = `! exit code 1
+! dag://?check=test&go-package=internal/lifecycle: Go tests in internal/lifecycle: exit code: 1
+
+CHECKS  ✘ 1 failed  ✔ 51 passed
+✘ dag://?check=test&go-package=internal/lifecycle 2m52s ERROR
+  TESTS
+    ✘ github.com/kpenfound/osmia/internal/lifecycle FAIL
+    ✘ github.com/kpenfound/osmia/internal/lifecycle › TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader FAIL
+`
+
+// LifecycleFailureOutput surrounds the report with synthetic progress and
+// passing output to put its failure beyond either end of a bounded excerpt.
+// The file diagnostic is synthetic; the owner supplied no file location or
+// exact progress-line length. A 72 KiB line exercises the reported scale.
+func LifecycleFailureOutput() string {
+	return strings.Repeat("progress ", 8192) + "\n" + LifecycleFailedReport +
+		"        lifecycle_test.go:42: expected pending change to apply\n" +
+		"✔ dag://?check=test&go-package=internal/checks 1s OK\n" +
+		strings.Repeat("    passing output\n", 10000)
+}
