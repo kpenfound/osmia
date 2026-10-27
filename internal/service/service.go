@@ -313,9 +313,20 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
+	if opts.boundary != nil {
+		s.setBoundary(func(step string) error { return opts.boundary(ctx, step) })
+	}
 	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
 	pendingRecovery.Finish(s.pending)
+	// Registration must finish before scanning its config: its trace may not
+	// be published yet, and its journal may carry a pinned charter copy.
+	if s.pending == nil {
+		if err := splitProjects(ctx, cfg, opts.Config.Home, s.step); err != nil {
+			return nil, fmt.Errorf("split projects: %w", err)
+		}
+	}
+	s.cfg = cfg
 	projects, err := s.openAll(cfg)
 	if err != nil {
 		return nil, err
@@ -1143,7 +1154,6 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		}
 		return nil, nil, nil, err
 	}
-	repository.SetCharterResolver(s.charterRepository)
 	observe := s.hub.TraceEvents(cfg.Project.ID, librarianWorkstream(cfg.Project.ID))
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
 	if options.Worker == "" {

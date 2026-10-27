@@ -35,8 +35,6 @@ const usage = `Usage: osmia <command> [--root PATH]
   engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
-  project add-repo <project-id> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
-  project repos <project-id> [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -293,7 +291,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "add-repo" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory" || a[0] == "repos")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -309,8 +307,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return invalid()
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -449,37 +446,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return 0
 	}
-	if cmd == "project" && a[0] == "repos" {
-		id, err := config.ParseProjectID(a[1])
-		if err != nil {
-			return invalid()
-		}
-		cfg, err := c.Configuration(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		var found *wire.ProjectView
-		for i := range cfg.Projects {
-			if cfg.Projects[i].ID == id {
-				found = &cfg.Projects[i]
-			}
-		}
-		if found == nil {
-			fmt.Fprintf(stderr, "%s: project %s is not active\n", wire.Validation, id)
-			return 4
-		}
-		if o.json {
-			return output(stdout, stderr, found.Repos)
-		}
-		for _, r := range found.Repos {
-			def := ""
-			if r.Default {
-				def = " (default)"
-			}
-			fmt.Fprintf(stdout, "%s%s %s\nUpstream: %s push repository: %s clone: %s\nTrace: %s\n", r.ID, def, r.Name, r.Upstream, (config.Project{Upstream: r.Upstream, Fork: r.Fork}).PushRepository(), r.Clone, r.Trace)
-		}
-		return 0
-	}
 	if cmd == "project" && a[0] == "memory" {
 		id, err := config.ParseProjectID(a[1])
 		if err != nil {
@@ -512,32 +478,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		for _, s := range result.Skipped {
 			fmt.Fprintf(stdout, "Skipped: %s: %s\n", s.Workstream, s.Reason)
-		}
-		return 0
-	}
-	if cmd == "project" && a[0] == "add-repo" {
-		id, err := config.ParseProjectID(a[1])
-		if err != nil {
-			return invalid()
-		}
-		clone, err := filepath.Abs(o.clone)
-		if err != nil {
-			return invalid()
-		}
-		result, err := c.AddRepo(ctx, wire.RepoAddRequest{Project: id, Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
-		if err != nil {
-			return fail(err)
-		}
-		if o.json {
-			return output(stdout, stderr, result)
-		}
-		fmt.Fprintf(stdout, "%s\n", result.NextStep)
-		for _, r := range result.Project.Repos {
-			def := ""
-			if r.Default {
-				def = " (default)"
-			}
-			fmt.Fprintf(stdout, "Repo %s%s %s upstream: %s clone: %s\n", r.ID, def, r.Name, r.Upstream, r.Clone)
 		}
 		return 0
 	}

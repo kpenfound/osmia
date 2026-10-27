@@ -48,7 +48,6 @@ var Routes = []Route{
 
 	{Method: http.MethodPost, Path: api.Prefix + "/projects", Summary: "Register a project", Request: api.ProjectAddRequest{}, Response: api.ProjectResponse{}},
 	{Method: http.MethodDelete, Path: api.Prefix + "/projects", Summary: "Remove a project from active work", Request: api.ProjectRemoveRequest{}, Response: api.ProjectResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/projects/repos", Summary: "Add a repo to an existing project", Request: api.RepoAddRequest{}, Response: api.ProjectResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/extract", Summary: "Start a knowledge-base extraction", Request: api.ProjectExtractRequest{}, Response: api.ExtractionResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: api.ProjectRebaseRequest{}, Response: api.ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: api.MemorySetup{}},

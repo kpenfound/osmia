@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	issues "github.com/kpenfound/osmia/internal/issues"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	seal "github.com/kpenfound/osmia/internal/seal"
@@ -25,26 +26,18 @@ func newHandInProductionFixture(t *testing.T) *productionDesignFixture {
 	return newConfiguredProductionDesignFixture(t, productionDesignConfiguration{handIn: true, wait: lifecycleAwait})
 }
 
-// handInProduction uses the public API. Only the injected selection engine
-// waits while the test captures the existing conversation; Go owns the handoff.
-func handInProduction(t *testing.T, f *productionDesignFixture, req HandInRequest) HandInRequest {
+// handInProduction resumes a recorded member selection through the owner API.
+func handInProduction(t *testing.T, f *productionDesignFixture, req HandInRequest, projects ...config.ProjectID) HandInRequest {
 	t.Helper()
-	ready := make(chan struct{})
-	defer close(ready)
-	f.engine.Mu.Lock()
-	selection := f.engine.Turns["select-repos-1"]
-	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		select {
-		case <-ready:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		if !strings.HasSuffix(req.Prompt, productionBrief) || !strings.Contains(req.SystemPrompt, string(f.project)) || !strings.Contains(req.SystemPrompt, string(f.project2)) {
-			return nil, errors.New("selection lacks the immutable input or project repo context")
-		}
-		return selection(ctx, req, verified, tools)
+	if len(projects) == 0 {
+		projects = []config.ProjectID{f.project, f.project2}
 	}
-	f.engine.Mu.Unlock()
+	f.sharedDesign().RecordSelection(t, projects...)
+	r, err := f.s.repository(f.project)
+	must(t, err)
+	lock := intake.DesignLock(r, f.origin)
+	lock.Lock()
+	defer lock.Unlock()
 	req.Project, req.Key = f.project, "production-handin"
 	if req.Stdin == nil && req.Path == "" && req.URL == "" {
 		text := productionBrief
@@ -85,7 +78,7 @@ func checkHandInRetry(t *testing.T, f *productionDesignFixture, req HandInReques
 	}
 }
 
-func TestHandInProductionSelectsDraftsRatifiesAndRestarts(t *testing.T) {
+func TestHandInRecordedSelectionDraftsRatifiesAndRestarts(t *testing.T) {
 	for _, form := range []string{"stdin", "file", "issue"} {
 		t.Run(form, func(t *testing.T) {
 			t.Parallel()
@@ -138,12 +131,12 @@ func TestHandInProductionSelectsDraftsRatifiesAndRestarts(t *testing.T) {
 	}
 }
 
-func TestHandInProductionRecoversSelectionAllocationJoinAndSeal(t *testing.T) {
+func TestHandInRecordedSelectionRecoversAllocationJoinAndSeal(t *testing.T) {
 	for _, boundary := range []struct {
 		step string
 		nth  int32
 	}{
-		{"design-selection-recorded", 1}, {"design-member-allocated", 1}, {"design-member-allocated", 2},
+		{"design-member-allocated", 1}, {"design-member-allocated", 2},
 		{"design-workgroup-prepared", 1}, {"design-member-joined", 1}, {"design-member-joined", 2},
 		{"design-conversation-imported", 1}, {"design-conversation-adopted", 1}, {"group-member-seal-prepared", 1},
 	} {
@@ -181,6 +174,10 @@ func TestHandInProductionRecoversSelectionAllocationJoinAndSeal(t *testing.T) {
 			if ratified != nil {
 				<-ratified
 			}
+			configPath := filepath.Join(f.opts.Config.Root, "projects", string(f.project2), "config.toml")
+			original, err := os.ReadFile(configPath)
+			must(t, err)
+			must(t, os.WriteFile(configPath, append([]byte(fmt.Sprintf("group_id = %q\n", f.project)), original...), 0600))
 			f.hook.Store(nil)
 			f.start(t)
 			packet := f.awaitPacket(t)
@@ -203,63 +200,8 @@ func TestHandInProductionRecoversSelectionAllocationJoinAndSeal(t *testing.T) {
 	}
 }
 
-func TestHandInProductionRefusesInvalidSelectionBeforeAllocation(t *testing.T) {
-	for _, kind := range []string{"empty", "duplicate", "outside", "invalid"} {
-		t.Run(kind, func(t *testing.T) {
-			t.Parallel()
-			f := newHandInProductionFixture(t)
-			selected := []string{}
-			switch kind {
-			case "duplicate":
-				selected = []string{string(f.project), string(f.project)}
-			case "outside":
-				selected = []string{"p_000000000000000000000000000000ff"}
-			case "invalid":
-				selected = []string{"invalid"}
-			}
-			f.engine.Mu.Lock()
-			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				if _, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": selected}); err == nil {
-					return nil, errors.New("invalid selection accepted")
-				}
-				return questionResult(req, "session-refused", "Selection refused."), nil
-			}
-			f.engine.Mu.Unlock()
-			req := handInProduction(t, f, HandInRequest{})
-			f.wait(t, "refused selection", func() bool {
-				repo, err := f.s.repository(f.project)
-				must(t, err)
-				state, err := repo.Workflow(f.origin, designStartSubject)
-				must(t, err)
-				return state.Value == "invalid"
-			})
-			for _, p := range []config.ProjectID{f.project, f.project2} {
-				repo, err := f.s.repository(p)
-				must(t, err)
-				streams, err := repo.Workstreams()
-				must(t, err)
-				for _, m := range streams {
-					if m != f.origin && m != librarianWorkstream(p) {
-						t.Fatalf("invalid selection allocated %s", m)
-					}
-				}
-				_, found, err := designSelectionOf(repo, f.origin)
-				if p == f.project {
-					must(t, err)
-					if found {
-						t.Fatal("invalid selection pinned")
-					}
-				}
-			}
-			checkHandInRetry(t, f, req)
-			f.stop(t)
-			f.start(t)
-			checkHandInRetry(t, f, req)
-		})
-	}
-}
-
-func TestHandInProductionSingleSelectedRepoKeepsOrdinaryPacket(t *testing.T) {
+// Project-list validation belongs to the owner-selected hand-in journeys.
+func TestHandInRecordedSingleSelectionKeepsOrdinaryPacket(t *testing.T) {
 	for _, other := range []bool{false, true} {
 		for _, skip := range []bool{false, true} {
 			name := "original"
@@ -279,17 +221,13 @@ func TestHandInProductionSingleSelectedRepoKeepsOrdinaryPacket(t *testing.T) {
 					f.stream1 = f.stream2
 				}
 				f.engine.Mu.Lock()
-				f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-					_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(target)}})
-					return questionResult(req, "session-single", "One repo is affected."), err
-				}
 				for i := 1; i <= 2; i++ {
 					f.engine.Turns[roundTurnID(1, committeeAgent(i), 1)] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 						return questionResult(req, "session-committee-"+req.Name, "The single-repo draft fits the charter."), nil
 					}
 				}
 				f.engine.Mu.Unlock()
-				req := handInProduction(t, f, HandInRequest{SkipDebate: skip})
+				req := handInProduction(t, f, HandInRequest{SkipDebate: skip}, target)
 				var packet PacketResponse
 				f.wait(t, "ordinary packet", func() bool {
 					got, err := f.c.Packet(context.Background(), f.origin)
@@ -483,14 +421,6 @@ func TestHandInProductionPreservesSameRepoBaseOnSelectedMember(t *testing.T) {
 	f := newHandInProductionFixture(t)
 	parent := HandInWorkstream(f.project, "parent")
 	f.engine.Mu.Lock()
-	selectBoth := f.engine.Turns["select-repos-1"]
-	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if strings.Contains(req.Workspace.Directory(), string(parent)) {
-			_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
-			return questionResult(req, "session-parent", "The parent affects only its repo."), err
-		}
-		return selectBoth(ctx, req, verified, tools)
-	}
 	draft := f.engine.Turns["draft-1-1"]
 	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Workspace.Directory(), string(parent)) {

@@ -58,9 +58,6 @@ type TestPendingProject = pendingProject
 
 var TestConversationEntries = conversationEntries
 
-func (a TestAccess) ValidateAddRepo(req RepoAddRequest) (config.Project, config.Project, *APIError) {
-	return a.s.validateAddRepo(req)
-}
 func (a TestAccess) DailyBudget() *DailyBudgetStatus { return a.s.dailyBudgetStatus() }
 
 var TestTraceUnit = traceUnit

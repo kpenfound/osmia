@@ -272,34 +272,20 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 // project's own charter and, for every repo of the project, its knowledge
 // base, using the service's already open repository handles.
 func (s *Controller) DesignSystemPrompt(ctx context.Context, cfg *config.Config, repository *trace.Repository, now time.Time) (string, error) {
-	members := GroupMembers(cfg.Projects, cfg.Project.Group())
-	if len(members) == 0 {
-		members = []config.Project{cfg.Project}
-	}
 	var b strings.Builder
 	b.WriteString(DesignRolePrompt)
-	fmt.Fprintf(&b, "\n\n## Project\nRepos in this project: %s\n", DesignRepoList(members))
+	fmt.Fprintf(&b, "\n\n## Project\nRepos in this project: %s\n", DesignRepoList([]config.Project{cfg.Project}))
 	charterDoc, err := repository.Charter(ctx)
 	if err != nil {
 		return "", fmt.Errorf("charter: %w", err)
 	}
 	b.WriteString("\n## Charter\n")
 	b.WriteString(charterDoc.Content)
-	for _, m := range members {
-		repo := repository
-		if m.ID != cfg.Project.ID {
-			opened, err := s.Repository(m.ID)
-			if err != nil {
-				return "", fmt.Errorf("repo %s: %w", m.ID, err)
-			}
-			repo = opened
-		}
-		text, err := DesignRepoKnowledge(repo)
-		if err != nil {
-			return "", fmt.Errorf("repo %s knowledge base: %w", m.ID, err)
-		}
-		fmt.Fprintf(&b, "\n## Repo %s (%s) knowledge base\n%s", m.Name, m.ID, text)
+	text, err := DesignRepoKnowledge(repository)
+	if err != nil {
+		return "", fmt.Errorf("project %s knowledge base: %w", cfg.Project.ID, err)
 	}
+	fmt.Fprintf(&b, "\n## Repo %s (%s) knowledge base\n%s", cfg.Project.Name, cfg.Project.ID, text)
 	return b.String(), nil
 }
 
@@ -514,16 +500,7 @@ func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Contr
 			}
 			target := current.Project
 			if in.Repo != "" && config.ProjectID(in.Repo) != current.Project.ID {
-				found := false
-				for _, m := range GroupMembers(current.Projects, current.Project.Group()) {
-					if string(m.ID) == in.Repo {
-						target, found = m, true
-						break
-					}
-				}
-				if !found {
-					return nil, fmt.Errorf("repo %q is not one of this project's repos", in.Repo)
-				}
+				return nil, fmt.Errorf("repo %q is not this project's repository", in.Repo)
 			}
 			cmd := exec.CommandContext(ctx, "git", "-C", target.Clone, "rev-parse", "--verify", "HEAD^{commit}")
 			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}

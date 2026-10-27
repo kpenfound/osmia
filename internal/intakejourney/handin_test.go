@@ -388,8 +388,11 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 		t.Fatal("an empty charter hand-in wrote to the trace")
 	}
 
+	_, err = f.c.Abandon(context.Background(), f.streams(t)[0], "Owner finished checking hand-in refusals")
+	must(t, err)
 	_, err = f.c.RemoveProject(context.Background(), f.project)
 	must(t, err)
+	head = f.head(t)
 	api = handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", Path: design})
 	if api.Code != NotFound || !strings.Contains(api.Message, "project "+string(f.project)+" is not an active project") {
 		t.Fatalf("inactive project: %+v", api)

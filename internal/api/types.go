@@ -167,10 +167,7 @@ type ReloadError struct {
 	At      time.Time `json:"at"`
 }
 
-// ProjectView names a registered project and its trace.
-// Upstream, Fork, Clone, BaseBranch, Trace and Extraction describe the
-// project's default repo, the one its own ID names; Repos lists every repo
-// of the project, the default repo included, each with its own settings.
+// ProjectView describes one project and its repository settings.
 type ProjectView struct {
 	ID         config.ProjectID `json:"id"`
 	Name       string           `json:"name"`
@@ -198,7 +195,6 @@ type RepoView struct {
 	Trace      string           `json:"trace"`
 	KB         string           `json:"kb"`
 	EntityMap  string           `json:"entity_map"`
-	Default    bool             `json:"default"`
 	Extraction *ExtractionState `json:"extraction,omitempty"`
 }
 
@@ -493,20 +489,6 @@ type ProjectRemoveRequest struct {
 type ProjectResponse struct {
 	Project  ProjectView `json:"project"`
 	NextStep string      `json:"next_step"`
-}
-
-// RepoAddRequest adds a repo to an existing project: Project must name an
-// active project's default repo. Name defaults to the last path segment of
-// Upstream. Clone, Upstream, Fork and BaseBranch behave as they do for
-// ProjectAddRequest, but describe this one additional repo, not the project
-// as a whole.
-type RepoAddRequest struct {
-	Project    config.ProjectID `json:"project"`
-	Name       string           `json:"name,omitempty"`
-	Upstream   string           `json:"upstream"`
-	Fork       string           `json:"fork,omitempty"`
-	Clone      string           `json:"clone"`
-	BaseBranch string           `json:"base_branch,omitempty"`
 }
 
 type RuntimeResponse struct {

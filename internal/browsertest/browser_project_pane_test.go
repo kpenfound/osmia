@@ -33,7 +33,7 @@ func TestBrowserProjectPaneKeepsFocusedNavigationAcrossStatusUpdates(t *testing.
 	p.Await("the refreshed link opens its workstream", `!document.querySelector('[data-view="workstream"]').hidden && document.querySelector('#workstream-head').dataset.workstream === `+quote(string(stream)))
 }
 
-func TestBrowserProjectPaneCreatesProjectAddsRepoAndScopesActions(t *testing.T) {
+func TestBrowserProjectPaneCreatesProjectsAndScopesActions(t *testing.T) {
 	t.Parallel()
 	opts, clone := projectFixture(t)
 	withWeb(t, opts, "127.0.0.1:0")
@@ -51,18 +51,19 @@ func TestBrowserProjectPaneCreatesProjectAddsRepoAndScopesActions(t *testing.T) 
 	p.AwaitText("#project-add .result", "Registered Uploads")
 	p.Click("#project-home")
 	p.AwaitText("#project-pane", "owner/server")
-	p.Click(`#project-pane [data-project-action="repo-add"]`)
-	p.TypeInto("#repo-add [name=upstream]", "owner/client")
-	p.TypeInto("#repo-add [name=clone]", second)
-	p.Click("#repo-add [type=submit]")
-	p.AwaitText("#repo-add .result", "Added repo to Uploads")
-	p.Await("the successful repo form clears", `document.querySelector('#repo-add [name=upstream]').value === ''`)
+	p.Click(`[data-view="project-pane"] [data-open="project-add"]`)
+	p.TypeInto("#project-add [name=name]", "Client")
+	p.TypeInto("#project-add [name=upstream]", "owner/client")
+	p.TypeInto("#project-add [name=clone]", second)
+	p.Click("#project-add [type=submit]")
+	p.AwaitText("#project-add .result", "Registered Client")
+	p.Await("the successful repo form clears", `document.querySelector('#project-add [name=upstream]').value === ''`)
 	p.Click("#project-home")
 	p.AwaitText("#project-pane", "owner/client")
-	p.Await("both repos in one project", `document.querySelectorAll('#project-pane [data-project]').length === 1 && document.querySelectorAll('#project-pane [data-repo]').length === 2`)
+	p.Await("two independent projects", `document.querySelectorAll('#project-pane [data-project]').length === 2 && document.querySelectorAll('#project-pane [data-repo]').length === 2`)
 	id := service.InspectForTest(s).Config().Projects[0].ID
 	for _, view := range []string{"handin", "design-add"} {
-		p.Click(`#project-pane [data-project-action="` + view + `"]`)
+		p.Click(`#project-pane [data-project="` + string(id) + `"] [data-project-action="` + view + `"]`)
 		p.Await("the action keeps its project", `document.querySelector('[data-view="`+view+`"] select[name=project]').value === `+quote(string(id)))
 		p.Click("#project-home")
 	}

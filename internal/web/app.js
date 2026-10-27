@@ -679,7 +679,7 @@
     ]) {
       scopeOutcome(document.querySelector(result), displayedWorkstream, document.querySelectorAll(buttons));
     }
-    for (const id of ['handin-form', 'design-add-form', 'session-add-form', 'repo-add']) {
+    for (const id of ['handin-form', 'design-add-form', 'session-add-form']) {
       const form = byId(id);
       let opening = 0;
       const scope = scopeOutcome(form.querySelector('.result'), () => opening, form.querySelectorAll('button'));
@@ -843,7 +843,7 @@
   }
 
   function configuredRepos() {
-    return projects().flatMap(p => p.repos?.length ? p.repos.map(r => ({ ...r, label: p.repos.length > 1 ? p.name + ' / ' + r.name : p.name })) : [{ ...p, label: p.name }]);
+    return projects().map(p => ({ ...p, label: p.name }));
   }
 
   function projectName(id) {
@@ -1445,7 +1445,7 @@
       const groupsView = [...groups.values()].map(g => {
         const members = work.filter(w => w.workgroup?.id === g.id);
         const graph = g.members.length > 1 || g.edges.length > 0;
-        let row = paneGroups.get(g.id);
+        let row = paneGroups.get(p.id + ":" + g.id);
         if (!row) {
           row = { inbox: el('button', { type: 'button' }), members: el('ul', { class: 'pane-streams' }), graph: el('div'), graphKey: '' };
           row.open = el('button', { type: 'button', 'data-open-workgroup': g.id }, 'Workgroup');
@@ -1460,7 +1460,7 @@
           row.open.addEventListener('click', open);
           row.node = el('section', { class: 'pane-workgroup', 'data-workgroup': g.id },
             el('h4', {}, row.open), el('p', { class: 'id' }, g.id), row.inbox, row.members, row.graph);
-          paneGroups.set(g.id, row);
+          paneGroups.set(p.id + ":" + g.id, row);
         }
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
         row.open.disabled = !members.some(w => !w.archived);
@@ -1476,7 +1476,7 @@
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
-              repoLabel(work.find(w => w.workstream === id)?.project || id), ' · ', id))),
+              repoLabel(streams().find(w => w.workstream === id)?.project || id), ' · ', id))),
             ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
@@ -1493,7 +1493,7 @@
         });
         row.node = el('article', { class: 'project-card', 'data-project': p.id }, row.name,
           el('div', { class: 'actions' }, action('Open a design session', 'design-add', p.id),
-            action('Hand in a feature', 'handin', p.id), action('Add repo', 'repo-add', p.id),
+            action('Hand in a feature', 'handin', p.id),
             action('Project management', 'projects', p.id), action('Open an exploratory session', 'session-add', p.id)),
           el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
         paneProjects.set(p.id, row);
@@ -1517,7 +1517,7 @@
     place(byId('project-pane'), projectNodes);
     if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
-    for (const id of paneGroups.keys()) if (!streams().some(w => w.workgroup?.id === id)) paneGroups.delete(id);
+    for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
     for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
   }
 
@@ -1569,7 +1569,7 @@
         popover.hidePopover();
       }
     }
-    if (['handin', 'design-add', 'session-add', 'repo-add'].includes(view) || (view === 'projects' && project)) {
+    if (['handin', 'design-add', 'session-add'].includes(view) || (view === 'projects' && project)) {
       const form = document.querySelector('[data-view="' + view + '"] form');
       const changedProject = form.elements.project.value !== project;
       form.elements.project.value = project;
@@ -3396,7 +3396,6 @@
     const state = configured?.charter_state;
     byId('charter-state').textContent = state ? (state.ready ? 'Ready for hand-in' : 'Not ready for hand-in') +
       ' · ' + state.rules + ' rules · revision ' + state.revision + '.' : (project ? 'Charter readiness not reported.' : 'Choose a project to manage its charter and repos.');
-    block(byId('project-add-repo'), !configured);
     block(byId('project-remove'), !configured);
     const repos = configured?.repos || [];
     const active = new Set(repos.map(r => r.id));
@@ -3429,7 +3428,7 @@
           row.extraction, el('div', {class: 'actions'}, ...row.buttons), row.result);
         managementRepos.set(repo.id, row);
       }
-      row.title.textContent = repoLabel(repo.id) + (repo.default ? ' · Default repo' : '');
+      row.title.textContent = repoLabel(repo.id);
       const fields = [['Name', repo.name], ['Upstream', repo.upstream], ...(repo.fork ? [['Fork', repo.fork]] : []),
         ['Clone path', repo.clone], ['Base branch', repo.base_branch]];
       const key = JSON.stringify(fields);
@@ -3543,12 +3542,6 @@
   }
 
   function setupOwnerForms() {
-    const repo = byId('repo-add');
-    repo.addEventListener('submit', event => {
-      event.preventDefault();
-      formAction(repo, event.submitter, () => request('POST', '/projects/repos', Object.fromEntries(new FormData(repo))),
-        out => 'Added repo to ' + out.project.name + '.', { reset: true });
-    });
     const add = byId('project-add');
     add.addEventListener('submit', event => {
       event.preventDefault();
@@ -3608,7 +3601,6 @@
           if (charterRead === pin && err.code === 'conflict') { pin.conflict = true; renderCharterPin(); }
         });
     });
-    byId('project-add-repo').addEventListener('click', () => openView('repo-add', charter.elements.project.value));
     byId('project-remove').addEventListener('click', event => {
       const project = charter.elements.project.value;
       if (!project) return;

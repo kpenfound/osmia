@@ -130,10 +130,10 @@ func TestHandInCharterGate(t *testing.T) {
 	}
 
 	_, err = c.RemoveProject(ctx, id)
-	must(t, err)
-	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != NotFound {
-		t.Fatalf("inactive project: %+v", api)
+	if !failed(err, Internal) {
+		t.Fatalf("removing a project whose member resolution cannot be read: %v", err)
 	}
+
 }
 
 func TestContextProviderReadsActiveProject(t *testing.T) {

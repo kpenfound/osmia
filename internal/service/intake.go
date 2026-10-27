@@ -310,8 +310,6 @@ var registrationActor = intake.RegistrationActor
 
 var serviceActor = intake.ServiceActor
 
-var groupMembers = intake.GroupMembers
-
 func (s *Service) questionSignals(repository *trace.Repository) func(context.Context, trace.TurnRequest, coreadapter.Scope) string {
 	return s.intake().QuestionSignals(repository)
 }

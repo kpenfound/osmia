@@ -77,8 +77,7 @@ func (s *Service) configuration() ConfigResponse {
 	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
-	// Every repo, default or not, has its own knowledge-base extraction; the
-	// charter is the project's, read only for its default repo.
+	// Each project has its own charter and knowledge-base extraction.
 	extractions := map[config.ProjectID]*ExtractionState{}
 	for _, p := range cfg.Projects {
 		directory, _ := cfg.Root.ProjectTrace(p.ID)
@@ -90,19 +89,8 @@ func (s *Service) configuration() ConfigResponse {
 		}
 	}
 	for _, p := range cfg.Projects {
-		if !p.IsDefaultRepo() {
-			continue
-		}
 		view := projectView(cfg.Root, p)
-		view.Repos = nil
-		for _, member := range groupMembers(cfg.Projects, p.ID) {
-			rv := repoView(cfg.Root, member)
-			rv.Extraction = extractions[member.ID]
-			view.Repos = append(view.Repos, rv)
-		}
-		if len(view.Repos) == 0 {
-			view.Repos = []RepoView{repoView(cfg.Root, p)}
-		}
+		view.Repos[0].Extraction = extractions[p.ID]
 		view.Extraction = extractions[p.ID]
 		// A project without a trace, or removed since the snapshot, has no
 		// charter to report.
@@ -564,23 +552,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, result)
 		return
 	}
-	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/repos" {
-		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(addProjectTimeout)); err != nil {
-			fail(w, Internal)
-			return
-		}
-		var v RepoAddRequest
-		if !decode(w, r, &v) {
-			return
-		}
-		result, api := s.addRepo(r.Context(), v)
-		if api != nil {
-			failWith(w, api)
-			return
-		}
-		respond(w, 200, result)
-		return
-	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/extract" {
 		var v ProjectExtractRequest
 		if !decode(w, r, &v) {
@@ -951,7 +922,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		err = s.store.ClearProviderLimit(v.Backend)
 	default:
-		fail(w, Unsupported)
+		if !routePathExists(r.URL.Path) {
+			failWith(w, &APIError{Code: NotFound, Message: "route not found"})
+		} else {
+			fail(w, Unsupported)
+		}
 		return
 	}
 	if err != nil {
@@ -1019,4 +994,30 @@ func uniqueJSON(d *json.Decoder) error {
 	}
 	_, err = d.Token()
 	return err
+}
+
+// routePathExists distinguishes an unsupported method on a known endpoint
+// from a path that has no API route.
+func routePathExists(path string) bool {
+	actual := strings.Split(path, "/")
+	for _, route := range Routes {
+		parts := strings.Split(route.Path, "/")
+		if len(parts) != len(actual) {
+			continue
+		}
+		matches := true
+		for i, part := range parts {
+			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") && actual[i] != "" {
+				continue
+			}
+			if part != actual[i] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }

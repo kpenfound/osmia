@@ -51,7 +51,6 @@ var librarianActor = service.TestLibrarianActor
 var masonTurnID = service.TestMasonTurnID
 
 var nextReadyTurn = service.TestNextReadyTurn
-var projectContext = service.TestProjectContext
 
 const projectContextTool = service.TestProjectContextTool
 

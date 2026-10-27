@@ -229,14 +229,6 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (api.Pr
 	return v, err
 }
 
-// AddRepo adds a repo to an existing project, the same way AddProject adds a
-// project's own default repo.
-func (c *Client) AddRepo(ctx context.Context, req api.RepoAddRequest) (api.ProjectResponse, error) {
-	var v api.ProjectResponse
-	err := c.do(ctx, "POST", api.Prefix+"/projects/repos", req, &v, c.addProjectTimeout)
-	return v, err
-}
-
 // ExtractProject starts a new knowledge-base extraction of the active project.
 func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (api.ExtractionResponse, error) {
 	var v api.ExtractionResponse

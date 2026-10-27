@@ -368,62 +368,7 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 	f.checkContinuation(t)
 }
 
-func TestDesignProductionSelectionRefusesInvalidReposBeforeAllocation(t *testing.T) {
-	for _, kind := range []string{"empty", "duplicate", "outside"} {
-		t.Run(kind, func(t *testing.T) {
-			t.Parallel()
-			f := newProductionDesignFixture(t)
-			defer f.stop(t)
-			selected := []string{}
-			if kind == "duplicate" {
-				selected = []string{string(f.project), string(f.project)}
-			}
-			if kind == "outside" {
-				selected = []string{"p_000000000000000000000000000000ff"}
-			}
-			f.engine.Mu.Lock()
-			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				if _, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": selected}); err == nil {
-					return nil, errors.New("invalid selection accepted")
-				}
-				return questionResult(req, "session-refused", "Selection refused."), nil
-			}
-			f.engine.Mu.Unlock()
-			f.startOwner(t)
-			f.wait(t, "invalid selection completed", func() bool {
-				repo, err := f.s.repository(f.project)
-				must(t, err)
-				state, err := repo.Workflow(f.origin, designStartSubject)
-				must(t, err)
-				return state.Value == "invalid"
-			})
-			for _, p := range []config.ProjectID{f.project, f.project2} {
-				repo, err := f.s.repository(p)
-				must(t, err)
-				streams, err := repo.Workstreams()
-				must(t, err)
-				for _, m := range streams {
-					if m != f.origin && m != librarianWorkstream(p) {
-						t.Fatalf("invalid selection allocated a member %s", m)
-					}
-				}
-			}
-			repo, err := f.s.repository(f.project)
-			must(t, err)
-			chief, err := repo.ChiefOfStaffThread(f.origin)
-			must(t, err)
-			if !equalJSONTest(chief, f.before) {
-				t.Fatal("invalid selection changed original conversation")
-			}
-			brief, err := trace.Get[trace.Document](repo, f.origin, handedDocument, 1)
-			must(t, err)
-			if !equalJSONTest(brief, f.handed) {
-				t.Fatal("invalid selection rewrote handed input")
-			}
-		})
-	}
-}
-
+// Project-list validation belongs to the owner-selected hand-in journeys.
 func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -668,12 +613,6 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 	f := newProductionDesignFixture(t)
 	defer f.stop(t)
 	f.stream1 = f.origin
-	f.engine.Mu.Lock()
-	f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
-		return questionResult(req, "session-selection", "Only the server needs a change."), err
-	}
-	f.engine.Mu.Unlock()
 	f.startOwner(t)
 	var packet PacketResponse
 	f.wait(t, "single-repo packet", func() bool {

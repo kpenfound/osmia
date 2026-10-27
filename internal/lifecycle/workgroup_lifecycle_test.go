@@ -235,14 +235,6 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				}
 			}
 			primaryDraft := f.engine.Turns["draft-1-1"]
-			primarySelection := f.engine.Turns["select-repos-1"]
-			f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				if !strings.Contains(req.Workspace.Directory(), string(unrelated)) {
-					return primarySelection(ctx, req, turn, tools)
-				}
-				_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
-				return questionResult(req, "session-unrelated-selection", "Only the independent request's repo is affected."), err
-			}
 			f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if !strings.Contains(req.Workspace.Directory(), string(unrelated)) {
 					return primaryDraft(ctx, req, turn, tools)

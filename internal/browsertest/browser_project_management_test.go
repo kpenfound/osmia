@@ -56,7 +56,7 @@ func projectChoicesInclude(p *page, project, repo config.ProjectID, repoPresent 
       const project = `+quote(string(project))+`, repo = `+quote(string(repo))+`;
       return [...document.querySelectorAll('[data-project-select]')].every(s =>
         [...s.options].filter(o => o.value).length === `+strconv.Itoa(projects)+` && [...s.options].some(o => o.value === project) &&
-        (repo === project || ![...s.options].some(o => o.value === repo))) &&
+        ([...s.options].some(o => o.value === repo) === `+strconv.FormatBool(repoPresent)+`)) &&
         [...document.querySelectorAll('[data-repo-select], #priority-project')].every(s =>
           [...s.options].some(o => o.value === repo) === `+strconv.FormatBool(repoPresent)+`) &&
         [...document.querySelector('#pause-form [name=target]').options].some(o => o.value === 'project:' + repo) === `+strconv.FormatBool(repoPresent)+`;
@@ -84,34 +84,32 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	p.Click(manage)
 	p.Await("management opened on its project", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
 	p.AwaitText("#charter-state", "Ready for hand-in")
-	p.Click("#project-add-repo")
-	p.Await("shared add-repo form with project chosen", `!document.querySelector('[data-view=repo-add]').hidden && document.querySelector('#repo-add [name=project]').value === `+quote(string(project)))
+
+	p.Await("grouping controls are absent", `document.querySelector('[data-open=repo-add], #project-add-repo, #repo-add') === null`)
+	p.Click("#project-home")
+	p.Click(`[data-view=project-pane] [data-open=project-add]`)
 	for name, value := range map[string]string{"name": "client", "upstream": "owner/client", "fork": "owner/client-fork", "clone": second} {
-		p.TypeInto("#repo-add [name="+name+"]", value)
+		p.TypeInto("#project-add [name="+name+"]", value)
 	}
-	p.Click("#repo-add [type=submit]")
-	managementOutcome(p, "#repo-add .result", "ok")
+	p.Click("#project-add [type=submit]")
+	managementOutcome(p, "#project-add .result", "ok")
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
 	var repoID config.ProjectID
-	for _, repo := range cfg.Projects[0].Repos {
-		if repo.ID != project {
-			repoID = repo.ID
+	for _, p := range cfg.Projects {
+		if p.ID != project {
+			repoID = p.ID
 		}
 	}
 	if repoID == "" {
-		t.Fatal("add-repo form did not register a second repo")
+		t.Fatal("project form did not register client")
 	}
-	projectChoicesInclude(p, project, repoID, true, 1)
-	p.AwaitText(card+` [data-repo="`+string(repoID)+`"]`, "dagger / client")
+	projectChoicesInclude(p, project, repoID, true, 2)
+	clientCard := `#project-pane [data-project="` + string(repoID) + `"]`
 	p.Click("#project-home")
+	p.AwaitText(clientCard+` [data-repo="`+string(repoID)+`"]`, "client")
 	p.Click(manage)
-	row := `#project-repos [data-managed-repo="` + string(repoID) + `"]`
-	defaultRow := `#project-repos [data-managed-repo="` + string(project) + `"]`
-	for _, text := range []string{"dagger / client", "client", "owner/client", "owner/client-fork", second, "main"} {
-		p.AwaitText(row, text)
-	}
-	p.AwaitText(defaultRow, "Default repo")
+	row := `#project-repos [data-managed-repo="` + string(project) + `"]`
 	p.Await("management fits at phone width", `document.documentElement.scrollWidth <= innerWidth && document.querySelector('#project-repos').getBoundingClientRect().right <= innerWidth`)
 	p.Click("#project-edit [data-action=read-charter]")
 	managementOutcome(p, "#project-edit .result", "ok")
@@ -129,40 +127,14 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	p.Await("charter save used the revision read", `managementWrites.some(r => r.method === 'PUT' && r.path === `+quote(Prefix+"/projects/charter/"+string(project))+` && r.body.revision === `+strconv.Itoa(read.Revision)+`)`)
 	p.AwaitText("#charter-state", "2 rules")
 
-	// Registration requests one initial extraction per repo. Observe both
-	// terminal outcomes before asking for another one on the client only.
-	for _, selector := range []string{row, defaultRow} {
-		p.Await("initial extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(selector+` [data-field=extraction]`)+`).textContent)`)
-	}
+	p.Await("initial extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
 	p.Click(row + ` [data-action=extract]`)
 	managementOutcome(p, row+" .result", "ok")
 	p.AwaitText(row+` [data-field=extraction]`, "Knowledge extraction 2:")
-	cfg, err = c.Configuration(ctx)
-	must(t, err)
-	for _, repo := range cfg.Projects[0].Repos {
-		want := 1
-		if repo.ID == repoID {
-			want = 2
-		}
-		if repo.Extraction == nil || repo.Extraction.Extraction != want {
-			t.Fatalf("extraction must target only client: %+v", repo)
-		}
-	}
 	p.Click(row + ` [data-action=rebase]`)
 	managementOutcome(p, row+" .result", "ok")
-	p.Click("#project-remove")
-	managementOutcome(p, "#project-result", "error")
-	p.AwaitText("#project-result", "still has other repos")
-	cfg, err = c.Configuration(ctx)
-	must(t, err)
-	if len(cfg.Projects) != 1 || len(cfg.Projects[0].Repos) != 2 {
-		t.Fatalf("refused project removal changed registrations: %+v", cfg.Projects)
-	}
-	p.Await("both repos remain in pane and management", `document.querySelectorAll(`+quote(card+` [data-repo]`)+`).length === 2 && document.querySelectorAll('#project-repos [data-managed-repo]').length === 2`)
-
 	p.Click("#project-home")
-	p.Click(card + ` [data-project-action=session-add]`)
-	p.Choose("#session-add-form [name=project]", string(repoID))
+	p.Click(clientCard + ` [data-project-action=session-add]`)
 	p.Choose("#session-add-form [name=profile]", "default")
 	p.TypeInto("#session-add-form [name=title]", "Explore the new client")
 	p.Click("#session-add-form [type=submit]")
@@ -170,26 +142,21 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	sessions, err := c.Sessions(ctx, repoID)
 	must(t, err)
 	if len(sessions.Sessions) != 1 || sessions.Sessions[0].Project != repoID {
-		t.Fatalf("exploratory session must use client repo: %+v", sessions)
+		t.Fatalf("project session: %+v", sessions)
 	}
 	p.Click("#project-home")
-	p.AwaitText(card+` [data-sessions=session] [data-pane-workstream="`+string(sessions.Sessions[0].Workstream)+`"]`, "dagger / client")
-	p.Click(manage)
-	p.Click(row + ` [data-action=remove]`)
-	managementOutcome(p, row+" .result", "ok")
-	p.AwaitText(row+" .result", "Repo removed from active work")
+	p.AwaitText(clientCard+` [data-sessions=session] [data-pane-workstream="`+string(sessions.Sessions[0].Workstream)+`"]`, "client")
+	p.Click(clientCard + ` [data-project-action=projects]`)
+	p.Click("#project-remove")
+	managementOutcome(p, "#project-result", "ok")
 	projectChoicesInclude(p, project, repoID, false, 1)
-	p.Await("project and default repo remain", `document.querySelectorAll(`+quote(card+` [data-repo]`)+`).length === 1 && document.querySelector(`+quote(defaultRow)+`) !== null && document.querySelector(`+quote(row+` [data-action=remove]`)+`).disabled`)
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
-	if len(cfg.Projects) != 1 || len(cfg.Projects[0].Repos) != 1 || cfg.Projects[0].Repos[0].ID != project {
-		t.Fatalf("repo removal must keep project and sibling: %+v", cfg.Projects)
+	if len(cfg.Projects) != 1 || cfg.Projects[0].ID != project {
+		t.Fatalf("project removal: %+v", cfg.Projects)
 	}
-	p.Await("all repo actions sent only the client ID", `(() => {
-      const writes = managementWrites.filter(r => ['/v1/projects/extract', '/v1/projects/rebase'].includes(r.path) || (r.path === '/v1/projects' && r.method === 'DELETE' && r.body.project !== `+quote(string(project))+`));
-      return writes.length === 3 && writes.every(r => JSON.stringify(r.body) === JSON.stringify({project: `+quote(string(repoID))+`}));
-    })()`)
 	p.Await("the same page throughout", `window.sameDocument === true`)
+
 }
 
 func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t *testing.T) {
@@ -279,7 +246,7 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	recordManagementWrites(p)
 	second := filepath.Join(t.TempDir(), "second")
 	demoGit(t, filepath.Dir(second), "init", "-q", second)
-	repos, err := c.AddRepo(ctx, RepoAddRequest{Project: project, Name: "second", Upstream: "owner/second", Clone: second})
+	repos, err := c.AddProject(ctx, ProjectAddRequest{Name: "second", Upstream: "owner/second", Clone: second})
 	must(t, err)
 	var repoID config.ProjectID
 	for _, repo := range repos.Project.Repos {
@@ -290,8 +257,9 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	if repoID == "" {
 		t.Fatal("missing API-added repo")
 	}
-	projectChoicesInclude(p, project, repoID, true, 1)
-	p.AwaitText(card+` [data-repo="`+string(repoID)+`"]`, "second")
+	projectChoicesInclude(p, project, repoID, true, 2)
+	p.AwaitText(`#project-pane [data-project="`+string(repoID)+`"]`, "second")
+	p.Choose("#project-edit [name=project]", string(repoID))
 	row := `#project-repos [data-managed-repo="` + string(repoID) + `"]`
 	p.AwaitText(row, "owner/second")
 	p.Await("initial API-added repo extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
@@ -314,8 +282,9 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	demoGit(t, filepath.Dir(third), "init", "-q", third)
 	another, err := c.AddProject(ctx, ProjectAddRequest{Name: "Third", Upstream: "owner/third", Clone: third})
 	must(t, err)
-	projectChoicesInclude(p, project, repoID, true, 2)
+	projectChoicesInclude(p, project, repoID, true, 3)
 	p.Await("API-created project in pane", `document.querySelector('#project-pane [data-project="`+string(another.Project.ID)+`"]') !== null`)
+	p.Choose("#project-edit [name=project]", string(project))
 	_, err = c.RemoveProject(ctx, repoID)
 	must(t, err)
 	projectChoicesInclude(p, project, repoID, false, 2)

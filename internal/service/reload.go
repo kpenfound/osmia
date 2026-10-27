@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -107,6 +106,13 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.log().Error("reload failed", "error", failed.Message)
 		return ReloadResponse{}, &APIError{Code: Validation, Message: failed.Message + "; the loaded configuration is unchanged"}
 	}
+	for _, p := range cfg.Projects {
+		if !next.Active(p.ID) {
+			if api := s.projectRemovalGate(p.ID); api != nil {
+				return ReloadResponse{}, api
+			}
+		}
+	}
 	unchanged := &APIError{Code: Internal, Message: "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
 	failUnchanged := func() (ReloadResponse, *APIError) {
 		s.log().Error("reload failed", "error", unchanged.Message)
@@ -183,18 +189,6 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.launch(p)
 	}
 	s.mu.Unlock()
-	// Member turns may still read their default repo's charter while draining.
-	// Release member handles before the authority they borrow.
-	slices.SortStableFunc(removed, func(a, b *activeProject) int {
-		ad, bd := cfg.For(a.id).Project.IsDefaultRepo(), cfg.For(b.id).Project.IsDefaultRepo()
-		if ad == bd {
-			return 0
-		}
-		if ad {
-			return 1
-		}
-		return -1
-	})
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
 			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())

@@ -35,7 +35,6 @@ import (
 // ProductionDesignClient is the owner API used by the shared design scenario.
 type ProductionDesignClient interface {
 	AddProject(context.Context, api.ProjectAddRequest) (api.ProjectResponse, error)
-	AddRepo(context.Context, api.RepoAddRequest) (api.ProjectResponse, error)
 	OpenDesign(context.Context, config.ProjectID) (api.DesignResponse, error)
 	DesignMessage(context.Context, config.WorkstreamID, string) (api.ConversationEntry, error)
 	DesignConversation(context.Context, config.WorkstreamID) (api.ConversationResponse, error)
@@ -350,8 +349,39 @@ func (f *ProductionDesign) LogTurns(t *testing.T, repo *trace.Repository, member
 	}
 }
 
+// RecordSelection seeds a durable member selection for recovery journeys.
+func (f *ProductionDesign) RecordSelection(t *testing.T, projects ...config.ProjectID) {
+	t.Helper()
+	ctx := context.Background()
+	r, err := f.Repository(*f.Project)
+	Must(t, err)
+	streams, err := r.Workstreams()
+	Must(t, err)
+	if !slices.Contains(streams, *f.Origin) {
+		Must(t, r.CreateWorkstream(ctx, *f.Origin, f.Clock.Now(), intake.OwnerActor))
+	}
+	selected := intake.DesignSelection{Group: config.WorkgroupID("g_" + strings.TrimPrefix(string(*f.Origin), "w_"))}
+	for _, p := range projects {
+		m := intake.HandInWorkstream(p, "design-"+string(*f.Origin))
+		if len(projects) == 1 && p == *f.Project {
+			m = *f.Origin
+		}
+		selected.Members = append(selected.Members, intake.DesignMember{Repo: p, Workstream: m})
+	}
+	data, err := json.Marshal(selected)
+	Must(t, err)
+	h := intake.OwnerHeader(intake.DesignSelectionDocument, *f.Project, *f.Origin, intake.DesignStartTransition, f.Clock.Now())
+	h.Schema = "osmia.trace.document"
+	Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignSelectionPath, Content: string(data)}}))
+}
+
 func (f *ProductionDesign) StartOwner(t *testing.T) {
 	t.Helper()
+	if *f.Stream1 == *f.Origin {
+		f.RecordSelection(t, *f.Project)
+	} else {
+		f.RecordSelection(t, *f.Project, *f.Project2)
+	}
 	_, err := f.Client().DesignStart(context.Background(), *f.Origin)
 	Must(t, err)
 	repo, err := f.Repository(*f.Project)
@@ -723,7 +753,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", second, bare)
 	fixturekit.DemoGit(t, home, "-C", second, "remote", "add", "upstream", bare)
-	other, err := f.Client().AddRepo(ctx, api.RepoAddRequest{Project: *f.Project, Upstream: "owner/client", Clone: second})
+	other, err := f.Client().AddProject(ctx, api.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
 	Must(t, err)
 	for _, repo := range other.Project.Repos {
 		if repo.Clone == second {
@@ -734,6 +764,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 		t.Fatal("second repo was not registered")
 	}
 	*f.Repos = append(*f.Repos, ProductionDesignRepo{*f.Project2, second, "owner/client", bare, strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare, "rev-parse", "refs/heads/main"))})
+	f.WriteCharter(t, *f.Project2, ShedCharter)
 	f.CheckRepos(t)
 	if handIn {
 		*f.Origin = intake.HandInWorkstream(*f.Project, "production-handin")

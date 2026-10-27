@@ -114,9 +114,10 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	f.engine.Mu.Unlock()
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
-	p.AwaitText(`[data-project="`+string(f.project)+`"] .pane-repos`, "client")
+	p.AwaitText(`[data-project="`+string(f.project2)+`"] .pane-repos`, "client")
 	p.Click(`[data-drilldown="` + string(f.origin) + `"]`)
 	p.Await("the original design chat", `!document.querySelector('[data-view="design"]').hidden`)
+	f.sharedDesign().RecordSelection(t, f.project, f.project2)
 	p.Click("#design-start")
 	packet := f.awaitPacket(t)
 	// Both selected repos allocate real members. Their shared chief gives
@@ -158,8 +159,8 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 			repoName = "client"
 		}
 		selector := sidebarGroup + ` [data-select="` + string(id) + `"]`
-		p.AwaitText(selector+` [data-field=goal]`, "dagger / "+repoName)
-		p.AwaitText(selector+` [data-field=project]`, "dagger / "+repoName)
+		p.AwaitText(selector+` [data-field=goal]`, repoName)
+		p.AwaitText(selector+` [data-field=project]`, repoName)
 	}
 	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	must(t, err)
@@ -200,7 +201,10 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	})
 	p.Run(chromedp.Reload())
 	p.Click("#project-home")
-	p.Await("one cross-repo graph with its edge", `document.querySelectorAll('#project-pane [data-workgroup]').length === 1 && document.querySelectorAll('#project-pane .workgroup-graph [data-edge]').length > 0`)
+	for _, project := range []config.ProjectID{f.project, f.project2} {
+		card := `#project-pane [data-project="` + string(project) + `"]`
+		p.Await("the one-repo project's workgroup graph and edge", `document.querySelectorAll(`+quote(card+` .pane-repos [data-repo]`)+`).length === 1 && document.querySelector(`+quote(card+` .pane-repos [data-repo="`+string(project)+`"]`)+`) !== null && document.querySelectorAll(`+quote(card+` [data-workgroup]`)+`).length === 1 && document.querySelector(`+quote(card+` [data-workgroup="`+string(selected.Group)+`"]`)+`) !== null && document.querySelectorAll(`+quote(card+` .workgroup-graph [data-edge]`)+`).length === 1`)
+	}
 	p.AwaitText(`[data-pane-workstream="`+string(f.stream2)+`"] [data-field=state]`, "blocked")
 	p.AwaitText(`[data-pane-workstream="`+string(f.stream2)+`"] [data-field=wait]`, "waiting on owner: dagger/dagger#123 merge")
 	inbox, err := f.c.Inbox(context.Background())
@@ -257,12 +261,16 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	f.wait(t, "one shared inbox decision", func() bool {
 		inbox, err := f.c.Inbox(context.Background())
 		must(t, err)
-		return len(inbox.Entries) == 1 && inbox.Entries[0].Workgroup != ""
+		return len(inbox.Entries) == 1 && inbox.Entries[0].Workgroup == selected.Group
 	})
 	p.Run(chromedp.Reload())
 	p.Click("#project-home")
-	p.Await("one shared decision in the project pane", `document.querySelectorAll('[data-group-inbox]').length === 1`)
-	p.Click(`[data-group-inbox]`)
+	for _, project := range []config.ProjectID{f.project, f.project2} {
+		card := `#project-pane [data-project="` + string(project) + `"]`
+		p.Await("one shared decision under the member's project card", `document.querySelectorAll(`+quote(card+` [data-group-inbox]`)+`).length === 1 && document.querySelector(`+quote(card+` [data-group-inbox]`)+`).dataset.groupInbox === `+quote(string(selected.Group)))
+		p.AwaitText(card+` [data-group-inbox]`, "1 waiting for you · Open inbox")
+	}
+	p.Click(`#project-pane [data-project="` + string(f.project2) + `"] [data-group-inbox]`)
 	p.Await("the project inbox opens the workgroup", `!document.querySelector('[data-view=workgroup]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))
 	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
 	p.Click("#project-home")

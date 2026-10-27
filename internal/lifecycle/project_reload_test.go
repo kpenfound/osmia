@@ -6,31 +6,34 @@ import (
 	os "os"
 	filepath "path/filepath"
 	strings "strings"
+	"sync"
 	testing "testing"
 )
 
-func TestReloadDrainsRemovedProjectAndAddsItAgain(t *testing.T) {
+func TestReloadRefusesUnresolvedProjectThenRemovesAndAddsItAgain(t *testing.T) {
 	t.Parallel()
 	f := newTwoProjectFixture(t)
 	entered, release := f.block(project, "first")
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	s, c := start(t, f.opts)
 	await(t, "the first project's turn", entered)
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	original, err := os.ReadFile(path)
 	must(t, err)
 	must(t, os.WriteFile(path, []byte(strings.Replace(string(original), `"`+string(project)+`", `, "", 1)), 0600))
-	done := make(chan error, 1)
-	go func() { _, err := c.Reload(context.Background()); done <- err }()
-	soon(t, "removal applied while its turn drains", func() bool { return !s.current().Active(project) })
-	select {
-	case err := <-done:
-		t.Fatalf("reload did not wait for the active turn: %v", err)
-	default:
+	_, err = c.Reload(context.Background())
+	assertCode(t, err, Validation)
+	if !strings.Contains(err.Error(), "workgroup") || !s.current().Active(project) {
+		t.Fatalf("reload did not retain the unresolved project's workgroup: %v", err)
 	}
-	close(release)
-	must(t, <-done)
+	unblock()
+	_, err = c.Abandon(context.Background(), f.streams[project], "Owner resolved this project's member.")
+	must(t, err)
+	_, err = c.Reload(context.Background())
+	must(t, err)
 	if len(s.traces()) != 1 || s.traces()[0].Project() != otherProject {
-		t.Fatal("the removed project still participates after draining")
+		t.Fatal("the removed project still participates after removal")
 	}
 	// A valid project-list edit starts the retained trace without registration.
 	must(t, os.WriteFile(path, original, 0600))

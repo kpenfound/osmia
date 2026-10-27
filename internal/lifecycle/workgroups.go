@@ -21,7 +21,7 @@ var MigrationActor = trace.Actor{Kind: "service", ID: "osmia"}
 var EnsureWorkgroupsInterrupt func(config.ProjectID) error
 
 // EnsureWorkgroups wraps every existing non-session workstream of each
-// Project's own default repo in its own one-workstream workgroup, whose
+// project in its own one-workstream workgroup, whose
 // chief of staff is that workstream's existing chief-of-staff thread: no new
 // thread is created. It runs once on every start, before the project
 // schedules any work, and is resumable and idempotent. A workstream already
@@ -38,8 +38,8 @@ func (s *Controller) EnsureWorkgroups(ctx context.Context, cfg *config.Config, p
 		repos[p.ID] = p
 	}
 	for _, p := range projects {
-		repo, ok := repos[p.ID]
-		if !ok || !repo.IsDefaultRepo() {
+		_, ok := repos[p.ID]
+		if !ok {
 			continue
 		}
 		streams, err := p.Repository.Workstreams()

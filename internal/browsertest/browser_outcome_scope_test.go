@@ -393,7 +393,6 @@ func TestBrowserCreateOutcomesBelongToTheirOpeningAndProject(t *testing.T) {
 		{"handin", "handin-form", "Handed in"},
 		{"design-add", "design-add-form", "Opened design session"},
 		{"session-add", "session-add-form", "Opened session"},
-		{"repo-add", "repo-add", "Added repo"},
 	} {
 		open(form.view, first)
 		result := "#" + form.id + " .result"
@@ -403,9 +402,6 @@ func TestBrowserCreateOutcomesBelongToTheirOpeningAndProject(t *testing.T) {
 			p.TypeInto("#handin-form [name=content]", "A feature with an outcome scoped to its project.")
 		case "session-add":
 			p.Choose("#session-add-form [name=profile]", "default")
-		case "repo-add":
-			p.TypeInto("#repo-add [name=upstream]", "owner/extra")
-			p.TypeInto("#repo-add [name=clone]", repoClone)
 		}
 		p.Click("#" + form.id + " [type=submit]")
 		p.AwaitText(result+"[data-outcome=ok]", form.success)
@@ -414,13 +410,4 @@ func TestBrowserCreateOutcomesBelongToTheirOpeningAndProject(t *testing.T) {
 		open(form.view, second)
 		assertOutcome(p, result, "", "")
 	}
-	// A refusal stays in the project where it was made, including when the
-	// owner changes the select without closing the shared form.
-	open("repo-add", first)
-	p.TypeInto("#repo-add [name=upstream]", "owner/duplicate")
-	p.TypeInto("#repo-add [name=clone]", repoClone)
-	p.Click("#repo-add [type=submit]")
-	p.AwaitText("#repo-add .result[data-outcome=error]", "already owns")
-	p.Choose("#repo-add [name=project]", string(second))
-	assertOutcome(p, "#repo-add .result", "", "")
 }

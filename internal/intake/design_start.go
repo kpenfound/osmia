@@ -38,19 +38,10 @@ type DesignSelection struct {
 
 func (s *Controller) DesignRepos(repo config.ProjectID) []config.Project {
 	cfg := s.Current()
-	var group config.ProjectID
-	for _, p := range cfg.Projects {
-		if p.ID == repo {
-			group = p.Group()
-		}
+	if !cfg.Active(repo) {
+		return nil
 	}
-	var out []config.Project
-	for _, p := range cfg.Projects {
-		if p.Group() == group && cfg.Active(p.ID) {
-			out = append(out, p)
-		}
-	}
-	return out
+	return []config.Project{cfg.For(repo).Project}
 }
 
 func DesignSelectionOf(r *trace.Repository, stream config.WorkstreamID) (DesignSelection, bool, error) {
@@ -95,7 +86,11 @@ func (s *Controller) DesignStartBlocksDraft(r *trace.Repository, stream config.W
 		_, issueErr := issues.Parse(d.Source)
 		return d.Source == "design:"+string(stream) || d.Source == "stdin" || strings.HasPrefix(d.Source, "file:") || issueErr == nil
 	})
-	if !source || len(s.DesignRepos(r.Project())) < 2 {
+	_, selected, err := DesignSelectionOf(r, stream)
+	if err != nil {
+		return false, err
+	}
+	if !source || !selected && len(s.DesignRepos(r.Project())) < 2 {
 		return false, nil
 	}
 	state, err := r.Workflow(stream, DesignStartSubject)

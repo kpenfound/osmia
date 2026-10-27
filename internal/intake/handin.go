@@ -61,7 +61,7 @@ func (s *Controller) HandIn(ctx context.Context, req HandInRequest) (HandInRespo
 	if errors.Is(err, ErrNoActiveProject) {
 		return HandInResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	edit := "osmia edit charter " + string(cfg.For(req.Project).Project.Group())
+	edit := "osmia edit charter " + string(cfg.For(req.Project).Project.ID)
 	if errors.Is(err, ErrNoTrace) {
 		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}

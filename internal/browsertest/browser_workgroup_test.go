@@ -418,3 +418,52 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		t.Fatalf("shared answer did not settle: %+v", remaining)
 	}
 }
+
+func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newTwoProjectFixture(t)
+	withWeb(t, f.opts, "127.0.0.1:0")
+	members := []trace.CrossRepoMember{}
+	names := map[config.ProjectID]string{project: "Server", otherProject: "Client"}
+	for _, id := range []config.ProjectID{project, otherProject} {
+		p := f.cfg.For(id).Project
+		p.Name = names[id]
+		path, err := f.cfg.Root.ProjectConfig(id)
+		must(t, err)
+		must(t, config.WriteProjectConfig(path, p))
+		r, err := trace.Open(f.cfg.Root, p)
+		must(t, err)
+		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[id]})
+	}
+	chief, g, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, demoStart, ownerActor, "fixture")
+	must(t, err)
+	for _, m := range members {
+		must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, demoStart, ownerActor, "fixture"))
+	}
+	_, err = chief.EnsureChiefOfStaff(ctx, g.Members[0], demoStart, ownerActor)
+	must(t, err)
+	must(t, chief.Close())
+	for _, m := range members {
+		must(t, m.Project.Close())
+	}
+	f.opts.Threads = func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) {
+		return &completedRunner{}, nil
+	}
+	f.opts.Reconciliation.Ticks = make(chan time.Time)
+	s, _ := start(t, f.opts)
+	p := openBrowser(t)
+	p.Run(chromedp.Navigate("http://" + s.WebAddr() + "/"))
+	for _, id := range []config.ProjectID{project, otherProject} {
+		card := `#project-pane [data-project="` + string(id) + `"]`
+		p.Await("workgroup in each project card", `document.querySelector(`+quote(card+` [data-workgroup="`+string(g.ID)+`"]`)+`) !== null`)
+		p.AwaitText(card+` [data-pane-workstream="`+string(f.streams[id])+`"] [data-field=repo]`, names[id])
+	}
+	p.Await("both cards retain their group nodes", `document.querySelectorAll('#project-pane [data-workgroup="`+string(g.ID)+`"]').length === 2`)
+	row := `[data-sidebar-workgroup="` + string(g.ID) + `"]`
+	p.AwaitText(row+` [data-select="`+string(f.streams[project])+`"] [data-field=project]`, "Server")
+	p.AwaitText(row+` [data-select="`+string(f.streams[otherProject])+`"] [data-field=project]`, "Client")
+	p.Click(row + ` [data-select-workgroup]`)
+
+	p.Await("members use only project names", `[...document.querySelectorAll('#workgroup-content .member-card [data-field=repo]')].map(n => n.textContent).sort().join(',') === 'Client,Server'`)
+}

@@ -346,7 +346,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("second repo source\n"), 0600))
 	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "README.md")
 	demoGit(t, filepath.Dir(clone), "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	added, err := c.AddRepo(context.Background(), RepoAddRequest{Project: project, Upstream: "owner/second", Clone: clone})
+	added, err := c.AddProject(context.Background(), ProjectAddRequest{Name: "client", Upstream: "owner/second", Clone: clone})
 	must(t, err)
 	var second config.ProjectID
 	for _, repo := range added.Project.Repos {
@@ -355,7 +355,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		}
 	}
 	if second == "" {
-		t.Fatal("live AddRepo did not register a second repo")
+		t.Fatal("project creation did not register the second project")
 	}
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("uncommitted source\n"), 0600))
 	for _, repoID := range []config.ProjectID{project, second} {
@@ -374,7 +374,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		if !strings.Contains(req.SystemPrompt, "1. Keep changes small.") {
 			fail("missing project charter in design context")
 		}
-		for _, repo := range []config.ProjectID{project, second} {
+		for _, repo := range []config.ProjectID{project} {
 			if !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
 				fail("missing repo knowledge base in context: %s", repo)
 			}
@@ -401,7 +401,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			}
 		}
 		out, err := callTool(ctx, tools, designReadRepoToolName, map[string]any{"repo": "p_00000000000000000000000000000099", "path": "README.md"})
-		if err == nil || !strings.Contains(err.Error(), "not one of this project's repos") {
+		if err == nil || !strings.Contains(err.Error(), "not this project's repository") {
 			fail("read outside project was not refused by membership: %s %v", out, err)
 		}
 		names, err := toolNames(ctx, tools)

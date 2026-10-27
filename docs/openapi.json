@@ -1969,43 +1969,6 @@
         }
       }
     },
-    "/v1/projects/repos": {
-      "post": {
-        "summary": "Add a repo to an existing project",
-        "operationId": "postProjectsRepos",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepoAddRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "description": "The request failed; the error names its code and reason.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/ratify/{workstream}": {
       "post": {
         "summary": "Ratify the spec and plan",
@@ -4448,9 +4411,6 @@
           "fork": {
             "type": "string"
           },
-          "group_id": {
-            "type": "string"
-          },
           "hearsay_entities": {
             "additionalProperties": {
               "type": "string"
@@ -6425,29 +6385,6 @@
         },
         "type": "object"
       },
-      "RepoAddRequest": {
-        "properties": {
-          "base_branch": {
-            "type": "string"
-          },
-          "clone": {
-            "type": "string"
-          },
-          "fork": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project": {
-            "type": "string"
-          },
-          "upstream": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "RepoView": {
         "properties": {
           "base_branch": {
@@ -6455,9 +6392,6 @@
           },
           "clone": {
             "type": "string"
-          },
-          "default": {
-            "type": "boolean"
           },
           "entity_map": {
             "type": "string"

@@ -10,9 +10,9 @@ import (
 
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/swaggest/jsonschema-go"
-	"github.com/swaggest/openapi-go"
 	"github.com/swaggest/openapi-go/openapi31"
+ "github.com/swaggest/openapi-go"
+ "github.com/swaggest/jsonschema-go"
 )
 
 const description = `The Osmia service serves this API over its Unix socket and, when configured,

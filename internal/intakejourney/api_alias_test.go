@@ -77,8 +77,6 @@ type RatifyRequest = api.RatifyRequest
 
 type RatifyResponse = api.RatifyResponse
 
-type RepoAddRequest = api.RepoAddRequest
-
 type PauseRequest = api.PauseRequest
 
 type ClearPauseRequest = api.ClearPauseRequest
@@ -124,3 +122,5 @@ type FeedResponse = api.FeedResponse
 type FeedEntry = api.FeedEntry
 
 type DraftEdit = api.DraftEdit
+
+type ProjectAddRequest = api.ProjectAddRequest

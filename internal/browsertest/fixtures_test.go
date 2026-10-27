@@ -95,7 +95,6 @@ const Prefix = service.Prefix
 
 type HandInRequest = service.HandInRequest
 type ProjectAddRequest = service.ProjectAddRequest
-type RepoAddRequest = service.RepoAddRequest
 type RuntimeResponse = service.RuntimeResponse
 type PauseRequest = service.PauseRequest
 type ClearPauseRequest = service.ClearPauseRequest

@@ -103,8 +103,8 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		f.start(t)
 		memberships := map[membership][]config.WorkgroupID{}
 		for _, project := range []config.ProjectID{f.project, f.project2} {
-			if f.s.current().For(project).Project.Group() != f.project {
-				t.Fatalf("repo %s is outside the workgroup's project", project)
+			if f.s.current().For(project).Project.ID != project {
+				t.Fatalf("repo %s is not active", project)
 			}
 			r, err := f.s.repository(project)
 			must(t, err)

@@ -64,7 +64,6 @@
 
 <div id="create-menu" class="popover menu" popover data-anchor="new-workstream">
   <button type="button" data-open="project-add">Create project</button>
-  <button type="button" data-open="repo-add">Add repo</button>
   <button type="button" data-open="handin">Hand in a feature</button>
   <button type="button" data-open="design-add">Open a design session</button>
   <button type="button" data-open="session-add">Open an exploratory session</button>
@@ -115,7 +114,6 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Open a design session
     </button>
     <button type="button" class="new" data-open="project-add">Create project</button>
-    <button type="button" class="new" data-open="repo-add">Add repo</button>
     <ul id="workstream-list" class="rows"></ul>
     <details id="archived" class="archived" hidden>
       <summary>Archived <span id="archived-count" class="meta"></span></summary>
@@ -131,20 +129,6 @@
     <section class="view" data-view="project-pane" aria-labelledby="project-pane-title">
       <div class="view-head"><h2 id="project-pane-title">Projects</h2><button type="button" data-open="project-add">Create project</button></div>
       <div id="project-pane"></div>
-    </section>
-
-    <section class="view" data-view="repo-add" aria-labelledby="repo-add-title" hidden>
-      <div class="view-head"><h2 id="repo-add-title">Add repo</h2><button type="button" data-open="project-pane">Back to projects</button></div>
-      <form id="repo-add" class="control">
-        <label>Project <select name="project" data-project-select required></select></label>
-        <label>Name (optional) <input name="name" type="text"></label>
-        <label>Upstream repository <input name="upstream" type="text" placeholder="owner/repository" required></label>
-        <label>Your fork (optional) <input name="fork" type="text"></label>
-        <label>Clone path on the service machine <input name="clone" type="text" required></label>
-        <label>Base branch <input name="base_branch" type="text" value="main" required></label>
-        <div class="actions"><button type="submit">Add repo</button></div>
-        <p class="result" role="status"></p>
-      </form>
     </section>
 
     <section class="view" data-view="workgroup" aria-label="Workgroup" hidden>
@@ -358,7 +342,6 @@
       </form>
       <div class="control">
         <div class="actions">
-          <button type="button" id="project-add-repo">Add repo</button>
           <button type="button" id="project-remove">Remove project from active work</button>
         </div>
         <p id="project-result" class="result" role="status"></p>

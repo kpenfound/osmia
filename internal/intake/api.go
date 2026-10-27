@@ -276,8 +276,6 @@ type ProjectRemoveRequest = api.ProjectRemoveRequest
 
 type ProjectResponse = api.ProjectResponse
 
-type RepoAddRequest = api.RepoAddRequest
-
 type RuntimeResponse = api.RuntimeResponse
 
 type EffectiveProfile = api.EffectiveProfile
