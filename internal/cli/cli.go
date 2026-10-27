@@ -39,7 +39,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project extract <project-id> [--json]
   project memory <project-id>
   project rebase <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
+  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
   edit charter <project-id> [--from FILE]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
@@ -98,6 +98,7 @@ type options struct {
 	skipDebate, version, detach                     bool
 	projectSpecRevision, specRevision, planRevision int
 	args                                            []string
+	with                                            []string
 }
 
 func parse(args []string) (o options, err error) {
@@ -109,12 +110,12 @@ func parse(args []string) (o options, err error) {
 			continue
 		}
 		key, value, has := strings.Cut(a, "=")
-		if seen[key] {
+		if seen[key] && key != "--with" {
 			return o, errors.New("duplicate flag")
 		}
 		seen[key] = true
 		switch key {
-		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -149,6 +150,8 @@ func parse(args []string) (o options, err error) {
 			case "--base-branch":
 				o.baseBranch = value
 				o.target = true
+			case "--with":
+				o.with = append(o.with, value)
 			case "--base":
 				o.base = value
 			case "--project":
@@ -307,7 +310,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return invalid()
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -523,6 +526,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 1
 		}
 		req := wire.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		if len(o.with) > 0 {
+			req.Projects = []config.ProjectID{id}
+			for _, raw := range o.with {
+				project, err := config.ParseProjectID(raw)
+				if err != nil {
+					return invalid()
+				}
+				req.Projects = append(req.Projects, project)
+			}
+		}
 		if o.base != "" {
 			req.Base, err = config.ParseWorkstreamID(o.base)
 			if err != nil {

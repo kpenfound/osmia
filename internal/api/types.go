@@ -262,19 +262,27 @@ type CharterState struct {
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`
 }
 
-// HandInRequest hands work to a project. Exactly one of Path (an absolute
-// path to a file), URL (a GitHub issue URL) and Stdin (the input itself) is
+// HandInRequest hands work to the ordered Projects, whose first project hosts
+// the shared chief and conversation. Project is a one-project shorthand.
+// Exactly one of Path (an absolute file path), URL (a GitHub issue URL) and
+// Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
-// workstream. SkipDebate asks for the workstream's debate to be skipped: its
-// spec and plan go to the owner's ratification without a committee.
+// workstream. Base belongs to a selected project and applies only to its member.
+// SkipDebate skips every member's debate; ratification still belongs to the owner.
 type HandInRequest struct {
 	Base       config.WorkstreamID `json:"base,omitempty"`
-	Project    config.ProjectID    `json:"project"`
+	Project    config.ProjectID    `json:"project,omitempty"`
+	Projects   []config.ProjectID  `json:"projects,omitempty"`
 	Key        string              `json:"key"`
 	Path       string              `json:"path,omitempty"`
 	URL        string              `json:"url,omitempty"`
 	Stdin      *string             `json:"stdin,omitempty"`
 	SkipDebate bool                `json:"skip_debate,omitempty"`
+}
+
+// ProjectSelectionRequest supplies the owner's ordered projects for a held design start.
+type ProjectSelectionRequest struct {
+	Projects []config.ProjectID `json:"projects"`
 }
 
 // HandInResponse names the workstream a hand-in created. Source is where its

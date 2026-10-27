@@ -29,6 +29,14 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	if reason == "" {
 		return AbandonResponse{}, &APIError{Code: Validation, Message: "reason must not be empty"}
 	}
+	if joining, err := s.intake().SelectionJoiningMember(stream); err != nil {
+		return AbandonResponse{}, &APIError{Code: Internal, Message: err.Error()}
+	} else if joining {
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: "the workgroup is still joining its owner-selected members; cancel the whole workgroup after it has joined"}
+	}
+	if api := s.lifecycle().MemberRemovalGate(ctx, raw); api != nil {
+		return AbandonResponse{}, api
+	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: abandonTransition}
 	state, err := repository.SetFeatureStateUnless(ctx, h, AbandonedState, reason, AbandonedState, DeliveredState)

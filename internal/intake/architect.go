@@ -170,7 +170,7 @@ func (d *Drafter) Reconcile(ctx context.Context, stream config.WorkstreamID) err
 	if feature.Value != HandedState {
 		return nil
 	}
-	if blocked, err := d.S.DesignStartBlocksDraft(d.Repository, stream); err != nil || blocked {
+	if blocked, err := d.S.DesignStartPending(d.Repository, stream); err != nil || blocked {
 		return err
 	}
 	state, err := d.Repository.Workflow(stream, DraftSubject)
@@ -1051,7 +1051,7 @@ func (d *Drafter) Sketch(ctx context.Context, operation string, stream config.Wo
 }
 
 func ArchitectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {

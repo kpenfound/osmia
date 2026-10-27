@@ -1119,6 +1119,55 @@
         }
       }
     },
+    "/v1/design/{workstream}/projects": {
+      "post": {
+        "summary": "Choose projects for an unselected handed design start held after an upgrade",
+        "operationId": "postDesignByWorkstreamProjects",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectSelectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignStartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/design/{workstream}/start": {
       "post": {
         "summary": "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff",
@@ -1408,7 +1457,7 @@
     },
     "/v1/handin": {
       "post": {
-        "summary": "Hand in a workstream",
+        "summary": "Hand in work to one project or an ordered list of projects",
         "operationId": "postHandin",
         "requestBody": {
           "content": {
@@ -5714,6 +5763,12 @@
           "project": {
             "type": "string"
           },
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "skip_debate": {
             "type": "boolean"
           },
@@ -6187,6 +6242,20 @@
           },
           "project": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectSelectionRequest": {
+        "properties": {
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"

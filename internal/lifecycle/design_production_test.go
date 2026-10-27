@@ -368,7 +368,6 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 	f.checkContinuation(t)
 }
 
-// Project-list validation belongs to the owner-selected hand-in journeys.
 func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

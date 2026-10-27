@@ -302,7 +302,8 @@
     <section class="view" data-view="handin" aria-labelledby="handin-title" hidden>
       <div class="view-head"><h2 id="handin-title">Hand in a feature</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="handin-form" class="control">
-        <label>Project <select name="project" data-project-select required></select></label>
+        <label>Projects <select name="project" data-project-select multiple required></select></label>
+        <p class="meta" id="handin-project-order">Choose projects in order; the first hosts the shared chief and conversation.</p>
         <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
         <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
         <label>Feature description or issue URL <textarea name="content" rows="8" required></textarea></label>

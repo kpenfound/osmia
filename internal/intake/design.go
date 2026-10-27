@@ -663,6 +663,13 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string) (Desi
 			handed, alreadyHanded = document, true
 		}
 	}
+	if _, found, err := DesignSelectionOf(repository, stream); err != nil {
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+	} else if !alreadyHanded && !found {
+		if api := s.RecordOwnerProjects(ctx, repository, stream, []config.ProjectID{project}, ""); api != nil {
+			return DesignStartResponse{}, api
+		}
+	}
 	if !alreadyHanded {
 		if err := repository.Append(ctx, handed); err != nil {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot hand off design session %s; check the trace repository", stream)}

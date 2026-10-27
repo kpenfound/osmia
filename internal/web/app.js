@@ -790,10 +790,12 @@
     if (select.dataset.options === key) {
       return;
     }
-    const chosen = select.value;
+    const chosen = select.multiple ? [...select.selectedOptions].map(o => o.value) : select.value;
     select.dataset.options = key;
     select.replaceChildren(...options.map(([value, label]) => el('option', { value }, label)));
-    if (options.some(([value]) => value === chosen)) {
+    if (select.multiple) {
+      for (const option of select.options) option.selected = chosen.includes(option.value);
+    } else if (options.some(([value]) => value === chosen)) {
       select.value = chosen;
     }
   }
@@ -1573,6 +1575,7 @@
       const form = document.querySelector('[data-view="' + view + '"] form');
       const changedProject = form.elements.project.value !== project;
       form.elements.project.value = project;
+      if (view === 'handin') handinProjects = project ? [project] : [];
       if (view !== 'projects' || changedProject) form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
     }
     const changed = ui.view !== view;
@@ -2761,6 +2764,11 @@
         (out) => 'Answered inbox entry ' + out.number + '.', undefined, decisionKey(entry));
       return;
     }
+    if (entry.kind === 'project-selection') {
+      body.projects = d.text.value.split(/[\s,]+/).filter(Boolean);
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, () => 'Projects selected. The start will continue.', undefined, decisionKey(entry));
+      return;
+    }
     if (entry.kind === 'delivery') {
       body.messages = d.messages.map((m) => ({ commit: m.commit, message: m.input.value }));
       body.description = d.text.value;
@@ -2849,6 +2857,9 @@
       d.accept = el('button', { type: 'button', 'data-field': 'accept' });
       d.accept.addEventListener('click', () => accept(d));
       fields.push(d.text);
+    } else if (entry.kind === 'project-selection') {
+      d.text = el('textarea', { name: 'projects', rows: '2', required: true });
+      fields.push(el('label', {}, 'Project IDs in order, separated by spaces or commas', d.text));
     } else if (entry.kind === 'delivery') {
       d.text = el('textarea', { name: 'description', rows: '8' });
       d.draft = '';
@@ -3003,6 +3014,9 @@
       case 'escalation':
         d.accept.textContent = 'Accept: ' + entry.quick_reply;
         place(d.actions, entry.quick_reply ? [d.submit, d.accept] : [d.submit]);
+        break;
+      case 'project-selection':
+        place(d.actions, [d.submit]);
         break;
       case 'delivery':
         renderDelivery(d, name);
@@ -3446,6 +3460,12 @@
   let draftRead = null;
   let baseRead = null;
   let handinRetry = null;
+  let handinProjects = [];
+  function selectedHandinProjects() {
+    const selected = [...byId('handin-form').elements.project.selectedOptions].map(o => o.value);
+    handinProjects = [...handinProjects.filter(id => selected.includes(id)), ...selected.filter(id => !handinProjects.includes(id))];
+    return handinProjects;
+  }
 
   // formAction runs an owner action a form submits. With opts.reset, a
   // successful submission clears the form back to its default values, the
@@ -3484,14 +3504,16 @@
   function renderOwnerForms() {
     const options = [['', 'Choose a project'], ...projects().map(p => [p.id, projectName(p.id)])];
     for (const select of document.querySelectorAll('[data-project-select]')) {
-      setOptions(select, options);
+      setOptions(select, select.multiple ? options.filter(([id]) => id) : options);
     }
     for (const select of document.querySelectorAll('[data-repo-select]')) {
       setOptions(select, [['', 'Choose a repo'], ...configuredRepos().map(r => [r.id, r.label])]);
     }
     const all = streams();
     const handin = byId('handin-form');
-    setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => w.project === handin.elements.project.value && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
+    const handinSelected = selectedHandinProjects();
+    setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => handinSelected.includes(w.project) && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
+    byId('handin-project-order').textContent = handinProjects.length ? 'Selected order: ' + handinProjects.map(projectName).join(' → ') + '. First project hosts the shared chief and conversation.' : 'Choose projects in order; the first hosts the shared chief and conversation.';
     const w = shown();
     for (const id of workstreamForms) {
       byId(id).elements.workstream.value = w ? w.workstream : '';
@@ -3552,7 +3574,7 @@
     handin.elements.project.addEventListener('change', renderOwnerForms);
     handin.addEventListener('submit', event => {
       event.preventDefault();
-      const body = {project: handin.elements.project.value, base: handin.elements.base.value, skip_debate: handin.elements.skip_debate.checked};
+      const body = {projects: selectedHandinProjects(), base: handin.elements.base.value, skip_debate: handin.elements.skip_debate.checked};
       body[handin.elements.source.value === 'url' ? 'url' : 'stdin'] = handin.elements.content.value;
       const input = JSON.stringify(body);
       if (!handinRetry || handinRetry.input !== input) {

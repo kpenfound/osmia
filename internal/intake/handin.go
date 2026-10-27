@@ -51,25 +51,25 @@ func HandInWorkstream(project config.ProjectID, key string) config.WorkstreamID 
 // copies the input into a new workstream and moves it to the handed state. The
 // project may be left out while exactly one project is active.
 func (s *Controller) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, *APIError) {
-	project, api := s.ProjectFor(req.Project)
-	if api != nil {
+	projects := req.Projects
+	if projects == nil {
+		project, api := s.ProjectFor(req.Project)
+		if api != nil {
+			return HandInResponse{}, api
+		}
+		projects = []config.ProjectID{project}
+	} else if req.Project != "" && (len(projects) == 0 || req.Project != projects[0]) {
+		return HandInResponse{}, &APIError{Code: Validation, Message: "project must match the first entry in projects"}
+	}
+	if api := s.ValidateProjects(ctx, projects); api != nil {
 		return HandInResponse{}, api
 	}
-	req.Project = project
+	req.Project = projects[0]
 	cfg := s.Current()
-	_, c, err := s.LoadCharter(ctx, req.Project)
-	if errors.Is(err, ErrNoActiveProject) {
-		return HandInResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
-	}
-	edit := "osmia edit charter " + string(cfg.For(req.Project).Project.ID)
-	if errors.Is(err, ErrNoTrace) {
-		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
-	}
-	if err != nil {
-		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter of project %s; check the project trace", req.Project)}
-	}
-	if c.Empty() {
-		return HandInResponse{}, &APIError{Code: CharterEmpty, Message: fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: %s", req.Project, edit)}
+	if len(projects) > 1 {
+		if _, api := s.SelectionBase(projects, req.Base); api != nil {
+			return HandInResponse{}, api
+		}
 	}
 	if !HandInKey.MatchString(req.Key) {
 		return HandInResponse{}, &APIError{Code: Validation, Message: "key must be 1 to 128 letters, digits, '_' or '-', starting with a letter or digit"}
@@ -96,6 +96,16 @@ func (s *Controller) HandIn(ctx context.Context, req HandInRequest) (HandInRespo
 		return HandInResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	stream := HandInWorkstream(req.Project, req.Key)
+	if len(projects) > 1 && req.Base != "" {
+		if req.Base == stream {
+			return HandInResponse{}, &APIError{Code: Validation, Message: "base must name another feature workstream"}
+		}
+		for _, project := range projects {
+			if req.Base == HandInWorkstream(project, "design-"+string(stream)) {
+				return HandInResponse{}, &APIError{Code: Validation, Message: "base cannot name a member of this hand-in"}
+			}
+		}
+	}
 	workstreamTrace, err := cfg.Root.WorkstreamTrace(req.Project, stream)
 	if err != nil {
 		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
@@ -145,8 +155,29 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		return HandInResponse{}, false, &APIError{Code: Conflict, Message: "workstream is permanently archived; use a new hand-in key"}
 	}
 	_, archivedBase := h.S.ArchivedWorkstream(string(req.Base))
-	if req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == LibrarianWorkstream(req.Project)) {
+	if len(req.Projects) < 2 && req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == LibrarianWorkstream(req.Project)) {
 		return HandInResponse{}, false, &APIError{Code: Validation, Message: "base must name another feature workstream in the same project"}
+	}
+	var selected DesignSelection
+	var selectionFound bool
+	if exists {
+		selected, selectionFound, err = DesignSelectionOf(repository, stream)
+		if err != nil {
+			return h.Failed("reading project selection of")
+		}
+	}
+	projects := req.Projects
+	if projects == nil {
+		projects = []config.ProjectID{req.Project}
+	}
+	if selectionFound {
+		prior := []config.ProjectID{}
+		for _, m := range selected.Members {
+			prior = append(prior, m.Repo)
+		}
+		if !slices.Equal(prior, projects) || selected.Base != req.Base {
+			return HandInResponse{}, false, &APIError{Code: Conflict, Message: "the hand-in key already names a different project selection or base"}
+		}
 	}
 	var doc *trace.Document
 	var handed, skipped bool
@@ -167,7 +198,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 				break
 			}
 		}
-		if (doc != nil || initial.Revision > 0) && initial.Base != req.Base {
+		if (doc != nil || initial.Revision > 0) && len(req.Projects) < 2 && initial.Base != req.Base {
 			return HandInResponse{}, false, &APIError{Code: Conflict, Message: "the hand-in key already names a different base"}
 		}
 		transitions, err := trace.Read[trace.Transition](repository, stream)
@@ -178,6 +209,9 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		// Only the skip the hand-in recorded counts: a later skip through the
 		// shed is the owner's action on the workstream, not part of the request.
 		skipped = slices.ContainsFunc(transitions, SkippedAtHandIn)
+	}
+	if doc != nil && len(projects) > 1 && !selectionFound {
+		return HandInResponse{}, false, &APIError{Code: Conflict, Message: "the hand-in key already names a single-project hand-in"}
 	}
 	if doc != nil && (doc.Source != h.Source || req.Stdin != nil && doc.Content != *req.Stdin) {
 		return HandInResponse{}, false, &APIError{Code: Conflict, Message: fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
@@ -219,7 +253,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, OwnerActor, HandInTransition); err != nil {
 			return h.Failed("recording the workgroup of")
 		}
-		if req.Base != "" {
+		if req.Base != "" && len(projects) == 1 {
 			recorded, err := repository.WorkstreamBase(stream)
 			if err != nil {
 				return h.Failed("reading base of")
@@ -233,6 +267,11 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		// priority or pause may name it as soon as this hand-in finishes.
 		if err := h.S.RefreshRuntime(); err != nil {
 			return h.Failed("resolving the runtime workstreams of")
+		}
+		if len(projects) > 1 {
+			if api := h.S.RecordOwnerProjects(ctx, repository, stream, projects, req.Base); api != nil {
+				return HandInResponse{}, false, api
+			}
 		}
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: HandedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: OwnerActor, Cause: HandInTransition},
 			Path: "handed/" + h.Name, Content: *content, Source: h.Source}

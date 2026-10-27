@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -493,6 +494,20 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			if out, api := s.designMessage(r.Context(), id, v); api != nil {
 				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/projects"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
+			var v api.ProjectSelectionRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, failure := s.intake().ChooseDesignProjects(r.Context(), id, v.Projects); failure != nil {
+				failWith(w, failure)
 			} else {
 				respond(w, 200, out)
 			}

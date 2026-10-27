@@ -204,8 +204,8 @@ func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignS
 
 const designStartSubject = intake.DesignStartSubject
 
-func (s *Service) designStartBlocksDraft(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
-	return s.intake().DesignStartBlocksDraft(r, stream)
+func (s *Service) designStartPending(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	return s.intake().DesignStartPending(r, stream)
 }
 
 func (s *Service) designStartPass(ctx context.Context, r *trace.Repository) error {
