@@ -1,10 +1,13 @@
 package plan
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/charter"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -51,4 +54,23 @@ func DraftCheck(directory string) func(map[string]string) error {
 		}
 		return nil
 	}
+}
+
+// CharterProblems checks embedded charter citations against the citing member's
+// current workgroup charters. It supplements structural draft validation.
+func CharterProblems(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, documents ...string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, text := range documents {
+		for _, c := range charter.References(text) {
+			if seen[c] {
+				continue
+			}
+			seen[c] = true
+			if _, _, err := repo.ResolveCharter(ctx, stream, c); err != nil {
+				out = append(out, "citation "+c+": "+err.Error())
+			}
+		}
+	}
+	return out
 }

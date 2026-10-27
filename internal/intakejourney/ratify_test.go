@@ -318,7 +318,8 @@ func TestRedraftIsAskedForOncePerConclusionAndWaitsForARunner(t *testing.T) {
 	if _, err := f.c.ShedRedraft(ctx, stream, "Split it differently."); !failed(err, Conflict) || !strings.Contains(err.Error(), "already asked for") {
 		t.Fatalf("asking twice after one conclusion: %v", err)
 	}
-	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: f.repository()}).Pass(ctx))
+	repo := f.repository()
+	drivePass(t, f.s, repo, func() error { return (&debate{S: f.s.intake().DebateDependencies(), Repository: repo}).Pass(ctx) })
 	if moves := f.shedMoves(t, stream); slices.Contains(moves, "redraft-1") {
 		t.Fatalf("a service without an architect wrote the redraft: %v", moves)
 	}

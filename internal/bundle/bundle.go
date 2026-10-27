@@ -43,17 +43,18 @@ type Scope struct {
 // Bundle is one assembled context. Every part names the path and record it
 // was read from.
 type Bundle struct {
-	Memory        []json.RawMessage `json:"memory,omitempty"`
-	MemoryProblem string            `json:"memory_problem,omitempty"`
-	Project       config.ProjectID  `json:"project"`
-	Mode          Mode              `json:"mode"`
-	Scope         Scope             `json:"scope"`
-	Charter       Charter           `json:"charter"`
-	Knowledge     []Prose           `json:"knowledge"`
-	Missing       []MissingProse    `json:"missing"`
-	Entities      Entities          `json:"entities"`
-	Decisions     []Decision        `json:"decisions"`
-	Notices       []Notice          `json:"notices"`
+	Memory         []json.RawMessage     `json:"memory,omitempty"`
+	MemoryProblem  string                `json:"memory_problem,omitempty"`
+	Project        config.ProjectID      `json:"project"`
+	Mode           Mode                  `json:"mode"`
+	Scope          Scope                 `json:"scope"`
+	MemberCharters []trace.MemberCharter `json:"member_charters,omitempty"`
+	Charter        Charter               `json:"charter"`
+	Knowledge      []Prose               `json:"knowledge"`
+	Missing        []MissingProse        `json:"missing"`
+	Entities       Entities              `json:"entities"`
+	Decisions      []Decision            `json:"decisions"`
+	Notices        []Notice              `json:"notices"`
 	// CharterNotices are the charter rules the owner ratified from rulings,
 	// in the order they were recorded in the charter.
 	CharterNotices []CharterNotice `json:"charter_notices"`
@@ -222,6 +223,16 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	}
 	c := charter.Parse(doc.Content)
 	b.Charter = Charter{Source: doc.Path, Record: doc.ID, Revision: doc.Revision, Rules: c.Rules, Diagnostics: c.Diagnostics}
+
+	if scope.Workstream != "" {
+		members, err := repo.WorkgroupCharters(ctx, scope.Workstream)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("workgroup charters: %w", err)
+		}
+		if len(members) > 1 {
+			b.MemberCharters = members
+		}
+	}
 
 	m, revision, err := kb.LoadRevision(repo)
 	if err != nil {

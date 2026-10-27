@@ -1486,7 +1486,7 @@ func CommitteePrompt(in RoundInput, standing []shed.Dissent, answers []string) s
 Your view holds:
 - spec.md and plan.json: the revision under debate. Cite a criterion as spec#<n> and a unit as plan#<unit>.
 - handed/: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>.
+- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>. Context labels all workgroup member charters by project ID. Each governs its member's slice, plan and units; check the workgroup spec and contracts against all of them. Cite another member as <project-id>/charter#<n>. Use kind charter_conflict and cite both rules when member charters conflict: only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Cite a knowledge-base file as kb/<subsystem>.md and an entity as %s<entity>.
 - repo/: the tracked files of the owner's clone, read-only.
 - shed/round-<n>/: what every member contributed in earlier rounds, and the architect's reply to each as reply.json, when there are any.

@@ -45,7 +45,8 @@ const Guidance = "When a service event says a question is open, choose exactly o
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
 	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
 	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it with the rule as the charter should state it; " +
-	"the owner ratifies or declines the proposal, so make it the attention of your status until they do."
+	"For an amendment to another member charter, set amends to that project's qualified rule citation; the proposal is recorded and decided in that project. " +
+	"The owner ratifies or declines the proposal, so make it the attention of your status until they do."
 
 // ChiefTools names the chief of staff's question tools.
 var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool, LogAssumptionTool}
@@ -83,16 +84,17 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		return chiefTools(repository, agent, scope, now), nil
 	}
 	ask := coreadapter.Tool{Name: AskTool, Effect: coreadapter.ToolMemory,
-		Description: "Ask the chief of staff a question you cannot answer from your context. Say what you need decided and what it blocks. The question is recorded and your turn ends; end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false}`)}
+		Description: "Ask the chief of staff a question you cannot answer from your context. Say what you need decided and what it blocks. For a conflict between member charters, supply charter_conflict with both project-qualified rules; Go sends it directly to the owner. The question is recorded and your turn ends; end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"charter_conflict":{"type":"array","items":{"type":"string"},"minItems":2}},"required":["question"],"additionalProperties":false}`)}
 	ask.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Question string `json:"question"`
+			Question        string   `json:"question"`
+			CharterConflict []string `json:"charter_conflict"`
 		}
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
 		}
-		q, err := repository.Ask(ctx, agent, scope, input.Question, now())
+		q, err := repository.AskCharterConflict(ctx, agent, scope, input.Question, input.CharterConflict, now())
 		if err != nil {
 			return refuse(err)
 		}
@@ -299,19 +301,20 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		}{true, relayed, input.Scope, "The ruling is delivered to each asker as its next turn."})
 	}
 	propose := coreadapter.Tool{Name: ProposeCharterTool, Effect: coreadapter.ToolMemory,
-		Description: "Propose the owner's ruling on a question as a standing charter rule, when it applies to the project beyond this feature. question: the number of a question the owner ruled on; one proposal per ruling. rule: the rule as the charter should state it, one line. " +
+		Description: "Propose the owner's ruling on a question as a standing charter rule, when it applies to the project beyond this feature. question: the number of a question the owner ruled on; one proposal per ruling. rule: the rule as the charter should state it, one line. amends: optional charter citation, qualified with the target project ID when amending another member charter; the proposal is recorded and decided in that project. " +
 			"The owner ratifies or declines it. A ratified rule is appended to the charter as its next number, recording the ruling, and becomes a notice in every bundle on the project.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"rule":{"type":"string"}},"required":["question","rule"],"additionalProperties":false}`)}
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"rule":{"type":"string"},"amends":{"type":"string"}},"required":["question","rule"],"additionalProperties":false}`)}
 	propose.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Question string `json:"question"`
 			Rule     string `json:"rule"`
+			Amends   string `json:"amends"`
 		}
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
 		}
 		next := func(content string) int { return charter.Parse(content).Next() }
-		proposal, err := repository.ProposeCharter(ctx, agent, scope, input.Question, input.Rule, next, now())
+		proposal, err := repository.ProposeCharterFor(ctx, agent, scope, input.Question, input.Rule, input.Amends, next, now())
 		if err != nil {
 			return refuse(err)
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/envelope"
 )
 
@@ -77,6 +78,18 @@ func (b Bundle) Render() string {
 	}
 
 	line("")
+	if len(b.MemberCharters) > 0 {
+		line("## Workgroup charters")
+		line("Each member's own charter governs its slice, plan and units. The workgroup spec and contracts must satisfy every charter below. Unqualified charter#<n> cites the member's own project. Use the displayed project ID for qualified citations. Conflicts between projects' charter rules require the owner; report them with charter_conflict and cite both rules.")
+		for _, m := range b.MemberCharters {
+			line("\n### Project %s (member %s)", m.Project, m.Workstream)
+			line("source: %s/charter.md (record %s revision %d)", m.Project, m.Document.ID, m.Document.Revision)
+			for _, rule := range charter.Parse(m.Document.Content).Rules {
+				line("- %s/charter#%d: %s", m.Project, rule.Number, rule.Text)
+			}
+		}
+	}
+
 	line("## Knowledge base")
 	if len(b.Knowledge) == 0 && len(b.Missing) == 0 {
 		line("No knowledge-base prose exists.")

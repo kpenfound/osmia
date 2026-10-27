@@ -98,6 +98,9 @@ func TestDraftWriteCheckAcceptance(t *testing.T) {
 			if tc.name == "own-feature" {
 				entities.Entities = append(entities.Entities, kb.Entity{ID: "internal.service", Name: "Service", Paths: []string{"internal/service/**"}}, kb.Entity{ID: "internal.plan", Name: "Plan", Paths: []string{"internal/plan/**"}})
 				must(t, kb.Store(context.Background(), f.repository(), entities, f.clock.Now(), serviceActor, "fixture"))
+				charter, err := f.repository().Charter(context.Background())
+				must(t, err)
+				recordCharter(t, f.repository(), charter.Content+"\n4. Run dagger check with --parallel 4.\n")
 			}
 			f.script("draft-1-1", map[string]string{plan.SpecPath: tc.spec, plan.PlanPath: tc.graph}, nil)
 			f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)

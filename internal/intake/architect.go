@@ -779,7 +779,7 @@ func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []s
 	if err != nil || len(problems) > 0 {
 		return DraftInvalid, problems, err
 	}
-	problems, err = d.Validate(trace.Document{Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
+	problems, err = d.Validate(trace.Document{Header: trace.Header{Workstream: stream}, Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
 	if err != nil {
 		return DraftInvalid, problems, err
 	}
@@ -1015,7 +1015,7 @@ func (d *Drafter) Validate(specDoc, planDoc trace.Document) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ValidateDraft(specDoc.Content, planDoc.Content, entities), nil
+	return append(ValidateDraft(specDoc.Content, planDoc.Content, entities), plan.CharterProblems(context.Background(), d.Repository, specDoc.Workstream, specDoc.Content, planDoc.Content)...), nil
 }
 
 // validateDraft returns every problem with a spec and a plan against the
@@ -1068,7 +1068,7 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, an
 
 Your view holds:
 - %s: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>.
+- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
 Deliver two files with %s; only what you deliver is kept.

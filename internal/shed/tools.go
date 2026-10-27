@@ -33,7 +33,7 @@ const (
 )
 
 // CitationForms lists what an objection may cite, for prompts and refusals.
-const CitationForms = "charter#<n> (a charter rule), spec#<n> (an acceptance criterion of the spec), plan#<unit> (a unit of the plan), kb/<subsystem>.md (a knowledge-base file) or " + EntityCitation + "<entity> (an entity of the entity map)"
+const CitationForms = "charter#<n> or <project>/charter#<n> (a member charter rule; project is its p_ ID), spec#<n> (an acceptance criterion of the spec), plan#<unit> (a unit of the plan), kb/<subsystem>.md (a knowledge-base file) or " + EntityCitation + "<entity> (an entity of the entity map)"
 
 // PartForms lists the parts an objection may concern.
 const PartForms = "spec#<n> (an acceptance criterion), plan#<unit> (a unit), spec (the spec as a whole) or plan (the plan as a whole)"
@@ -95,7 +95,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 		return nil, err
 	}
 	object := coreadapter.Tool{Name: ObjectTool, Effect: coreadapter.ToolMemory, InputSchema: schema,
-		Description: "Object to one part of the spec or the plan. kind: charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
+		Description: "Object to one part of the spec or the plan. kind: charter_conflict (two member charters conflict; cite both rules; only the owner resolves it), charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
 			"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
 			"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."}
 	object.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -155,7 +155,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 // checkObjection returns *Invalid for an objection the round refuses.
 func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 	if !slices.Contains(Kinds, o.Kind) {
-		return invalid("kind %q is not one of charter, fit, size or acceptance", o.Kind)
+		return invalid("kind %q is not one of charter, charter_conflict, fit, size or acceptance", o.Kind)
 	}
 	if strings.TrimSpace(o.Argument) == "" {
 		return invalid("an objection requires an argument")
@@ -169,6 +169,11 @@ func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 	for _, c := range o.Citations {
 		if err := t.Resolve(ctx, c); err != nil {
 			return err
+		}
+	}
+	if o.Kind == CharterConflict {
+		if err := t.Repository.CheckCharterConflict(ctx, t.Stream, o.Citations); err != nil {
+			return invalid("%s", err)
 		}
 	}
 	if o.Kind == Charter && !slices.ContainsFunc(o.Citations, questions.IsCharter) {
@@ -257,6 +262,9 @@ func (t Turn) checkConcession(c Concession) error {
 	records := append(slices.Clone(t.Earlier), t.Record)
 	for _, r := range records {
 		for _, o := range r.Objections {
+			if o.ID == c.Objection && o.Kind == CharterConflict {
+				return invalid("a conflict between member charters is escalated to the owner; only the owner resolves it")
+			}
 			if o.ID == c.Objection && r.Member != t.Record.Member {
 				return invalid("objection %s is %s's; you may concede only your own", c.Objection, r.Member)
 			}

@@ -29,6 +29,8 @@ type Kind string
 const (
 	// Charter says the part violates a charter rule. It is a veto.
 	Charter Kind = "charter"
+	// CharterConflict reports incompatible rules of two member projects; only the owner settles it.
+	CharterConflict Kind = "charter_conflict"
 	// Fit says the plan does not realise the handed design, or works against
 	// a decision the knowledge base holds. It is advice to the owner.
 	Fit Kind = "fit"
@@ -40,7 +42,7 @@ const (
 )
 
 // Kinds lists the objection kinds in the order prompts and schemas give them.
-var Kinds = []Kind{Charter, Fit, Size, Acceptance}
+var Kinds = []Kind{Charter, Fit, Size, Acceptance, CharterConflict}
 
 // Pin is the revision of spec.md and of plan.json a round runs against.
 type Pin struct {
@@ -239,7 +241,9 @@ type Dissent struct {
 // Blocking reports whether the dissent stands in the way of ratification: the
 // owner's own objection or a charter veto. Engineering objections are advice. The
 // owner's disposition of the objection overrides this.
-func (d Dissent) Blocking() bool { return d.Kind == Charter || d.Kind == Owner }
+func (d Dissent) Blocking() bool {
+	return d.Kind == Charter || d.Kind == CharterConflict || d.Kind == Owner
+}
 
 // Entry is one line of the dissent record: an objection that stands, whether
 // it blocks, and how it was disposed of. By is ChiefOfStaff when the chief of
@@ -277,7 +281,10 @@ func DissentRecord(records []Record, rulings []Rulings, chief []ChiefDecisions) 
 	entries := make([]Entry, len(open))
 	for i, d := range open {
 		entries[i] = Entry{Dissent: d, Blocking: d.Blocking()}
-		if c, ok := decided[d.ID]; ok && d.Member != OwnerMember {
+		if d.Kind == CharterConflict {
+			entries[i].Blocking, entries[i].Escalated, entries[i].Escalation = true, true, "Conflicting member charters require the owner."
+		}
+		if c, ok := decided[d.ID]; ok && d.Member != OwnerMember && d.Kind != CharterConflict {
 			switch c.Decision {
 			case Escalate:
 				entries[i].Escalated, entries[i].Escalation = true, c.Note
@@ -324,7 +331,7 @@ func OpenDissent(records []Record) []Dissent {
 		}
 		accepts := r.Failure == "" && len(r.Objections) == 0
 		open = slices.DeleteFunc(open, func(d Dissent) bool {
-			if d.Member != r.Member {
+			if d.Member != r.Member || d.Kind == CharterConflict {
 				return false
 			}
 			conceded := slices.ContainsFunc(r.Concessions, func(c Concession) bool { return c.Objection == d.ID })

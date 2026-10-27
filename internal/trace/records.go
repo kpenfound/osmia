@@ -72,12 +72,13 @@ func (Transition) traceRecord() {}
 // the rest of what the owner is sent.
 type Question struct {
 	Header
-	AskedBy     Actor       `json:"asked_by"`
-	Thread      string      `json:"thread,omitempty"`
-	Turn        string      `json:"turn,omitempty"`
-	Question    string      `json:"question"`
-	SentToOwner string      `json:"sent_to_owner,omitempty"`
-	Escalation  *Escalation `json:"escalation,omitempty"`
+	AskedBy         Actor       `json:"asked_by"`
+	Thread          string      `json:"thread,omitempty"`
+	Turn            string      `json:"turn,omitempty"`
+	Question        string      `json:"question"`
+	CharterConflict []string    `json:"charter_conflict,omitempty"`
+	SentToOwner     string      `json:"sent_to_owner,omitempty"`
+	Escalation      *Escalation `json:"escalation,omitempty"`
 }
 
 // Amendment is a request against the sealed spec or plan.
