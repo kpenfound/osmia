@@ -302,13 +302,16 @@ type DesignOpenRequest struct {
 	Project config.ProjectID `json:"project"`
 }
 
-// DesignView is one design session: the workstream it lives on, its project
-// and when it opened. It carries no spec, plan or feature state: it stays
-// outside every factory pass until the owner starts a workgroup from it.
+// DesignView is a design session and its latest brief, revision and ordered
+// projects. BriefRevision is zero until a brief is recorded. The session stays
+// outside feature work until the owner starts a workgroup from the brief.
 type DesignView struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Project    config.ProjectID    `json:"project"`
-	CreatedAt  time.Time           `json:"created_at"`
+	Workstream    config.WorkstreamID `json:"workstream"`
+	Project       config.ProjectID    `json:"project"`
+	CreatedAt     time.Time           `json:"created_at"`
+	BriefRevision int                 `json:"brief_revision"`
+	Brief         string              `json:"brief"`
+	Projects      []config.ProjectID  `json:"projects"`
 }
 
 // DesignResponse answers opening or reading one design session.
@@ -324,6 +327,11 @@ type DesignsResponse struct {
 // DesignMessageRequest is an owner message to a design session's agent.
 type DesignMessageRequest struct {
 	Text string `json:"text"`
+}
+
+// DesignStartRequest optionally pins the brief the owner reviewed.
+type DesignStartRequest struct {
+	BriefRevision *int `json:"brief_revision,omitempty"`
 }
 
 // DesignStartResponse names the workstream a design session's brief started

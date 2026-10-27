@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -90,6 +91,11 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		}
 		intent := trace.SessionDestroy{Project: cfg.For(p.id).Project, Workstream: id, Kind: trace.SessionKind}
 		if design {
+			if _, pinned, err := intake.DesignStartIntentOf(p.repository, id); err != nil {
+				return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
+			} else if pinned {
+				return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "a workgroup start is pending for this design session"}
+			}
 			intent.Kind = "design"
 			groups, _, err := trace.Workgroups(p.repository)
 			if err != nil {

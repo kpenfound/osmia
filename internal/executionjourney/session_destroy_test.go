@@ -486,6 +486,74 @@ func TestDestroySessionFencesControlsWithStaleLookups(t *testing.T) {
 	}
 }
 
+func TestDestroySessionKeepsNeighborScheduling(t *testing.T) {
+	t.Parallel()
+	for _, stage := range []string{"base", "edge"} {
+		for _, design := range []bool{false, true} {
+			t.Run(stage+"/"+map[bool]string{false: "exploratory", true: "design"}[design], func(t *testing.T) {
+				t.Parallel()
+				ctx := context.Background()
+				entered, release := make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer unblock()
+				var armed atomic.Bool
+				var passes atomic.Int64
+				var logs syncBuffer
+				s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
+					opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+					opts.schedulePassed = func() { passes.Add(1) }
+					opts.boundary = func(ctx context.Context, step string) error {
+						if step == "schedule:"+stage && armed.CompareAndSwap(true, false) {
+							close(entered)
+							select {
+							case <-release:
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+						}
+						return nil
+					}
+				})
+				if design {
+					opened, err := c.OpenDesign(ctx, project)
+					must(t, err)
+					stream = opened.Design.Workstream
+				}
+				armed.Store(true)
+				select {
+				case <-entered:
+				case <-time.After(demoTimeout):
+					t.Fatal("scheduling did not reach its boundary")
+				}
+				repo, err := s.repository(project)
+				must(t, err)
+				neighbor := config.WorkstreamID("w_00000000000000000000000000000901")
+				must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), ownerActor))
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-waiting", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: ownerActor, Cause: "fixture"}
+				_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: lifecycle.EdgeWaitSubject, To: "waiting", Reason: "Await edge observation"}})
+				must(t, err)
+				if design {
+					_, err = c.DestroyDesign(ctx, stream)
+				} else {
+					_, err = c.DestroySession(ctx, stream)
+				}
+				must(t, err)
+				unblock()
+				eventually(t, "neighbor's edge wait clears after destroy", func() bool {
+					state, err := repo.Workflow(neighbor, lifecycle.EdgeWaitSubject)
+					must(t, err)
+					return state.Value == "available"
+				})
+				assertDestroyedSession(t, s, c, project, stream)
+				awaitFurtherPasses(t, &passes, 2)
+				if strings.Contains(logs.String(), `"level":"ERROR"`) {
+					t.Fatalf("background error: %s", logs.String())
+				}
+			})
+		}
+	}
+}
+
 func TestDestroyRefusesTurnsAndConcurrentDesignStart(t *testing.T) {
 	t.Parallel()
 	s, c, project := newDesignFixture(t)

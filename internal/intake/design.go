@@ -23,8 +23,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Design session tool and document names. draft_brief and read_repo are the
-// only tools a design session's agent may ever reach; every other tool a
+// Design session tool and document names. file_read, draft_brief and read_repo
+// are the only tools a design session's agent may ever reach; every other tool a
 // chief-of-staff turn can hold, including every write, version-control,
 // credential or owner-gate tool, is narrowed away for it (enforcement.go).
 const (
@@ -56,7 +56,38 @@ const DesignOpenValue = "open"
 const DesignClosedValue = "started"
 
 type DesignBriefRecord struct {
-	Content string `json:"content"`
+	Content  string             `json:"content"`
+	Projects []config.ProjectID `json:"projects,omitempty"`
+}
+
+// LatestDesignBrief resolves the legacy default without changing its revision.
+func LatestDesignBrief(repository *trace.Repository, stream config.WorkstreamID) (DesignBriefRecord, int, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return DesignBriefRecord{}, 0, err
+	}
+	var latest trace.Document
+	for _, d := range docs {
+		if d.ID == DesignDraftDocument && d.Revision > latest.Revision {
+			latest = d
+		}
+	}
+	brief := DesignBriefRecord{}
+	if latest.Revision != 0 {
+		if err := json.Unmarshal([]byte(latest.Content), &brief); err != nil {
+			return brief, 0, err
+		}
+	}
+	if brief.Projects == nil {
+		brief.Projects = []config.ProjectID{repository.Project()}
+	}
+	return brief, latest.Revision, nil
+}
+
+func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView, error) {
+	brief, revision, err := LatestDesignBrief(repository, view.Workstream)
+	view.BriefRevision, view.Brief, view.Projects = revision, brief.Content, brief.Projects
+	return view, err
 }
 
 // isDesignWorkstream reports whether stream is a design session: a
@@ -150,7 +181,11 @@ func (s *Controller) DesignList(rawProject string) (DesignsResponse, *APIError) 
 				return DesignsResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
 			}
 			if design {
-				out = append(out, RenderDesignView(active.ID, w))
+				view, err := DesignBriefView(active.Repository, RenderDesignView(active.ID, w))
+				if err != nil {
+					return DesignsResponse{}, &APIError{Code: Internal, Message: err.Error()}
+				}
+				out = append(out, view)
 			}
 		}
 	}
@@ -193,7 +228,11 @@ func (s *Controller) DesignRead(raw string) (DesignView, *APIError) {
 			if !design {
 				return DesignView{}, notFound
 			}
-			return RenderDesignView(active.ID, w), nil
+			view, err := DesignBriefView(active.Repository, RenderDesignView(active.ID, w))
+			if err != nil {
+				return DesignView{}, &APIError{Code: Internal, Message: err.Error()}
+			}
+			return view, nil
 		}
 	}
 	return DesignView{}, notFound
@@ -254,8 +293,8 @@ func DesignLock(repository *trace.Repository, stream config.WorkstreamID) *sync.
 // states the agent's read-only, gate-free standing and the readiness pass it
 // runs before handoff.
 const DesignRolePrompt = "You are the design agent for a project the owner is scoping before any work starts. " +
-	"You have the project's charter and the knowledge base of every repo in the project below, and read-only access to each " +
-	"repo's committed source code through read_repo. You hold no write tool, no version control tool, no credential and no " +
+	"You have a catalog of every active project below. Brief projects have their charter and knowledge base inline; " +
+	"other projects have those documents in your view. Read any active project's committed source code through read_repo. You hold no write tool, no version control tool, no credential and no " +
 	"owner gate: you cannot write a file, commit, push, open a pull request, rule on anything or start work yourself.\n\n" +
 	"Run a readiness pass before handoff. Ask the owner only about choices that are expensive to undo (contracts, data " +
 	"models, migrations, public APIs), genuine forks with no clear signal in the code or the charter, or points that are in " +
@@ -263,38 +302,46 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"code, the project's conventions and the owner's stated intent, and show it as a collapsed, overridable assumption the " +
 	"owner can skim and override, for example inside a <details><summary>Assumptions</summary>...</details> block, rather " +
 	"than asking about it.\n\n" +
+	"An owner request to add or remove a project is confirmation of that list change. If you infer a project change, " +
+	"raise it as a readiness question with a recommendation and apply it only after the owner agrees. " +
+	"Use draft_brief projects to record the confirmed ordered project list; omitting projects keeps the current list.\n\n" +
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
 	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes; only its " +
 	"latest call is used. The owner starts the workgroup once satisfied; you never start it yourself, and nothing you say " +
 	"or record causes any work to begin."
 
-// designSystemPrompt renders stream's turn prompt: the role prompt, the
-// project's own charter and, for every repo of the project, its knowledge
-// base, using the service's already open repository handles.
-func (s *Controller) DesignSystemPrompt(ctx context.Context, cfg *config.Config, repository *trace.Repository, now time.Time) (string, error) {
+// DesignSystemPrompt includes the active catalog and only brief projects' full context.
+func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (string, error) {
+	brief, _, err := LatestDesignBrief(repository, stream)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	b.WriteString(DesignRolePrompt)
-	fmt.Fprintf(&b, "\n\n## Project\nRepos in this project: %s\n", DesignRepoList([]config.Project{cfg.Project}))
-	charterDoc, err := repository.Charter(ctx)
-	if err != nil {
-		return "", fmt.Errorf("charter: %w", err)
+	b.WriteString("\n\n## Active project catalog\nProject | Name | Upstream | In brief | Reference files\n--- | --- | --- | --- | ---\n")
+	for _, project := range s.Current().Projects {
+		references := "inline below"
+		if !slices.Contains(brief.Projects, project.ID) {
+			references = fmt.Sprintf("projects/%s/charter.md, projects/%s/kb.md", project.ID, project.ID)
+		}
+		fmt.Fprintf(&b, "%s | %s | %s | %t | %s\n", project.ID, project.Name, project.Upstream, slices.Contains(brief.Projects, project.ID), references)
 	}
-	b.WriteString("\n## Charter\n")
-	b.WriteString(charterDoc.Content)
-	text, err := DesignRepoKnowledge(repository)
-	if err != nil {
-		return "", fmt.Errorf("project %s knowledge base: %w", cfg.Project.ID, err)
+	for _, project := range brief.Projects {
+		repo, err := s.Repository(project)
+		if err != nil {
+			return "", err
+		}
+		charterDoc, err := repo.Charter(ctx)
+		if err != nil {
+			return "", err
+		}
+		knowledge, err := DesignRepoKnowledge(repo)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "\n## Project %s charter\n%s\n## Project %s knowledge base\n%s", project, charterDoc.Content, project, knowledge)
 	}
-	fmt.Fprintf(&b, "\n## Repo %s (%s) knowledge base\n%s", cfg.Project.Name, cfg.Project.ID, text)
 	return b.String(), nil
-}
-
-func DesignRepoList(members []config.Project) string {
-	names := make([]string, len(members))
-	for i, m := range members {
-		names[i] = fmt.Sprintf("%s (%s)", m.Name, m.ID)
-	}
-	return strings.Join(names, ", ")
 }
 
 // designRepoKnowledge renders one repo's entity map and knowledge-base prose.
@@ -359,7 +406,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot read the design session's documents"}
 	}
 	for _, document := range documents {
-		if document.ID == HandedDocument {
+		if document.ID == HandedDocument || document.ID == DesignStartIntentDocument {
 			return ConversationEntry{}, &APIError{Code: Conflict, Message: "a workgroup start is pending; retry starting the workgroup before sending more messages"}
 		}
 	}
@@ -371,9 +418,9 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 	if UnfinishedSessionTurn(th) {
 		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
-	prompt, err := s.DesignSystemPrompt(ctx, cfg, repository, at)
+	prompt, err := s.DesignSystemPrompt(ctx, repository, stream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the charter and the knowledge base of every repo in the project", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the active projects' charters and knowledge bases", stream)}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -396,16 +443,17 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 // drafted: decisions, intent and tradeoffs, and rejected options, as one
 // piece of markdown. A later call replaces the one startDesignWorkgroup
 // reads; nothing before the latest call is used.
-func DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
+func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftBriefToolName, Effect: coreadapter.ToolMemory,
-		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}`),
+		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}}},"required":["content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := repository.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
 			var in struct {
-				Content string `json:"content"`
+				Content  string          `json:"content"`
+				Projects json.RawMessage `json:"projects"`
 			}
 			d := json.NewDecoder(bytes.NewReader(raw))
 			d.DisallowUnknownFields()
@@ -427,20 +475,24 @@ func DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now f
 				return RefuseReport("the brief must cover decisions, intent and tradeoffs, and rejected options; missing: %s", strings.Join(missing, ", "))
 			}
 			stream := config.WorkstreamID(scope.Workstream)
-			docs, err := trace.Read[trace.Document](repository, stream)
+			brief, revision, err := LatestDesignBrief(repository, stream)
 			if err != nil {
 				return nil, err
 			}
-			k := 1
-			for _, d := range docs {
-				if d.ID == DesignDraftDocument && d.Revision >= k {
-					k = d.Revision + 1
+			if in.Projects != nil {
+				if err := json.Unmarshal(in.Projects, &brief.Projects); err != nil {
+					return RefuseReport("projects must be an ordered project list")
 				}
 			}
+			if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
+				return RefuseReport("%s", api.Message)
+			}
+			brief.Content = content
+			k := revision + 1
 			at := now()
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignDraftDocument, Revision: k,
 				Project: repository.Project(), Workstream: stream, At: at, Actor: ChiefActor, Cause: DraftBriefToolName}
-			data, err := json.Marshal(DesignBriefRecord{Content: content})
+			data, err := json.Marshal(brief)
 			if err != nil {
 				return nil, err
 			}
@@ -457,13 +509,13 @@ func DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now f
 }
 
 // designReadRepoTool reads a file, or lists a directory, from the committed
-// head of one repo of the design session's project: the session's own repo
-// by default, or another repo of the project named by its project ID. It
+// head of any active project: the session's project by default, or another
+// active project named by its project ID. It
 // reads only; it never writes, fetches credentials or touches version
 // control beyond a local, read-only export of the head commit.
 func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Controls, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: DesignReadRepoToolName, Effect: coreadapter.ToolRead,
-		Description: "Read a file, or list a directory, from the head of one repo of this project, read-only. repo defaults to this project's own repo; name another repo of the project by its project ID to read it instead. path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).",
+		Description: "Read a file, or list a directory, from any active project, read-only. repo defaults to the session project; name any active project by its project ID to read it instead. path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}},"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := r.ActiveTurn(scope); err != nil {
@@ -496,11 +548,14 @@ func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Contr
 			// replacing existing runners. Resolve membership and clones per read.
 			current := cfg
 			if service := controls.Load(); service != nil {
-				current = service.About(r)
+				current = service.Current().For(r.Project())
 			}
 			target := current.Project
-			if in.Repo != "" && config.ProjectID(in.Repo) != current.Project.ID {
-				return nil, fmt.Errorf("repo %q is not this project's repository", in.Repo)
+			if in.Repo != "" {
+				target = current.For(config.ProjectID(in.Repo)).Project
+			}
+			if !current.Active(target.ID) {
+				return nil, fmt.Errorf("repo %q is not an active project", in.Repo)
 			}
 			cmd := exec.CommandContext(ctx, "git", "-C", target.Clone, "rev-parse", "--verify", "HEAD^{commit}")
 			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
@@ -555,23 +610,48 @@ func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Contr
 		}}
 }
 
-// stageDesignWorkspace prepares a design session turn's workspace: it has no
-// files of its own, since the charter and every repo's knowledge base are
-// already in the turn's system prompt and its source code is read through
-// read_repo.
-func StageDesignWorkspace(workspace string) ([]string, error) {
+// StageDesignWorkspace puts non-brief projects' reference documents in the read-only view.
+func (s *Controller) StageDesignWorkspace(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
 	if err := os.RemoveAll(workspace); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(workspace, 0700); err != nil {
 		return nil, err
 	}
-	readme := "This design session has no files of its own. The project's charter and every repo's knowledge base are in " +
-		"your system prompt; read source code read-only with " + DesignReadRepoToolName + ".\n"
-	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte(readme), 0600); err != nil {
+	brief, _, err := LatestDesignBrief(repository, stream)
+	if err != nil {
 		return nil, err
 	}
-	return []string{"README.md"}, nil
+	paths := []string{}
+	for _, project := range s.Current().Projects {
+		if slices.Contains(brief.Projects, project.ID) {
+			continue
+		}
+		repo, err := s.Repository(project.ID)
+		if err != nil {
+			return nil, err
+		}
+		charterDoc, err := repo.Charter(ctx)
+		if err != nil {
+			return nil, err
+		}
+		knowledge, err := DesignRepoKnowledge(repo)
+		if err != nil {
+			return nil, err
+		}
+		for _, doc := range []struct{ name, content string }{{"charter.md", charterDoc.Content}, {"kb.md", knowledge}} {
+			path := filepath.Join("projects", string(project.ID), doc.name)
+			full := filepath.Join(workspace, path)
+			if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(full, []byte(doc.content), 0600); err != nil {
+				return nil, err
+			}
+			paths = append(paths, filepath.ToSlash(path))
+		}
+	}
+	return paths, nil
 }
 
 // designTranscript renders a design session's conversation, oldest first,
@@ -607,7 +687,7 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 // design conversation continues as the workgroup's. It is refused, recording
 // nothing, when the workstream is no longer a design session, a turn is
 // running, or the agent has not drafted a brief yet.
-func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string) (DesignStartResponse, *APIError) {
+func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, requests ...DesignStartRequest) (DesignStartResponse, *APIError) {
 	project, stream, repository, api := s.DesignTrace(raw)
 	if api != nil {
 		return DesignStartResponse{}, api
@@ -622,88 +702,95 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string) (Desi
 	}
 	th, err := repository.ChiefOfStaffThread(stream)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the thread of design session %s; check the trace repository", stream)}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if UnfinishedSessionTurn(th) {
 		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
-	docs, err := trace.Read[trace.Document](repository, stream)
+	intent, found, err := DesignStartIntentOf(repository, stream)
 	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the documents of design session %s; check the trace repository", stream)}
-	}
-	var draft trace.Document
-	for _, d := range docs {
-		if d.ID == DesignDraftDocument && d.Revision >= draft.Revision {
-			draft = d
-		}
-	}
-	if draft.Revision == 0 {
-		return DesignStartResponse{}, &APIError{Code: Validation, Message: "the design agent has not drafted a brief yet; keep talking to it until it records one"}
-	}
-	transcript, err := DesignTranscript(repository, stream)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of design session %s; check the trace repository", stream)}
-	}
-	var brief DesignBriefRecord
-	if err := json.Unmarshal([]byte(draft.Content), &brief); err != nil || strings.TrimSpace(brief.Content) == "" {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot read the drafted brief; check the trace repository"}
-	}
-	content := strings.TrimRight(brief.Content, "\n") + "\n" + DesignTranscriptHeading + transcript
-	now := s.Now()
-	source := "design:" + string(stream)
-	handed := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: HandedDocument, Revision: 1,
-		Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignStartTransition},
-		Path: DesignBriefPath, Content: content, Source: source}
-	alreadyHanded := false
-	for _, document := range docs {
-		if document.ID == HandedDocument {
-			if document.Source != source || document.Path != DesignBriefPath {
-				return DesignStartResponse{}, &APIError{Code: Conflict, Message: "the design session already has a different handed input"}
-			}
-			handed, alreadyHanded = document, true
-		}
-	}
-	if _, found, err := DesignSelectionOf(repository, stream); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	} else if !alreadyHanded && !found {
-		if api := s.RecordOwnerProjects(ctx, repository, stream, []config.ProjectID{project}, ""); api != nil {
+	}
+	var revision *int
+	if len(requests) > 0 {
+		revision = requests[0].BriefRevision
+	}
+	if !found {
+		// A handed input without an intent belongs to upgrade recovery. Never attach
+		// today's draft project list to that immutable legacy input.
+		docs, err := trace.Read[trace.Document](repository, stream)
+		if err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		for _, d := range docs {
+			if d.ID == HandedDocument {
+				if d.Source != "design:"+string(stream) || d.Path != DesignBriefPath {
+					return DesignStartResponse{}, &APIError{Code: Conflict, Message: "the design session already has a different handed input"}
+				}
+				if err := s.ReconcileDesignStart(ctx, repository, stream); err != nil {
+					return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+				}
+				return DesignStartResponse{Project: project, Workstream: stream, State: HandedState, Handed: d.Path, Source: d.Source}, nil
+			}
+		}
+		brief, latest, err := LatestDesignBrief(repository, stream)
+		if err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		if revision != nil && *revision != latest {
+			return DesignStartResponse{}, &APIError{Code: Conflict, Message: "the brief has changed; read the latest brief before starting"}
+		}
+		if latest == 0 {
+			return DesignStartResponse{}, &APIError{Code: Validation, Message: "the design agent has not drafted a brief yet; keep talking to it until it records one"}
+		}
+		if strings.TrimSpace(brief.Content) == "" {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot read the drafted brief"}
+		}
+		// An owner selection recorded before handoff remains authoritative
+		// when resuming an upgraded start that has no intent yet.
+		if selected, recorded, err := DesignSelectionOf(repository, stream); err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		} else if recorded {
+			brief.Projects = make([]config.ProjectID, 0, len(selected.Members))
+			for _, member := range selected.Members {
+				brief.Projects = append(brief.Projects, member.Repo)
+			}
+		}
+		if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
 			return DesignStartResponse{}, api
 		}
-	}
-	if !alreadyHanded {
-		if err := repository.Append(ctx, handed); err != nil {
-			return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot hand off design session %s; check the trace repository", stream)}
+		transcript, err := DesignTranscript(repository, stream)
+		if err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
+		now := s.Now()
+		handed := trace.Document{Header: OwnerHeader(HandedDocument, project, stream, DesignStartTransition, now), Path: DesignBriefPath,
+			Content: strings.TrimRight(brief.Content, "\n") + "\n" + DesignTranscriptHeading + transcript, Source: "design:" + string(stream)}
+		handed.Schema = "osmia.trace.document"
+		intent = DesignStartIntent{BriefRevision: latest, Projects: brief.Projects, Handed: handed}
+		data, err := json.Marshal(intent)
+		if err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		h := OwnerHeader(DesignStartIntentDocument, project, stream, DesignStartTransition, now)
+		h.Schema = "osmia.trace.document"
+		if err := repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: "tools/design-start.json", Content: string(data)}}); err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		if err := s.Step("design-start-intent-recorded"); err != nil {
+			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+	} else if revision != nil && *revision != intent.BriefRevision {
+		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a start is already pinned to another brief revision"}
 	}
-	if err := s.Step("design-brief-handed"); err != nil {
+	if err := s.PreparePinnedDesignStart(ctx, repository, stream, intent); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	if err := RecordFactoryPolicy(ctx, repository, stream, now, false); err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record factory authority for %s; check the trace repository", stream)}
-	}
-	designState, err := repository.Workflow(stream, DesignSessionSubject)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the design session marker of %s; check the trace repository", stream)}
-	}
-	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DesignStartTransition, Revision: 1,
-		Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignStartTransition}
-	closeHeader := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DesignStartTransition + "-design-session", Revision: 1,
-		Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignStartTransition}
-	closeTx := trace.Transaction{ExpectedVersion: designState.Version,
-		Transition: trace.Transition{Header: closeHeader, Subject: DesignSessionSubject, From: DesignOpenValue, To: DesignClosedValue,
-			Reason: "the owner started a workgroup from the design session's brief"}}
-	// The design session's own marker closes in the same commit as the
-	// feature state's own first transition: a design session's feature state
-	// is always "" until this moment, so MoveFeatureStateWith's own From
-	// check (rather than SetFeatureState's unconditional write) also refuses
-	// a stray second attempt to hand this same workstream off through some
-	// other path between the read above and this commit.
-	state, err := repository.MoveFeatureStateWith(ctx, header, "", HandedState, "the owner started a workgroup from the design session's brief", closeTx)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the handed state of %s; check the trace repository", stream)}
+	if err := s.ResumeHandedDesign(ctx, repository, stream, intent.Handed); err != nil {
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := s.RefreshRuntime(); err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot resolve the runtime workstreams after starting the workgroup"}
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	return DesignStartResponse{Project: project, Workstream: stream, State: state.Value, Handed: handed.Path, Source: source}, nil
+	return DesignStartResponse{Project: project, Workstream: stream, State: HandedState, Handed: intent.Handed.Path, Source: intent.Handed.Source}, nil
 }

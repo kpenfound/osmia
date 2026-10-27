@@ -1184,6 +1184,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignStartRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "default": {
             "description": "The request failed; the error names its code and reason.",
@@ -5033,6 +5042,17 @@
         },
         "type": "object"
       },
+      "DesignStartRequest": {
+        "properties": {
+          "brief_revision": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "DesignStartResponse": {
         "properties": {
           "handed": {
@@ -5055,12 +5075,27 @@
       },
       "DesignView": {
         "properties": {
+          "brief": {
+            "type": "string"
+          },
+          "brief_revision": {
+            "type": "integer"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
           },
           "project": {
             "type": "string"
+          },
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "workstream": {
             "type": "string"

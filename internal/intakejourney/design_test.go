@@ -267,11 +267,25 @@ func TestDesignWorkgroupStartRecoversAfterRestartWithoutRewritingBrief(t *testin
 	must(t, s.Close())
 	restarted, client := start(t, options)
 	result, err := client.DesignStart(ctx, stream)
-	must(t, err)
-	if result.State != HandedState {
+	if err != nil && !failed(err, Conflict) && !failed(err, NotFound) {
+		t.Fatal(err)
+	}
+	if err == nil && result.State != HandedState {
 		t.Fatalf("start after restart: %+v", result)
 	}
 	repository = restarted.sole().repository
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		state, err := repository.Workflow(stream, trace.FeatureSubject)
+		must(t, err)
+		if state.Value != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("neither retry nor recovery completed the handoff")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	after, err := repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if before.Identity != after.Identity {
@@ -357,6 +371,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	if second == "" {
 		t.Fatal("project creation did not register the second project")
 	}
+	writeCharter(t, c, second, "1. Keep the client API stable.\n")
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("uncommitted source\n"), 0600))
 	for _, repoID := range []config.ProjectID{project, second} {
 		repository, err := s.repository(repoID)
@@ -374,8 +389,32 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		if !strings.Contains(req.SystemPrompt, "1. Keep changes small.") {
 			fail("missing project charter in design context")
 		}
-		for _, repo := range []config.ProjectID{project} {
-			if !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
+		for _, p := range s.current().Projects {
+			row := fmt.Sprintf("%s | %s | %s | %t |", p.ID, p.Name, p.Upstream, p.ID == project)
+			if !strings.Contains(req.SystemPrompt, row) {
+				fail("missing catalog row %s", row)
+			}
+		}
+		if strings.Contains(req.SystemPrompt, "Keep the client API stable") {
+			fail("non-brief charter was inlined")
+		}
+		if strings.Contains(req.SystemPrompt, "Conventions for repo "+string(second)) {
+			fail("non-brief KB was inlined")
+		}
+		for _, name := range []string{"charter.md", "kb.md"} {
+			out, err := readTool(ctx, tools, "projects/"+string(second)+"/"+name)
+			if err != nil || out == "" {
+				fail("non-brief reference %s unreadable: %s %v", name, out, err)
+			}
+			if name == "charter.md" && !strings.Contains(out, "Keep the client API stable") {
+				fail("reference charter missing content: %s", out)
+			}
+			if name == "kb.md" && !strings.Contains(out, "Conventions for repo "+string(second)) {
+				fail("reference KB missing content: %s", out)
+			}
+		}
+		for _, repo := range []config.ProjectID{project, second} {
+			if repo == project && !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
 				fail("missing repo knowledge base in context: %s", repo)
 			}
 			out, err := callTool(ctx, tools, designReadRepoToolName, map[string]any{"repo": repo, "path": "README.md"})
@@ -401,8 +440,8 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			}
 		}
 		out, err := callTool(ctx, tools, designReadRepoToolName, map[string]any{"repo": "p_00000000000000000000000000000099", "path": "README.md"})
-		if err == nil || !strings.Contains(err.Error(), "not this project's repository") {
-			fail("read outside project was not refused by membership: %s %v", out, err)
+		if err == nil || !strings.Contains(err.Error(), "not an active project") {
+			fail("read outside active projects was not refused: %s %v", out, err)
 		}
 		names, err := toolNames(ctx, tools)
 		if err != nil {

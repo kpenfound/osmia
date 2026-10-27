@@ -170,18 +170,22 @@ func BaseWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, erro
 	return state.Value == "waiting", err
 }
 func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) error {
-	streams, err := repo.Workstreams()
+	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
+	var dependencies []trace.WorkstreamBase
 	for _, stream := range streams {
-		dependency, err := repo.WorkstreamBase(stream)
+		dependency, err := snapshotWorkstreamBase(repo, stream)
 		if err != nil {
 			return err
 		}
-		if dependency.Base == "" {
-			continue
+		if dependency.Base != "" {
+			dependencies = append(dependencies, dependency)
 		}
+	}
+	for _, dependency := range dependencies {
+		stream := dependency.Workstream
 		feature, err := repo.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
 			return err
@@ -235,7 +239,7 @@ func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) e
 			if sealed.Base.Workstream == "" {
 				break
 			}
-			next, err := repo.WorkstreamBase(parent)
+			next, err := snapshotWorkstreamBase(repo, parent)
 			if err != nil {
 				return err
 			}

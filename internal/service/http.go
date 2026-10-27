@@ -516,7 +516,13 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if id, ok := strings.CutSuffix(r.URL.Path, "/start"); ok && r.Method == http.MethodPost {
 		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
-			if out, api := s.startDesignWorkgroup(r.Context(), id); api != nil {
+			var req DesignStartRequest
+			if r.Body != nil && r.ContentLength != 0 {
+				if !decode(w, r, &req) {
+					return
+				}
+			}
+			if out, api := s.startDesignWorkgroup(r.Context(), id, req); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)

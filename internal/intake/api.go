@@ -230,6 +230,8 @@ type DesignOpenRequest = api.DesignOpenRequest
 
 type DesignView = api.DesignView
 
+type DesignStartRequest = api.DesignStartRequest
+
 type DesignResponse = api.DesignResponse
 
 type DesignsResponse = api.DesignsResponse

@@ -64,7 +64,7 @@ func (s *Controller) SelectionBase(projects []config.ProjectID, base config.Work
 	return "", &APIError{Code: Validation, Message: "base must name another feature workstream in a selected project"}
 }
 
-// RecordOwnerProjects pins member identities before the handed input is durable.
+// RecordOwnerProjects records the owner selection and stable member identities.
 // The conversation may be hosted outside the selected projects. A recorded list
 // is immutable; recovery reads it without consulting a model or current briefs.
 func (s *Controller) RecordOwnerProjects(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, projects []config.ProjectID, base config.WorkstreamID) *APIError {
@@ -122,6 +122,9 @@ func (s *Controller) ChooseDesignProjects(ctx context.Context, raw string, proje
 	if found {
 		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this start already has its owner-selected projects"}
 	}
+	if _, pinned, err := DesignStartIntentOf(r, stream); err != nil || pinned {
+		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this start already has its pinned projects"}
+	}
 	feature, err := r.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
@@ -169,6 +172,9 @@ func (s *Controller) LegacyProjectsEntry(r *trace.Repository, stream config.Work
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
 		return InboxEntry{}, false, err
+	}
+	if slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == DesignStartIntentDocument }) {
+		return InboxEntry{}, false, nil
 	}
 	feature, err := r.Workflow(stream, trace.FeatureSubject)
 	if err != nil || feature.Value == AbandonedState {

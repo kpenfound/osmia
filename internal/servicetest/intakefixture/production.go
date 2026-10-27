@@ -375,13 +375,28 @@ func (f *ProductionDesign) RecordSelection(t *testing.T, projects ...config.Proj
 	Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignSelectionPath, Content: string(data)}}))
 }
 
+// RecordBriefProjects supplies the confirmed project list for owner-start journeys.
+func (f *ProductionDesign) RecordBriefProjects(t *testing.T, projects ...config.ProjectID) {
+	t.Helper()
+	repo, err := f.Repository(*f.Project)
+	Must(t, err)
+	brief, revision, err := intake.LatestDesignBrief(repo, *f.Origin)
+	Must(t, err)
+	brief.Projects = projects
+	data, err := json.Marshal(brief)
+	Must(t, err)
+	h := intake.OwnerHeader(intake.DesignDraftDocument, *f.Project, *f.Origin, intake.DraftBriefToolName, f.Clock.Now())
+	h.Schema, h.Revision = "osmia.trace.document", revision+1
+	Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(data)}}))
+}
+
 func (f *ProductionDesign) StartOwner(t *testing.T) {
 	t.Helper()
+	projects := []config.ProjectID{*f.Project, *f.Project2}
 	if *f.Stream1 == *f.Origin {
-		f.RecordSelection(t, *f.Project)
-	} else {
-		f.RecordSelection(t, *f.Project, *f.Project2)
+		projects = projects[:1]
 	}
+	f.RecordBriefProjects(t, projects...)
 	_, err := f.Client().DesignStart(context.Background(), *f.Origin)
 	Must(t, err)
 	repo, err := f.Repository(*f.Project)
@@ -802,7 +817,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 			return nil, err
 		}
 		if slices.Contains(names, intake.DraftBriefToolName) {
-			_, err = CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief})
+			_, err = CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief, "projects": []config.ProjectID{*f.Project, *f.Project2}})
 			return QuestionResult(req, "session-design", ProductionBrief), err
 		}
 		return QuestionResult(req, "session-chief", "The service is following the agreed design."), nil

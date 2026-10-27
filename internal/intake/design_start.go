@@ -16,6 +16,60 @@ const DesignSelectionDocument = "design-selection"
 
 const DesignSelectionPath = "owner/projects.json"
 
+const DesignStartIntentDocument = "design-start-intent"
+
+// DesignStartIntent binds the owner-started text, revision and ordered list
+// before any handed input, owner decision or member allocation is recorded.
+type DesignStartIntent struct {
+	BriefRevision int                `json:"brief_revision"`
+	Projects      []config.ProjectID `json:"projects"`
+	Handed        trace.Document     `json:"handed"`
+}
+
+func DesignStartIntentOf(r *trace.Repository, stream config.WorkstreamID) (DesignStartIntent, bool, error) {
+	docs, err := trace.Read[trace.Document](r, stream)
+	if err != nil {
+		return DesignStartIntent{}, false, err
+	}
+	for _, d := range docs {
+		if d.ID == DesignStartIntentDocument {
+			var intent DesignStartIntent
+			err := json.Unmarshal([]byte(d.Content), &intent)
+			return intent, true, err
+		}
+	}
+	return DesignStartIntent{}, false, nil
+}
+
+func (s *Controller) PreparePinnedDesignStart(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, intent DesignStartIntent) error {
+	docs, err := trace.Read[trace.Document](r, stream)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, d := range docs {
+		if d.ID != HandedDocument {
+			continue
+		}
+		if d.Content != intent.Handed.Content || d.Source != intent.Handed.Source || d.Path != intent.Handed.Path {
+			return trace.ErrConflict
+		}
+		found = true
+	}
+	if !found {
+		if err := r.Append(ctx, intent.Handed); err != nil {
+			return err
+		}
+		if err := s.Step("design-brief-handed"); err != nil {
+			return err
+		}
+	}
+	if api := s.RecordOwnerProjects(ctx, r, stream, intent.Projects, ""); api != nil {
+		return fmt.Errorf("%s", api.Message)
+	}
+	return nil
+}
+
 type DesignMember struct {
 	Repo       config.ProjectID    `json:"repo"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -64,7 +118,9 @@ func (s *Controller) DesignStartPending(r *trace.Repository, stream config.Works
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == HandedDocument && d.Source == "design:"+string(stream) }), nil
+	return slices.ContainsFunc(docs, func(d trace.Document) bool {
+		return d.ID == DesignStartIntentDocument || (d.ID == HandedDocument && d.Source == "design:"+string(stream))
+	}), nil
 }
 
 // designStartPass reconciles the owner's handed design before any member can
@@ -97,7 +153,9 @@ func (s *Controller) DesignStartPass(ctx context.Context, r *trace.Repository) e
 			if err != nil {
 				return err
 			}
-			if !slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == HandedDocument && d.Source == "design:"+string(stream) }) {
+			if !slices.ContainsFunc(docs, func(d trace.Document) bool {
+				return d.ID == DesignStartIntentDocument || (d.ID == HandedDocument && d.Source == "design:"+string(stream))
+			}) {
 				continue
 			}
 		}
@@ -133,6 +191,13 @@ func (s *Controller) DesignStartState(ctx context.Context, r *trace.Repository, 
 }
 
 func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Repository, stream config.WorkstreamID) error {
+	if intent, found, err := DesignStartIntentOf(r, stream); err != nil {
+		return err
+	} else if found {
+		if err := s.PreparePinnedDesignStart(ctx, r, stream, intent); err != nil {
+			return err
+		}
+	}
 	selected, found, err := DesignSelectionOf(r, stream)
 	if err != nil {
 		return err
@@ -207,6 +272,9 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 				return err
 			}
 		}
+		if err := s.Step("design-member-brief-recorded"); err != nil {
+			return err
+		}
 		if skipped {
 			tx := trace.Transaction{Transition: trace.Transition{Header: OwnerHeader(SkipTransition, member.Repo, member.Workstream, HandInTransition, handed.At), Subject: OwnerSubject, To: SkippedValue, Reason: HandInSkipReason}}
 			if _, err := repo.Transact(ctx, tx); err != nil {
@@ -279,6 +347,9 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	if err := s.DesignStartState(ctx, r, stream, "active"); err != nil {
 		return err
 	}
+	if err := s.Step("design-start-active"); err != nil {
+		return err
+	}
 	for _, m := range members {
 		feature, err := m.Project.Workflow(m.Workstream, trace.FeatureSubject)
 		if err != nil {
@@ -294,8 +365,14 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		if _, err := m.Project.SetFeatureState(ctx, h, HandedState, "the owner started work from the immutable design brief"); err != nil {
 			return err
 		}
+		if err := s.Step("design-member-handed"); err != nil {
+			return err
+		}
 	}
 	if err := s.DesignStartState(ctx, r, stream, "complete"); err != nil {
+		return err
+	}
+	if err := s.Step("design-start-complete"); err != nil {
 		return err
 	}
 	return s.RefreshRuntime()
@@ -345,6 +422,9 @@ func (s *Controller) ResumeHandedDesign(ctx context.Context, r *trace.Repository
 	if err := RecordFactoryPolicy(ctx, r, stream, handed.At, false); err != nil {
 		return err
 	}
+	if err := s.Step("design-factory-policy-recorded"); err != nil {
+		return err
+	}
 	design, err := r.Workflow(stream, DesignSessionSubject)
 	if err != nil {
 		return err
@@ -353,5 +433,8 @@ func (s *Controller) ResumeHandedDesign(ctx context.Context, r *trace.Repository
 	closeHeader := OwnerHeader(DesignStartTransition+"-design-session", r.Project(), stream, DesignStartTransition, handed.At)
 	closeTx := trace.Transaction{ExpectedVersion: design.Version, Transition: trace.Transition{Header: closeHeader, Subject: DesignSessionSubject, From: DesignOpenValue, To: DesignClosedValue, Reason: "the owner started a workgroup from the design session's brief"}}
 	_, err = r.MoveFeatureStateWith(ctx, header, "", HandedState, "the owner started a workgroup from the design session's brief", closeTx)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.Step("design-session-handed")
 }

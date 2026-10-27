@@ -205,7 +205,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					}
 					if design {
 						workspace := filepath.Join(root, "design", project, scope.Workstream)
-						paths, err := stageDesignWorkspace(workspace)
+						paths, err := controls.intake().Load().StageDesignWorkspace(ctx, r, stream, workspace)
 						if err != nil {
 							return isolation.Selection{}, err
 						}
@@ -259,7 +259,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				// Both tools are registered unconditionally; Select's Narrow
 				// decides, per turn, whether either is actually reachable.
-				return append(tools, draftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope)), nil
+				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope)), nil
 			},
 			Hosts: e.Hosts,
 			// resumableEngine's heuristic fallback (used only when e.Engine has

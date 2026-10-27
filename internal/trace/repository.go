@@ -104,7 +104,7 @@ type Repository struct {
 	workstreamsMu sync.Mutex
 	workstreams   map[config.WorkstreamID]*Repository
 	// snapshotMu excludes trace deletion while a short discovery snapshot is
-	// assembled. Scheduling, operation admission and results never take it.
+	// assembled. Operation admission and results proceed independently of it.
 	snapshotMu sync.RWMutex
 	// closed is set under workstreamsMu once Close has begun, so a scoped
 	// call racing it never opens a child Close could miss.

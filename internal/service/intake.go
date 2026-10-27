@@ -192,14 +192,10 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 	return s.intake().DesignMessage(ctx, raw, req)
 }
 
-var draftBriefTool = intake.DraftBriefTool
-
 var designReadRepoTool = intake.DesignReadRepoTool
 
-var stageDesignWorkspace = intake.StageDesignWorkspace
-
-func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignStartResponse, *APIError) {
-	return s.intake().StartDesignWorkgroup(ctx, raw)
+func (s *Service) startDesignWorkgroup(ctx context.Context, raw string, req ...DesignStartRequest) (DesignStartResponse, *APIError) {
+	return s.intake().StartDesignWorkgroup(ctx, raw, req...)
 }
 
 const designStartSubject = intake.DesignStartSubject

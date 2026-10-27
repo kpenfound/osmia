@@ -275,7 +275,7 @@ func (s *Controller) ChangeLeader(members []config.WorkstreamID) config.Workstre
 	return leader
 }
 func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) error {
-	streams, err := repo.Workstreams()
+	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}

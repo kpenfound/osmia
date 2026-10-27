@@ -117,7 +117,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.AwaitText(`[data-project="`+string(f.project2)+`"] .pane-repos`, "client")
 	p.Click(`[data-drilldown="` + string(f.origin) + `"]`)
 	p.Await("the original design chat", `!document.querySelector('[data-view="design"]').hidden`)
-	f.sharedDesign().RecordSelection(t, f.project, f.project2)
+	f.sharedDesign().RecordBriefProjects(t, f.project, f.project2)
 	p.Click("#design-start")
 	packet := f.awaitPacket(t)
 	// Both selected repos allocate real members. Their shared chief gives
