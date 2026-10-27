@@ -21,10 +21,13 @@ func TestSchedulingScansPreserveTraceErrors(t *testing.T) {
 	must(t, os.Mkdir(path, 0700))
 	ctx := context.Background()
 	for name, pass := range map[string]func(context.Context) error{
-		"base":         func(ctx context.Context) error { return refresh.S.BaseWaitPass(ctx, repo) },
-		"edge":         func(ctx context.Context) error { return refresh.S.EdgeWaitPass(ctx, repo) },
-		"base-refresh": refresh.Pass,
-		"edge-refresh": func(ctx context.Context) error { return refresh.S.EdgeResolverPass(ctx, repo) },
+		"base":                           func(ctx context.Context) error { return refresh.S.BaseWaitPass(ctx, repo) },
+		"edge":                           func(ctx context.Context) error { return refresh.S.EdgeWaitPass(ctx, repo) },
+		"base-refresh":                   refresh.Pass,
+		"edge-refresh":                   func(ctx context.Context) error { return refresh.S.EdgeResolverPass(ctx, repo) },
+		"workgroup-resolution":           (&WorkgroupResolver{S: refresh.S, Repository: repo}).Pass,
+		"workgroup-project-spec":         func(ctx context.Context) error { return refresh.S.ProjectSpecDraftPass(ctx, repo) },
+		"workgroup-project-spec-refresh": func(ctx context.Context) error { return refresh.S.ProjectSpecRefreshPass(ctx, repo) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := pass(ctx); err == nil {

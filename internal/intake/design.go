@@ -90,15 +90,10 @@ func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView,
 	return view, err
 }
 
-// isDesignWorkstream reports whether stream is a design session: a
+// IsDesignWorkstream reports whether stream is a design session: a
 // workstream openDesign created and startDesignWorkgroup has not yet handed
-// off. A design session carries no feature state until the owner starts a
-// workgroup from its brief, which is exactly the window every factory pass
-// (architect, shed, masons, reviewers, base refresh, drift, final review,
-// publication, archive cleanup, workgroup resolution) already leaves alone
-// for a workstream with none: none of them acts before a workstream reaches
-// a feature state they recognise, so a design session needs no pass-by-pass
-// exclusion of its own.
+// off. Factory discovery classifies it under the trace-deletion guard so an
+// owner destroy cannot invalidate a later feature-workstream read.
 func IsDesignWorkstream(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	state, err := repository.Workflow(stream, DesignSessionSubject)
 	if err != nil {

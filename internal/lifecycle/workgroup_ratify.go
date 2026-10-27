@@ -762,7 +762,7 @@ func (s *Controller) FailProjectSpecDraft(ctx context.Context, wt *trace.Reposit
 // member's own project pass finding the same workgroup does not race to
 // draft it more than once; the others' calls are a cheap, idempotent no-op.
 func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace.Repository) error {
-	streams, err := repository.Workstreams()
+	streams, err := nonSessionWorkstreams(repository)
 	if err != nil {
 		return err
 	}

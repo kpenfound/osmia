@@ -85,7 +85,7 @@ func (a *AmendmentDrafter) Pass(ctx context.Context) error {
 	if a.S.Options.Architect == nil {
 		return nil
 	}
-	streams, err := a.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return err
 	}

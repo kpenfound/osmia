@@ -89,6 +89,9 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 // The answer tool only records; this pass is the one path that delivers, so
 // an answer recorded before a crash is delivered by the first pass after it.
 type Deliverer struct {
+	// Workstreams supplies a guarded discovery snapshot; nil lists all workstreams.
+	Workstreams func() ([]config.WorkstreamID, error)
+
 	Repository *trace.Repository
 	Now        func() time.Time
 	// Profile returns the profile a new turn of the role's agent runs with.
@@ -105,7 +108,11 @@ func (d *Deliverer) Pass(ctx context.Context) error {
 	if d.Repository == nil || d.Now == nil || d.Profile == nil {
 		return errors.New("answer delivery requires a trace, a clock and profiles")
 	}
-	streams, err := d.Repository.Workstreams()
+	workstreams := d.Workstreams
+	if workstreams == nil {
+		workstreams = d.Repository.Workstreams
+	}
+	streams, err := workstreams()
 	if err != nil {
 		return err
 	}

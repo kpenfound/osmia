@@ -139,7 +139,7 @@ var _ coreadapter.Reconciler = (*FinalReviewer)(nil)
 
 // Pass reconciles every workstream of the trace except the librarian's.
 func (a *FinalReviewer) Pass(ctx context.Context) error {
-	streams, err := a.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return err
 	}

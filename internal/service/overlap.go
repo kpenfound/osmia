@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/intake"
 	"slices"
 	"strings"
 
@@ -189,7 +190,7 @@ type overlaps struct {
 // event for its chief of staff. A pair whose subject already records its
 // seals is not warned again.
 func (o *overlaps) Pass(ctx context.Context) error {
-	streams, err := o.repository.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(o.repository)
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func overlapAdvisories(repository *trace.Repository, stream config.WorkstreamID,
 				return nil, err
 			}
 			m = &loaded
-			if present, err = repository.Workstreams(); err != nil {
+			if present, err = intake.NonSessionWorkstreams(repository); err != nil {
 				return nil, err
 			}
 		}

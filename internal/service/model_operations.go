@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -148,7 +149,7 @@ func (s *Service) acquireReviewCheckSlot(ctx context.Context, run CheckSlotRun, 
 }
 
 func (s *Service) reserveModelOperation(repository *trace.Repository, op coreadapter.Operation, role string) (func(), bool) {
-	streams, err := repository.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(repository)
 	if err != nil {
 		s.log().Error("model operation capacity", "operation", op.ID, "error", err)
 		return nil, false

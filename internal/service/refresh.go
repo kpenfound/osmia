@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -124,7 +125,7 @@ func refreshPendingStreams(repo *trace.Repository) (map[config.WorkstreamID]bool
 // learned.
 func (r *refresher) Pass(ctx context.Context) error {
 	stream := librarianWorkstream(r.repository.Project())
-	streams, err := r.repository.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(r.repository)
 	if err != nil {
 		return err
 	}

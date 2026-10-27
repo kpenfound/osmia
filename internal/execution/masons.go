@@ -79,7 +79,7 @@ type building struct {
 // each ready unit it did not start waits, when that differs from the unit's
 // latest decision; a start records its own decision.
 func (m *masons) Pass(ctx context.Context) error {
-	streams, err := m.repository.Workstreams()
+	streams, err := nonSessionWorkstreams(m.repository)
 	if err != nil {
 		return err
 	}

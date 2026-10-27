@@ -94,7 +94,7 @@ var _ coreadapter.Reconciler = (*Sealer)(nil)
 
 // Pass reconciles every workstream of the trace except the librarian's.
 func (z *Sealer) Pass(ctx context.Context) error {
-	streams, err := z.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(z.Repository)
 	if err != nil {
 		return err
 	}

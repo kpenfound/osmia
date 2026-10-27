@@ -1004,6 +1004,19 @@ func (r *Repository) WithWorkstreamSnapshot(fn func() error) error {
 	return fn()
 }
 
+// WithWorkstreamDiscovery lists workstreams and reads their bookkeeping while
+// trace deletion is excluded. The callback must obey WithWorkstreamSnapshot's
+// restrictions; scheduling and external work run after this method returns.
+func (r *Repository) WithWorkstreamDiscovery(read func([]config.WorkstreamID) error) error {
+	return r.WithWorkstreamSnapshot(func() error {
+		streams, err := r.Workstreams()
+		if err != nil {
+			return err
+		}
+		return read(streams)
+	})
+}
+
 // Generation reports how many commits landed in the trace through this
 // handle. It never decreases while the handle is open, and it is
 // unchanged exactly when no write landed between two calls: a caller that

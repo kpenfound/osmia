@@ -27,6 +27,7 @@ import (
 	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -1248,7 +1249,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
+		deliver, err := events.New(repository, events.Options{Workstreams: func() ([]config.WorkstreamID, error) { return intake.NonSessionWorkstreams(repository) }, Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
 			Skip: s.chiefEventsSkip(repository), ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
 				target, _, _, close, err := s.chiefRepository(ctx, repository, stream)
 				if errors.Is(err, errWorkgroupJoining) {

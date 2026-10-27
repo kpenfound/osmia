@@ -104,7 +104,7 @@ var _ coreadapter.Reconciler = (*Publisher)(nil)
 // workstream has neither a result nor a recorded outcome yet, or one of that
 // approval was already asked for.
 func (p *Publisher) Pass(ctx context.Context) error {
-	streams, err := p.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(p.Repository)
 	if err != nil {
 		return err
 	}

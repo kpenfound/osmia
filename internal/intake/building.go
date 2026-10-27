@@ -80,7 +80,7 @@ var _ coreadapter.Reconciler = (*Builder)(nil)
 
 // Pass reconciles every workstream of the trace except the librarian's.
 func (b *Builder) Pass(ctx context.Context) error {
-	streams, err := b.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(b.Repository)
 	if err != nil {
 		return err
 	}

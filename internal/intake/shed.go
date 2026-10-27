@@ -163,7 +163,7 @@ var _ coreadapter.Reconciler = (*Debate)(nil)
 
 // Pass reconciles every workstream of the trace except the librarian's.
 func (d *Debate) Pass(ctx context.Context) error {
-	streams, err := d.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(d.Repository)
 	if err != nil {
 		return err
 	}

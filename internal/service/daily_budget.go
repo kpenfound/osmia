@@ -186,7 +186,12 @@ func (s *Service) localDay() calendarDay {
 func daySpend(day calendarDay, repositories ...*trace.Repository) (spendTotal, error) {
 	var today []trace.Cost
 	for _, repository := range repositories {
-		costs, err := repository.Costs()
+		var costs []trace.Cost
+		err := repository.WithWorkstreamDiscovery(func([]config.WorkstreamID) error {
+			var err error
+			costs, err = repository.Costs()
+			return err
+		})
 		if err != nil {
 			return spendTotal{}, err
 		}

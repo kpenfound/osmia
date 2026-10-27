@@ -392,11 +392,17 @@ type loaded struct {
 // place in the rotation of chief-of-staff, mason, reviewer or committee
 // turns.
 func load(repository *trace.Repository) (loaded, error) {
+	var result loaded
+	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
+		var err error
+		result, err = loadSnapshot(repository, streams)
+		return err
+	})
+	return result, err
+}
+
+func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (loaded, error) {
 	project := repository.Project()
-	all, err := repository.Workstreams()
-	if err != nil {
-		return loaded{}, err
-	}
 	out := loaded{project: project, threads: map[config.WorkstreamID][]trace.Thread{}, dispatched: map[turnKey]bool{}, served: map[rotation]time.Time{}}
 	for _, stream := range all {
 		kind, err := repository.Kind(stream)

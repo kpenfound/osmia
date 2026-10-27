@@ -135,7 +135,7 @@ func AmendmentCommitteePrompt(in RoundInput, standing []shed.Dissent, answers []
 }
 
 func (a AmendmentDebate) Pass(ctx context.Context) error {
-	streams, err := a.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return err
 	}

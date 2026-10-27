@@ -280,7 +280,12 @@ func CharterSource(p trace.CharterProposalState) string {
 
 // Pass records the rule of every ratified proposal in the charter.
 func (c Charterer) Pass(ctx context.Context) error {
-	proposals, err := c.Repository.CharterProposals()
+	var proposals []trace.CharterProposalState
+	err := c.Repository.WithWorkstreamDiscovery(func([]config.WorkstreamID) error {
+		var err error
+		proposals, err = c.Repository.CharterProposals()
+		return err
+	})
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Controller) ProjectSpecRefreshPass(ctx context.Context, repository *trace.Repository) error {
-	streams, err := repository.Workstreams()
+	streams, err := nonSessionWorkstreams(repository)
 	if err != nil {
 		return err
 	}

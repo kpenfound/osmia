@@ -126,7 +126,7 @@ func (s *Controller) DesignStartPending(r *trace.Repository, stream config.Works
 // designStartPass reconciles the owner's handed design before any member can
 // draft or ask. All identities are recorded before allocating the first member.
 func (s *Controller) DesignStartPass(ctx context.Context, r *trace.Repository) error {
-	streams, err := r.Workstreams()
+	streams, err := s.designStartWorkstreams(r)
 	if err != nil {
 		return err
 	}

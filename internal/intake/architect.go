@@ -127,7 +127,7 @@ func (d *Drafter) Pass(ctx context.Context) error {
 	if d.S.Options.Architect == nil {
 		return nil
 	}
-	streams, err := d.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(d.Repository)
 	if err != nil {
 		return err
 	}

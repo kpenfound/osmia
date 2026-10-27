@@ -133,3 +133,5 @@ const publishUpstreamAction = "publish-upstream"
 const moveWorkstreamTool = "move_workstream"
 
 const checkGateReviewInstructions = " Test passing is decided by the service-owned check gate. When the gate passed for the candidate, every acceptance item or criterion requiring tests to pass (whole-suite, scoped or named) is satisfied as to passing: the passing gate is the evidence that required tests ran and passed. Never raise a finding by itself because only a smart-check selection ran, because you cannot see that a named test was selected, or because you cannot run tests yourself. Still judge from the work whether tests the unit was asked to add exist and exercise the stated behaviour."
+
+var nonSessionWorkstreams = intake.NonSessionWorkstreams

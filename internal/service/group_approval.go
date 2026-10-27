@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/intake"
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -172,7 +173,7 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	streams, err := repo.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
