@@ -93,7 +93,7 @@ func TestPacketReadBindsCLIRatificationAcrossOtherMemberRefresh(t *testing.T) {
 	defer func() { s.Close() }()
 	root := opts.Config.Root
 	first := successful(t, root, "packet", stream)
-	for _, displayed := range []string{"Project spec revision 1", "Uploads resume across the service and client.", "Contract resume: Persist the acknowledged offset.", "contract criteria [1]", shedSpec, shedPlan} {
+	for _, displayed := range []string{"Workgroup spec revision 1", "Uploads resume across the service and client.", "Contract resume: Persist the acknowledged offset.", "contract criteria [1]", shedSpec, shedPlan} {
 		if !strings.Contains(first, displayed) {
 			t.Fatalf("packet omitted %q: %s", displayed, first)
 		}
@@ -163,14 +163,14 @@ func TestPacketReadBindsCLIRatificationAcrossOtherMemberRefresh(t *testing.T) {
 	s, err = service.Start(ctx, opts)
 	must(t, err)
 	second := successful(t, root, "packet", stream)
-	if !strings.Contains(second, "Project spec revision 2") || !strings.Contains(second, updatedSpec) {
+	if !strings.Contains(second, "Workgroup spec revision 2") || !strings.Contains(second, updatedSpec) {
 		t.Fatalf("reread did not show the refreshed slice: %s", second)
 	}
 	command := packetRatifyCommand(t, second)
 	if !reflect.DeepEqual(command, []string{"ratify", stream, "--project-spec-revision", strconv.Itoa(refreshed.ProjectSpecRevision), "--spec-revision", "1", "--plan-revision", "1"}) {
 		t.Fatalf("reread command: %v", command)
 	}
-	if out := successful(t, root, command...); !strings.Contains(out, "Project spec revision 2 approved.") {
+	if out := successful(t, root, command...); !strings.Contains(out, "Workgroup spec revision 2 approved.") {
 		t.Fatalf("ratify omitted the approved project revision: %s", out)
 	}
 	must(t, s.Close())

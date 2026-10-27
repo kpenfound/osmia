@@ -19,14 +19,8 @@ flowchart LR
     Trace --> API
 ```
 
-A project owns one charter and a repo list. Each repo has its own settings,
-KB, entities and dedicated knowledge trace; the default repo's trace holds
-the authoritative project charter. Each workstream targets one repo and has
-its own complete trace, branch and PR. A cross-repo workgroup's separate trace
-under `workgroups/<group-id>/` owns its project spec, fixed membership, shared
-chief thread and group decisions. Direct one-repo groups keep their existing
-chief thread in the workstream trace; selection of a different repo adopts the
-original conversation into the workgroup trace even for one selected member.
+A project is exactly one repo with its own charter, settings, KB, entities and dedicated knowledge trace. Each workstream has its own complete trace, branch and PR. A cross-project workgroup's separate trace under `workgroups/<group-id>/` owns its workgroup spec, fixed membership, shared chief and decisions. Direct single-project groups keep their chief in the workstream trace. A design session can start members in other projects while its conversation stays at the session's project; the workgroup adopts that thread even for one selected member.
+
 Nothing is authoritative in two places, and every trace stays
 outside target clones. Each trace is one SQLite database, `trace.db`, in its
 own directory under the root; every document is a revision in it, so the
@@ -36,15 +30,12 @@ an event wakes a pass early but does not carry the state transition.
 
 One owner start hands the design brief to production drafting and allocation;
 the actual design conversation becomes the shared chief thread. For several
-selected repos, one ratification pins the project spec and all member revisions. Until every pinned member seal
+selected projects, one ratification pins the workgroup spec and all member revisions. Until every pinned member seal
 completes, no member has effective group approval or can build or release a
 contract edge. Restart reconciles the same durable decision, without another
 gate. Every PR still needs its own delivery approval and owner signing.
 
-Ordinary file, issue and stdin hand-ins in projects with several active repos
-use that same validated selection, allocation and conversation-adoption path.
-A single selected repo uses ordinary single-member ratification; several use
-the all-member packet. One-repo hand-ins go directly to ordinary drafting.
+Ordinary file, issue and stdin hand-ins use an owner-selected ordered project list, with the first project home. A single project uses ordinary drafting and ratification. Several projects use the shared allocation and join path and all-member packet without an architect selection turn. Design start pins the brief text, revision and ordered list durably, preserving the same member identities through recovery. Each member's charter governs its slice and units; the shared spec and contracts satisfy every member's charter.
 
 Repo/member bindings preserve shared authority when a terminal member is
 owner-archived and legitimately cleanup-deleted. Archive identity, verified
@@ -55,7 +46,7 @@ approved effects retain their original pins; unavailable history never grants
 completion. Archive does not establish merge or release dependencies.
 
 Resolution retires a member's own documents and workspaces from active state.
-The project spec remains active for the shared chief and unresolved members
+The workgroup spec remains active for the shared chief and unresolved members
 until all members resolve (merged or cancelled). A ready but unmerged PR keeps
 its member unresolved. Traces and decisions remain until owner archive.
 The same snapshot-based predicate governs live resolution, archive pins and

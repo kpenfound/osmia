@@ -2935,7 +2935,7 @@
     const dismissed = all.filter((o) => o.by === 'chief_of_staff');
     d.detail.replaceChildren(...[
       view.project_spec ? el('details', { 'data-field': 'project-spec' },
-        el('summary', {}, 'Project spec revision ' + view.project_spec_revision),
+        el('summary', {}, 'Workgroup spec revision ' + view.project_spec_revision),
         el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },

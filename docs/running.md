@@ -105,55 +105,33 @@ shows that instance's latest outcome, including a response received while
 another instance was open. Create forms start with an empty outcome when
 opened or switched to another project.
 
-The project pane is the main entry point. It lists each project's repos and
-workgroups, their member workstreams and any named wait. **Create project**
-creates a one-repo project; **Add repo** extends it using a separate clone and
-the shared charter. **Open a design session** opens the read-only project chat;
-**Start workgroup from brief** hands the latest brief to the architect in one
-owner action. **Hand in a feature** takes the document fast path instead.
-With several active repos, both entry points let the architect select the
-affected repos; the service validates the selection and creates their members.
-A single selected repo gets ordinary ratification. For several selected repos,
-one ratification covers the project spec, graph and slices. The original
-conversation continues as the one shared chief-of-staff thread.
+The project pane is the main entry point. Each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared chief and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement.
+
+Above **Start workgroup from brief**, the read-only **Brief** panel shows the latest revision, project names with home marked and text collapsed by default. It updates live and Start sends the displayed revision. A stale brief shows a conflict and refreshes the panel without allocating work. One member per selected project is created without an architect selection turn. The list stays fixed until ratification; changing it requires abandoning and handing in again. One ratification covers the workgroup spec, graph and slices; the original conversation continues as the shared chief, at the session's project even when it is not a member.
 
 Member labels are planning, ready, building, paused, blocked (naming the edge
 or merge), PR open, delivered (merged) and cancelled. Expected merge waits
 create no inbox entry or notification. The workstream graph appears only for
 several members or recorded edges. Exploratory sessions appear under their
 project outside workgroups and retain their direct writable-worktree chat.
-The **Osmia** heading returns to the project pane. **Create project**, **Add
-repo**, **Hand in a feature**, **Open a design session** and **Open an exploratory
-session** use the same forms from the header's **+**, the sidebar and project
-cards wherever offered. Card actions choose that project; global actions ask
-for a project. Hand-in, design and add-repo choices list each project once.
-Exploratory sessions choose any repo, including a non-default repo. Repo labels
-use the project name and repo name together when a project has several repos.
+The **Osmia** heading returns to the project pane. **Create project**, **Hand in a feature**, **Open a design session** and **Open an exploratory session** use shared forms from the header's **+**, sidebar and project cards. Card actions preselect that project; global actions ask for it. A cross-project workgroup appears under each member's project card and sidebar group row. Member labels are project names only.
 
 **Project management**, from the cog menu or a project card, shows the chosen
-project's shared charter and whether it is ready for hand-in. **Read charter**
+project's own charter and whether it is ready for hand-in. **Read charter**
 loads the current revision; **Save charter** saves against that revision. An
 untouched editor follows another client's save live. Unsaved edits keep their
 text and revision, with a notice that the charter changed elsewhere; a stale
 save is refused and keeps the draft and error until **Read charter** explicitly
 loads the latest text.
 
-Each repo in Project management shows its name, upstream, optional fork, clone
-path, base branch, default marker and reported knowledge extraction state.
-**Extract knowledge**, **Rebase workstreams** and **Remove repo from active
-work** affect that row's repo only and show their outcome on the row. **Add
-repo** opens the shared form with the project chosen. **Remove project from
-active work** shows the service's refusal while the project still has other
-repos; remove those repos first. Removing a non-default repo keeps its project
-and sibling repos. Project and repo changes, charter saves and extraction
-state updates arrive live, including changes made through the API.
+Project management shows the project's name, upstream, optional fork, clone, base branch and knowledge extraction state. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,
 unmerged PR shows **PR open**; ready, draft and closed-without-merge PRs remain
 unresolved. An archived member without pinned merge or cancel evidence shows
 **blocked**, with a wait explaining that the workgroup remains unresolved.
-The project spec stays active until every member is merged or cancelled,
+The workgroup spec stays active until every member is merged or cancelled,
 including in one-member workgroups. Trace history remains until owner archive.
 
 Selecting a member opens its existing view, with a direct workstream link
@@ -161,7 +139,7 @@ that survives reload; an original design link follows the adopted conversation
 after start. Shared questions appear once in the project overview and can be
 answered from either member, preserving the original entry and project pin.
 Owner-approved archive and eligible cleanup of a terminal member do not remove
-the survivor's shared conversation or active project spec. Unexplained missing
+the survivor's shared conversation or active workgroup spec. Unexplained missing
 live history yields a truthful diagnostic. Archive does not count as merge.
 
 The member view is laid out like a chat client:
@@ -244,9 +222,9 @@ From the page you can:
   keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.
 - Set or clear a project's priority order and each role's profile.
-- Create a project, add a repo, read and edit its shared charter (each save a
-  new revision, as with `osmia edit charter`), remove repo
-  registrations from active work and hand in new work.
+- Register one repo per project, read and edit its charter (each save a
+  new revision, as with `osmia edit charter`), remove eligible projects
+  from active work and select projects when handing in new work.
 - Open a project design chat, review readiness questions and collapsed
   assumptions, then start a workgroup from its brief.
 - Request amend or cancel in the shared conversation and approve its single
@@ -567,14 +545,15 @@ belong to the workgroup feed. Single-member feeds also contain those chief
 entries. `GET` and `POST /v1/conversation/{workstream}` keep the member's
 conversation address and member note for CLI and API clients.
 
-Project views include repo lists; member status includes workgroup membership.
+Project views include the project's single repo in the `repos` API field;
+member status includes workgroup membership.
 Workstream status separates the stored workflow `state` from `display_state`
 and its named `wait`;
 publication state `delivered` alone does not establish merge. Runtime archive
 records expose `resolution_evidence` (`merged`, `cancelled` or `unresolved`)
 and `resolved`, pinned from history before cleanup. Only merge or cancel
 evidence resolves an archived member; a missing pin keeps the workgroup and
-project spec active with a visible diagnostic. See
+workgroup spec active with a visible diagnostic. See
 [resolution and retention](configuration.md#resolution-retention-and-shared-lifecycle).
 
 Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET

@@ -1,10 +1,8 @@
 # Command line
 
-A project has one charter and one or more repos. A feature request runs as a
-workgroup with one shared chief of staff; each member workstream targets one
-repo, feature branch and pull request. Repo settings, KB and entities are
-independent. The project pane is the web entry point, with member views as
-drill-downs and exploratory sessions outside workgroups.
+A project is exactly one repo with its own charter, settings, KB and entities. A feature request runs as a workgroup across an owner-selected set of projects with one shared chief of staff, one workgroup spec and one ratification. Each member has its own workstream, branch and pull request. The web project pane shows the group under every member's project, labelled by project name, with exploratory sessions outside workgroups.
+
+The shared design's displayed name is **workgroup spec**. Stored paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the flag `--project-spec-revision` keep their names.
 
 [Getting started](getting-started.md) walks through installing, configuring and
 running `osmia` for the first time. To build from source instead, use
@@ -28,8 +26,6 @@ osmia trace w_0123456789abcdef0123456789abcdef criterion spec#1
 osmia trace w_0123456789abcdef0123456789abcdef unit parser
 osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789abcdef01234567
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
-osmia project add-repo p_0123456789abcdef0123456789abcdef --upstream owner/other --clone ~/src/other
-osmia project repos p_0123456789abcdef0123456789abcdef
 osmia project memory p_0123456789abcdef0123456789abcdef
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
@@ -37,6 +33,7 @@ osmia rebase w_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia edit charter p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
+osmia handin p_0123456789abcdef0123456789abcdef design.md --with p_1123456789abcdef0123456789abcdef
 osmia edit spec w_0123456789abcdef0123456789abcdef
 osmia edit plan w_0123456789abcdef0123456789abcdef --from plan.json
 osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
@@ -72,34 +69,19 @@ osmia status --json
 
 ## Design Sessions
 
-`osmia design open <project-id>` opens a project design conversation. The
-agent receives the charter and every repo's knowledge base, and can read
-committed files from any repo in the project. It cannot change source files,
-use version control, access delivery credentials or take owner gates. It works
-without Hearsay. Exploratory `osmia session` chats remain separate and keep
-their writable worktrees.
+`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and KB are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo` and `draft_brief`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
 
-Use `design send` and `design read` to discuss intent. The readiness pass asks
-only about expensive-to-undo choices, genuine forks without a clear signal, or
-tension with intent. Each question has a recommended answer; other inferred
-assumptions appear in a collapsed list on the web page and can be overridden
-by replying. The brief states decisions, intent and tradeoffs, and rejected
-options.
+Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active with a nonempty charter for every project. Paused projects are allowed; the session's project can be removed while another remains.
 
-`osmia design start <design-id>` hands the latest brief to the architect in
-one owner action. A transcript accompanies the brief for reference; the brief
-wins where they differ. Starting is refused until a brief exists or while a
-turn is unfinished. The same durable thread continues as the workgroup chief
-of staff's conversation, accessible with `osmia send` and `osmia conversation`.
-In a project with several repos, the architect selects the affected repos and
-the service creates their members automatically. The original design ID keeps
-working for conversation, packet and ratification commands. One ratification
-approves the shared project spec and every member; interrupted sealing remains
-pending for the whole group until all members finish. Delivery approvals stay
-per workstream.
-The web page's **Open a design session** and **Start workgroup from brief** offer
-the same flow, using `POST /v1/design` and `POST /v1/design/{workstream}/start`.
-All design commands support `--json`.
+`osmia design read <design-id>` prints `Brief revision: N`, then `Projects:` with the ordered project IDs and `(home)` beside the session's project when listed, followed by brief text and the conversation. With `--json` it returns `design` (including `brief_revision`, `brief` and `projects`) and the conversation fields (`workstream` and `entries`) at the top level.
+
+`osmia design start <design-id>` first reads the current brief, prints `Starting with:` followed by its revision and ordered project list, then sends that `brief_revision` to `POST /v1/design/{workstream}/start`. With `--json`, the starting list goes to stderr and stdout remains the API response. A stale pin returns `conflict` (exit 5) and starts nothing; read the brief before trying again. Start is also refused until a brief exists or while a turn is unfinished. The API pin is optional for direct clients, but CLI and web always send the revision they read.
+
+The web's read-only **Brief** panel above Start shows the latest revision and project names with home marked; brief text is collapsed by default. It refreshes when a brief is recorded. The project list is not editable there: request changes in the conversation. Start sends the displayed revision, surfaces a conflict and refreshes the panel when the brief changed.
+
+Start records the brief's ordered list as the owner's decision and allocates one member per project without an architect selection turn. The handed text, revision and list are durably bound through crashes and retries; recovery completes the exact start once or leaves it safely retryable with nothing allocated. The brief wins over its reference transcript. The conversation and shared chief stay at the session's project even when it is not a member. The original design ID continues to work for conversation, packet and ratification. One ratification approves the workgroup spec, graph and every slice; all members wait for seal completion. Project membership stays fixed until ratification; to change it, abandon and hand in again. Afterwards amend/cancel retain their existing behavior. Every member keeps its own delivery approval.
+
+**Open a design session** uses `POST /v1/design`; the design read is `GET /v1/design/{workstream}`. All design commands support `--json`.
 
 `osmia design destroy <design-id> [--json]` permanently removes an open design
 session before a workgroup has been started from it. It removes its trace,
@@ -120,7 +102,7 @@ runtime agents. The [OpenAPI reference](openapi.json) describes both routes.
 ## Dependencies, delivery and retention
 
 The architect's workgroup graph must be acyclic. A **contract** edge (the
-preferred default) resolves when its interface is in the ratified project
+preferred default) resolves when its interface is in the ratified workgroup
 spec. A **hard block** starts no dependent unit before the upstream PR merges.
 A **merge-order** edge allows parallel building, but keeps the dependent PR a
 draft until the upstream merges. The service polls GitHub for merges; an
@@ -157,16 +139,16 @@ matching merged or closed outcome stops observation. Failed lookups are
 retried without recording an outcome; closed without merge remains unresolved.
 
 On member resolution (merged or cancelled), its own slice, spec, plan and
-workspaces leave active state and bundles. The project spec remains active
+workspaces leave active state and bundles. The workgroup spec remains active
 for the shared chief and all unresolved members until every member resolves,
 including a dependent waiting on or repairing after a merge. At both levels,
 trace history is retained until owner archive. Archiving and eligible cleanup
 of one terminal member preserve the survivor's original conversation and
-project spec across restart; missing live history yields a truthful error or
+workgroup spec across restart; missing live history yields a truthful error or
 hold and does not count as a merge. Archive and cleanup never establish a merge
 or resolve an unmerged publication.
 An archived member without pinned merge or cancel evidence keeps the group
-unresolved and its project spec active; the pane shows **blocked** with a
+unresolved and its workgroup spec active; the pane shows **blocked** with a
 missing-evidence diagnostic rather than **delivered (merged)**.
 
 **Open question:** integration-gate edges await an owner ruling on how a combined
@@ -211,14 +193,11 @@ These conversation controls do not introduce a separate `cancel` command.
 
 ## Migration
 
-Startup wraps every existing one-repo project in a default project, retaining
-its ID, charter and repo settings. Building, delivered, abandoned and archived
-non-session workstreams each appear in a one-workstream workgroup using their
-existing chief thread. Exploratory sessions stay outside workgroups with the
-same kind, thread and exclusion from factory passes. Traces, rulings, decisions
-and archive records are preserved without owner action. Migration resumes after
-a crash and repeated starts neither lose nor duplicate records. See
-[configuration](configuration.md#project-and-workgroup-migration).
+Startup splits grouped registrations into independent one-repo projects while retaining every `p_` ID. Each split-off charter copies the source project's current charter with its rule numbers and records the source project and charter revision. Configuration loses only the grouping field; comments and all other bytes survive. In-flight groups retain members, approvals, pins and shared chief without re-ratification. The split is crash-safe and idempotent, with no duplicate charter revisions.
+
+Existing one-repo projects keep their settings and charter. The project/workgroup migration puts existing non-session workstreams in workgroups using their existing chief threads; exploratory sessions keep their separate kind and thread. Traces, rulings, decisions and archive records remain. An in-flight design start without a recorded selection waits with an inbox entry for the owner's validated project list; a recorded selection stays in force. See [configuration](configuration.md#project-and-workgroup-migration).
+
+Use `project add` for each repo and hand-in project lists for coordinated work. Repo-grouping commands, their registration route and web controls are unavailable; the architect has no selection turn or affected-repos tool.
 
 ## Commands and flags
 
@@ -546,15 +525,21 @@ a crash and repeated starts neither lose nor duplicate records. See
   with one round that reads it. A debate still running or never concluded, a
   skipped one, and a conclusion you have already asked a redraft for fail with
   `conflict` (exit 5); an empty note fails with `validation` (exit 4).
-- `ratify <workstream-id>` ratifies the spec and plan of a one-member workgroup
-  in the shed. For a multi-repo workgroup it covers the shared project spec,
+- `packet <workstream-id> [--json]` reads the ratification packet, including the
+  workgroup spec and the revision pins required for approval.
+- `ratify <workstream-id> [--project-spec-revision N --spec-revision N --plan-revision N]` ratifies the spec and plan of a one-member workgroup
+  in the shed. For a cross-project workgroup it covers the shared workgroup spec,
   graph and every slice and plan in the packet, with the same command and
   `POST /v1/ratify/{workstream}` request shape. Invalid graphs or incomplete
   member coverage are refused before writes. Interrupted sealing reconciles
   from the exact approved pins; all members remain effectively pending and
   unable to build or release contract edges until every pinned seal completes.
-  No additional repo-selection or graph approval is required. It reads your ratification packet, pins the revisions the packet
-  names and ratifies exactly those, so revisions that moved since are refused.
+  Read `osmia packet <workstream-id>` first. Shared workgroup approval requires
+  its displayed `--project-spec-revision`, `--spec-revision` and
+  `--plan-revision` pins; without them the command shows the current revisions,
+  asks you to read the packet and records nothing (exit 5). Stale pins are
+  refused. A one-member packet without a shared spec is read and pinned by the
+  command as usual. No separate graph approval is required.
   Ratification is refused, with every reason listed, when an objection still
   blocks and you have not overruled it, when the plan does not validate, when
   the revisions are not the current ones, and when the workstream is not in the
@@ -661,14 +646,8 @@ a crash and repeated starts neither lose nor duplicate records. See
   attempt. Adding a
   project while others are active is supported with a separate clone. Repeating
   an active project's exact registration returns it again.
-- `project add-repo <project-id> --upstream OWNER/REPO [--fork OWNER/REPO]
-  --clone PATH [--base-branch NAME]` adds a repo to the default project's ID.
-  It uses the same validation and recoverable registration as `project add`,
-  creates the repo's own configuration, trace, KB and entity map and shares
-  the existing project charter. The API is `POST /v1/projects/repos`.
-- `project repos <project-id>` lists that project's repos, marking its default
-  repo and showing each repo's own upstream, fork, clone and KB location.
-  `--json` returns the repo views from `GET /v1/config`.
+
+
 - `project extract <repo-id>` starts a new
   knowledge-base extraction of the active
   repo registration: a librarian turn that rewrites `kb/<subsystem>.md` and
@@ -688,13 +667,13 @@ a crash and repeated starts neither lose nor duplicate records. See
   resumes a workstream whose drift rebase is held. A project ID that is
   not the active project fails with `not_found` (exit 4).
 - `project remove <project-id>` takes the active project out of
-  `active_projects` and closes that repo registration's runtime state. Remove
-  additional repos before removing the default repo. Its trace repository, every
+  `active_projects` and closes its runtime state. Removal is refused while it
+  has any unresolved member in any workgroup. Its trace repository, every
   workstream's own trace repository and the clone are kept. Adding the same
   upstream again afterwards creates a new project ID and new trace
   repositories; see [configuration](configuration.md#project-registration).
-- `handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate]` hands one input to the active
-  project and initially creates a one-workstream workgroup in the named repo,
+- `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
+  projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
   (`https://github.com/OWNER/REPO/issues/NUMBER`, fetched by the service), or
@@ -710,21 +689,27 @@ a crash and repeated starts neither lose nor duplicate records. See
   fails with `not_found` (exit 4). An unreadable, empty, non-UTF-8 or oversized
   input, or a URL of another shape, fails with `validation` (exit 4); an issue
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
-  creates nothing. With one active repo, the architect drafts the spec and plan
-  directly. With two or more active repos, the architect first selects the affected
-  repos from the document and project context, through the same path as a design
-  start. Go validates and durably records the selection before allocating exactly
-  one member per selected repo. Empty, duplicate or outside-project selections
-  are refused before allocation. A selection turn that finishes without a valid
-  selection leaves the start invalid and allocates no members.
-  Selecting only the named repo keeps the original workstream. Selecting one
-  other repo creates one member there. Either single selection gets the ordinary
-  ratification packet; several selected repos get the project spec, contracts,
-  graph, slices and plans, with one all-member ratification. Every member receives
-  the immutable input, and the hand-in's original chief-of-staff conversation
-  continues as the group's one shared thread. Selection, allocation, conversation
-  adoption and sealing recover across restarts without duplication. There is no
-  repo-selection approval or additional owner step.
+  creates nothing. Repeat `--with <project-id>` to add members in argument order;
+  the positional project is home for the shared chief and conversation. The API
+  accepts an ordered `projects` list, with `project` as a one-element shorthand.
+  The web form offers a multi-select of every active project. Go refuses empty
+  or duplicate lists, inactive projects and empty charters; paused projects are
+  allowed. A single-project hand-in keeps ordinary drafting and ratification.
+  Several projects allocate and join one member each without a model selection
+  turn, and get a workgroup spec, contracts, graph, slices and plans with one
+  all-member ratification. The architect escalates a judgment that a project
+  needs no change and cannot drop it. Each member's slice, plan and units obey
+  its own charter; the workgroup spec and contracts obey all member charters.
+  Use `<project>/charter#n` for another project's rule and `charter#n` for the
+  member's own. Charter conflicts go to the owner and cannot be dismissed by
+  the chief; amendments are decided in the project whose rule they change.
+  The project set is fixed until ratification. To choose a different set,
+  abandon and hand in again; afterwards amend/cancel behave as usual. Every
+  member gets the immutable input, and the original conversation continues as
+  the one shared chief thread. Allocation and join recover without duplicate
+  members. `--base` must name a workstream in a selected project and applies
+  only to that project's member.
+
   With `--skip-debate` the hand-in skips debate, for small work: once the
   architect's draft is
   valid, the workstream enters the shed without a committee, no round runs, and
@@ -827,7 +812,7 @@ its top-level file at `~/.config/osmia/config.toml` (see
 [root and identity](configuration.md#root-and-identity)). An explicit root holds
 its own `config.toml`. Flags may occur
 before or after positional arguments; value flags also accept `--flag=value`.
-Duplicate and unknown flags are errors. `--help` prints the supported syntax.
+Duplicate and unknown flags are errors, except repeatable `--with` on `handin`. `--help` prints the supported syntax.
 `--version` prints the stamped [release](release.md) version and commit and
 exits 0 without contacting the service; like `--help`, it takes precedence
 over a command.
@@ -919,8 +904,8 @@ It uses the local trace and contacts no memory service. Merge and validate the
 fragments when configuring Hearsay; see [memory setup](hearsay.md).
 
 A hand-in's `--base <workstream-id>` selects an available feature on the same
-repo. In a project with several active repos, the affected-repo selection must
-include that repo, and only its member inherits the base. Dependent requests
+repo. That workstream's project must be selected, and only its member inherits
+the base. Dependent requests
 open in the push repository. After the dependency integrates,
 delivery maintenance requires a fresh review and owner approval before opening
 the upstream request, or retargeting the existing request when no fork is

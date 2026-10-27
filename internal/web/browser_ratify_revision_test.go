@@ -36,7 +36,7 @@ func TestBrowserRatifySendsDisplayedProjectSpecRevision(t *testing.T) {
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.click(`[data-select="w_000"]`)
 	card := decisionSelector("ratification", "w_000", "")
-	p.awaitText(card+`[data-field=project-spec]`, "Project spec revision 7")
+	p.awaitText(card+`[data-field=project-spec]`, "Workgroup spec revision 7")
 	p.choose(card+"select", "ratify")
 	p.click(card + "button[type=submit]")
 	p.awaitText("#inbox-result", "the owner ratified the packet.")

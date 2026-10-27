@@ -740,7 +740,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return 0
 			}
 			if packet.ProjectSpec != nil || packet.ProjectSpecRevision > 0 {
-				fmt.Fprintf(stderr, "Project spec revision %d; spec.md revision %d; plan.json revision %d. Read the packet again with osmia packet %s, then ratify with its --project-spec-revision, --spec-revision and --plan-revision.\n", packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, id)
+				fmt.Fprintf(stderr, "Workgroup spec revision %d; spec.md revision %d; plan.json revision %d. Read the packet again with osmia packet %s, then ratify with its --project-spec-revision, --spec-revision and --plan-revision.\n", packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, id)
 				return 5
 			}
 			specRevision, planRevision = packet.Packet.Revision.Spec, packet.Packet.Revision.Plan
@@ -754,7 +754,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
 		if o.projectSpecRevision > 0 {
-			fmt.Fprintf(stdout, "Project spec revision %d approved.\n", o.projectSpecRevision)
+			fmt.Fprintf(stdout, "Workgroup spec revision %d approved.\n", o.projectSpecRevision)
 		}
 		return 0
 	}
@@ -1484,7 +1484,7 @@ func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse)
 		fmt.Fprintln(w, string(content))
 	}
 	if spec := packet.ProjectSpec; spec != nil {
-		fmt.Fprintf(w, "\nProject spec revision %d\n%s\n", packet.ProjectSpecRevision, spec.Behavior)
+		fmt.Fprintf(w, "\nWorkgroup spec revision %d\n%s\n", packet.ProjectSpecRevision, spec.Behavior)
 		for _, contract := range spec.Contracts {
 			fmt.Fprintf(w, "Contract %s: %s\n", contract.Name, contract.Text)
 		}
