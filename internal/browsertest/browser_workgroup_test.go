@@ -59,10 +59,8 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 		must(t, trace.RecordProjectSpec(ctx, repo, g, spec, demoStart, ownerActor, "fixture"))
 	}
 	must(t, repo.Close())
-	// The runner reconciles operations locally; no provider or model is used.
-	opts.Threads = func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) {
-		return &completedRunner{}, nil
-	}
+	// Page facts are recorded manually. Leave turns undispatched until a test
+	// binds a runner that completes the durable thread as well as its operation.
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, opts)
 	live := service.InspectForTest(s).SoleRepository()
