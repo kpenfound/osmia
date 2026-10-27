@@ -483,7 +483,10 @@
             const w = streams().find(w => w.workstream === ui.selected);
             if (w) {
               ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
-              if (w.kind === 'design') dirty.add('design/' + w.workstream + '/conversation');
+              if (w.kind === 'design') {
+                dirty.add('design/' + w.workstream);
+                dirty.add('design/' + w.workstream + '/conversation');
+              }
             }
           }
           for (const w of streams()) {
@@ -547,7 +550,7 @@
   function expand(name, event) {
     if (name === 'feeds') {
       return [...listedFeeds(), ...streams().filter((w) => isDesignId(w.workstream) && !w.archived)
-        .map((w) => 'design/' + w.workstream + '/conversation')];
+        .flatMap((w) => ['design/' + w.workstream, 'design/' + w.workstream + '/conversation'])];
     }
     if (name === 'feed') {
       let data = {};
@@ -560,7 +563,7 @@
         return [];
       }
       return isDesignId(data.workstream)
-        ? ['feed/' + data.workstream, 'design/' + data.workstream + '/conversation']
+        ? ['feed/' + data.workstream, 'design/' + data.workstream, 'design/' + data.workstream + '/conversation']
         : ['feed/' + data.workstream, ...workgroups().filter(g => g.members.includes(data.workstream) || g.conversation?.workstream === data.workstream).map(g => groupFeed(g.id))];
     }
     return [name];
@@ -679,7 +682,7 @@
     ]) {
       scopeOutcome(document.querySelector(result), displayedWorkstream, document.querySelectorAll(buttons));
     }
-    for (const id of ['handin-form', 'design-add-form', 'session-add-form', 'repo-add']) {
+    for (const id of ['handin-form', 'design-add-form', 'session-add-form']) {
       const form = byId(id);
       let opening = 0;
       const scope = scopeOutcome(form.querySelector('.result'), () => opening, form.querySelectorAll('button'));
@@ -790,10 +793,12 @@
     if (select.dataset.options === key) {
       return;
     }
-    const chosen = select.value;
+    const chosen = select.multiple ? [...select.selectedOptions].map(o => o.value) : select.value;
     select.dataset.options = key;
     select.replaceChildren(...options.map(([value, label]) => el('option', { value }, label)));
-    if (options.some(([value]) => value === chosen)) {
+    if (select.multiple) {
+      for (const option of select.options) option.selected = chosen.includes(option.value);
+    } else if (options.some(([value]) => value === chosen)) {
       select.value = chosen;
     }
   }
@@ -843,7 +848,7 @@
   }
 
   function configuredRepos() {
-    return projects().flatMap(p => p.repos?.length ? p.repos.map(r => ({ ...r, label: p.repos.length > 1 ? p.name + ' / ' + r.name : p.name })) : [{ ...p, label: p.name }]);
+    return projects().map(p => ({ ...p, label: p.name }));
   }
 
   function projectName(id) {
@@ -1445,7 +1450,7 @@
       const groupsView = [...groups.values()].map(g => {
         const members = work.filter(w => w.workgroup?.id === g.id);
         const graph = g.members.length > 1 || g.edges.length > 0;
-        let row = paneGroups.get(g.id);
+        let row = paneGroups.get(p.id + ":" + g.id);
         if (!row) {
           row = { inbox: el('button', { type: 'button' }), members: el('ul', { class: 'pane-streams' }), graph: el('div'), graphKey: '' };
           row.open = el('button', { type: 'button', 'data-open-workgroup': g.id }, 'Workgroup');
@@ -1460,7 +1465,7 @@
           row.open.addEventListener('click', open);
           row.node = el('section', { class: 'pane-workgroup', 'data-workgroup': g.id },
             el('h4', {}, row.open), el('p', { class: 'id' }, g.id), row.inbox, row.members, row.graph);
-          paneGroups.set(g.id, row);
+          paneGroups.set(p.id + ":" + g.id, row);
         }
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
         row.open.disabled = !members.some(w => !w.archived);
@@ -1476,7 +1481,7 @@
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
-              repoLabel(work.find(w => w.workstream === id)?.project || id), ' · ', id))),
+              repoLabel(streams().find(w => w.workstream === id)?.project || id), ' · ', id))),
             ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
@@ -1493,7 +1498,7 @@
         });
         row.node = el('article', { class: 'project-card', 'data-project': p.id }, row.name,
           el('div', { class: 'actions' }, action('Open a design session', 'design-add', p.id),
-            action('Hand in a feature', 'handin', p.id), action('Add repo', 'repo-add', p.id),
+            action('Hand in a feature', 'handin', p.id),
             action('Project management', 'projects', p.id), action('Open an exploratory session', 'session-add', p.id)),
           el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
         paneProjects.set(p.id, row);
@@ -1517,7 +1522,7 @@
     place(byId('project-pane'), projectNodes);
     if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
-    for (const id of paneGroups.keys()) if (!streams().some(w => w.workgroup?.id === id)) paneGroups.delete(id);
+    for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
     for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
   }
 
@@ -1557,7 +1562,7 @@
       mark(['status', 'sessions/' + id + '/changes']);
     }
     if (design) {
-      mark(['status', 'design/' + id + '/conversation']);
+      mark(['status', 'design/' + id, 'design/' + id + '/conversation']);
     }
   }
 
@@ -1569,10 +1574,11 @@
         popover.hidePopover();
       }
     }
-    if (['handin', 'design-add', 'session-add', 'repo-add'].includes(view) || (view === 'projects' && project)) {
+    if (['handin', 'design-add', 'session-add'].includes(view) || (view === 'projects' && project)) {
       const form = document.querySelector('[data-view="' + view + '"] form');
       const changedProject = form.elements.project.value !== project;
       form.elements.project.value = project;
+      if (view === 'handin') handinProjects = project ? [project] : [];
       if (view !== 'projects' || changedProject) form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
     }
     const changed = ui.view !== view;
@@ -2145,7 +2151,7 @@
       sessionEchoes.delete(id);
       sessionCheckResults.delete(id);
       sessionCommitRetries.delete(id);
-      for (const name of ['feed/' + id, 'design/' + id + '/conversation', 'sessions/' + id + '/changes']) {
+      for (const name of ['feed/' + id, 'design/' + id, 'design/' + id + '/conversation', 'sessions/' + id + '/changes']) {
         delete views[name];
         delete failures[name];
         dirty.delete(name);
@@ -2376,18 +2382,50 @@
   // design session's drafted brief; the same conversation continues as the
   // workgroup's chief-of-staff thread.
   function startDesign(id) {
-    act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start'), (out) => {
+    const revision = Number(byId('design-brief').dataset.revision);
+    act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start', { brief_revision: revision }), (out) => {
       designIds.delete(id);
       startedDesignIds.add(id);
       ui.tab = 'feed';
       select(out.workstream);
       mark(['status', 'feed/' + out.workstream]);
       return 'Started a workgroup from this brief; workstream ' + out.workstream + ' is now ' + out.state + '.';
+    }, (err) => {
+      if (err.code === 'conflict') mark(['design/' + id]);
     });
+  }
+
+  // Keep the rendered revision with the panel so Start pins exactly what
+  // the owner saw, even while another read is in flight.
+  function renderDesignBrief(w) {
+    const panel = byId('design-brief');
+    const box = byId('design-brief-content');
+    const path = w && 'design/' + w.workstream;
+    const design = path && views[path]?.design;
+    block(byId('design-start'), !design || !!failures[path]);
+    if (!design || failures[path]) {
+      delete panel.dataset.revision;
+      delete panel.dataset.shown;
+      box.replaceChildren(el('p', { class: 'meta' }, failures[path] || (w ? 'Reading the brief…' : 'No design session selected.')));
+      return;
+    }
+    const key = JSON.stringify([design, design.projects.map(projectName), projectName(design.project)]);
+    if (panel.dataset.shown === key) return;
+    panel.dataset.shown = key;
+    panel.dataset.revision = String(design.brief_revision);
+    box.replaceChildren(
+      el('p', { 'data-field': 'revision' }, 'Brief revision: ' + design.brief_revision),
+      el('p', { class: 'meta', 'data-field': 'home' }, 'Home project: ' + projectName(design.project)),
+      el('ul', { 'data-field': 'projects' }, ...design.projects.map(id =>
+        el('li', { 'data-project': id }, projectName(id) + (id === design.project ? ' (home)' : '')))),
+      design.brief_revision > 0
+        ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
+        : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
   }
 
   function renderDesignView() {
     const w = shownDesign();
+    renderDesignBrief(w);
     if (!w) {
       byId('design-title').textContent = 'Design session';
       byId('design-meta').replaceChildren();
@@ -2761,6 +2799,11 @@
         (out) => 'Answered inbox entry ' + out.number + '.', undefined, decisionKey(entry));
       return;
     }
+    if (entry.kind === 'project-selection') {
+      body.projects = d.text.value.split(/[\s,]+/).filter(Boolean);
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, () => 'Projects selected. The start will continue.', undefined, decisionKey(entry));
+      return;
+    }
     if (entry.kind === 'delivery') {
       body.messages = d.messages.map((m) => ({ commit: m.commit, message: m.input.value }));
       body.description = d.text.value;
@@ -2849,6 +2892,9 @@
       d.accept = el('button', { type: 'button', 'data-field': 'accept' });
       d.accept.addEventListener('click', () => accept(d));
       fields.push(d.text);
+    } else if (entry.kind === 'project-selection') {
+      d.text = el('textarea', { name: 'projects', rows: '2', required: true });
+      fields.push(el('label', {}, 'Project IDs in order, separated by spaces or commas', d.text));
     } else if (entry.kind === 'delivery') {
       d.text = el('textarea', { name: 'description', rows: '8' });
       d.draft = '';
@@ -2889,7 +2935,7 @@
     const dismissed = all.filter((o) => o.by === 'chief_of_staff');
     d.detail.replaceChildren(...[
       view.project_spec ? el('details', { 'data-field': 'project-spec' },
-        el('summary', {}, 'Project spec revision ' + view.project_spec_revision),
+        el('summary', {}, 'Workgroup spec revision ' + view.project_spec_revision),
         el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },
@@ -3003,6 +3049,9 @@
       case 'escalation':
         d.accept.textContent = 'Accept: ' + entry.quick_reply;
         place(d.actions, entry.quick_reply ? [d.submit, d.accept] : [d.submit]);
+        break;
+      case 'project-selection':
+        place(d.actions, [d.submit]);
         break;
       case 'delivery':
         renderDelivery(d, name);
@@ -3396,7 +3445,6 @@
     const state = configured?.charter_state;
     byId('charter-state').textContent = state ? (state.ready ? 'Ready for hand-in' : 'Not ready for hand-in') +
       ' · ' + state.rules + ' rules · revision ' + state.revision + '.' : (project ? 'Charter readiness not reported.' : 'Choose a project to manage its charter and repos.');
-    block(byId('project-add-repo'), !configured);
     block(byId('project-remove'), !configured);
     const repos = configured?.repos || [];
     const active = new Set(repos.map(r => r.id));
@@ -3429,7 +3477,7 @@
           row.extraction, el('div', {class: 'actions'}, ...row.buttons), row.result);
         managementRepos.set(repo.id, row);
       }
-      row.title.textContent = repoLabel(repo.id) + (repo.default ? ' · Default repo' : '');
+      row.title.textContent = repoLabel(repo.id);
       const fields = [['Name', repo.name], ['Upstream', repo.upstream], ...(repo.fork ? [['Fork', repo.fork]] : []),
         ['Clone path', repo.clone], ['Base branch', repo.base_branch]];
       const key = JSON.stringify(fields);
@@ -3447,6 +3495,12 @@
   let draftRead = null;
   let baseRead = null;
   let handinRetry = null;
+  let handinProjects = [];
+  function selectedHandinProjects() {
+    const selected = [...byId('handin-form').elements.project.selectedOptions].map(o => o.value);
+    handinProjects = [...handinProjects.filter(id => selected.includes(id)), ...selected.filter(id => !handinProjects.includes(id))];
+    return handinProjects;
+  }
 
   // formAction runs an owner action a form submits. With opts.reset, a
   // successful submission clears the form back to its default values, the
@@ -3485,14 +3539,16 @@
   function renderOwnerForms() {
     const options = [['', 'Choose a project'], ...projects().map(p => [p.id, projectName(p.id)])];
     for (const select of document.querySelectorAll('[data-project-select]')) {
-      setOptions(select, options);
+      setOptions(select, select.multiple ? options.filter(([id]) => id) : options);
     }
     for (const select of document.querySelectorAll('[data-repo-select]')) {
       setOptions(select, [['', 'Choose a repo'], ...configuredRepos().map(r => [r.id, r.label])]);
     }
     const all = streams();
     const handin = byId('handin-form');
-    setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => w.project === handin.elements.project.value && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
+    const handinSelected = selectedHandinProjects();
+    setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => handinSelected.includes(w.project) && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
+    byId('handin-project-order').textContent = handinProjects.length ? 'Selected order: ' + handinProjects.map(projectName).join(' → ') + '. First project hosts the shared chief and conversation.' : 'Choose projects in order; the first hosts the shared chief and conversation.';
     const w = shown();
     for (const id of workstreamForms) {
       byId(id).elements.workstream.value = w ? w.workstream : '';
@@ -3543,12 +3599,6 @@
   }
 
   function setupOwnerForms() {
-    const repo = byId('repo-add');
-    repo.addEventListener('submit', event => {
-      event.preventDefault();
-      formAction(repo, event.submitter, () => request('POST', '/projects/repos', Object.fromEntries(new FormData(repo))),
-        out => 'Added repo to ' + out.project.name + '.', { reset: true });
-    });
     const add = byId('project-add');
     add.addEventListener('submit', event => {
       event.preventDefault();
@@ -3559,7 +3609,7 @@
     handin.elements.project.addEventListener('change', renderOwnerForms);
     handin.addEventListener('submit', event => {
       event.preventDefault();
-      const body = {project: handin.elements.project.value, base: handin.elements.base.value, skip_debate: handin.elements.skip_debate.checked};
+      const body = {projects: selectedHandinProjects(), base: handin.elements.base.value, skip_debate: handin.elements.skip_debate.checked};
       body[handin.elements.source.value === 'url' ? 'url' : 'stdin'] = handin.elements.content.value;
       const input = JSON.stringify(body);
       if (!handinRetry || handinRetry.input !== input) {
@@ -3608,7 +3658,6 @@
           if (charterRead === pin && err.code === 'conflict') { pin.conflict = true; renderCharterPin(); }
         });
     });
-    byId('project-add-repo').addEventListener('click', () => openView('repo-add', charter.elements.project.value));
     byId('project-remove').addEventListener('click', event => {
       const project = charter.elements.project.value;
       if (!project) return;

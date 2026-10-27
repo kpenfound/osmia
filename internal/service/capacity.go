@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -151,11 +152,17 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 // are under jev.Role; other costs no recorded attempt matches, such as a
 // classifier's, are under "".
 func providerCosts(repository *trace.Repository, day calendarDay) (map[string][]trace.Cost, error) {
+	var result map[string][]trace.Cost
+	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
+		var err error
+		result, err = providerCostsSnapshot(repository, day, streams)
+		return err
+	})
+	return result, err
+}
+
+func providerCostsSnapshot(repository *trace.Repository, day calendarDay, streams []config.WorkstreamID) (map[string][]trace.Cost, error) {
 	costs, err := repository.Costs()
-	if err != nil {
-		return nil, err
-	}
-	streams, err := repository.Workstreams()
 	if err != nil {
 		return nil, err
 	}

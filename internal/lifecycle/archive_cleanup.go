@@ -212,17 +212,19 @@ func (c *ArchiveCleanup) Prepare(ctx context.Context, a runtime.Archive) (eligib
 // retain its ancestors as well.
 func (c *ArchiveCleanup) ResolveDependencies(ready map[config.WorkstreamID]bool, reasons map[config.WorkstreamID]string) error {
 	repo := c.Workspaces.Repository
-	streams, err := repo.Workstreams()
+	bases := map[config.WorkstreamID]config.WorkstreamID{}
+	err := repo.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
+		for _, stream := range streams {
+			base, err := repo.WorkstreamBase(stream)
+			if err != nil {
+				return err
+			}
+			bases[stream] = base.Base
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	bases := map[config.WorkstreamID]config.WorkstreamID{}
-	for _, stream := range streams {
-		base, err := repo.WorkstreamBase(stream)
-		if err != nil {
-			return err
-		}
-		bases[stream] = base.Base
 	}
 	for changed := true; changed; {
 		changed = false

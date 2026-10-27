@@ -167,10 +167,7 @@ type ReloadError struct {
 	At      time.Time `json:"at"`
 }
 
-// ProjectView names a registered project and its trace.
-// Upstream, Fork, Clone, BaseBranch, Trace and Extraction describe the
-// project's default repo, the one its own ID names; Repos lists every repo
-// of the project, the default repo included, each with its own settings.
+// ProjectView describes one project and its repository settings.
 type ProjectView struct {
 	ID         config.ProjectID `json:"id"`
 	Name       string           `json:"name"`
@@ -198,7 +195,6 @@ type RepoView struct {
 	Trace      string           `json:"trace"`
 	KB         string           `json:"kb"`
 	EntityMap  string           `json:"entity_map"`
-	Default    bool             `json:"default"`
 	Extraction *ExtractionState `json:"extraction,omitempty"`
 }
 
@@ -266,19 +262,27 @@ type CharterState struct {
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`
 }
 
-// HandInRequest hands work to a project. Exactly one of Path (an absolute
-// path to a file), URL (a GitHub issue URL) and Stdin (the input itself) is
+// HandInRequest hands work to the ordered Projects, whose first project hosts
+// the shared chief and conversation. Project is a one-project shorthand.
+// Exactly one of Path (an absolute file path), URL (a GitHub issue URL) and
+// Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
-// workstream. SkipDebate asks for the workstream's debate to be skipped: its
-// spec and plan go to the owner's ratification without a committee.
+// workstream. Base belongs to a selected project and applies only to its member.
+// SkipDebate skips every member's debate; ratification still belongs to the owner.
 type HandInRequest struct {
 	Base       config.WorkstreamID `json:"base,omitempty"`
-	Project    config.ProjectID    `json:"project"`
+	Project    config.ProjectID    `json:"project,omitempty"`
+	Projects   []config.ProjectID  `json:"projects,omitempty"`
 	Key        string              `json:"key"`
 	Path       string              `json:"path,omitempty"`
 	URL        string              `json:"url,omitempty"`
 	Stdin      *string             `json:"stdin,omitempty"`
 	SkipDebate bool                `json:"skip_debate,omitempty"`
+}
+
+// ProjectSelectionRequest supplies the owner's ordered projects for a held design start.
+type ProjectSelectionRequest struct {
+	Projects []config.ProjectID `json:"projects"`
 }
 
 // HandInResponse names the workstream a hand-in created. Source is where its
@@ -298,13 +302,16 @@ type DesignOpenRequest struct {
 	Project config.ProjectID `json:"project"`
 }
 
-// DesignView is one design session: the workstream it lives on, its project
-// and when it opened. It carries no spec, plan or feature state: it stays
-// outside every factory pass until the owner starts a workgroup from it.
+// DesignView is a design session and its latest brief, revision and ordered
+// projects. BriefRevision is zero until a brief is recorded. The session stays
+// outside feature work until the owner starts a workgroup from the brief.
 type DesignView struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Project    config.ProjectID    `json:"project"`
-	CreatedAt  time.Time           `json:"created_at"`
+	Workstream    config.WorkstreamID `json:"workstream"`
+	Project       config.ProjectID    `json:"project"`
+	CreatedAt     time.Time           `json:"created_at"`
+	BriefRevision int                 `json:"brief_revision"`
+	Brief         string              `json:"brief"`
+	Projects      []config.ProjectID  `json:"projects"`
 }
 
 // DesignResponse answers opening or reading one design session.
@@ -320,6 +327,11 @@ type DesignsResponse struct {
 // DesignMessageRequest is an owner message to a design session's agent.
 type DesignMessageRequest struct {
 	Text string `json:"text"`
+}
+
+// DesignStartRequest optionally pins the brief the owner reviewed.
+type DesignStartRequest struct {
+	BriefRevision *int `json:"brief_revision,omitempty"`
 }
 
 // DesignStartResponse names the workstream a design session's brief started
@@ -493,20 +505,6 @@ type ProjectRemoveRequest struct {
 type ProjectResponse struct {
 	Project  ProjectView `json:"project"`
 	NextStep string      `json:"next_step"`
-}
-
-// RepoAddRequest adds a repo to an existing project: Project must name an
-// active project's default repo. Name defaults to the last path segment of
-// Upstream. Clone, Upstream, Fork and BaseBranch behave as they do for
-// ProjectAddRequest, but describe this one additional repo, not the project
-// as a whole.
-type RepoAddRequest struct {
-	Project    config.ProjectID `json:"project"`
-	Name       string           `json:"name,omitempty"`
-	Upstream   string           `json:"upstream"`
-	Fork       string           `json:"fork,omitempty"`
-	Clone      string           `json:"clone"`
-	BaseBranch string           `json:"base_branch,omitempty"`
 }
 
 type RuntimeResponse struct {

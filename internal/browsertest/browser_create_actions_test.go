@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/chromedp/chromedp"
@@ -23,7 +24,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	clone := filepath.Join(t.TempDir(), "client")
 	demoGit(t, filepath.Dir(clone), "init", "-q", clone)
 	s, c := start(t, f.opts)
-	_, err := c.AddRepo(context.Background(), RepoAddRequest{Project: project, Name: "client", Upstream: "owner/client", Clone: clone})
+	_, err := c.AddProject(context.Background(), ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	cfg, err := c.Configuration(context.Background())
 	must(t, err)
@@ -33,9 +34,9 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	}
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
-	p.Await("two projects with three repos", `document.querySelectorAll('#project-pane [data-project]').length === 2 && document.querySelectorAll('#project-pane [data-repo]').length === 3`)
+	p.Await("three projects", `document.querySelectorAll('#project-pane [data-project]').length === 3 && document.querySelectorAll('#project-pane [data-repo]').length === 3`)
 	actions := []struct{ view, name string }{
-		{"project-add", "Create project"}, {"repo-add", "Add repo"}, {"handin", "Hand in a feature"},
+		{"project-add", "Create project"}, {"handin", "Hand in a feature"},
 		{"design-add", "Open a design session"}, {"session-add", "Open an exploratory session"},
 	}
 	for _, action := range actions {
@@ -63,7 +64,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 				if action.view != "session-add" {
 					var got [][2]string
 					p.Eval(`[...document.querySelector(`+quote(view+` select[name=project]`)+`).options].filter(o => o.value).map(o => [o.value, o.textContent])`, &got)
-					if len(got) != 2 || got[0] != choices[0] || got[1] != choices[1] {
+					if !reflect.DeepEqual(got, choices) {
 						t.Fatalf("%s choices: %v, want %v", action.name, got, choices)
 					}
 				}
@@ -95,7 +96,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	}
 }
 
-func TestBrowserExploratorySessionOnNonDefaultRepoUsesConsistentLabels(t *testing.T) {
+func TestBrowserExploratorySessionUsesProjectNameAcrossSurfaces(t *testing.T) {
 	t.Parallel()
 	s, c, project, _, clone := sessionWebFixture(t)
 	ctx := context.Background()
@@ -105,7 +106,7 @@ func TestBrowserExploratorySessionOnNonDefaultRepoUsesConsistentLabels(t *testin
 	must(t, os.MkdirAll(filepath.Dir(upstream), 0700))
 	demoGit(t, filepath.Dir(clone), "clone", "-q", "--bare", "--no-hardlinks", second, upstream)
 	demoGit(t, filepath.Dir(clone), "-C", second, "remote", "add", "upstream", upstream)
-	added, err := c.AddRepo(ctx, RepoAddRequest{Project: project, Name: "client", Upstream: "owner/client", Clone: second})
+	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
 	must(t, err)
 	var repoID config.ProjectID
 	for _, repo := range added.Project.Repos {
@@ -116,12 +117,12 @@ func TestBrowserExploratorySessionOnNonDefaultRepoUsesConsistentLabels(t *testin
 	if repoID == "" {
 		t.Fatal("missing additional repo")
 	}
-	const label = "dagger / client"
+	const label = "client"
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
-	card := `[data-project="` + string(project) + `"]`
+	card := `[data-project="` + string(repoID) + `"]`
 	p.AwaitText(card+` [data-repo="`+string(repoID)+`"] strong`, label)
-	p.Click(card + ` [data-project-action="session-add"]`)
+	p.Click(`[data-project="` + string(project) + `"] [data-project-action="session-add"]`)
 	p.Await("card selects the default repo", `document.querySelector('#session-add-form [name=project]').value === `+quote(string(project)))
 	p.Await("every repo is offered with its shared label", `document.querySelector('#session-add-form [name=project]').options.length === 3 && [...document.querySelector('#session-add-form [name=project]').options].some(o => o.value === `+quote(string(repoID))+` && o.textContent === `+quote(label)+`)`)
 	p.Choose("#session-add-form [name=project]", string(repoID))

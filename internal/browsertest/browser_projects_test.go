@@ -100,11 +100,15 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 
 	// Configuration events remove unavailable targets without reloading the
 	// page, and reset the editor to the remaining project's saved order.
+	_, err = c.Abandon(ctx, f.streams[otherProject], "Owner finished this work")
+	must(t, err)
 	_, err = c.RemoveProject(ctx, otherProject)
 	must(t, err)
 	p.Await("only the remaining project", `document.querySelector('#priority-project').options.length === 1 && document.querySelector('#priority-project').value === `+quote(string(project)))
 	p.Await("the remaining saved priority", `document.querySelector('#priority-list li').dataset.priority === `+quote(string(stream))+` && document.querySelector('#priority-list input').checked`)
 	p.Await("removed pause targets", `![...document.querySelector('#pause-form select[name=target]').options].some(o => o.value === `+quote("project:"+string(otherProject))+` || o.value === `+quote("workstream:"+string(otherStream))+`)`)
+	_, err = c.Abandon(ctx, f.streams[project], "Owner finished this work")
+	must(t, err)
 	_, err = c.RemoveProject(ctx, project)
 	must(t, err)
 	p.AwaitText("#priority-current", "No repo is configured.")

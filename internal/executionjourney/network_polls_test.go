@@ -228,15 +228,33 @@ func TestNetworkPollingStopsOnProjectRemoval(t *testing.T) {
 	must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: DeliveredState, ArchivedAt: demoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), PullRequest: 42}}))
 	InspectForTest(s).WakeConversations()
 	awaitPollSignal(t, host.entered)
+	_, err := client.RemoveProject(context.Background(), cfg.Project.ID)
+	assertCode(t, err, Validation)
+	_, err = client.Abandon(context.Background(), quiet, "Owner cancelled the other member before removing its project")
+	must(t, err)
+	state, err := repo.Workflow(stream, trace.FeatureSubject)
+	must(t, err)
+	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-before-project-removal", Revision: 1, Project: cfg.Project.ID, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "owner"},
+		Subject: trace.FeatureSubject, From: state.Value, To: AbandonedState, Reason: "Owner cancelled the archived member before removing its project",
+	}})
+	must(t, err)
+	must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: AbandonedState, ArchivedAt: demoStart, Resolved: true, ResolutionEvidence: "cancelled"}))
 	removed := make(chan error, 1)
 	go func() { _, err := client.RemoveProject(context.Background(), cfg.Project.ID); removed <- err }()
-	awaitPollSignal(t, host.cancelled)
+	select {
+	case <-host.cancelled:
+	case err := <-removed:
+		t.Fatalf("project removal refused before cancelling its poll: %v", err)
+	case <-time.After(demoTimeout):
+		t.Fatal("project removal did not cancel its poll")
+	}
 	select {
 	case err := <-removed:
 		t.Fatalf("project removal did not join poll: %v", err)
 	default:
 	}
-	_, err := repo.Workstreams()
+	_, err = repo.Workstreams()
 	must(t, err)
 	exit.Do(func() { close(host.exit) })
 	select {

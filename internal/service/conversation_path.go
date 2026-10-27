@@ -205,23 +205,50 @@ func (a conversationAdapter) Apply(ctx context.Context, op coreadapter.Operation
 // completion hooks. A completed turn's operation must settle before its
 // successor is admitted, so a delayed hook cannot mutate a newer turn's state.
 func (p *conversationPath) queue(ctx context.Context, repository *trace.Repository) error {
-	streams, err := p.streams(repository)
+	type queuedStream struct {
+		stream  config.WorkstreamID
+		threads []trace.Thread
+		records []trace.OperationRecord
+	}
+	var snapshot []queuedStream
+	type scanFailure struct {
+		stream config.WorkstreamID
+		err    error
+	}
+	var failures []scanFailure
+	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
+		if repository != p.repository {
+			var err error
+			streams, err = p.streams(repository)
+			if err != nil {
+				return err
+			}
+		}
+		for _, stream := range streams {
+			threads, err := repository.Threads(stream)
+			if err != nil {
+				failures = append(failures, scanFailure{stream, err})
+				continue
+			}
+			records, err := repository.Operations(stream)
+			if err != nil {
+				failures = append(failures, scanFailure{stream, err})
+				continue
+			}
+			snapshot = append(snapshot, queuedStream{stream, threads, records})
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	for _, stream := range streams {
-		threads, err := repository.Threads(stream)
-		if err != nil {
-			p.scanError(repository, stream, err)
-			continue
-		}
+	for _, failure := range failures {
+		p.scanError(repository, failure.stream, failure.err)
+	}
+	for _, entry := range snapshot {
+		stream, threads, records := entry.stream, entry.threads, entry.records
 		if err := p.s.step("conversation-queue-read:" + string(stream)); err != nil {
 			return err
-		}
-		records, err := repository.Operations(stream)
-		if err != nil {
-			p.scanError(repository, stream, err)
-			continue
 		}
 		for _, th := range threads {
 			if !conversationRole(th.Identity.Role) {

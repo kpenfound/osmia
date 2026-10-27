@@ -5,7 +5,7 @@ approved. Follow the steps in order.
 
 ## Supported features
 
-- Projects with one charter and one or more repos, each with its own clone,
+- One-repo projects with their own charter and clone,
   settings, knowledge base and entity map.
 - Feature workgroups with one shared chief of staff, optional project design
   chat, cross-repo contracts and merge dependencies.
@@ -168,17 +168,13 @@ opens the same revision-pinned charter editor and shows readiness for hand-in. R
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 
-To add another repo and list the project's repos:
+Register another repo as its own project:
 
 ```sh
-osmia project add-repo p_… --upstream owner/other --clone ~/src/other
-osmia project repos p_…
+osmia project add other --upstream owner/other --clone ~/src/other
 ```
 
-Its repo configuration and KB are separate; the charter is shared. The project
-pane offers the same creation and repo-add actions. Existing one-repo projects
-are wrapped automatically on startup, retaining IDs, charter and history;
-existing exploratory sessions stay outside workgroups.
+Write that project's charter too. Projects have independent configuration and KBs. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
 
 ## 5. Start a workgroup and decide
 
@@ -189,16 +185,9 @@ hand it in with the project ID:
 osmia handin p_… design.md
 ```
 
-The command creates an initial workstream with the document as its brief
-and prints its ID (`w_…`). With one active repo, it stays a one-workstream
-workgroup. With several active repos, the architect selects the affected repos;
-the service validates that selection and creates one member per selected repo.
-A single selected repo gets the ordinary packet; several get one ratification
-covering the project spec, graph and slices. The original conversation continues
-as the group's shared chief-of-staff thread. No design session or extra graph
-approval is required. Add `--skip-debate` for small
-work: the committee does not debate it and the draft waits for your ratification.
-Follow progress with `osmia status <workstream-id>`, or on the page.
+The command creates a one-member workgroup with the document as its brief and prints its workstream ID (`w_…`). Add `--with <other-project-id>` for each additional project. The positional project is home for the shared chief and conversation. Every selected project needs a nonempty charter; paused projects are allowed. Go allocates one member per project without an architect selection turn. Several projects share one workgroup spec, graph and ratification. The web hand-in form offers the same selection through a multi-select of active projects.
+
+The project set stays fixed until ratification; changing it requires abandoning and handing in again. Add `--skip-debate` for small work: the committee does not debate it and the draft waits for your ratification. Follow progress with `osmia status <workstream-id>`, or on the page.
 
 If you want to discuss the design first, open a project design session:
 
@@ -209,16 +198,9 @@ osmia design read w_…
 osmia design start w_…
 ```
 
-The design agent reads every repo but cannot change code, use version control,
-access delivery credentials or start work. It asks only material readiness
-questions with recommendations and lists other inferences as collapsed,
-overridable assumptions. Once it records a brief, one owner start hands it to
-the architect; the brief wins over its reference transcript. The architect
-chooses affected repos, and Go allocates members without another owner step.
-For several repos the packet includes the project spec, contracts, graph and
-per-repo slices and plans, all covered by one ratification. The actual design
-conversation continues as the shared chief's thread for status, escalations,
-amend and cancel. See [design sessions](cli.md#design-sessions).
+The design agent can read any active project's committed source, with exactly `file_read`, `read_repo` and `draft_brief`, and no write, VCS or credential access. Ask it to add or remove projects from the brief. An inferred change needs your agreement first. It asks material readiness questions with recommendations and records other assumptions for you to override.
+
+`design read` prints the latest brief revision and project list. `design start` reads them, prints the list it is starting with and sends that revision. On the web, the read-only Brief panel above Start shows project names with home marked and collapsed brief text, updating live. Start sends its displayed revision; a stale brief returns a conflict and starts nothing. The brief, revision and list stay bound through recovery. The conversation stays at the session's project even if the brief excludes it, then continues as the shared chief's thread. See [design sessions](cli.md#design-sessions).
 
 The architect drafts a spec and a plan of units, the committee debates them in
 the shed, and the chief of staff presents them to you. From then on Osmia stops
@@ -283,7 +265,7 @@ delivery approval before becoming ready. Merge is the only release signal.
 Expected waits appear in status without an inbox entry or notification.
 
 Resolution retires each member's own documents and workspaces from active
-context. The shared project spec stays active for the chief and unresolved
+context. The shared workgroup spec stays active for the chief and unresolved
 members until all members resolve (merged or cancelled). Trace history at both
 levels is retained until owner archive. The same lifetime applies to one-member
 workgroups. A ready or closed-without-merge PR remains unresolved; archive and

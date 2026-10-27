@@ -76,7 +76,7 @@ func TestWebListenerServesTheSocketAPI(t *testing.T) {
 		t.Fatalf("pause written over web is not seen over the socket: %+v", state.Effective)
 	}
 	code, body = exchange(t, web, "GET", base+"/index.html", "", "", "")
-	if code != 501 || errorCode(t, body) != Unsupported {
+	if code != 404 || errorCode(t, body) != NotFound {
 		t.Fatalf("unknown page path: %d %s", code, body)
 	}
 }

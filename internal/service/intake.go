@@ -192,20 +192,16 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 	return s.intake().DesignMessage(ctx, raw, req)
 }
 
-var draftBriefTool = intake.DraftBriefTool
-
 var designReadRepoTool = intake.DesignReadRepoTool
 
-var stageDesignWorkspace = intake.StageDesignWorkspace
-
-func (s *Service) startDesignWorkgroup(ctx context.Context, raw string) (DesignStartResponse, *APIError) {
-	return s.intake().StartDesignWorkgroup(ctx, raw)
+func (s *Service) startDesignWorkgroup(ctx context.Context, raw string, req ...DesignStartRequest) (DesignStartResponse, *APIError) {
+	return s.intake().StartDesignWorkgroup(ctx, raw, req...)
 }
 
 const designStartSubject = intake.DesignStartSubject
 
-func (s *Service) designStartBlocksDraft(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
-	return s.intake().DesignStartBlocksDraft(r, stream)
+func (s *Service) designStartPending(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	return s.intake().DesignStartPending(r, stream)
 }
 
 func (s *Service) designStartPass(ctx context.Context, r *trace.Repository) error {
@@ -309,8 +305,6 @@ var sliceMatchesPin = intake.SliceMatchesPin
 var registrationActor = intake.RegistrationActor
 
 var serviceActor = intake.ServiceActor
-
-var groupMembers = intake.GroupMembers
 
 func (s *Service) questionSignals(repository *trace.Repository) func(context.Context, trace.TurnRequest, coreadapter.Scope) string {
 	return s.intake().QuestionSignals(repository)

@@ -30,8 +30,6 @@ var quote = browsertest.Quote
 
 var factoryTarget = runtime.Target{Scope: "factory"}
 
-type RepoAddRequest = api.RepoAddRequest
-
 const commentedConfig = fixturekit.CommentedConfig
 
 const InboxEscalation = api.InboxEscalation

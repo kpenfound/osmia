@@ -35,7 +35,6 @@ import (
 // ProductionDesignClient is the owner API used by the shared design scenario.
 type ProductionDesignClient interface {
 	AddProject(context.Context, api.ProjectAddRequest) (api.ProjectResponse, error)
-	AddRepo(context.Context, api.RepoAddRequest) (api.ProjectResponse, error)
 	OpenDesign(context.Context, config.ProjectID) (api.DesignResponse, error)
 	DesignMessage(context.Context, config.WorkstreamID, string) (api.ConversationEntry, error)
 	DesignConversation(context.Context, config.WorkstreamID) (api.ConversationResponse, error)
@@ -350,8 +349,54 @@ func (f *ProductionDesign) LogTurns(t *testing.T, repo *trace.Repository, member
 	}
 }
 
+// RecordSelection seeds a durable member selection for recovery journeys.
+func (f *ProductionDesign) RecordSelection(t *testing.T, projects ...config.ProjectID) {
+	t.Helper()
+	ctx := context.Background()
+	r, err := f.Repository(*f.Project)
+	Must(t, err)
+	streams, err := r.Workstreams()
+	Must(t, err)
+	if !slices.Contains(streams, *f.Origin) {
+		Must(t, r.CreateWorkstream(ctx, *f.Origin, f.Clock.Now(), intake.OwnerActor))
+	}
+	selected := intake.DesignSelection{Group: config.WorkgroupID("g_" + strings.TrimPrefix(string(*f.Origin), "w_"))}
+	for _, p := range projects {
+		m := intake.HandInWorkstream(p, "design-"+string(*f.Origin))
+		if len(projects) == 1 && p == *f.Project {
+			m = *f.Origin
+		}
+		selected.Members = append(selected.Members, intake.DesignMember{Repo: p, Workstream: m})
+	}
+	data, err := json.Marshal(selected)
+	Must(t, err)
+	h := intake.OwnerHeader(intake.DesignSelectionDocument, *f.Project, *f.Origin, intake.DesignStartTransition, f.Clock.Now())
+	h.Schema = "osmia.trace.document"
+	Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignSelectionPath, Content: string(data)}}))
+}
+
+// RecordBriefProjects supplies the confirmed project list for owner-start journeys.
+func (f *ProductionDesign) RecordBriefProjects(t *testing.T, projects ...config.ProjectID) {
+	t.Helper()
+	repo, err := f.Repository(*f.Project)
+	Must(t, err)
+	brief, revision, err := intake.LatestDesignBrief(repo, *f.Origin)
+	Must(t, err)
+	brief.Projects = projects
+	data, err := json.Marshal(brief)
+	Must(t, err)
+	h := intake.OwnerHeader(intake.DesignDraftDocument, *f.Project, *f.Origin, intake.DraftBriefToolName, f.Clock.Now())
+	h.Schema, h.Revision = "osmia.trace.document", revision+1
+	Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(data)}}))
+}
+
 func (f *ProductionDesign) StartOwner(t *testing.T) {
 	t.Helper()
+	projects := []config.ProjectID{*f.Project, *f.Project2}
+	if *f.Stream1 == *f.Origin {
+		projects = projects[:1]
+	}
+	f.RecordBriefProjects(t, projects...)
 	_, err := f.Client().DesignStart(context.Background(), *f.Origin)
 	Must(t, err)
 	repo, err := f.Repository(*f.Project)
@@ -723,7 +768,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", second, bare)
 	fixturekit.DemoGit(t, home, "-C", second, "remote", "add", "upstream", bare)
-	other, err := f.Client().AddRepo(ctx, api.RepoAddRequest{Project: *f.Project, Upstream: "owner/client", Clone: second})
+	other, err := f.Client().AddProject(ctx, api.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
 	Must(t, err)
 	for _, repo := range other.Project.Repos {
 		if repo.Clone == second {
@@ -734,6 +779,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 		t.Fatal("second repo was not registered")
 	}
 	*f.Repos = append(*f.Repos, ProductionDesignRepo{*f.Project2, second, "owner/client", bare, strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare, "rev-parse", "refs/heads/main"))})
+	f.WriteCharter(t, *f.Project2, ShedCharter)
 	f.CheckRepos(t)
 	if handIn {
 		*f.Origin = intake.HandInWorkstream(*f.Project, "production-handin")
@@ -765,39 +811,13 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	}
 	f.Script(intake.ReplyTurnID(1, 1), nil, nil)
 	f.Engine.Mu.Lock()
-	f.Engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if verified.VCS || req.Grants.VCS || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 {
-			return nil, errors.New("architect has mutation or VCS authority")
-		}
-		// The recorded selection is returned, again when it is delivered
-		// again.
-		var results []string
-		for range 2 {
-			got, err := CallTool(ctx, tools, intake.AffectedReposTool, map[string]any{"repos": []string{string(*f.Project), string(*f.Project2)}})
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, got)
-		}
-		var selected struct {
-			Recorded bool                  `json:"recorded"`
-			Members  []intake.DesignMember `json:"members"`
-		}
-		if err := json.Unmarshal([]byte(results[0]), &selected); err != nil {
-			return nil, err
-		}
-		if !selected.Recorded || len(selected.Members) != 2 || selected.Members[0].Repo != *f.Project || selected.Members[1].Repo != *f.Project2 || selected.Members[0].Workstream == "" || results[1] != results[0] {
-			return nil, fmt.Errorf("%s returned %v", intake.AffectedReposTool, results)
-		}
-		return QuestionResult(req, "session-selection", "Both repos are affected."), nil
-	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := ToolNames(ctx, tools)
 		if err != nil {
 			return nil, err
 		}
 		if slices.Contains(names, intake.DraftBriefToolName) {
-			_, err = CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief})
+			_, err = CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief, "projects": []config.ProjectID{*f.Project, *f.Project2}})
 			return QuestionResult(req, "session-design", ProductionBrief), err
 		}
 		return QuestionResult(req, "session-chief", "The service is following the agreed design."), nil

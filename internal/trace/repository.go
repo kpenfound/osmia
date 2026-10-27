@@ -75,8 +75,6 @@ type Repository struct {
 	// same workgroup succeeds. nil on every other instance, where Close
 	// behaves exactly as it does today.
 	shared          *sharedWorkgroupTrace
-	charterProject  config.ProjectID
-	charterResolver atomic.Pointer[func(config.ProjectID) (*Repository, error)]
 	root            config.Root
 	project         config.ProjectID
 	stream          config.WorkstreamID
@@ -106,7 +104,7 @@ type Repository struct {
 	workstreamsMu sync.Mutex
 	workstreams   map[config.WorkstreamID]*Repository
 	// snapshotMu excludes trace deletion while a short discovery snapshot is
-	// assembled. Scheduling, operation admission and results never take it.
+	// assembled. Operation admission and results proceed independently of it.
 	snapshotMu sync.RWMutex
 	// closed is set under workstreamsMu once Close has begun, so a scoped
 	// call racing it never opens a child Close could miss.
@@ -144,9 +142,6 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 		return nil, err
 	}
 	r, err := openStoreDirectory(root, project.ID, "", directory)
-	if r != nil {
-		r.charterProject = project.Group()
-	}
 	return r, err
 }
 
@@ -260,8 +255,7 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 }
 
 // ProjectFor resolves the repo handle holding stream's knowledge base and
-// entity map. Charter access on that handle follows CharterRepository to the
-// project's default repo. r must be unscoped. Ordinary repo receivers return
+// entity map and charter. r must be unscoped. Ordinary repo receivers return
 // themselves; a cross-repo workgroup returns the member's borrowed repo
 // handle, even if its workstream history is retired. The shared chief host
 // uses the first live member's repo context. Project data is never duplicated
@@ -549,7 +543,7 @@ func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause 
 }
 
 // Charter returns the latest recorded charter revision. Creation records the
-// template as the first on the default repo; member repos use that authority.
+// template as the first revision on each project.
 // A charter with no recorded revision is fs.ErrNotExist.
 func (r *Repository) Charter(ctx context.Context) (Document, error) {
 	r, err := r.CharterRepository()
@@ -611,9 +605,7 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 		return nil, err
 	}
 	var records []Record
-	if project.IsDefaultRepo() {
-		records = append(records, charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
-	}
+	records = append(records, charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
 	if entities != nil {
 		d := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: project.ID, At: at, Actor: actor, Cause: "project-create"}, Path: EntitiesPath, Content: string(entities)}
 		if err := validate(d); err != nil {
@@ -1012,6 +1004,19 @@ func (r *Repository) WithWorkstreamSnapshot(fn func() error) error {
 	return fn()
 }
 
+// WithWorkstreamDiscovery lists workstreams and reads their bookkeeping while
+// trace deletion is excluded. The callback must obey WithWorkstreamSnapshot's
+// restrictions; scheduling and external work run after this method returns.
+func (r *Repository) WithWorkstreamDiscovery(read func([]config.WorkstreamID) error) error {
+	return r.WithWorkstreamSnapshot(func() error {
+		streams, err := r.Workstreams()
+		if err != nil {
+			return err
+		}
+		return read(streams)
+	})
+}
+
 // Generation reports how many commits landed in the trace through this
 // handle. It never decreases while the handle is open, and it is
 // unchanged exactly when no write landed between two calls: a caller that
@@ -1089,9 +1094,6 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 func (r *Repository) append(ctx context.Context, v Record) error {
 	if err := validate(v); err != nil {
 		return err
-	}
-	if d, ok := v.(Document); ok && d.Path == "charter.md" && r.charterProject != "" && r.charterProject != r.project {
-		return fmt.Errorf("%w: the charter belongs to project %s", ErrConflict, r.charterProject)
 	}
 	if v.header().Project != r.project {
 		return fmt.Errorf("record belongs to a different project")

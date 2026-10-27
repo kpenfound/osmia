@@ -5,22 +5,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestApprovedChangeSurvivesProjectRemovalAndReaddition(t *testing.T) {
+func TestApprovedChangeSurvivesProjectRemovalGateAndReaddition(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 	entered, release := f.block(project, "first")
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	s, client := start(t, f.opts)
 	await(t, "admitted unit turn", entered)
 	wait, closeWait := serviceChanges(t, s)
 	defer closeWait()
-	requested, api := s.requestChange(ctx, string(stream), ChangeRequest{Key: "draining-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel after this whole unit boundary."})
+	requested, api := s.requestChange(ctx, string(stream), ChangeRequest{Key: "boundary-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel after this whole unit boundary."})
 	if api != nil {
 		t.Fatal(api)
 	}
@@ -40,36 +43,18 @@ func TestApprovedChangeSurvivesProjectRemovalAndReaddition(t *testing.T) {
 	original, err := os.ReadFile(path)
 	must(t, err)
 	must(t, os.WriteFile(path, []byte(strings.Replace(string(original), `"`+string(project)+`", `, "", 1)), 0600))
-	drained := make(chan error, 1)
-	go func() { _, err := client.Reload(ctx); drained <- err }()
-	deadline = time.Now().Add(demoTimeout)
-	for s.current().Active(project) {
-		if time.Now().After(deadline) {
-			t.Fatal("removed project's turn did not enter draining")
-		}
-		wait()
-	}
-	select {
-	case err := <-drained:
-		t.Fatalf("reload did not retain the admitted boundary: %v", err)
-	default:
+	_, err = client.Reload(ctx)
+	assertCode(t, err, Validation)
+	if approved.Workgroup == "" || !strings.Contains(err.Error(), string(approved.Workgroup)) || !s.current().Active(project) {
+		t.Fatalf("reload did not refuse removal and name the unresolved workgroup: %v", err)
 	}
 	repo := f.repository(project)
 	changes, err := readChanges(repo, stream)
 	must(t, err)
-	if len(changes) != 1 || changes[0].State == "applied" || len(changes[0].Applied) != 0 || !equalJSONTest(changes[0].Decision, approved.Decision) || !equalJSONTest(changes[0].Members, approved.Members) || !equalJSONTest(changes[0].Before, approved.Before) {
-		t.Fatalf("draining lost or applied the approved journal: %+v", changes)
+	if len(changes) != 1 || changes[0].State == "applied" || len(changes[0].Applied) != 0 || !equalJSONTest(changes[0].Decision, approved.Decision) || !equalJSONTest(changes[0].Members, approved.Members) || !equalJSONTest(changes[0].Before, approved.Before) || !equalJSONTest(changes[0].After, approved.After) {
+		t.Fatalf("refused removal lost or applied the approved journal: %+v", changes)
 	}
-	close(release)
-	select {
-	case err := <-drained:
-		must(t, err)
-	case <-time.After(demoTimeout):
-		t.Fatal("reload did not finish after the admitted turn completed")
-	}
-	must(t, os.WriteFile(path, original, 0600))
-	_, err = client.Reload(ctx)
-	must(t, err)
+	unblock()
 	deadline = time.Now().Add(demoTimeout)
 	for {
 		repo, err = s.repository(project)
@@ -80,13 +65,33 @@ func TestApprovedChangeSurvivesProjectRemovalAndReaddition(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("readded project did not resume its original approval: %+v", changes)
+			t.Fatalf("completed turn did not apply the original approval: %+v", changes)
 		}
 		wait()
 	}
 	finished := changes[0]
 	if len(finished.Applied) != 1 || finished.Applied[0] != stream || !equalJSONTest(finished.Decision, approved.Decision) || !equalJSONTest(finished.Members, approved.Members) || !equalJSONTest(finished.Before, approved.Before) || !equalJSONTest(finished.After, approved.After) {
-		t.Fatalf("readdition changed original pins or duplicated effects: %+v", finished)
+		t.Fatalf("cancellation changed original pins or duplicated effects: %+v", finished)
+	}
+	// The cancellation resolves the member, so removing and re-adding its
+	// project can now reload the journal without repeating its effects.
+	_, err = client.Reload(ctx)
+	must(t, err)
+	if s.current().Active(project) {
+		t.Fatal("resolved project stayed active after removal")
+	}
+	must(t, os.WriteFile(path, original, 0600))
+	_, err = client.Reload(ctx)
+	must(t, err)
+	if !s.current().Active(project) {
+		t.Fatal("resolved project was not re-added")
+	}
+	repo, err = s.repository(project)
+	must(t, err)
+	changes, err = readChanges(repo, stream)
+	must(t, err)
+	if len(changes) != 1 || !equalJSONTest(changes[0], finished) {
+		t.Fatalf("readdition changed the applied journal: %+v", changes)
 	}
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	must(t, err)

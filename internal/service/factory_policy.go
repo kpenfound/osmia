@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/intake"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -36,7 +37,7 @@ func factoryInstructions(scope coreadapter.Scope) string {
 }
 
 func (s *Service) reconcileFactoryPolicy(ctx context.Context, r *trace.Repository) error {
-	streams, err := r.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(r)
 	if err != nil {
 		return err
 	}

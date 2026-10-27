@@ -58,7 +58,7 @@ func (b *BaseRefresher) Pass(ctx context.Context) error {
 	if err := b.ObserveArchivedPullRequests(ctx); err != nil {
 		return err
 	}
-	streams, err := b.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(b.Repository)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (b *BaseRefresher) Pass(ctx context.Context) error {
 		} else if session {
 			continue
 		}
-		dependency, err := b.Repository.WorkstreamBase(stream)
+		dependency, err := snapshotWorkstreamBase(b.Repository, stream)
 		if err != nil {
 			return err
 		}

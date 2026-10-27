@@ -230,6 +230,8 @@ type DesignOpenRequest = api.DesignOpenRequest
 
 type DesignView = api.DesignView
 
+type DesignStartRequest = api.DesignStartRequest
+
 type DesignResponse = api.DesignResponse
 
 type DesignsResponse = api.DesignsResponse
@@ -275,8 +277,6 @@ type ProjectAddRequest = api.ProjectAddRequest
 type ProjectRemoveRequest = api.ProjectRemoveRequest
 
 type ProjectResponse = api.ProjectResponse
-
-type RepoAddRequest = api.RepoAddRequest
 
 type RuntimeResponse = api.RuntimeResponse
 

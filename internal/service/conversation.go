@@ -73,7 +73,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	} else if design {
 		return ConversationEntry{}, &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is a design session; send messages with POST %s/design/%s/message", stream, Prefix, stream)}
 	}
-	if blocked, err := s.designStartBlocksDraft(repository, stream); err != nil {
+	if blocked, err := s.designStartPending(repository, stream); err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: err.Error()}
 	} else if blocked {
 		state, err := repository.Workflow(stream, designStartSubject)

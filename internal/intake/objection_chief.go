@@ -72,6 +72,8 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 	switch {
 	case i < 0:
 		return shed.Entry{}, &APIError{Code: NotFound, Message: fmt.Sprintf("no objection %s stands in workstream %s", req.Objection, stream)}
+	case entries[i].Kind == shed.CharterConflict:
+		return shed.Entry{}, &APIError{Code: Conflict, Message: "a conflict between member charters is escalated to the owner; the chief cannot resolve it"}
 	case entries[i].Member == shed.OwnerMember:
 		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s is the owner's own; the owner decides it", req.Objection)}
 	case entries[i].By == shed.ChiefOfStaff || entries[i].Escalated:

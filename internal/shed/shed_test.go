@@ -289,7 +289,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		in     input
 		reason string
 	}{
-		{"unknown kind", input{"taste", "spec#1", "x", []string{"charter#1"}}, `kind "taste" is not one of charter, fit, size or acceptance`},
+		{"unknown kind", input{"taste", "spec#1", "x", []string{"charter#1"}}, `kind "taste" is not one of charter, charter_conflict, fit, size or acceptance`},
 		{"empty argument", input{"fit", "spec#1", " ", []string{"charter#1"}}, "an objection requires an argument"},
 		{"no citation", input{"fit", "spec#1", "x", []string{}}, "an objection requires at least one citation"},
 		{"charter rule that does not exist", input{"charter", "spec#1", "x", []string{"charter#9"}}, "the charter has no rule numbered 9 exactly once"},

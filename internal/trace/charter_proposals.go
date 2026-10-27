@@ -48,15 +48,19 @@ func CharterProposalID(question string) string   { return "charter_" + question 
 // last revision adds the number the rule took and Charter, the charter.md
 // revision that records it.
 type CharterProposal struct {
-	Question       string `json:"question"`
-	Ruling         string `json:"ruling"`
-	RulingRevision int    `json:"ruling_revision"`
-	OwnerResponse  string `json:"owner_response"`
-	Rule           string `json:"rule"`
-	Number         int    `json:"number"`
-	Decision       string `json:"decision,omitempty"`
-	Note           string `json:"note,omitempty"`
-	Charter        int    `json:"charter,omitempty"`
+	SourceProject    config.ProjectID    `json:"source_project,omitempty"`
+	SourceWorkstream config.WorkstreamID `json:"source_workstream,omitempty"`
+	SourceQuestion   string              `json:"source_question,omitempty"`
+	Amends           string              `json:"amends,omitempty"`
+	Question         string              `json:"question"`
+	Ruling           string              `json:"ruling"`
+	RulingRevision   int                 `json:"ruling_revision"`
+	OwnerResponse    string              `json:"owner_response"`
+	Rule             string              `json:"rule"`
+	Number           int                 `json:"number"`
+	Decision         string              `json:"decision,omitempty"`
+	Note             string              `json:"note,omitempty"`
+	Charter          int                 `json:"charter,omitempty"`
 }
 
 // CharterProposalState is one charter proposal: its first and latest
@@ -162,6 +166,42 @@ func charterProposalPath(parts []string) bool {
 // is empty, spans lines or holds an HTML comment marker, are refused with
 // *QuestionRefused.
 func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope coreadapter.Scope, id, rule string, next func(charter string) int, at time.Time) (CharterProposal, error) {
+	return r.ProposeCharterFor(ctx, agent, scope, id, rule, "", next, at)
+}
+
+// ProposeCharterFor routes a proposal to the member project whose cited rule it
+// amends. The ruling and proposing member remain recorded as provenance.
+func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope coreadapter.Scope, id, rule, amends string, next func(charter string) int, at time.Time) (CharterProposal, error) {
+	authority := r
+	if err := r.ActiveTurn(scope); err != nil {
+		return CharterProposal{}, err
+	}
+	source, local, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+	if err != nil {
+		return CharterProposal{}, err
+	}
+	proposals, err := r.CharterProposals()
+	if err != nil {
+		return CharterProposal{}, err
+	}
+	for _, p := range proposals {
+		if p.Workstream == source && p.Proposal.Question == local || p.Proposal.SourceWorkstream == source && p.Proposal.SourceQuestion == local {
+			return CharterProposal{}, refused("the owner's ruling on question %s already has a charter proposal, which is %s", local, p.State.Value)
+		}
+	}
+	var destination MemberCharter
+	if amends != "" {
+		member, _, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+		if err != nil {
+			return CharterProposal{}, err
+		}
+		var resolveErr error
+		destination, _, resolveErr = r.ResolveCharter(ctx, member, amends)
+		if resolveErr != nil {
+			return CharterProposal{}, refused("%s", resolveErr)
+		}
+	}
+
 	project := r
 	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
@@ -205,14 +245,47 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 	if err != nil {
 		return CharterProposal{}, err
 	}
+	originStream, originQuestion, originProject := stream, id, project.Project()
+	ruling := existing[i].Ruling
+	if amends != "" && destination.Project != originProject {
+		// Store the proposal in the target member's trace, using an origin-qualified
+		// question key so independent member questions cannot collide.
+		targetProject, err := authority.charterMemberRepository(destination)
+		if err != nil {
+			return CharterProposal{}, err
+		}
+		r, err = targetProject.scoped(destination.Workstream)
+		if err != nil {
+			return CharterProposal{}, err
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		stream, id = destination.Workstream, string(originStream)+"_"+originQuestion
+		log, v, err = r.loadWorkflow(stream)
+		if err != nil {
+			return CharterProposal{}, err
+		}
+		subject = CharterSubject(id)
+		if v.states[subject].Value != "" {
+			return CharterProposal{}, refused("the owner's ruling on question %s already has a charter proposal, which is %s", originQuestion, v.states[subject].Value)
+		}
+		project = targetProject
+		current, err = project.Charter(ctx)
+		if err != nil {
+			return CharterProposal{}, err
+		}
+	}
 	number := next(current.Content)
 	if number < 1 {
 		return CharterProposal{}, fmt.Errorf("a charter rule number starts at 1")
 	}
-	ruling := existing[i].Ruling
 	// The owner's words are in the ruling's first revision; the relay keeps
 	// them.
 	proposal := CharterProposal{Question: id, Ruling: recordPath(*ruling), RulingRevision: ruling.Revision, OwnerResponse: ruling.OwnerResponse, Rule: rule, Number: number}
+	if amends != "" {
+		proposal.SourceProject, proposal.SourceWorkstream, proposal.SourceQuestion, proposal.Amends = originProject, originStream, originQuestion, amends
+	}
+
 	content, err := json.MarshalIndent(proposal, "", "  ")
 	if err != nil {
 		return CharterProposal{}, err
@@ -238,4 +311,12 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 	}
 	_ = r.wake.Notify(context.Background())
 	return proposal, nil
+}
+
+// charterMemberRepository borrows a target member handle from the shared authority.
+func (r *Repository) charterMemberRepository(member MemberCharter) (*Repository, error) {
+	if m, ok := r.memberBinding(member.Workstream); ok {
+		return m.Project, nil
+	}
+	return nil, refused("charter proposals for another project require the shared workgroup authority")
 }

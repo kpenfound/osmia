@@ -35,13 +35,11 @@ const usage = `Usage: osmia <command> [--root PATH]
   engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
-  project add-repo <project-id> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
-  project repos <project-id> [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
   project rebase <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
+  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
   edit charter <project-id> [--from FILE]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
@@ -100,6 +98,7 @@ type options struct {
 	skipDebate, version, detach                     bool
 	projectSpecRevision, specRevision, planRevision int
 	args                                            []string
+	with                                            []string
 }
 
 func parse(args []string) (o options, err error) {
@@ -111,12 +110,12 @@ func parse(args []string) (o options, err error) {
 			continue
 		}
 		key, value, has := strings.Cut(a, "=")
-		if seen[key] {
+		if seen[key] && key != "--with" {
 			return o, errors.New("duplicate flag")
 		}
 		seen[key] = true
 		switch key {
-		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -151,6 +150,8 @@ func parse(args []string) (o options, err error) {
 			case "--base-branch":
 				o.baseBranch = value
 				o.target = true
+			case "--with":
+				o.with = append(o.with, value)
 			case "--base":
 				o.base = value
 			case "--project":
@@ -293,7 +294,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "add-repo" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory" || a[0] == "repos")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -309,8 +310,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return invalid()
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -449,37 +449,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return 0
 	}
-	if cmd == "project" && a[0] == "repos" {
-		id, err := config.ParseProjectID(a[1])
-		if err != nil {
-			return invalid()
-		}
-		cfg, err := c.Configuration(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		var found *wire.ProjectView
-		for i := range cfg.Projects {
-			if cfg.Projects[i].ID == id {
-				found = &cfg.Projects[i]
-			}
-		}
-		if found == nil {
-			fmt.Fprintf(stderr, "%s: project %s is not active\n", wire.Validation, id)
-			return 4
-		}
-		if o.json {
-			return output(stdout, stderr, found.Repos)
-		}
-		for _, r := range found.Repos {
-			def := ""
-			if r.Default {
-				def = " (default)"
-			}
-			fmt.Fprintf(stdout, "%s%s %s\nUpstream: %s push repository: %s clone: %s\nTrace: %s\n", r.ID, def, r.Name, r.Upstream, (config.Project{Upstream: r.Upstream, Fork: r.Fork}).PushRepository(), r.Clone, r.Trace)
-		}
-		return 0
-	}
 	if cmd == "project" && a[0] == "memory" {
 		id, err := config.ParseProjectID(a[1])
 		if err != nil {
@@ -512,32 +481,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		for _, s := range result.Skipped {
 			fmt.Fprintf(stdout, "Skipped: %s: %s\n", s.Workstream, s.Reason)
-		}
-		return 0
-	}
-	if cmd == "project" && a[0] == "add-repo" {
-		id, err := config.ParseProjectID(a[1])
-		if err != nil {
-			return invalid()
-		}
-		clone, err := filepath.Abs(o.clone)
-		if err != nil {
-			return invalid()
-		}
-		result, err := c.AddRepo(ctx, wire.RepoAddRequest{Project: id, Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
-		if err != nil {
-			return fail(err)
-		}
-		if o.json {
-			return output(stdout, stderr, result)
-		}
-		fmt.Fprintf(stdout, "%s\n", result.NextStep)
-		for _, r := range result.Project.Repos {
-			def := ""
-			if r.Default {
-				def = " (default)"
-			}
-			fmt.Fprintf(stdout, "Repo %s%s %s upstream: %s clone: %s\n", r.ID, def, r.Name, r.Upstream, r.Clone)
 		}
 		return 0
 	}
@@ -583,6 +526,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 1
 		}
 		req := wire.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		if len(o.with) > 0 {
+			req.Projects = []config.ProjectID{id}
+			for _, raw := range o.with {
+				project, err := config.ParseProjectID(raw)
+				if err != nil {
+					return invalid()
+				}
+				req.Projects = append(req.Projects, project)
+			}
+		}
 		if o.base != "" {
 			req.Base, err = config.ParseWorkstreamID(o.base)
 			if err != nil {
@@ -787,7 +740,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return 0
 			}
 			if packet.ProjectSpec != nil || packet.ProjectSpecRevision > 0 {
-				fmt.Fprintf(stderr, "Project spec revision %d; spec.md revision %d; plan.json revision %d. Read the packet again with osmia packet %s, then ratify with its --project-spec-revision, --spec-revision and --plan-revision.\n", packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, id)
+				fmt.Fprintf(stderr, "Workgroup spec revision %d; spec.md revision %d; plan.json revision %d. Read the packet again with osmia packet %s, then ratify with its --project-spec-revision, --spec-revision and --plan-revision.\n", packet.ProjectSpecRevision, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, id)
 				return 5
 			}
 			specRevision, planRevision = packet.Packet.Revision.Spec, packet.Packet.Revision.Plan
@@ -801,7 +754,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
 		if o.projectSpecRevision > 0 {
-			fmt.Fprintf(stdout, "Project spec revision %d approved.\n", o.projectSpecRevision)
+			fmt.Fprintf(stdout, "Workgroup spec revision %d approved.\n", o.projectSpecRevision)
 		}
 		return 0
 	}
@@ -1300,17 +1253,40 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintf(stdout, "Message %s sent to the design agent of %s: %s\n", entry.Turn, id, entry.State)
 			return 0
 		case "read":
+			brief, err := c.Design(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
 			list, err := c.DesignConversation(ctx, id)
 			if err != nil {
 				return fail(err)
 			}
 			if o.json {
-				return output(stdout, stderr, list)
+				return output(stdout, stderr, struct {
+					wire.ConversationResponse
+					Design wire.DesignView `json:"design"`
+				}{list, brief.Design})
+			}
+			showDesignBrief(stdout, brief.Design)
+			if brief.Design.Brief != "" {
+				fmt.Fprintf(stdout, "Brief:\n%s\n", brief.Design.Brief)
 			}
 			showConversation(stdout, list, "design send")
 			return 0
 		case "start":
-			result, err := c.DesignStart(ctx, id)
+			brief, err := c.Design(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if brief.Design.BriefRevision > 0 {
+				writer := stdout
+				if o.json {
+					writer = stderr
+				}
+				fmt.Fprintln(writer, "Starting with:")
+				showDesignBrief(writer, brief.Design)
+			}
+			result, err := c.DesignStartWithBriefRevision(ctx, id, brief.Design.BriefRevision)
 			if err != nil {
 				return fail(err)
 			}
@@ -1508,7 +1484,7 @@ func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse)
 		fmt.Fprintln(w, string(content))
 	}
 	if spec := packet.ProjectSpec; spec != nil {
-		fmt.Fprintf(w, "\nProject spec revision %d\n%s\n", packet.ProjectSpecRevision, spec.Behavior)
+		fmt.Fprintf(w, "\nWorkgroup spec revision %d\n%s\n", packet.ProjectSpecRevision, spec.Behavior)
 		for _, contract := range spec.Contracts {
 			fmt.Fprintf(w, "Contract %s: %s\n", contract.Name, contract.Text)
 		}
@@ -1877,6 +1853,17 @@ func showAgentStatus(w io.Writer, agents []wire.AgentStatus) {
 			fmt.Fprintf(w, " question_id=%s", a.QuestionID)
 		}
 		fmt.Fprintln(w)
+	}
+}
+
+func showDesignBrief(w io.Writer, d wire.DesignView) {
+	fmt.Fprintf(w, "Brief revision: %d\nProjects:\n", d.BriefRevision)
+	for _, project := range d.Projects {
+		marker := ""
+		if project == d.Project {
+			marker = " (home)"
+		}
+		fmt.Fprintf(w, "  %s%s\n", project, marker)
 	}
 }
 

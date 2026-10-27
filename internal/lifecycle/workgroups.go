@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -21,7 +22,7 @@ var MigrationActor = trace.Actor{Kind: "service", ID: "osmia"}
 var EnsureWorkgroupsInterrupt func(config.ProjectID) error
 
 // EnsureWorkgroups wraps every existing non-session workstream of each
-// Project's own default repo in its own one-workstream workgroup, whose
+// project in its own one-workstream workgroup, whose
 // chief of staff is that workstream's existing chief-of-staff thread: no new
 // thread is created. It runs once on every start, before the project
 // schedules any work, and is resumable and idempotent. A workstream already
@@ -38,8 +39,8 @@ func (s *Controller) EnsureWorkgroups(ctx context.Context, cfg *config.Config, p
 		repos[p.ID] = p
 	}
 	for _, p := range projects {
-		repo, ok := repos[p.ID]
-		if !ok || !repo.IsDefaultRepo() {
+		_, ok := repos[p.ID]
+		if !ok {
 			continue
 		}
 		streams, err := p.Repository.Workstreams()
@@ -132,19 +133,48 @@ func (w *WorkgroupResolver) Pass(ctx context.Context) error {
 	if err := w.ReconcileArchivedEdgeMerges(ctx); err != nil {
 		return err
 	}
-	groups, _, err := trace.Workgroups(w.Repository)
-	if err != nil {
-		return err
-	}
-	if len(groups) > 0 {
-		streams, err := w.Repository.Workstreams()
+	var groups []trace.Workgroup
+	present := map[config.WorkstreamID]bool{}
+	err := w.Repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
+		var err error
+		groups, _, err = trace.Workgroups(w.Repository)
 		if err != nil {
 			return err
 		}
-		present := make(map[config.WorkstreamID]bool, len(streams))
+		sessions := map[config.WorkstreamID]bool{}
 		for _, stream := range streams {
 			present[stream] = true
+			session, err := intake.IsSession(w.Repository, stream)
+			if err != nil {
+				return err
+			}
+			design, err := intake.IsDesignWorkstream(w.Repository, stream)
+			if err != nil {
+				return err
+			}
+			sessions[stream] = session || design
 		}
+		var features []trace.Workgroup
+		// A destroyable design owns a one-member wrapper. Every other group
+		// retains the normal membership and resolution validation.
+		for _, group := range groups {
+			if len(group.Members) == 1 && sessions[group.Members[0]] {
+				continue
+			}
+			features = append(features, group)
+		}
+		groups = features
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if w.S.Step != nil {
+		if err := w.S.Step("workgroup-resolution-groups-discovered"); err != nil {
+			return err
+		}
+	}
+	if len(groups) > 0 {
 		_, err = trace.MarkWorkgroupsResolved(ctx, w.Repository, groups, func(stream config.WorkstreamID) (bool, error) {
 			if pending, err := trace.SessionDestroyPending(w.S.Current().Root, w.Repository.Project(), stream); err != nil || pending {
 				return false, err
@@ -187,9 +217,14 @@ func (w *WorkgroupResolver) ReconcileArchivedEdgeMerges(ctx context.Context) err
 	if len(archives) == 0 {
 		return nil
 	}
-	streams, err := w.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(w.Repository)
 	if err != nil {
 		return err
+	}
+	if w.S.Step != nil {
+		if err := w.S.Step("workgroup-resolution-edges-discovered"); err != nil {
+			return err
+		}
 	}
 	for _, stream := range streams {
 		if err := ctx.Err(); err != nil {
@@ -231,9 +266,14 @@ func (w *WorkgroupResolver) ReconcileArchivedEdgeMerges(ctx context.Context) err
 // reached a resolved state or has matching durable archive/resolution evidence.
 // Absence and API failure never prove resolution.
 func (w *WorkgroupResolver) ResolveCrossRepoWorkgroups(ctx context.Context) error {
-	streams, err := w.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(w.Repository)
 	if err != nil {
 		return err
+	}
+	if w.S.Step != nil {
+		if err := w.S.Step("workgroup-resolution-discovered"); err != nil {
+			return err
+		}
 	}
 	// Collect stream locators before archives so a new live member always
 	// overrides the cached resolution, including before its amendment finishes.

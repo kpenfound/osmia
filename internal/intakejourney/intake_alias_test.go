@@ -136,9 +136,6 @@ type designBriefRecord = intakefixture.DesignBriefRecord
 
 var isDesignWorkstream = intake.IsDesignWorkstream
 
-const affectedReposTool = intake.AffectedReposTool
-const designStartSubject = intake.DesignStartSubject
-
 var designSelectionOf = intake.DesignSelectionOf
 
 var librarianWorkstream = intake.LibrarianWorkstream

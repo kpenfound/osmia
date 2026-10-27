@@ -4,12 +4,10 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	reflect "reflect"
 	slices "slices"
 	sync "sync"
@@ -54,12 +52,6 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				configuration.options = func(opts *Options) { opts.PullRequests = host }
 				f = newConfiguredProductionDesignFixture(t, configuration)
 				f.stream1 = f.origin
-				f.engine.Mu.Lock()
-				f.engine.Turns["select-repos-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-					_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project)}})
-					return questionResult(req, "session-selection", "Only the server needs a change."), err
-				}
-				f.engine.Mu.Unlock()
 				f.startOwner(t)
 				var packet PacketResponse
 				lifecycleAwait(t, f, "single-member packet", func() bool {

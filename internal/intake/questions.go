@@ -87,7 +87,7 @@ func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *tra
 // unit's workspace is gone and a merged unit changes only through a
 // follow-up.
 func (s *Controller) Answers(cfg *config.Config, repository *trace.Repository) *questions.Deliverer {
-	return &questions.Deliverer{Repository: repository, Now: s.Now,
+	return &questions.Deliverer{Repository: repository, Now: s.Now, Workstreams: func() ([]config.WorkstreamID, error) { return NonSessionWorkstreams(repository) },
 		Profile: func(role, agent string) (coreadapter.Profile, error) {
 			return s.AgentProfile(cfg, role, agent)
 		},

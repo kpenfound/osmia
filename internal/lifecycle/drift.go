@@ -100,7 +100,7 @@ func DriftIDs(k int) (transition, event string) {
 // and returns the workstreams it asked for. A landing, drift, final review or
 // publication without a result holds only its own workstream.
 func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
-	streams, err := f.repository.Workstreams()
+	streams, err := nonSessionWorkstreams(f.repository)
 	if err != nil {
 		return nil, err
 	}

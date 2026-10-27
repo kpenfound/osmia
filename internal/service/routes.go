@@ -48,7 +48,6 @@ var Routes = []Route{
 
 	{Method: http.MethodPost, Path: api.Prefix + "/projects", Summary: "Register a project", Request: api.ProjectAddRequest{}, Response: api.ProjectResponse{}},
 	{Method: http.MethodDelete, Path: api.Prefix + "/projects", Summary: "Remove a project from active work", Request: api.ProjectRemoveRequest{}, Response: api.ProjectResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/projects/repos", Summary: "Add a repo to an existing project", Request: api.RepoAddRequest{}, Response: api.ProjectResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/extract", Summary: "Start a knowledge-base extraction", Request: api.ProjectExtractRequest{}, Response: api.ExtractionResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: api.ProjectRebaseRequest{}, Response: api.ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: api.MemorySetup{}},
@@ -74,9 +73,10 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/design/{workstream}", Summary: "Show one design session", Response: api.DesignResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/design/{workstream}/conversation", Summary: "List a design session's conversation with its agent", Response: api.ConversationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/message", Summary: "Send a message to a design session's agent; refused as busy while a turn is running", Request: api.DesignMessageRequest{}, Response: api.ConversationEntry{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/start", Summary: "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff", Response: api.DesignStartResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/projects", Summary: "Choose projects for an unselected handed design start held after an upgrade", Request: api.ProjectSelectionRequest{}, Response: api.DesignStartResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/start", Summary: "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff", Request: api.DesignStartRequest{}, Response: api.DesignStartResponse{}},
 
-	{Method: http.MethodPost, Path: api.Prefix + "/handin", Summary: "Hand in a workstream", Request: api.HandInRequest{}, Response: api.HandInResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/handin", Summary: "Hand in work to one project or an ordered list of projects", Request: api.HandInRequest{}, Response: api.HandInResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: api.StatusResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/status/{workstream}", Summary: "Show one workstream", Response: api.WorkstreamStatus{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/abandon/{workstream}", Summary: "Abandon an undelivered workstream", Request: api.AbandonRequest{}, Response: api.AbandonResponse{}},

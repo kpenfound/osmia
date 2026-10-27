@@ -190,6 +190,8 @@ func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
 			return ops
 		})
 	}
+	_, err := c.Abandon(ctx, f.streams[project], "Owner finished this project's work.")
+	must(t, err)
 	removed, err := c.RemoveProject(ctx, project)
 	must(t, err)
 	if removed.Project.ID != project {

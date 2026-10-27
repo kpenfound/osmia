@@ -21,8 +21,9 @@ import (
 // written before any other file and removed last, so a restart finds every
 // interrupted registration and finishes it with the same identity.
 type pendingProject struct {
-	Version int            `json:"version"`
-	Project config.Project `json:"project"`
+	Version     int            `json:"version"`
+	Project     config.Project `json:"project"`
+	CharterCopy *projectSplit  `json:"charter_copy,omitempty"`
 }
 
 func (s *Service) step(name string) error {
@@ -51,31 +52,11 @@ func projectView(root config.Root, p config.Project) ProjectView {
 // repoView names one repo's own settings and trace.
 func repoView(root config.Root, p config.Project) RepoView {
 	directory, _ := root.ProjectTrace(p.ID)
-	return RepoView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Landing: p.Landing, Trace: directory, KB: filepath.Join(directory, "kb"), EntityMap: filepath.Join(directory, trace.EntitiesPath), Default: p.IsDefaultRepo()}
+	return RepoView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Landing: p.Landing, Trace: directory, KB: filepath.Join(directory, "kb"), EntityMap: filepath.Join(directory, trace.EntitiesPath)}
 }
 
-// projectGroupView builds the view of the project any repo of belongs to:
-// the project's own default repo's fields at the top level, for
-// compatibility with a one-repo project, and every repo of the project, the
-// default repo included, in Repos. any need not itself be the default repo.
-func (s *Service) projectGroupView(any config.Project) ProjectView {
-	cfg := s.current()
-	members := groupMembers(cfg.Projects, any.Group())
-	primary := any
-	for _, member := range members {
-		if member.IsDefaultRepo() {
-			primary = member
-		}
-	}
-	view := projectView(cfg.Root, primary)
-	view.Repos = nil
-	for _, member := range members {
-		view.Repos = append(view.Repos, repoView(cfg.Root, member))
-	}
-	if len(view.Repos) == 0 {
-		view.Repos = []RepoView{repoView(cfg.Root, primary)}
-	}
-	return view
+func (s *Service) viewProject(p config.Project) ProjectView {
+	return projectView(s.current().Root, p)
 }
 
 // validateAdd checks a request before anything is written. Every failure names
@@ -86,7 +67,7 @@ func (s *Service) validateAdd(req ProjectAddRequest) (config.Project, *APIError)
 
 // validateRepo checks one repo's own fields before anything is written. Every
 // failure names the field at fault; the clone is read, never written. It is
-// shared by project creation and by adding a repo to an existing project.
+// used by project creation.
 func (s *Service) validateRepo(name, upstream, fork, clone, baseBranch string) (config.Project, *APIError) {
 	invalid := func(message string) (config.Project, *APIError) {
 		return config.Project{}, &APIError{Code: Validation, Message: message}
@@ -129,49 +110,6 @@ func (s *Service) validateRepo(name, upstream, fork, clone, baseBranch string) (
 		return invalid("clone is not a Git repository: no .git entry")
 	}
 	return config.Project{Version: 1, Name: name, Upstream: upstream, Fork: fork, Clone: resolved, BaseBranch: branch, Landing: "commit-per-unit"}, nil
-}
-
-// repoNameFromUpstream derives a repo's default name from its upstream
-// owner/repository reference: the part after the slash.
-func repoNameFromUpstream(upstream string) string {
-	if i := strings.LastIndex(upstream, "/"); i >= 0 {
-		return upstream[i+1:]
-	}
-	return upstream
-}
-
-// validateAddRepo checks a RepoAddRequest before anything is written: Project
-// must name an active project's own default repo, and the new repo's own
-// fields must be valid. It returns the project's default repo and the new
-// repo, with GroupID already set to the project.
-func (s *Service) validateAddRepo(req RepoAddRequest) (config.Project, config.Project, *APIError) {
-	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
-	}
-	cfg := s.current()
-	var primary config.Project
-	found := false
-	for _, p := range cfg.Projects {
-		if p.ID == req.Project {
-			primary, found = p, true
-		}
-	}
-	if !found {
-		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active", req.Project)}
-	}
-	if !primary.IsDefaultRepo() {
-		return config.Project{}, config.Project{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is a repo of project %s; add repos there instead", req.Project, primary.Group())}
-	}
-	name := req.Name
-	if name == "" {
-		name = repoNameFromUpstream(req.Upstream)
-	}
-	repo, api := s.validateRepo(name, req.Upstream, req.Fork, req.Clone, req.BaseBranch)
-	if api != nil {
-		return config.Project{}, config.Project{}, api
-	}
-	repo.GroupID = primary.ID
-	return primary, repo, nil
 }
 
 func sameRegistration(a, b config.Project) bool {
@@ -227,55 +165,6 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	return s.added(p), nil
 }
 
-// addRepo registers a repo as part of an existing project's default repo: the
-// same journal, the same crash recovery and the same deduplication addProject
-// uses for a whole project, scoped to one additional repo.
-func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectResponse, *APIError) {
-	s.projectMu.Lock()
-	defer s.projectMu.Unlock()
-	pending, err := s.readPending()
-	if err != nil {
-		return ProjectResponse{}, &APIError{Code: Internal, Message: "the project registration journal is unreadable; inspect project-add.json under the root"}
-	}
-	if pending != nil {
-		if conflict := pendingCloneConflict(s.current(), pending.Project); conflict != nil {
-			return ProjectResponse{}, conflict
-		}
-		p, err := s.complete(ctx, *pending, true)
-		if err != nil {
-			return ProjectResponse{}, incomplete(pending.Project.ID, err)
-		}
-		if _, requested, api := s.validateAddRepo(req); api != nil || !sameRegistration(requested, p) || requested.Group() != p.Group() {
-			return ProjectResponse{}, activeError(p.ID)
-		}
-		return s.addedRepo(p), nil
-	}
-	cfg := s.current()
-	_, p, api := s.validateAddRepo(req)
-	if api != nil {
-		return ProjectResponse{}, api
-	}
-	for _, active := range cfg.Projects {
-		if p.Group() == active.Group() && sameRegistration(p, active) {
-			return s.addedRepo(active), nil
-		}
-		if p.Clone == active.Clone {
-			return ProjectResponse{}, activeError(active.ID)
-		}
-	}
-	if err := s.reserve(&p); err != nil {
-		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
-	}
-	if err := s.step("journal-written"); err != nil {
-		return ProjectResponse{}, incomplete(p.ID, err)
-	}
-	p, err = s.complete(ctx, pendingProject{Version: 1, Project: p}, true)
-	if err != nil {
-		return ProjectResponse{}, incomplete(p.ID, err)
-	}
-	return s.addedRepo(p), nil
-}
-
 func activeError(id config.ProjectID) *APIError {
 	return &APIError{Code: ProjectActive, Message: fmt.Sprintf("project %s already owns this registration or clone; use a separate clone for another project", id)}
 }
@@ -292,13 +181,8 @@ func incomplete(id config.ProjectID, err error) *APIError {
 }
 
 func (s *Service) added(p config.Project) ProjectResponse {
-	view := s.projectGroupView(p)
+	view := s.viewProject(p)
 	return ProjectResponse{Project: view, NextStep: "Write the charter with: osmia edit charter " + string(view.ID)}
-}
-
-func (s *Service) addedRepo(p config.Project) ProjectResponse {
-	view := s.projectGroupView(p)
-	return ProjectResponse{Project: view, NextStep: fmt.Sprintf("Repo %s added to project %s.", p.ID, p.Group())}
 }
 
 // reserve generates an identity with no directory under projects and journals it.
@@ -331,7 +215,10 @@ func (s *Service) writePending(p pendingProject) error {
 	if err != nil {
 		return err
 	}
-	return writeFileSynced(path, append(data, '\n'))
+	if err := writeFileSynced(path, append(data, '\n')); err != nil {
+		return err
+	}
+	return syncSplitDirectory(filepath.Dir(path))
 }
 
 func (s *Service) readPending() (*pendingProject, error) {
@@ -346,14 +233,50 @@ func (s *Service) readPending() (*pendingProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	var p pendingProject
+	var stored struct {
+		Version int `json:"version"`
+		Project struct {
+			config.Project
+			Source config.ProjectID `json:"group_id,omitempty"`
+		} `json:"project"`
+		CharterCopy *projectSplit `json:"charter_copy,omitempty"`
+	}
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
-	if err := d.Decode(&p); err != nil {
+	if err := d.Decode(&stored); err != nil {
 		return nil, err
 	}
+	p := pendingProject{Version: stored.Version, Project: stored.Project.Project, CharterCopy: stored.CharterCopy}
 	if p.Version != 1 || config.CheckProjectIDs(p.Project.ID) != nil || !filepath.IsAbs(p.Project.Clone) {
 		return nil, errors.New("invalid project registration journal")
+	}
+	if stored.Project.Source != "" && p.CharterCopy == nil {
+		cfg, err := s.current().AddProject(stored.Project.Source, s.options.Config.Home)
+		if err != nil {
+			return nil, err
+		}
+		if err := migrateSplitTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
+			return nil, err
+		}
+		r, err := trace.Open(cfg.Root, cfg.For(stored.Project.Source).Project)
+		if err != nil {
+			if r != nil {
+				r.Close()
+			}
+			return nil, err
+		}
+		charter, readErr := r.Charter(context.Background())
+		if err := errors.Join(readErr, r.Close()); err != nil {
+			return nil, err
+		}
+		charter.At = time.Now().UTC()
+		p.CharterCopy = &projectSplit{Project: p.Project, Source: stored.Project.Source, Charter: charter}
+		if err := s.writePending(p); err != nil {
+			return nil, err
+		}
+		if err := s.step("project-charter-pinned"); err != nil {
+			return nil, err
+		}
 	}
 	return &p, nil
 }
@@ -415,7 +338,11 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if !published {
-		if err := config.WriteProjectConfig(projectPath, p); err != nil {
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			if err := config.WriteProjectConfig(projectPath, p); err != nil {
+				return p, err
+			}
+		} else if err != nil {
 			return p, err
 		}
 		if err := s.step("project-config-written"); err != nil {
@@ -445,6 +372,20 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := s.step("trace-created"); err != nil {
 		return p, err
 	}
+	if pending.CharterCopy != nil {
+		if err := copySplitCharter(ctx, root, *pending.CharterCopy, pending.CharterCopy.Charter.At); err != nil {
+			return p, err
+		}
+		if err := s.step("project-charter-copied"); err != nil {
+			return p, err
+		}
+		if err := config.RemoveProjectGroup(projectPath); err != nil {
+			return p, err
+		}
+		if err := s.step("project-group-removed"); err != nil {
+			return p, err
+		}
+	}
 	configPath, err := root.Config()
 	if err != nil {
 		return p, err
@@ -464,6 +405,9 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		}
 	}
 	if err := os.Remove(journal); err != nil && !os.IsNotExist(err) {
+		return p, err
+	}
+	if err := syncSplitDirectory(filepath.Dir(journal)); err != nil {
 		return p, err
 	}
 	return p, s.step("journal-removed")
@@ -591,18 +535,10 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		}
 		return ProjectResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
 	}
-	removed := cfg.For(req.Project).Project
-	if removed.IsDefaultRepo() {
-		if others := groupMembers(cfg.Projects, removed.ID); len(others) > 1 {
-			var ids []string
-			for _, o := range others {
-				if o.ID != removed.ID {
-					ids = append(ids, string(o.ID))
-				}
-			}
-			return ProjectResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("project %s still has other repos (%s); remove them first", removed.ID, strings.Join(ids, ", "))}
-		}
+	if api := s.projectRemovalGate(req.Project); api != nil {
+		return ProjectResponse{}, api
 	}
+	removed := cfg.For(req.Project).Project
 	configPath, err := cfg.Root.Config()
 	if err == nil {
 		err = config.RemoveActiveProject(configPath, req.Project)

@@ -72,12 +72,13 @@ func (Transition) traceRecord() {}
 // the rest of what the owner is sent.
 type Question struct {
 	Header
-	AskedBy     Actor       `json:"asked_by"`
-	Thread      string      `json:"thread,omitempty"`
-	Turn        string      `json:"turn,omitempty"`
-	Question    string      `json:"question"`
-	SentToOwner string      `json:"sent_to_owner,omitempty"`
-	Escalation  *Escalation `json:"escalation,omitempty"`
+	AskedBy         Actor       `json:"asked_by"`
+	Thread          string      `json:"thread,omitempty"`
+	Turn            string      `json:"turn,omitempty"`
+	Question        string      `json:"question"`
+	CharterConflict []string    `json:"charter_conflict,omitempty"`
+	SentToOwner     string      `json:"sent_to_owner,omitempty"`
+	Escalation      *Escalation `json:"escalation,omitempty"`
 }
 
 // Amendment is a request against the sealed spec or plan.
@@ -357,7 +358,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
+	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)

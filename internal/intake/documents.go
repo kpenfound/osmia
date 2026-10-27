@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -103,6 +104,10 @@ func (s *Controller) OwnerDocuments(w http.ResponseWriter, r *http.Request, h Do
 			entities, loadErr := kb.Load(repo)
 			if loadErr != nil {
 				h.FailWith(w, DocumentError(loadErr))
+				return true
+			}
+			if problems := plan.CharterProblems(r.Context(), repo, stream, edit.Spec, edit.Plan); len(problems) > 0 {
+				h.FailWith(w, &APIError{Code: Validation, Message: strings.Join(problems, "; ")})
 				return true
 			}
 			out, err = repo.EditDraft(r.Context(), stream, edit.SpecRevision, edit.PlanRevision, edit.Spec, edit.Plan, s.Now(), func(content map[string]string) error {

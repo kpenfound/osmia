@@ -47,6 +47,24 @@ func FindCharterProposal(repository *trace.Repository, stream config.WorkstreamI
 	return proposals[i], true, nil
 }
 
+// CharterProposalLocation resolves both a target proposal key and its proposing
+// member's question, so owner decisions reach the same target after a restart.
+func (s *Controller) CharterProposalLocation(repository *trace.Repository, stream config.WorkstreamID, question string) (*trace.Repository, config.WorkstreamID, string, error) {
+	_, projects := s.Runtimes()
+	for _, project := range projects {
+		proposals, err := project.Repository.CharterProposals()
+		if err != nil {
+			return nil, "", "", err
+		}
+		for _, p := range proposals {
+			if p.Workstream == stream && p.Proposal.Question == question || p.Proposal.SourceWorkstream == stream && p.Proposal.SourceQuestion == question {
+				return project.Repository, p.Workstream, p.Proposal.Question, nil
+			}
+		}
+	}
+	return repository, stream, question, nil
+}
+
 // charterProposals lists the charter proposals of every active project that
 // wait for the owner, leaving out those of abandoned workstreams.
 func (s *Controller) CharterProposals() (CharterProposalsResponse, *APIError) {
@@ -84,6 +102,10 @@ func (s *Controller) CharterProposal(raw, question string) (CharterProposalView,
 	if api != nil {
 		return CharterProposalView{}, api
 	}
+	repository, stream, question, err := s.CharterProposalLocation(repository, stream, question)
+	if err != nil {
+		return CharterProposalView{}, &APIError{Code: Internal, Message: err.Error()}
+	}
 	p, found, err := FindCharterProposal(repository, stream, question)
 	if err != nil {
 		return CharterProposalView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
@@ -110,12 +132,17 @@ func (s *Controller) DecideCharter(ctx context.Context, raw, question string, re
 // the charter. Deciding a decided proposal the same way again returns it and
 // records nothing; deciding it the other way is refused. Proposals of
 // abandoned workstreams take no decision.
-func (s *Controller) RecordCharterDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string) (CharterProposalView, *APIError) {
+func (s *Controller) RecordCharterDecision(ctx context.Context, _ config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string) (CharterProposalView, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if decision != trace.CharterRatify && decision != trace.CharterDecline {
 		return CharterProposalView{}, &APIError{Code: Validation, Message: "a charter decision is ratify or decline"}
 	}
+	repository, stream, question, err := s.CharterProposalLocation(repository, stream, question)
+	if err != nil {
+		return CharterProposalView{}, failed
+	}
+	project := repository.Project()
 	gone, err := Abandoned(repository, stream)
 	if err != nil {
 		return CharterProposalView{}, failed
@@ -217,7 +244,11 @@ func (c *Controls) DecideCharter(repository *trace.Repository, scope coreadapter
 		if !owner {
 			return PriorityRefusal("only the owner decides a charter proposal; this turn does not answer a message from the owner")
 		}
-		out, api := s.RecordCharterDecision(ctx, repository.Project(), config.WorkstreamID(scope.Workstream), repository, input.Question,
+		member, question, err := repository.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), input.Question)
+		if err != nil {
+			return PriorityRefusal(err.Error())
+		}
+		out, api := s.RecordCharterDecision(ctx, repository.Project(), member, repository, question,
 			CharterDecisionRequest{Decision: input.Decision, Note: input.Note}, request.Actor, request.ID)
 		if api != nil {
 			if api.Code == Internal {
@@ -249,7 +280,12 @@ func CharterSource(p trace.CharterProposalState) string {
 
 // Pass records the rule of every ratified proposal in the charter.
 func (c Charterer) Pass(ctx context.Context) error {
-	proposals, err := c.Repository.CharterProposals()
+	var proposals []trace.CharterProposalState
+	err := c.Repository.WithWorkstreamDiscovery(func([]config.WorkstreamID) error {
+		var err error
+		proposals, err = c.Repository.CharterProposals()
+		return err
+	})
 	if err != nil {
 		return err
 	}

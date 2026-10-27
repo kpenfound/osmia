@@ -71,7 +71,7 @@ func (c *WorkspaceCleanup) Pass(ctx context.Context) error {
 	if len(held) == 0 {
 		return nil
 	}
-	streams, err := c.Repository.Workstreams()
+	streams, err := nonSessionWorkstreams(c.Repository)
 	if err != nil {
 		return err
 	}

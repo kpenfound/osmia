@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/intake"
 	"math/big"
 	"strconv"
 	"strings"
@@ -27,7 +28,7 @@ func (b budgetSignals) Pass(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("invalid per-unit budget %q", limitText)
 	}
-	streams, err := b.repository.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(b.repository)
 	if err != nil {
 		return err
 	}

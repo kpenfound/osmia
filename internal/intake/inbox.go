@@ -83,7 +83,7 @@ func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 // crossRepoWorkgroupIDs returns, in encounter order, the distinct
 // fully joined cross-repo workgroup IDs repository's workstreams point to.
 func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trace.Repository) ([]config.WorkgroupID, error) {
-	streams, err := repository.Workstreams()
+	streams, err := NonSessionWorkstreams(repository)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +256,9 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 			out = append(out, e)
 		}
 		return err
+	}
+	if err := add(s.LegacyProjectsEntry(repository, w.Workstream)); err != nil {
+		return nil, err
 	}
 	if w.State == InShedState || w.State == SketchedState {
 		if err := add(RatificationEntry(repository, w.Workstream)); err != nil {

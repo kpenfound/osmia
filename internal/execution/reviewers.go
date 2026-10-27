@@ -122,7 +122,7 @@ func answerQuestionID(turn string) string {
 }
 
 func (r *reviewers) Pass(ctx context.Context) error {
-	streams, err := r.repository.Workstreams()
+	streams, err := nonSessionWorkstreams(r.repository)
 	if err != nil {
 		return err
 	}

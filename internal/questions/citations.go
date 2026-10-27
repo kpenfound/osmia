@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/charter"
@@ -21,18 +20,17 @@ import (
 
 // CitationForms lists the citations an answer may rest on, for prompts and
 // refusals.
-const CitationForms = "source#<record> (a recorded remote source), inspection#<record> (a recorded code inspection), charter#<n> (a charter rule), kb/<subsystem>.md (a knowledge-base file), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
+const CitationForms = "source#<record> (a recorded remote source), inspection#<record> (a recorded code inspection), charter#<n> or <project>/charter#<n> (a charter rule; project is its p_ ID), kb/<subsystem>.md (a knowledge-base file), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
 
 var (
-	charterCitation = regexp.MustCompile(`^charter#([1-9][0-9]{0,8})$`)
-	proseCitation   = regexp.MustCompile(`^kb/([^/]+)\.md$`)
-	rulingCitation  = regexp.MustCompile(`^ruling#([A-Za-z0-9][A-Za-z0-9_-]{0,127})$`)
-	planCitation    = regexp.MustCompile(`^plan#(.+)$`)
+	proseCitation  = regexp.MustCompile(`^kb/([^/]+)\.md$`)
+	rulingCitation = regexp.MustCompile(`^ruling#([A-Za-z0-9][A-Za-z0-9_-]{0,127})$`)
+	planCitation   = regexp.MustCompile(`^plan#(.+)$`)
 )
 
 // IsCharter reports whether citation has the form of a charter rule,
 // charter#<n>, and IsProse the form of a knowledge-base file, kb/<subsystem>.md.
-func IsCharter(citation string) bool { return charterCitation.MatchString(citation) }
+func IsCharter(citation string) bool { _, _, ok := charter.Citation(citation); return ok }
 func IsProse(citation string) bool   { return proseCitation.MatchString(citation) }
 
 // Unresolved is why a citation cannot support an answer.
@@ -70,21 +68,13 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 		}
 		return nil
 	}
-	if m := charterCitation.FindStringSubmatch(citation); m != nil {
-		project, err := repository.ProjectFor(stream)
-		if err != nil {
-			return err
-		}
-		doc, err := project.Charter(ctx)
-		if err != nil {
-			return err
-		}
-		n, _ := strconv.Atoi(m[1])
-		if _, ok := charter.Parse(doc.Content).Rule(n); !ok {
-			return unresolved("the charter has no rule numbered %d exactly once", n)
+	if IsCharter(citation) {
+		if _, _, err := repository.ResolveCharter(ctx, stream, citation); err != nil {
+			return unresolved("%s", err)
 		}
 		return nil
 	}
+
 	if m := proseCitation.FindStringSubmatch(citation); m != nil {
 		project, err := repository.ProjectFor(stream)
 		if err != nil {

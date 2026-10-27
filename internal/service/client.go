@@ -229,14 +229,6 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (api.Pr
 	return v, err
 }
 
-// AddRepo adds a repo to an existing project, the same way AddProject adds a
-// project's own default repo.
-func (c *Client) AddRepo(ctx context.Context, req api.RepoAddRequest) (api.ProjectResponse, error) {
-	var v api.ProjectResponse
-	err := c.do(ctx, "POST", api.Prefix+"/projects/repos", req, &v, c.addProjectTimeout)
-	return v, err
-}
-
 // ExtractProject starts a new knowledge-base extraction of the active project.
 func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (api.ExtractionResponse, error) {
 	var v api.ExtractionResponse
@@ -310,6 +302,13 @@ func (c *Client) DesignMessage(ctx context.Context, id config.WorkstreamID, text
 func (c *Client) DesignStart(ctx context.Context, id config.WorkstreamID) (api.DesignStartResponse, error) {
 	var v api.DesignStartResponse
 	err := c.Do(ctx, "POST", api.Prefix+"/design/"+url.PathEscape(string(id))+"/start", nil, &v)
+	return v, err
+}
+
+// DesignStartWithBriefRevision starts from exactly the brief revision read by the owner.
+func (c *Client) DesignStartWithBriefRevision(ctx context.Context, id config.WorkstreamID, revision int) (api.DesignStartResponse, error) {
+	var v api.DesignStartResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/design/"+url.PathEscape(string(id))+"/start", api.DesignStartRequest{BriefRevision: &revision}, &v)
 	return v, err
 }
 

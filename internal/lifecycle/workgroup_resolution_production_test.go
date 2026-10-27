@@ -15,12 +15,18 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// resolutionPulls fails only the sink member's own PR lookup. Upstream edge
+// resolutionPulls fails or delays only the sink member's own PR lookup. Upstream edge
 // observation keeps its existing provider behavior.
 type resolutionPulls struct {
 	*fakePulls
-	fail atomic.Bool
-	sink atomic.Pointer[string]
+	fail    atomic.Bool
+	sink    atomic.Pointer[string]
+	pending atomic.Pointer[resolutionLookup]
+}
+
+type resolutionLookup struct {
+	reached chan struct{}
+	release chan struct{}
 }
 
 func (p *resolutionPulls) Find(ctx context.Context, repository, head, branch string) ([]pulls.PullRequest, error) {
@@ -31,7 +37,18 @@ func (p *resolutionPulls) Find(ctx context.Context, repository, head, branch str
 		p.Mu.Unlock()
 		return nil, errors.New("provider temporarily unavailable")
 	}
-	return p.fakePulls.Find(ctx, repository, head, branch)
+	found, err := p.fakePulls.Find(ctx, repository, head, branch)
+	if sink != nil && *sink == branch {
+		if pending := p.pending.Swap(nil); pending != nil {
+			close(pending.reached)
+			select {
+			case <-pending.release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+	return found, err
 }
 func resolutionApprovedFixture(t *testing.T, configuration productionDesignConfiguration, edge string, host pulls.Client, prepare ...func(*productionDesignFixture)) *productionDesignFixture {
 	t.Helper()
@@ -214,6 +231,17 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			f.clock.Advance(10 * time.Minute)
 			awaitChecks("ready open provider lookups", 2)
 			assertNoOutcomes()
+			// Keep an open response in flight across the merge and clock advance.
+			pending := &resolutionLookup{reached: make(chan struct{}), release: make(chan struct{})}
+			host.pending.Store(pending)
+			lifecycleAwait(t, f, "open provider response in flight", func() bool {
+				select {
+				case <-pending.reached:
+					return true
+				default:
+					return false
+				}
+			})
 			// Hold final resolution after every durable observation, then perform a real restart.
 			hold.Store(true)
 			host.Mu.Lock()
@@ -224,11 +252,17 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			}
 			host.Mu.Unlock()
 			f.clock.Advance(10 * time.Minute)
-			select {
-			case <-reached:
-			case <-time.After(demoTimeout):
-				f.timeout(t, "durable outcomes before resolution")
-			}
+			close(pending.release)
+			// Poll completions can schedule another cadence while the host changes.
+			// Advance through those deadlines until both outcomes are durable.
+			lifecycleAwait(t, f, "durable outcomes before resolution", func() bool {
+				select {
+				case <-reached:
+					return true
+				default:
+					return false
+				}
+			})
 			for i, m := range resolutionMembers(f) {
 				repo, err := f.s.repository(m.project)
 				must(t, err)

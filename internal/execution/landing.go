@@ -74,7 +74,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	streams, err := f.repository.Workstreams()
+	streams, err := nonSessionWorkstreams(f.repository)
 	if err != nil {
 		return err
 	}

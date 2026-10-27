@@ -127,7 +127,7 @@ func (d *Drafter) Pass(ctx context.Context) error {
 	if d.S.Options.Architect == nil {
 		return nil
 	}
-	streams, err := d.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(d.Repository)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (d *Drafter) Reconcile(ctx context.Context, stream config.WorkstreamID) err
 	if feature.Value != HandedState {
 		return nil
 	}
-	if blocked, err := d.S.DesignStartBlocksDraft(d.Repository, stream); err != nil || blocked {
+	if blocked, err := d.S.DesignStartPending(d.Repository, stream); err != nil || blocked {
 		return err
 	}
 	state, err := d.Repository.Workflow(stream, DraftSubject)
@@ -779,7 +779,7 @@ func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []s
 	if err != nil || len(problems) > 0 {
 		return DraftInvalid, problems, err
 	}
-	problems, err = d.Validate(trace.Document{Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
+	problems, err = d.Validate(trace.Document{Header: trace.Header{Workstream: stream}, Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
 	if err != nil {
 		return DraftInvalid, problems, err
 	}
@@ -1015,7 +1015,7 @@ func (d *Drafter) Validate(specDoc, planDoc trace.Document) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ValidateDraft(specDoc.Content, planDoc.Content, entities), nil
+	return append(ValidateDraft(specDoc.Content, planDoc.Content, entities), plan.CharterProblems(context.Background(), d.Repository, specDoc.Workstream, specDoc.Content, planDoc.Content)...), nil
 }
 
 // validateDraft returns every problem with a spec and a plan against the
@@ -1051,7 +1051,7 @@ func (d *Drafter) Sketch(ctx context.Context, operation string, stream config.Wo
 }
 
 func ArchitectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
@@ -1068,7 +1068,7 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, an
 
 Your view holds:
 - %s: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>.
+- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
 Deliver two files with %s; only what you deliver is kept.

@@ -486,6 +486,107 @@ func TestDestroySessionFencesControlsWithStaleLookups(t *testing.T) {
 	}
 }
 
+func TestDestroySessionKeepsNeighborScheduling(t *testing.T) {
+	t.Parallel()
+	for _, stage := range []string{"base", "edge", "workgroup-resolution", "workgroup-resolution-groups-discovered", "workgroup-resolution-discovered", "workgroup-resolution-edges-discovered"} {
+		for _, design := range []bool{false, true} {
+			t.Run(stage+"/"+map[bool]string{false: "exploratory", true: "design"}[design], func(t *testing.T) {
+				t.Parallel()
+				ctx := context.Background()
+				entered, release := make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer unblock()
+				var armed atomic.Bool
+				var passes atomic.Int64
+				var logs syncBuffer
+				s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
+					opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+					opts.schedulePassed = func() { passes.Add(1) }
+					opts.boundary = func(ctx context.Context, step string) error {
+						if (step == "schedule:"+stage || step == stage) && armed.CompareAndSwap(true, false) {
+							close(entered)
+							select {
+							case <-release:
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+						}
+						return nil
+					}
+				})
+				if design {
+					opened, err := c.OpenDesign(ctx, project)
+					must(t, err)
+					stream = opened.Design.Workstream
+				}
+				if stage == "workgroup-resolution-edges-discovered" {
+					repo, err := s.repository(project)
+					must(t, err)
+					archived := config.WorkstreamID("w_00000000000000000000000000000903")
+					must(t, repo.CreateWorkstream(ctx, archived, s.now(), ownerActor))
+					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "archived-cancelled", Revision: 1, Project: project, Workstream: archived, At: s.now(), Actor: ownerActor, Cause: "fixture"}
+					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "cancelled archive"}})
+					must(t, err)
+					must(t, s.refreshRuntime())
+					must(t, s.store.SetArchived(runtime.Archive{Project: project, Workstream: archived, Title: "Cancelled archive", State: AbandonedState, ArchivedAt: s.now(), CleanedAt: s.now(), Resolved: true, ResolutionEvidence: "cancelled"}))
+				}
+				armed.Store(true)
+				select {
+				case <-entered:
+				case <-time.After(demoTimeout):
+					t.Fatal("scheduling did not reach its boundary")
+				}
+				repo, err := s.repository(project)
+				must(t, err)
+				neighbor := config.WorkstreamID("w_00000000000000000000000000000901")
+				must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), ownerActor))
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-waiting", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: ownerActor, Cause: "fixture"}
+				_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: lifecycle.EdgeWaitSubject, To: "waiting", Reason: "Await edge observation"}})
+				must(t, err)
+				var neighborGroup config.WorkgroupID
+				if strings.HasPrefix(stage, "workgroup-resolution") {
+					_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), ownerActor, "neighbor-group")
+					must(t, err)
+					groups, _, err := trace.Workgroups(repo)
+					must(t, err)
+					group, found := trace.WorkgroupOf(groups, neighbor)
+					if !found {
+						t.Fatal("neighbor has no workgroup")
+					}
+					neighborGroup = group.ID
+					h.ID = "neighbor-abandoned"
+					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "neighbor is resolved"}})
+					must(t, err)
+				}
+				if design {
+					_, err = c.DestroyDesign(ctx, stream)
+				} else {
+					_, err = c.DestroySession(ctx, stream)
+				}
+				must(t, err)
+				unblock()
+				eventually(t, "neighbor's edge wait clears after destroy", func() bool {
+					state, err := repo.Workflow(neighbor, lifecycle.EdgeWaitSubject)
+					must(t, err)
+					return state.Value == "available"
+				})
+				if neighborGroup != "" {
+					eventually(t, "neighbor's workgroup resolves after destroy", func() bool {
+						resolved, _, err := trace.ResolvedWorkgroups(repo)
+						must(t, err)
+						return slices.Contains(resolved, neighborGroup)
+					})
+				}
+				assertDestroyedSession(t, s, c, project, stream)
+				awaitFurtherPasses(t, &passes, 2)
+				if strings.Contains(logs.String(), `"level":"ERROR"`) {
+					t.Fatalf("background error: %s", logs.String())
+				}
+			})
+		}
+	}
+}
+
 func TestDestroyRefusesTurnsAndConcurrentDesignStart(t *testing.T) {
 	t.Parallel()
 	s, c, project := newDesignFixture(t)
@@ -621,4 +722,134 @@ func TestDestroyDesignRefusesWorkgroupStartInProgress(t *testing.T) {
 	}
 	_, err = c.DestroyDesign(context.Background(), opened.Design.Workstream)
 	assertCode(t, err, Conflict)
+}
+
+func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
+	t.Parallel()
+	for _, design := range []bool{false, true} {
+		t.Run(map[bool]string{false: "exploratory", true: "design"}[design], func(t *testing.T) {
+			t.Parallel()
+			listed, release, destroying := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			defer unblock()
+			reachedDestroy := sync.OnceFunc(func() { close(destroying) })
+			var logs syncBuffer
+			var passes atomic.Int64
+			s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
+				opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+				opts.schedulePassed = func() { passes.Add(1) }
+				opts.boundary = func(_ context.Context, step string) error {
+					if step == "session-destroy-released" {
+						reachedDestroy()
+					}
+					return nil
+				}
+			})
+			ctx := context.Background()
+			if design {
+				opened, err := c.OpenDesign(ctx, project)
+				must(t, err)
+				stream = opened.Design.Workstream
+			}
+			repo, err := s.repository(project)
+			must(t, err)
+			type snapshot struct {
+				streams []config.WorkstreamID
+				err     error
+			}
+			scanned := make(chan snapshot, 1)
+			go func() {
+				streams, err := intake.NonSessionWorkstreamsForTest(repo, func(streams []config.WorkstreamID) error {
+					if !slices.Contains(streams, stream) {
+						return errors.New("discovery did not list the session")
+					}
+					close(listed)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})
+				scanned <- snapshot{streams, err}
+			}()
+			select {
+			case <-listed:
+			case <-time.After(demoTimeout):
+				t.Fatal("discovery did not enumerate the session")
+			}
+			neighbor := config.WorkstreamID("w_00000000000000000000000000000904")
+			must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), ownerActor))
+			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), ownerActor, "neighbor-group")
+			must(t, err)
+			group, found := trace.WorkgroupOf(groups, neighbor)
+			if !found {
+				t.Fatal("neighbor has no workgroup")
+			}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-cancelled", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: ownerActor, Cause: "fixture"}
+			_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "neighbor is resolved"}})
+			must(t, err)
+			destroyed := make(chan error, 1)
+			go func() {
+				var err error
+				if design {
+					_, err = c.DestroyDesign(ctx, stream)
+				} else {
+					_, err = c.DestroySession(ctx, stream)
+				}
+				destroyed <- err
+			}()
+			select {
+			case <-destroying:
+			case err := <-destroyed:
+				t.Fatalf("destroy returned before reaching trace removal: %v", err)
+			case <-time.After(demoTimeout):
+				t.Fatal("destroy did not reach trace removal")
+			}
+			pending, err := trace.SessionDestroyPending(s.current().Root, project, stream)
+			must(t, err)
+			if !pending {
+				t.Fatal("destroy has no durable intent")
+			}
+			gone, err := trace.WorkstreamTraceGone(s.current().Root, project, stream)
+			must(t, err)
+			if gone {
+				t.Fatal("destroy removed the trace during classification")
+			}
+			if _, err := repo.Kind(stream); err != nil {
+				t.Fatalf("listed trace became unreadable under the guard: %v", err)
+			}
+			select {
+			case err := <-destroyed:
+				t.Fatalf("destroy passed an active discovery snapshot: %v", err)
+			default:
+			}
+			unblock()
+			select {
+			case result := <-scanned:
+				must(t, result.err)
+				if slices.Contains(result.streams, stream) {
+					t.Fatal("snapshot retained a removable session")
+				}
+			case <-time.After(demoTimeout):
+				t.Fatal("discovery did not finish")
+			}
+			select {
+			case err := <-destroyed:
+				must(t, err)
+			case <-time.After(demoTimeout):
+				t.Fatal("destroy did not finish after the snapshot released its guard")
+			}
+			eventually(t, "neighbor workgroup resolves", func() bool {
+				resolved, _, err := trace.ResolvedWorkgroups(repo)
+				must(t, err)
+				return slices.Contains(resolved, group.ID)
+			})
+			assertDestroyedSession(t, s, c, project, stream)
+			awaitFurtherPasses(t, &passes, 2)
+			if strings.Contains(logs.String(), `"level":"ERROR"`) {
+				t.Fatalf("background error: %s", logs.String())
+			}
+		})
+	}
 }

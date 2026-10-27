@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -332,6 +333,24 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 	if !handInKey.MatchString(req.Key) || strings.TrimSpace(req.Change) == "" || (req.Kind != "amend" && req.Kind != "cancel") || (req.Scope != "workgroup" && req.Scope != "workstream") {
 		return WorkgroupChange{}, &APIError{Code: Validation, Message: "key, amend or cancel kind, workgroup or workstream scope, and change are required"}
 	}
+	if req.Kind == "cancel" {
+		_, stream, _, api := s.ConversationTrace(raw)
+		if api != nil {
+			return WorkgroupChange{}, api
+		}
+		// Until join completes, a member may still route to its temporary
+		// singleton. Neither cancellation scope may act on that grouping.
+		for _, target := range []config.WorkstreamID{stream, req.Workstream} {
+			if target == "" {
+				continue
+			}
+			if joining, err := s.Intake().SelectionJoiningMember(target); err != nil {
+				return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
+			} else if joining {
+				return WorkgroupChange{}, &APIError{Code: Conflict, Message: "the workgroup is still joining its owner-selected members; cancel the whole workgroup after it has joined"}
+			}
+		}
+	}
 	wt, g, origin, close, err := s.ChangeContext(ctx, raw)
 	if err != nil {
 		return WorkgroupChange{}, &APIError{Code: Conflict, Message: err.Error()}
@@ -365,7 +384,7 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 	if err != nil {
 		return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	if req.Kind == "amend" {
+	if req.Kind == "amend" || req.Scope == "workstream" && len(members) > 1 {
 		for _, m := range members {
 			_, _, r, api := s.ConversationTrace(string(m.Workstream))
 			if api != nil {
@@ -374,6 +393,9 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 			if _, _, approved, err := seal.Latest(r, m.Workstream); err != nil {
 				return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
 			} else if !approved {
+				if req.Kind == "cancel" {
+					return WorkgroupChange{}, &APIError{Code: Conflict, Message: FixedProjectsMessage}
+				}
 				return WorkgroupChange{}, &APIError{Code: Conflict, Message: "ratify the project spec before requesting a delta amendment"}
 			}
 		}
@@ -697,4 +719,56 @@ func (c WorkgroupChange) Summary() string {
 		}
 	}
 	return b.String()
+}
+
+// FixedProjectsMessage explains how the owner can replace a selection.
+const FixedProjectsMessage = "the project set is fixed until ratification; cancel the whole workgroup to abandon the work and hand it in again"
+
+// MemberRemovalGate protects the owner's project set for direct abandonment
+// as well as moves relayed by the chief. Whole-workgroup cancellation uses its
+// durable change journal and does not pass through individual abandonment.
+func (s *Controller) MemberRemovalGate(ctx context.Context, raw string) *APIError {
+	_, stream, repo, api := s.ConversationTrace(raw)
+	if api != nil {
+		return api
+	}
+	id, err := repo.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return &APIError{Code: Internal, Message: err.Error()}
+	}
+	if id == "" {
+		return nil
+	}
+	approval, found, err := repo.GroupApprovalOf(stream)
+	if err != nil {
+		return &APIError{Code: Internal, Message: err.Error()}
+	}
+	if found && approval.Complete {
+		return nil
+	}
+	wt, g, _, close, err := s.ChangeContext(ctx, raw)
+	if err != nil {
+		return &APIError{Code: Conflict, Message: err.Error()}
+	}
+	defer close()
+	members := s.ChangeMembers(g, wt)
+	if len(members) < 2 {
+		return nil
+	}
+	archives := s.MemberArchives()
+	for _, member := range members {
+		if slices.ContainsFunc(archives, func(a runtime.Archive) bool { return a.Workstream == member }) {
+			continue
+		}
+		_, _, r, api := s.ConversationTrace(string(member))
+		if api != nil {
+			return api
+		}
+		if _, _, approved, err := seal.Latest(r, member); err != nil {
+			return &APIError{Code: Internal, Message: err.Error()}
+		} else if !approved {
+			return &APIError{Code: Conflict, Message: FixedProjectsMessage}
+		}
+	}
+	return nil
 }

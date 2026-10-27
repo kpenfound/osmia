@@ -125,65 +125,67 @@ func (c *Controller) ShedOwnerDependencies() *ShedOwnerDependencies {
 
 // HandInDependencies contains the boundaries used by the handin controller.
 type HandInDependencies struct {
-	About              func(repository *trace.Repository) *config.Config
-	ArchivedWorkstream func(raw string) (runtime.Archive, bool)
-	HandInMu           *sync.Mutex
-	NewWorkspaces      func(ctx context.Context, cfg *config.Config) (WorkspacesStatus, error)
-	RefreshRuntime     func() error
+	RecordOwnerProjects func(context.Context, *trace.Repository, config.WorkstreamID, []config.ProjectID, config.WorkstreamID) *APIError
+	About               func(repository *trace.Repository) *config.Config
+	ArchivedWorkstream  func(raw string) (runtime.Archive, bool)
+	HandInMu            *sync.Mutex
+	NewWorkspaces       func(ctx context.Context, cfg *config.Config) (WorkspacesStatus, error)
+	RefreshRuntime      func() error
 }
 
 func (c *Controller) HandInDependencies() *HandInDependencies {
 	return &HandInDependencies{
-		About:              c.About,
-		ArchivedWorkstream: c.ArchivedWorkstream,
-		HandInMu:           c.HandInMu,
-		NewWorkspaces:      c.NewWorkspaces,
-		RefreshRuntime:     c.RefreshRuntime,
+		RecordOwnerProjects: c.RecordOwnerProjects,
+		About:               c.About,
+		ArchivedWorkstream:  c.ArchivedWorkstream,
+		HandInMu:            c.HandInMu,
+		NewWorkspaces:       c.NewWorkspaces,
+		RefreshRuntime:      c.RefreshRuntime,
 	}
 }
 
 // DrafterDependencies contains the boundaries used by the drafter controller.
 type DrafterDependencies struct {
-	About                  func(repository *trace.Repository) *config.Config
-	ChangeHeld             func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
-	ContextFor             func(repo *trace.Repository) bundle.Provider
-	ContinueStopped        func(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error)
-	Current                func() *config.Config
-	DesignStartBlocksDraft func(r *trace.Repository, stream config.WorkstreamID) (bool, error)
-	FactoryContext         func(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool
-	Held                   func(repository *trace.Repository, stream config.WorkstreamID) error
-	InspectCode            func(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
-	MemoryTurns            func(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns
-	Now                    func() time.Time
-	Options                Execution
-	Pausing                func(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool)
-	RemoteFileTool         func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
-	RoleExecution          func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
-	Stoppable              func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
-	ThreadRunner           func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
-	TrackTurn              func(config.WorkstreamID, context.CancelFunc) func()
+	About              func(repository *trace.Repository) *config.Config
+	ChangeHeld         func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
+	ContextFor         func(repo *trace.Repository) bundle.Provider
+	ContinueStopped    func(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error)
+	Current            func() *config.Config
+	DesignStartPending func(r *trace.Repository, stream config.WorkstreamID) (bool, error)
+	FactoryContext     func(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool
+	Held               func(repository *trace.Repository, stream config.WorkstreamID) error
+	InspectCode        func(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
+	MemoryTurns        func(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns
+	Now                func() time.Time
+	Options            Execution
+	Pausing            func(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool)
+	RemoteFileTool     func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
+	RoleExecution      func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
+	Stoppable          func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
+	ThreadRunner       func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
+	TrackTurn          func(config.WorkstreamID, context.CancelFunc) func()
 }
 
 func (c *Controller) DrafterDependencies() *DrafterDependencies {
 	return &DrafterDependencies{
-		About:                  c.About,
-		ChangeHeld:             c.ChangeHeld,
-		ContextFor:             c.ContextFor,
-		ContinueStopped:        c.ContinueStopped,
-		Current:                c.Current,
-		DesignStartBlocksDraft: c.DesignStartBlocksDraft,
-		FactoryContext:         c.FactoryContext,
-		Held:                   c.Held,
-		InspectCode:            c.InspectCode,
-		MemoryTurns:            c.MemoryTurns,
-		Now:                    c.Now,
-		Options:                c.Options,
-		Pausing:                c.Pausing,
-		RemoteFileTool:         c.RemoteFileTool,
-		RoleExecution:          c.RoleExecution,
-		Stoppable:              c.Stoppable,
-		ThreadRunner:           c.ThreadRunner,
-		TrackTurn:              c.TrackTurn,
+		About:              c.About,
+		ChangeHeld:         c.ChangeHeld,
+		ContextFor:         c.ContextFor,
+		ContinueStopped:    c.ContinueStopped,
+		Current:            c.Current,
+		DesignStartPending: c.DesignStartPending,
+		FactoryContext:     c.FactoryContext,
+		Held:               c.Held,
+		InspectCode:        c.InspectCode,
+		MemoryTurns:        c.MemoryTurns,
+		Now:                c.Now,
+		Options:            c.Options,
+		Pausing:            c.Pausing,
+		RemoteFileTool:     c.RemoteFileTool,
+		RoleExecution:      c.RoleExecution,
+		Stoppable:          c.Stoppable,
+		ThreadRunner:       c.ThreadRunner,
+		TrackTurn:          c.TrackTurn,
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -577,6 +578,12 @@ func StageProjectSpecView(members []trace.CrossRepoMember, workspace string, inp
 			return err
 		}
 		files[plan.SpecPath], files[plan.PlanPath] = spec, graph
+		charterDoc, err := m.Project.Charter(context.Background())
+		if err != nil {
+			return err
+		}
+		files["charter.md"] = fmt.Sprintf("Project %s; citations: %s/charter#<n>\nEach member's charter governs its slice, plan and units; the workgroup spec and contracts must satisfy every member charter.\n\n%s", m.Project.Project(), m.Project.Project(), charterDoc.Content)
+
 		for name, content := range files {
 			path := filepath.Join(dir, filepath.FromSlash(name))
 			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -629,17 +636,18 @@ func (s *Controller) ProjectSpecDraftTool(g trace.Workgroup, host config.Workstr
 	}}
 }
 func ProjectSpecDraftSystemPrompt() string {
-	return fmt.Sprintf("You are the architect drafting the shared project spec of a multi-repo workgroup. Each member workstream's own spec and plan are already drafted and sketched, independently, in its own repo; your job is to add only what spans them: the intended cross-repo behaviour, the named contracts at the seams between repos, the dependency graph between members, and, for each member, which of its own already-numbered acceptance criteria are contract sections (read-only to that member's own workers). You hold no version-control tool and no way to ask a question in this step: use only what is in your view, and deliver with %s. Do not restate or retype a member's own spec or plan text; the service fills each member's own slice content in automatically from what is already recorded.", ProjectSpecDraftTool)
+	return fmt.Sprintf("You are the architect drafting the shared workgroup spec across the owner-selected projects. The member list is fixed: cover every selected project, with its workstream, contracts and graph. Never add or drop a member. Each member workstream's own spec and plan are already drafted and sketched, independently, in its own repo; your job is to add only what spans them: the intended cross-repo behaviour, the named contracts at the seams between repos, the dependency graph between members, and, for each member, which of its own already-numbered acceptance criteria are contract sections (read-only to that member's own workers). You hold no version-control tool and no way to ask a question in this step: use only what is in your view, and deliver with %s. Do not restate or retype a member's own spec or plan text; the service fills each member's own slice content in automatically from what is already recorded.", ProjectSpecDraftTool)
 }
 func (s *Controller) ProjectSpecDraftPrompt(members []trace.CrossRepoMember) (string, error) {
 	var b strings.Builder
-	b.WriteString("Draft the project spec of this workgroup from its members' own already-sketched specs and plans.\n\nYour view holds, for each member workstream, its handed input, its own drafted spec.md and plan.json, under members/<workstream>/.\n\n")
+	b.WriteString("Draft the project spec of this workgroup from its members' own already-sketched specs and plans.\n\nYour view holds, for each member workstream, its handed input, its project-labelled charter.md, its own drafted spec.md and plan.json, under members/<workstream>/.\n\n")
 	for _, m := range members {
-		b.WriteString("Member " + string(m.Workstream) + "\n")
+		b.WriteString("Member " + string(m.Workstream) + " project " + string(m.Project.Project()) + " (citations " + string(m.Project.Project()) + "/charter#<n>)\n")
 	}
 	fmt.Fprintf(&b, `
 Deliver with %s: {"behavior": "...", "contracts": [{"name": "...", "text": "..."}], "graph": [{"from": "...", "to": "...", "type": "contract|hard_block|merge_order"}], "slices": [{"workstream": "...", "contract_criteria": [1, 2]}]}.
 
+- The workgroup spec and contracts must satisfy every member charter. Each member charter governs its own slice, plan and units. Read every members/<workstream>/charter.md. Cite another project with its displayed project ID.
 - behavior: the intended cross-repo behaviour as prose, including what spans the members' own repos.
 - contracts: the named interfaces at the seams between members' repos, each with its full text.
 - graph: a dependency edge between two members is optional; every edge must name two members from the list above and one of the three types.
@@ -700,6 +708,9 @@ func (s *Controller) RecordProjectSpecDraft(ctx context.Context, wt *trace.Repos
 	if _, _, approved, err := trace.ReadGroupApproval(wt, host); err != nil || approved {
 		return err
 	}
+	if problems := ProjectSpecCharterProblems(ctx, wt, g, full); len(problems) > 0 {
+		return s.FailProjectSpecDraft(ctx, wt, host, "the delivered workgroup spec has invalid charter citations: "+strings.Join(problems, "; "))
+	}
 	if err := trace.RecordProjectSpec(ctx, wt, g, full, s.Now(), ProjectSpecDraftActor, turn); err != nil {
 		return s.FailProjectSpecDraft(ctx, wt, host, "the delivered project spec is invalid: "+err.Error())
 	}
@@ -751,7 +762,7 @@ func (s *Controller) FailProjectSpecDraft(ctx context.Context, wt *trace.Reposit
 // member's own project pass finding the same workgroup does not race to
 // draft it more than once; the others' calls are a cheap, idempotent no-op.
 func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace.Repository) error {
-	streams, err := repository.Workstreams()
+	streams, err := nonSessionWorkstreams(repository)
 	if err != nil {
 		return err
 	}
@@ -806,4 +817,40 @@ func LeastWorkstream(streams []config.WorkstreamID) config.WorkstreamID {
 		}
 	}
 	return least
+}
+
+// ProjectSpecCharterProblems resolves shared citations at home and slice citations
+// in each member, preserving the meaning of an unqualified rule in every document.
+func ProjectSpecCharterProblems(ctx context.Context, wt *trace.Repository, g trace.Workgroup, spec trace.ProjectSpec) []string {
+	problems := SharedCharterProblems(ctx, wt, g.Members[0], spec)
+	for _, slice := range spec.Slices {
+		problems = append(problems, plan.CharterProblems(ctx, wt, slice.Workstream, slice.Spec, slice.Plan)...)
+	}
+	return problems
+}
+
+// SharedCharterProblems validates citations in workgroup behavior and contracts.
+func SharedCharterProblems(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, spec trace.ProjectSpec) []string {
+	texts := []string{spec.Behavior}
+	for _, contract := range spec.Contracts {
+		texts = append(texts, contract.Text)
+	}
+	return plan.CharterProblems(ctx, wt, host, texts...)
+}
+
+// WorkgroupCharterText labels each charter and the citation form roles use for it.
+func WorkgroupCharterText(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) (string, error) {
+	members, err := repo.WorkgroupCharters(ctx, stream)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("Each member charter governs its slice, plan and units. The workgroup spec and contracts must satisfy every member charter. Conflicts between member charters require the owner.\n")
+	for _, m := range members {
+		fmt.Fprintf(&b, "\n## Project %s (member %s), charter revision %d\n", m.Project, m.Workstream, m.Document.Revision)
+		for _, rule := range charter.Parse(m.Document.Content).Rules {
+			fmt.Fprintf(&b, "- %s/charter#%d: %s\n", m.Project, rule.Number, rule.Text)
+		}
+	}
+	return b.String(), nil
 }

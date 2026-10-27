@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/hearsay"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -75,7 +76,7 @@ func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error
 			delay = 5 * time.Second
 			continue
 		}
-		targets, err := repo.Workstreams()
+		targets, err := intake.NonSessionWorkstreams(repo)
 		if err != nil {
 			return err
 		}

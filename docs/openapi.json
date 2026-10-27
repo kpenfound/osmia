@@ -1119,6 +1119,55 @@
         }
       }
     },
+    "/v1/design/{workstream}/projects": {
+      "post": {
+        "summary": "Choose projects for an unselected handed design start held after an upgrade",
+        "operationId": "postDesignByWorkstreamProjects",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectSelectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignStartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/design/{workstream}/start": {
       "post": {
         "summary": "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff",
@@ -1135,6 +1184,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignStartRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "default": {
             "description": "The request failed; the error names its code and reason.",
@@ -1408,7 +1466,7 @@
     },
     "/v1/handin": {
       "post": {
-        "summary": "Hand in a workstream",
+        "summary": "Hand in work to one project or an ordered list of projects",
         "operationId": "postHandin",
         "requestBody": {
           "content": {
@@ -1962,43 +2020,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectRebaseResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/projects/repos": {
-      "post": {
-        "summary": "Add a repo to an existing project",
-        "operationId": "postProjectsRepos",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepoAddRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "description": "The request failed; the error names its code and reason.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -4448,9 +4469,6 @@
           "fork": {
             "type": "string"
           },
-          "group_id": {
-            "type": "string"
-          },
           "hearsay_entities": {
             "additionalProperties": {
               "type": "string"
@@ -5024,6 +5042,17 @@
         },
         "type": "object"
       },
+      "DesignStartRequest": {
+        "properties": {
+          "brief_revision": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "DesignStartResponse": {
         "properties": {
           "handed": {
@@ -5046,12 +5075,27 @@
       },
       "DesignView": {
         "properties": {
+          "brief": {
+            "type": "string"
+          },
+          "brief_revision": {
+            "type": "integer"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
           },
           "project": {
             "type": "string"
+          },
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "workstream": {
             "type": "string"
@@ -5754,6 +5798,12 @@
           "project": {
             "type": "string"
           },
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "skip_debate": {
             "type": "boolean"
           },
@@ -6231,6 +6281,20 @@
         },
         "type": "object"
       },
+      "ProjectSelectionRequest": {
+        "properties": {
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ProjectView": {
         "properties": {
           "base_branch": {
@@ -6425,29 +6489,6 @@
         },
         "type": "object"
       },
-      "RepoAddRequest": {
-        "properties": {
-          "base_branch": {
-            "type": "string"
-          },
-          "clone": {
-            "type": "string"
-          },
-          "fork": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project": {
-            "type": "string"
-          },
-          "upstream": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "RepoView": {
         "properties": {
           "base_branch": {
@@ -6455,9 +6496,6 @@
           },
           "clone": {
             "type": "string"
-          },
-          "default": {
-            "type": "boolean"
           },
           "entity_map": {
             "type": "string"

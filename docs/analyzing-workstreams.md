@@ -27,8 +27,8 @@ one SQLite database, `trace.db`, in its own directory.
 | Path | What it answers |
 |---|---|
 | `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`), profile overrides |
-| `projects/<p>/config.toml` | The repo's clone path, base branch, landing style and optional group_id |
-| `projects/<p>/trace.db` | The repo's knowledge: charter (default repo), KB, entity map, role notes, lasting decisions |
+| `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
+| `projects/<p>/trace.db` | The project's charter, KB, entity map, role notes and lasting decisions |
 | `workstreams/<p>/<w>/trace.db` | The workstream's complete trace |
 | `units/<p>/<w>/<u>`, `drifts/<p>/<w>` | Unit and drift resolution workspaces |
 
@@ -56,9 +56,9 @@ Each repo's librarian has a workstream of its own, `w_` followed by the
 first 32 hex digits of `sha256("librarian:<project id>")`. Its workflow holds
 the knowledge base extraction and refresh operations.
 
-Here `<p>` is the repo registration ID. Its default project's charter is shared,
-but its KB and settings are local. For a cross-repo workgroup also inspect
-`workgroups/<group-id>/trace.db`: the authoritative project spec, membership, original
+Here `<p>` is the one-repo project's ID; its charter, KB and settings are its
+own. For a cross-project workgroup also inspect
+`workgroups/<group-id>/trace.db`: the authoritative workgroup spec, membership, original
 shared chief conversation, consolidated questions and approved change journals
 are there, outside member traces. Member roles' asking-turn links lead back to
 their own traces. A published `delivered` workflow state is not itself a merge;

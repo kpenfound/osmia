@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
@@ -274,7 +275,7 @@ func (s *Controller) ChangeLeader(members []config.WorkstreamID) config.Workstre
 	return leader
 }
 func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) error {
-	streams, err := repo.Workstreams()
+	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
@@ -583,7 +584,7 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 		if err != nil {
 			return err
 		}
-		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
+		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read charters.md and check shared behaviour and contracts against every member charter. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
 		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve.", Prompt: prompt + acceptanceDraftInstructions})
 		if err != nil {
 			return err
@@ -615,15 +616,19 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 		if err := os.MkdirAll(workspace, 0700); err != nil {
 			return isolation.Selection{}, err
 		}
+		charters, err := WorkgroupCharterText(ctx, wt, c.Host)
+		if err != nil {
+			return isolation.Selection{}, err
+		}
 		before, _ := json.MarshalIndent(c.Before, "", "  ")
 		change, _ := json.MarshalIndent(c, "", "  ")
-		for name, data := range map[string][]byte{"before.json": before, "change.json": change} {
+		for name, data := range map[string][]byte{"before.json": before, "change.json": change, "charters.md": []byte(charters)} {
 			if err := os.WriteFile(filepath.Join(workspace, name), data, 0600); err != nil {
 				return isolation.Selection{}, err
 			}
 		}
 		_, settings, err := s.RoleExecution(s.Current(), role)
-		return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"before.json", "change.json"}, Execution: settings}, err
+		return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"before.json", "change.json", "charters.md"}, Execution: settings}, err
 	}, Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 		if scope.Workstream != string(c.Host) || scope.Thread != identity {
 			return nil, errors.New("delta scope denied")
@@ -733,6 +738,9 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 			if err := DecodeToolInput(raw, &after); err != nil {
 				return nil, err
 			}
+			if problems := SharedCharterProblems(ctx, wt, c.Origin, after); len(problems) > 0 {
+				return priorityRefusal(strings.Join(problems, "; "))
+			}
 			impact, err := amendment.ClassifyImpact(c.ID, c.Before, after, c.Members)
 			if err != nil {
 				return priorityRefusal(err.Error())
@@ -758,7 +766,7 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 					return nil, errors.New(api.Message)
 				}
 				draft := &drafter{S: s.Intake().DrafterDependencies(), Repository: repo}
-				problems, err := draft.Validate(trace.Document{Content: sl.Spec}, trace.Document{Content: sl.Plan})
+				problems, err := draft.Validate(trace.Document{Header: trace.Header{Workstream: sl.Workstream}, Content: sl.Spec}, trace.Document{Content: sl.Plan})
 				if err != nil {
 					return nil, err
 				}

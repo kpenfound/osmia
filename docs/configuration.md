@@ -4,52 +4,28 @@
 It returns a configuration only when the top-level file and every active
 repo configuration pass. It creates no directories, repositories, sockets or state and does
 not launch agents. The local service owns startup and the Unix
-socket. Registration through `osmia project add` or `project add-repo` writes
-the repo file and edits `active_projects`; see [project registration](#project-registration).
+socket. Registration through `osmia project add` writes
+the project file and edits `active_projects`; see [project registration](#project-registration).
 A running service applies edited files through [reload](running.md#reload).
 Startup performs the recoverable migrations described below.
 
 ## Projects, repos and workgroups
 
-A project owns one charter and one or more repos. Each repo owns its upstream,
-optional fork, clone, base branch, landing style, caps, KB and entity map.
-Workgroups represent feature requests; their workstreams each target exactly
-one repo and share one chief of staff. Footprints name entities from that repo.
-Briefs, project specs, slices and all other factory state stay outside target
-repositories. File-based context supports the complete flow without Hearsay.
+A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps, KB and entity map. Its `p_…` ID identifies it in `active_projects` and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters, KBs and entities are independent for every project.
 
-The default repo's `p_…` ID is also the project ID. Additional repos have their
-own `p_…` IDs and set `group_id` to that default ID in their configuration.
-`active_projects` lists repo registrations, including the default. The shared
-charter is a document in the default repo's trace,
-`projects/<default-repo-id>/trace.db`, which the owner edits with
-`osmia edit charter <project-id>` or in the web UI; each repo keeps its KB and
-entities in its own trace. API project views expose the repo list;
-compatibility fields such as `upstream` at the top level describe the default
-repo. Use `osmia project repos <project-id>` to see the members.
+A workgroup represents one feature across any number of selected active projects. It has one member workstream per project, one shared chief, one workgroup spec, contracts and graph, and one ratification. The workgroup appears under each member's project card and sidebar group row, with members labelled by project name. Briefs, workgroup specs, slices and all factory state stay outside target repositories. File-based context supports the whole flow without Hearsay.
 
-Charter reads and edits through any repo use that same default-repo authority,
-including worker bundles and owner-ratified rules. Added repos have no separate
-charter file. Any charter revisions retained in a member repo are historical
-records and do not supply its active policy.
+Each member's own charter governs its slice, plan and units. The workgroup spec and contracts must satisfy every member's charter; the architect, committee and chief receive them all. `charter#n` means the citing member's rule, and `<project>/charter#n` names another project's rule. Unknown projects or rules are refused. Conflicting charters go to the owner and cannot be dismissed by the chief. A proposed charter amendment is recorded and decided in the project whose rule it changes.
 
-The design agent uses the `chief_of_staff` role's profile, overrides and sandbox
-configuration. There is no separate `design` role binding. Its grants restrict
-it to the project charter, each repo's KB and read-only source access; it has
-no VCS, delivery credentials, source writes or gate tools. The service records
-its draft brief outside the repos. One owner start hands that brief to the
-architect, which selects affected repos; Go validates and allocates one member
-per selected repo. The same conversation becomes the shared chief thread.
-One ratification seals the project spec, graph and slices together. See
-[design sessions](cli.md#design-sessions) for commands.
+The owner chooses an ordered project list at hand-in: API `projects` (`project` alone is a one-element shorthand), repeatable CLI `--with <project-id>`, or the web multi-select of all active projects. The first project is home for the shared chief and conversation. Go rejects an empty or duplicate list, inactive projects and empty charters; paused projects are allowed. Several projects allocate and join one member each without an architect selection turn. One project retains the ordinary workflow. The list stays fixed until ratification; changing it requires abandoning and handing in again. After ratification, amend and cancel retain their existing rules. A selected project judged to need no change is escalated to the owner rather than dropped.
 
-Ordinary file, issue and stdin hand-ins use the same affected-repo selection
-path when the project has two or more active repos. A single selected repo
-keeps ordinary single-member ratification; several selected repos share one
-all-member packet. A project with one active repo goes directly to ordinary
-drafting. Selection adds no configuration or owner approval. See
-[handing in work](design.md#142-handing-in-a-workstream) for input, base and
-skipped-debate behavior.
+The design agent uses the `chief_of_staff` profile, overrides and sandbox configuration, with no separate `design` binding. Its tools are exactly `file_read`, `read_repo` and `draft_brief`, without write, VCS or credential access. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and KB are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
+
+A session's brief starts with its own project, including older briefs without a list. Optional `draft_brief.projects` replaces the list under the hand-in validation rules; omitting it retains the list. The session's own project can be removed while another remains. An owner request confirms the change; inferred changes require a readiness question and owner agreement. The web's read-only Brief panel shows the latest revision, project names with home marked and collapsed text above Start, updating live. Design read returns `brief_revision`, `brief` and `projects`; CLI read prints the revision and list, and CLI start reads and prints them before sending the pin. Start sends the displayed/read `brief_revision`; a stale pin returns `conflict` and allocates nothing. The web surfaces the conflict and refreshes the panel.
+
+Start durably binds the handed brief text, revision and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The session's project retains the conversation and continued shared chief even when it is not a member. See [design sessions](cli.md#design-sessions).
+
+The shared design is called the **workgroup spec**. Stored document paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the CLI flag `--project-spec-revision` keep their names. These names do not introduce another project grouping model.
 
 Edges are recorded in the ratified workgroup graph, not configured in TOML.
 A contract edge resolves on its ratified contract; hard-block and merge-order
@@ -111,10 +87,10 @@ configuration list; they belong to persisted workstream manifests.
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
 <root>/projects/<repo-id>/config.toml
-<root>/projects/<repo-id>/trace.db             dedicated repo knowledge trace; default repo holds project charter
+<root>/projects/<repo-id>/trace.db             project charter, KB, entity map and role notes
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
 <root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own trace.db and osmia.lock, separate from projects/<repo-id>/
-<root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, project spec, shared chief and group decisions
+<root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, workgroup spec, shared chief and group decisions
 <root>/workstreams-staging/                    a new workstream's trace is built here before an atomic rename publishes it
 <root>/workstreams-deleting/<repo-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
 <root>/branches/<repo-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
@@ -142,18 +118,13 @@ state writers must protect against concurrent symlink replacement.
 
 ### Project and workgroup migration
 
-At startup, each existing one-repo project becomes a default project holding
-that one repo, retaining its ID and paths. Its charter is the project charter.
-Every existing non-session workstream appears under it as a one-workstream
-workgroup whose chief is its existing thread. This includes building,
-delivered, abandoned and archived records. Existing exploratory sessions
-stay outside workgroups, retain their session kind and thread identity and
-remain excluded from factory passes. They are never converted to features.
-Traces, rulings, decisions and archive records are preserved without owner
-action. Migration is resumable and idempotent: an interrupted start finishes
-on the next start, and repeated starts create no duplicates. This is separate
-from the trace migration below; neither requires moving existing member
-traces to a workgroup trace.
+At startup, each repo of a multi-repo project becomes an independent project, keeping its existing `p_` ID. Each split-off charter copies the group's current rules and numbers as a charter revision naming its source project and source charter revision. The owner edits each charter separately afterwards. Startup removes `group_id` from every configuration file, preserving every other byte, including comments. It is no longer a supported configuration field. The split is crash-safe and idempotent: interrupted startup resumes without duplicate charter revisions. Existing workgroups keep their identity, members, approvals, revision pins and shared chief without another ratification.
+
+Existing one-repo projects keep their ID, paths, charter and settings. The project/workgroup migration puts every non-session workstream, including building, delivered, abandoned and archived records, in its own workgroup with the existing chief thread. Exploratory sessions keep their kind and thread outside workgroups and remain excluded from factory passes. Traces, rulings, decisions and archive records are preserved without owner action. Repeated starts do not duplicate records or require moving existing member traces.
+
+An in-flight design start keeps its recorded selection. A start with no selection waits with an inbox entry for the owner's choice, validated like hand-in before continuing. New hand-ins and design starts record selection durably with the handed input.
+
+The commands `osmia project add-repo` and `osmia project repos` and the web Add repo control are unavailable: use `project add` for each repo, `GET /v1/config` for the projects and the hand-in project list for shared work. The grouping registration route `POST /v1/projects/repos` is not served. Intake uses no architect selection turn, `tools/design-selection.json` or `deliver_affected_repos` tool. This migration is separate from trace migration below.
 
 ### Trace migration
 
@@ -208,16 +179,17 @@ model = "your-model-name"
 
 Only IDs in `active_projects` are loaded; the list may be empty or absent, and
 the service then starts without a project until `osmia project add` registers
-one. With several IDs the service runs every listed repo at once, each with
-its own trace, reconciliation loop, lander and drift cadence. Additional repos
-share the project of their `group_id`; that default repo must also be active. Role capacity
+one. With several IDs the service runs every listed one-repo project at once,
+each with its own trace, reconciliation loop, lander and drift cadence. Role capacity
 (`capacity.*`), budgets and the factory-level pause are shared by all of them:
 a turn in flight on any project takes a slot of its role kind. Each repo
 counts its own slots in use, waiting turns and daily spend from its own trace
 and publishes them, so the shared limits and the status's capacity and daily
 budget follow each repo's latest pass. Each repo's
 `capacity.per_workstream` applies to its own workstreams. Runtime project-scoped
-controls retain the selected repo registration's scope. Additional directories
+controls apply only to that project's members, including in cross-project workgroups.
+A paused project or one at its capacity or `git_operations` limit holds only
+its own member; the others continue as far as graph edges allow. Additional directories
 may hold archived
 traces and are not scanned or activated. Duplicate IDs are errors. The
 top-level file, and every active repo's file, must exist and specify
@@ -799,14 +771,7 @@ registration needs its own clone. Repeating an active project's exact
 registration returns it without change. Existing project runtimes and overrides
 are retained.
 
-`osmia project add` creates a project with exactly one default repo.
-`osmia project add-repo <project-id> --upstream OWNER/REPO --clone PATH`
-(API: `POST /v1/projects/repos`) uses the same registration journal to add a
-repo to that project, with its own config, clone, KB and entity map, and the
-project's existing charter. `--fork` and `--base-branch` are optional on both
-commands. `osmia project repos <project-id>` lists the repo views returned by
-`GET /v1/config`. There is no separate repo-list endpoint. The project pane
-offers project creation and adding a repo with these same service operations.
+`osmia project add` creates exactly one one-repo project with its own charter. `--fork` and `--base-branch` are optional. The project pane offers the same creation operation. To coordinate repositories, select their independent projects when handing in a feature or confirming a design brief's project list.
 
 ### Knowledge maintenance and retrieval
 
@@ -834,8 +799,7 @@ silently truncated: a successful librarian pass must consolidate them.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active repo ID from `active_projects` as a text edit, stops admitting new work,
-and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's traces, and the owner's clone, are not deleted. Remove additional repos before removing the default repo; a default with other
-active repos cannot be removed. Adding the
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. Removal is refused while that project has any unresolved member in any workgroup. The project's and every workstream's traces, and the owner's clone, are not deleted. Adding the
 same upstream again afterwards generates a new project ID and new trace
 repositories; the old ones stay untouched under `projects/<old-id>/` and
 `workstreams/<old-id>/` and are
@@ -847,16 +811,15 @@ for these edits.
 Without a project, `/config` and `/runtime` carry a `no_project` diagnostic and
 project-scoped overrides are rejected as referencing an inactive project.
 
-## Repo config.toml
+## Project config.toml
 
-Store this file at `projects/<repo-id>/config.toml`; `osmia project add` or
-`osmia project add-repo` writes it. The directory ID is the identity; there is no second configurable ID
+Store this file at `projects/<project-id>/config.toml`; `osmia project add`
+writes it. The directory ID is the identity; there is no second configurable ID
 to disagree with it.
 
 ```toml
 version = 1
 name = "My repo"                    # optional display metadata, default empty
-# group_id = "p_0123456789abcdef0123456789abcdef" # additional repo: its project ID
 upstream = "upstream/repository"    # required owner/repository, not a URL
 fork = "my-account/repository"      # optional; omit to push feature branches to upstream
 clone = "~/src/repository"          # required; may not yet exist
@@ -1140,13 +1103,13 @@ on without its key.
 
 A workstream's own slice, spec, plan and workspaces leave active state and new
 bundles when it resolves (merged or cancelled). Its trace remains until owner
-archive. The workgroup's project spec stays active for the shared chief and
+archive. The workgroup's workgroup spec stays active for the shared chief and
 every unresolved member until every member resolves, including a dependent
 waiting for or repairing after an upstream merge. Only then does it leave
-active views and bundles; project-spec history and owner decisions remain in
+active views and bundles; workgroup spec history and owner decisions remain in
 the trace until archive. A stored `delivered` publication state alone does not
 mean merged: an open, unmerged PR shows **PR open** in the project pane.
-A ready but unmerged PR keeps its member unresolved and the project spec active.
+A ready but unmerged PR keeps its member unresolved and the workgroup spec active.
 Merge is detected by GitHub polling or recorded by the owner with `osmia merged`.
 Resolution requires cancellation/abandonment or delivery with an owner merge
 record or a recorded merged outcome matching the current publication's PR.
@@ -1162,7 +1125,7 @@ on the next cadence; a closed-without-merge outcome remains unresolved.
 These are service rules, with no additional polling configuration.
 
 Owner archive and eligible cleanup of a terminal member preserve the original
-shared conversation, active project spec and status for unresolved survivors,
+shared conversation, active workgroup spec and status for unresolved survivors,
 including across restart and when the retired member was the conversation's
 source or the controller's driver. Durable archive identity and verified
 resolution evidence, followed by cleanup intent and confirmed removal, locate
@@ -1192,7 +1155,7 @@ record also pins `resolution_evidence` from the member's history as `merged`,
 `cancelled` or `unresolved`; `resolved` is true only with merged or cancelled
 evidence. Both fields are exposed in the API's runtime archive records. An
 archived member without that evidence keeps the workgroup unresolved and its
-project spec active. The pane shows **blocked** with the wait
+workgroup spec active. The pane shows **blocked** with the wait
 `archived member <id> has no pinned merge or cancel evidence; workgroup remains unresolved`.
 An older `resolved` flag without evidence is re-derived from retained history
 where possible; otherwise the hold remains visible. Archive and cleanup alone

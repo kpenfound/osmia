@@ -1,11 +1,16 @@
 # Charter
 
 Each project has one charter: your rules as a contributor to that project. It
-is the `charter.md` document in the default repo's trace, and you edit it with
+is the `charter.md` document in the project's trace, and you edit it with
 `osmia edit charter <project-id>` or in the web UI. Plans, reviews and the
 committee cite its rules, so Osmia refuses to hand in work while it has none.
-Every additional repo in the project uses this same authoritative charter. KB,
-entities and repository settings remain per repo.
+Each project is one repo with its own charter, KB, entities and settings. In a
+cross-project workgroup each charter governs its member's slice, plan and units;
+the workgroup spec and contracts must satisfy all member charters. Unqualified
+`charter#n` means the member's own rule; `<project>/charter#n` names another
+project's rule. Unknown projects or rules are refused. Charter conflicts go
+to the owner and cannot be dismissed by the chief. Amendments are recorded
+and decided in the project whose rule changes.
 
 ## Template
 

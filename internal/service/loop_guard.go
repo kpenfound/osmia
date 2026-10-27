@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/intake"
 	"slices"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func (g loopGuard) Pass(ctx context.Context) error {
 	if g.s.store == nil {
 		return nil
 	}
-	streams, err := g.repository.Workstreams()
+	streams, err := intake.NonSessionWorkstreams(g.repository)
 	if err != nil {
 		return err
 	}
@@ -79,7 +80,11 @@ func (g loopGuard) Pass(ctx context.Context) error {
 			return err
 		}
 		if costs == nil {
-			if costs, err = g.repository.Costs(); err != nil {
+			if err = g.repository.WithWorkstreamDiscovery(func([]config.WorkstreamID) error {
+				var err error
+				costs, err = g.repository.Costs()
+				return err
+			}); err != nil {
 				return err
 			}
 		}

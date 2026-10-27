@@ -252,7 +252,7 @@ func (r AssessedRuling) Describe(stream config.WorkstreamID) string {
 // A relay gives every ruling of its batch the same text, so a batch is one
 // ruling, the first of them.
 func (a Assessor) Rulings() ([]AssessedRuling, error) {
-	streams, err := a.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return nil, err
 	}

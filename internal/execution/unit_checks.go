@@ -144,7 +144,7 @@ type checkers struct{ *masons }
 var _ coreadapter.Reconciler = (*checkers)(nil)
 
 func (c *checkers) Pass(ctx context.Context) error {
-	streams, err := c.repository.Workstreams()
+	streams, err := nonSessionWorkstreams(c.repository)
 	if err != nil {
 		return err
 	}

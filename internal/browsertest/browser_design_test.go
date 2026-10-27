@@ -54,6 +54,7 @@ func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *te
 
 	// No brief has been drafted, since no agent turn ran: starting a
 	// workgroup is refused, and the refusal is shown next to the button.
+	awaitBrowserDesignBrief(t, p, c, stream)
 	p.Click("#design-start")
 	p.AwaitText("#design-start-result", "has not drafted a brief yet")
 	assertBrowserDesignSelection(t, p, c, stream, false)
@@ -144,6 +145,7 @@ func TestBrowserDesignReadinessAssumptionsAndStartWorkgroup(t *testing.T) {
 	p.AwaitText("#design-feed details", "Use existing naming conventions.")
 	p.AwaitText("#design-feed", "Rejected options: a breaking replacement.")
 	assertBrowserDesignSelection(t, p, c, stream, false)
+	awaitBrowserDesignBrief(t, p, c, stream)
 	p.Click("#design-start")
 	var started bool
 	p.Await("workgroup start", `document.getElementById('design-start-result').textContent.includes('Started a workgroup')`)
@@ -156,6 +158,16 @@ func TestBrowserDesignReadinessAssumptionsAndStartWorkgroup(t *testing.T) {
 	}
 	if !started {
 		t.Fatal("the design conversation did not continue on the workgroup thread")
+	}
+}
+
+func awaitBrowserDesignBrief(t *testing.T, p *page, c *Client, stream config.WorkstreamID) {
+	t.Helper()
+	brief, err := c.Design(context.Background(), stream)
+	must(t, err)
+	p.Await("the current brief displayed and Start enabled", fmt.Sprintf(`document.querySelector('#design-brief').dataset.revision === %q && !document.querySelector('#design-start').disabled`, fmt.Sprint(brief.Design.BriefRevision)))
+	for _, project := range brief.Design.Projects {
+		p.Await("the brief project displayed", `document.querySelector('#design-brief [data-field=projects] [data-project="`+string(project)+`"]') !== null`)
 	}
 }
 

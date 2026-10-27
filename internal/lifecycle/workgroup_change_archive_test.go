@@ -203,7 +203,11 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				}
 				return cleanup.checkpoint(ctx, step)
 			}})
-			defer func() { f.stop(t) }()
+			defer func() {
+				race.Release()
+				cleanup.release()
+				f.stop(t)
+			}()
 			retired, survivor := f.stream1, f.stream2
 			retiredProject, survivorProject := f.project, f.project2
 			if retired > survivor {
@@ -462,8 +466,24 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				})
 			}
 			archive := func() error {
-				_, err := f.c.Archive(ctx, retired)
-				return err
+				archiveCtx, cancel := context.WithTimeout(ctx, demoTimeout)
+				defer cancel()
+				retry := time.NewTicker(10 * time.Millisecond)
+				defer retry.Stop()
+				for {
+					_, err := f.c.Archive(archiveCtx, retired)
+					if err == nil || !strings.Contains(err.Error(), "an approved change is being applied to this workgroup; retry") {
+						return err
+					}
+					// A readiness pass can briefly own the change lock while
+					// both workers still hold the unit boundary. Retry until
+					// retirement reaches the deliberately held snapshot.
+					select {
+					case <-archiveCtx.Done():
+						return archiveCtx.Err()
+					case <-retry.C:
+					}
+				}
 			}
 			if tc.order == "archive-first" {
 				race.Armed.Store(true)

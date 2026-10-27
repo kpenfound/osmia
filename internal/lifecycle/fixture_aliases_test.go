@@ -35,7 +35,6 @@ type InboxQuestion = api.InboxQuestion
 var currentOwnPublication = delivery.CurrentOwnPublication
 
 const sealSubject = intake.SealSubject
-const affectedReposTool = intake.AffectedReposTool
 
 type debate = intake.Debate
 

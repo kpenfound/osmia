@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -215,6 +217,39 @@ func TestHandInSkipDebate(t *testing.T) {
 		code, out, diag := invokeInput(t, root, "", args...)
 		if code != 2 || out != "" || diag != "invalid arguments; use osmia --help\n" {
 			t.Errorf("%v: %d %q %q", args, code, out, diag)
+		}
+	}
+}
+
+func TestHandInWithSendsOrderedProjects(t *testing.T) {
+	t.Parallel()
+	a := config.ProjectID("p_11111111111111111111111111111111")
+	b := config.ProjectID("p_22222222222222222222222222222222")
+	c := config.ProjectID("p_33333333333333333333333333333333")
+	requests := make(chan wire.HandInRequest, 1)
+	root, socket := ratifyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/v1/handin" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var req wire.HandInRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		requests <- req
+		json.NewEncoder(w).Encode(wire.HandInResponse{Project: a, Workstream: service.HandInWorkstream(a, req.Key), State: "handed", Source: "file:" + req.Path})
+	}))
+	code, out, diag := invoke(t, root, "handin", string(a), "brief.md", "--with", string(b), "--with", string(c), "--socket", socket)
+	if code != 0 || diag != "" {
+		t.Fatalf("handin with: %d %s %s", code, out, diag)
+	}
+	req := <-requests
+	if !slices.Equal(req.Projects, []config.ProjectID{a, b, c}) || req.Project != a || filepath.Base(req.Path) != "brief.md" {
+		t.Fatalf("handin projects: %+v", req)
+	}
+	for _, args := range [][]string{{"status", "--with", string(b)}, {"handin", string(a), "brief.md", "--with", "bad"}} {
+		code, _, _ := invoke(t, root, append(args, "--socket", socket)...)
+		if code != 2 {
+			t.Fatalf("%v: exit %d", args, code)
 		}
 	}
 }

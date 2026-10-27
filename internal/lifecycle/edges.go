@@ -427,7 +427,7 @@ func (s *Controller) PollEdgeMerge(ctx context.Context, out EdgeMergeStatus, pub
 // incoming edges is recorded merged, since merge is a one-way signal that
 // never needs to be observed again (owner ruling 3).
 func (s *Controller) EdgeResolverPass(ctx context.Context, repo *trace.Repository) error {
-	streams, err := repo.Workstreams()
+	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
@@ -533,42 +533,51 @@ func AllEdgesResolved(observed EdgeObservation, edges []trace.Edge) bool {
 // Records a same-repo base's availability; neither creates an inbox entry,
 // because waiting on a merge is status, never an escalation (spec#15).
 func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) error {
-	streams, err := repo.Workstreams()
+	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
-	for _, stream := range streams {
-		edges, err := IncomingMergeEdges(repo, stream)
-		if err != nil {
-			return err
+	var transactions []trace.Transaction
+	err = repo.WithWorkstreamSnapshot(func() error {
+		for _, stream := range streams {
+			edges, err := IncomingMergeEdges(repo, stream)
+			if err != nil {
+				return err
+			}
+			blocking := EdgesOfType(edges, trace.EdgeHardBlock)
+			observed, _, _, err := EdgeObservationAt(repo, stream)
+			if err != nil {
+				return err
+			}
+			reason := ""
+			if reference, found := FirstUnresolvedEdge(blocking, observed); found {
+				reason = EdgeWaitMessage(reference)
+			}
+			state, err := repo.Workflow(stream, EdgeWaitSubject)
+			if err != nil {
+				return err
+			}
+			next := "available"
+			if reason != "" {
+				next = "waiting"
+			}
+			if state.Value == next || state.Value == "" && next == "available" {
+				continue
+			}
+			id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
+			if reason == "" {
+				reason = "the workstream's blocking edges resolved"
+			}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: foremanActor, Cause: "edge-availability"}
+			transactions = append(transactions, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "edge", reason)}})
 		}
-		blocking := EdgesOfType(edges, trace.EdgeHardBlock)
-		observed, _, _, err := EdgeObservationAt(repo, stream)
-		if err != nil {
-			return err
-		}
-		reason := ""
-		if reference, found := FirstUnresolvedEdge(blocking, observed); found {
-			reason = EdgeWaitMessage(reference)
-		}
-		state, err := repo.Workflow(stream, EdgeWaitSubject)
-		if err != nil {
-			return err
-		}
-		next := "available"
-		if reason != "" {
-			next = "waiting"
-		}
-		if state.Value == next || state.Value == "" && next == "available" {
-			continue
-		}
-		id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
-		if reason == "" {
-			reason = "the workstream's blocking edges resolved"
-		}
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: foremanActor, Cause: "edge-availability"}
-		_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "edge", reason)}})
-		if err != nil {
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, tx := range transactions {
+		if _, err := repo.Transact(ctx, tx); err != nil {
 			return err
 		}
 	}

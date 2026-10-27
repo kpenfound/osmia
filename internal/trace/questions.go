@@ -206,6 +206,51 @@ func questionTransition(v *workflowView, h Header, id, from, to, reason string) 
 // the same commit. A chief-of-staff turn fails. An empty question and a second
 // question from the same turn are refused with *QuestionRefused.
 func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time) (Question, error) {
+	return r.AskCharterConflict(ctx, agent, scope, text, nil, at)
+}
+
+// AskCharterConflict records a question and sends a reported conflict between
+// member charters directly to the owner in the same question transaction.
+func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope coreadapter.Scope, text string, citations []string, at time.Time) (Question, error) {
+	if citations != nil && len(citations) < 2 {
+		return Question{}, refused("a charter conflict must cite rules from two member projects")
+	}
+	var inbox int
+	if len(citations) > 0 {
+		if scope.Role == ChiefOfStaff {
+			return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
+		}
+		if !present(text) {
+			return Question{}, refused("question is required: say what you need decided and what it blocks")
+		}
+		if err := r.ActiveTurn(scope); err != nil {
+			return Question{}, err
+		}
+
+		if err := r.CheckCharterConflict(ctx, config.WorkstreamID(scope.Workstream), citations); err != nil {
+			return Question{}, refused("%s", err)
+		}
+		authority := r
+		if r.memberBindings() == nil {
+			id, err := r.CrossRepoWorkgroupOf(config.WorkstreamID(scope.Workstream))
+			if err != nil {
+				return Question{}, err
+			}
+			if id != "" {
+				authority, err = OpenWorkgroupAuthority(r.root, id)
+				if err != nil {
+					return Question{}, err
+				}
+				defer authority.Close()
+			}
+		}
+		var err error
+		inbox, err = authority.reserveInboxNumber(ctx)
+		if err != nil {
+			return Question{}, err
+		}
+	}
+
 	r, err := r.lockQuestionRead(config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return Question{}, err
@@ -248,6 +293,14 @@ func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Sc
 	}
 	tx := questionTransition(v, h, id, "", QuestionOpen, fmt.Sprintf("The %s asked question %s", scope.Role, id))
 	tx.Events = []Event{Notice(tx.Transition.ID, "question", fmt.Sprintf("Question %s is open, asked by the %s: %s", id, scope.Role, strings.TrimSpace(text)))}
+	if len(citations) > 0 {
+		question.CharterConflict = slices.Clone(citations)
+		question.SentToOwner = text
+		question.Escalation = &Escalation{Batch: "charter_conflict_" + id, Inbox: inbox, Questions: []string{id}, Section: strings.Join(citations, ", "), Conflict: text, Blocked: "The asking member waits for the owner's charter ruling.", Recommendation: "Resolve the conflict between member charters before continuing."}
+		tx = questionTransition(v, h, id, "", QuestionEscalated, "A conflict between member charters requires the owner")
+		tx.Events = []Event{Notice(tx.Transition.ID, "question", "A conflict between member charters is escalated to the owner: "+text)}
+	}
+
 	files, _, err := r.stage(ctx, stream, log, v, []Record{question}, tx)
 	if err != nil {
 		return Question{}, err

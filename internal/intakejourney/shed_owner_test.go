@@ -539,6 +539,8 @@ func TestShedActionsRefuseAnUnknownWorkstream(t *testing.T) {
 	}
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "concluded-1", fmt.Sprintf("failed-%d", 1))
+	_, err := f.c.Abandon(ctx, stream, "Owner finished checking shed actions")
+	must(t, err)
 	if _, err := f.c.RemoveProject(ctx, f.project); err != nil {
 		t.Fatal(err)
 	}

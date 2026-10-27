@@ -85,7 +85,7 @@ func (a *AmendmentDrafter) Pass(ctx context.Context) error {
 	if a.S.Options.Architect == nil {
 		return nil
 	}
-	streams, err := a.Repository.Workstreams()
+	streams, err := NonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return err
 	}
@@ -501,7 +501,7 @@ func (a *AmendmentDrafter) Revision(stream config.WorkstreamID, turn string) (Am
 	if !hasSpec && !hasPlan {
 		return AmendmentRevision{Problems: []string{"no revised document was delivered"}}, nil
 	}
-	problems, err := a.Validate(trace.Document{Content: spec}, trace.Document{Content: graph})
+	problems, err := a.Validate(trace.Document{Header: trace.Header{Workstream: stream}, Content: spec}, trace.Document{Content: graph})
 	if err != nil {
 		return AmendmentRevision{}, err
 	}
