@@ -68,12 +68,12 @@ func TestDesignCommands(t *testing.T) {
 	}
 
 	// An ordinary workstream, never a design session, is refused by the two
-	// commands that only ever act on one: sending it a message and starting
-	// a workgroup from it (design read shares the ordinary conversation
-	// endpoint and so is not itself restricted to design sessions).
+	// commands that act on one: sending it a message, reading its brief,
+	// and starting a workgroup from it.
 	other := handInStdin(t, root, project, "# Another feature\n")
 	for _, args := range [][]string{
 		{"design", "send", other, "hi"},
+		{"design", "read", other},
 		{"design", "start", other},
 	} {
 		code, _, diag := invoke(t, root, args...)

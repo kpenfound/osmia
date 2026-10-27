@@ -305,6 +305,13 @@ func (c *Client) DesignStart(ctx context.Context, id config.WorkstreamID) (api.D
 	return v, err
 }
 
+// DesignStartWithBriefRevision starts from exactly the brief revision read by the owner.
+func (c *Client) DesignStartWithBriefRevision(ctx context.Context, id config.WorkstreamID, revision int) (api.DesignStartResponse, error) {
+	var v api.DesignStartResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/design/"+url.PathEscape(string(id))+"/start", api.DesignStartRequest{BriefRevision: &revision}, &v)
+	return v, err
+}
+
 // Abandon abandons a workstream with the owner's reason.
 func (c *Client) Abandon(ctx context.Context, id config.WorkstreamID, reason string) (api.AbandonResponse, error) {
 	var v api.AbandonResponse

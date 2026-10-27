@@ -156,6 +156,7 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 	must(t, err)
 	p := openOutcomePage(t, s)
 	selectOutcomeDesign(p, a.Design.Workstream)
+	awaitBrowserDesignBrief(t, p, c, a.Design.Workstream)
 	p.Click("#design-start")
 	p.AwaitText("#design-start-result[data-outcome=error]", "has not drafted a brief yet")
 	var refusal string
@@ -167,6 +168,7 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 	exerciseHeldSends(p, a.Design.Workstream, b.Design.Workstream, "design", "#design-form", "#design-result", "Sent; the design agent answers in its next turn (", selectOutcomeDesign)
 	p.Await("both design turns completed on the page", `document.querySelectorAll('#design-feed [data-kind=response][data-state=done]').length === 2`)
 	p.AwaitText("#design-feed", "Brief ready.")
+	awaitBrowserDesignBrief(t, p, c, a.Design.Workstream)
 	p.Click("#design-start")
 	p.AwaitText("#design-start-result[data-outcome=ok]", "Started a workgroup from this brief")
 	p.Await("start still navigates to its workstream", `!document.querySelector('[data-view=workstream]').hidden`)

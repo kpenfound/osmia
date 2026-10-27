@@ -483,7 +483,10 @@
             const w = streams().find(w => w.workstream === ui.selected);
             if (w) {
               ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
-              if (w.kind === 'design') dirty.add('design/' + w.workstream + '/conversation');
+              if (w.kind === 'design') {
+                dirty.add('design/' + w.workstream);
+                dirty.add('design/' + w.workstream + '/conversation');
+              }
             }
           }
           for (const w of streams()) {
@@ -547,7 +550,7 @@
   function expand(name, event) {
     if (name === 'feeds') {
       return [...listedFeeds(), ...streams().filter((w) => isDesignId(w.workstream) && !w.archived)
-        .map((w) => 'design/' + w.workstream + '/conversation')];
+        .flatMap((w) => ['design/' + w.workstream, 'design/' + w.workstream + '/conversation'])];
     }
     if (name === 'feed') {
       let data = {};
@@ -560,7 +563,7 @@
         return [];
       }
       return isDesignId(data.workstream)
-        ? ['feed/' + data.workstream, 'design/' + data.workstream + '/conversation']
+        ? ['feed/' + data.workstream, 'design/' + data.workstream, 'design/' + data.workstream + '/conversation']
         : ['feed/' + data.workstream, ...workgroups().filter(g => g.members.includes(data.workstream) || g.conversation?.workstream === data.workstream).map(g => groupFeed(g.id))];
     }
     return [name];
@@ -1559,7 +1562,7 @@
       mark(['status', 'sessions/' + id + '/changes']);
     }
     if (design) {
-      mark(['status', 'design/' + id + '/conversation']);
+      mark(['status', 'design/' + id, 'design/' + id + '/conversation']);
     }
   }
 
@@ -2148,7 +2151,7 @@
       sessionEchoes.delete(id);
       sessionCheckResults.delete(id);
       sessionCommitRetries.delete(id);
-      for (const name of ['feed/' + id, 'design/' + id + '/conversation', 'sessions/' + id + '/changes']) {
+      for (const name of ['feed/' + id, 'design/' + id, 'design/' + id + '/conversation', 'sessions/' + id + '/changes']) {
         delete views[name];
         delete failures[name];
         dirty.delete(name);
@@ -2379,18 +2382,50 @@
   // design session's drafted brief; the same conversation continues as the
   // workgroup's chief-of-staff thread.
   function startDesign(id) {
-    act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start'), (out) => {
+    const revision = Number(byId('design-brief').dataset.revision);
+    act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start', { brief_revision: revision }), (out) => {
       designIds.delete(id);
       startedDesignIds.add(id);
       ui.tab = 'feed';
       select(out.workstream);
       mark(['status', 'feed/' + out.workstream]);
       return 'Started a workgroup from this brief; workstream ' + out.workstream + ' is now ' + out.state + '.';
+    }, (err) => {
+      if (err.code === 'conflict') mark(['design/' + id]);
     });
+  }
+
+  // Keep the rendered revision with the panel so Start pins exactly what
+  // the owner saw, even while another read is in flight.
+  function renderDesignBrief(w) {
+    const panel = byId('design-brief');
+    const box = byId('design-brief-content');
+    const path = w && 'design/' + w.workstream;
+    const design = path && views[path]?.design;
+    block(byId('design-start'), !design || !!failures[path]);
+    if (!design || failures[path]) {
+      delete panel.dataset.revision;
+      delete panel.dataset.shown;
+      box.replaceChildren(el('p', { class: 'meta' }, failures[path] || (w ? 'Reading the brief…' : 'No design session selected.')));
+      return;
+    }
+    const key = JSON.stringify([design, design.projects.map(projectName), projectName(design.project)]);
+    if (panel.dataset.shown === key) return;
+    panel.dataset.shown = key;
+    panel.dataset.revision = String(design.brief_revision);
+    box.replaceChildren(
+      el('p', { 'data-field': 'revision' }, 'Brief revision: ' + design.brief_revision),
+      el('p', { class: 'meta', 'data-field': 'home' }, 'Home project: ' + projectName(design.project)),
+      el('ul', { 'data-field': 'projects' }, ...design.projects.map(id =>
+        el('li', { 'data-project': id }, projectName(id) + (id === design.project ? ' (home)' : '')))),
+      design.brief_revision > 0
+        ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
+        : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
   }
 
   function renderDesignView() {
     const w = shownDesign();
+    renderDesignBrief(w);
     if (!w) {
       byId('design-title').textContent = 'Design session';
       byId('design-meta').replaceChildren();

@@ -118,7 +118,29 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.Click(`[data-drilldown="` + string(f.origin) + `"]`)
 	p.Await("the original design chat", `!document.querySelector('[data-view="design"]').hidden`)
 	f.sharedDesign().RecordBriefProjects(t, f.project, f.project2)
+	brief, err := f.c.Design(context.Background(), f.origin)
+	must(t, err)
+	startState := func() string {
+		var state string
+		p.Eval(`JSON.stringify({revision: document.querySelector('#design-brief').dataset.revision, disabled: document.querySelector('#design-start').disabled, outcome: document.querySelector('#design-start-result').dataset.outcome, text: document.querySelector('#design-start-result').textContent})`, &state)
+		return state
+	}
+	t.Logf("recorded brief revision %d; browser before refresh: %s", brief.Design.BriefRevision, startState())
+	projects, err := json.Marshal([]config.ProjectID{f.project, f.project2})
+	must(t, err)
+	p.Await("the confirmed brief ready to start", `document.querySelector('#design-brief').dataset.revision === `+quote(fmt.Sprint(brief.Design.BriefRevision))+` && JSON.stringify(Array.from(document.querySelectorAll('#design-brief [data-field=projects] li'), li => li.dataset.project)) === `+quote(string(projects))+` && !document.querySelector('#design-start').disabled`)
+	p.AwaitText("#design-brief [data-field=projects]", "dagger (home)")
+	p.AwaitText("#design-brief [data-field=projects]", "client")
+	t.Logf("browser at Start: %s", startState())
 	p.Click("#design-start")
+	f.wait(t, "the server accepts the displayed brief", func() bool {
+		var result struct{ Outcome, Text string }
+		p.Eval(`({Outcome: document.querySelector('#design-start-result').dataset.outcome, Text: document.querySelector('#design-start-result').textContent})`, &result)
+		if result.Outcome == "error" || result.Outcome == "unavailable" {
+			t.Fatalf("design start %s: %s", result.Outcome, result.Text)
+		}
+		return result.Outcome == "ok"
+	})
 	packet := f.awaitPacket(t)
 	// Both selected repos allocate real members. Their shared chief gives
 	// them the same goal; the adopted design origin is a conversation host.

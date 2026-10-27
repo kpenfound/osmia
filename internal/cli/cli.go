@@ -1253,17 +1253,40 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintf(stdout, "Message %s sent to the design agent of %s: %s\n", entry.Turn, id, entry.State)
 			return 0
 		case "read":
+			brief, err := c.Design(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
 			list, err := c.DesignConversation(ctx, id)
 			if err != nil {
 				return fail(err)
 			}
 			if o.json {
-				return output(stdout, stderr, list)
+				return output(stdout, stderr, struct {
+					wire.ConversationResponse
+					Design wire.DesignView `json:"design"`
+				}{list, brief.Design})
+			}
+			showDesignBrief(stdout, brief.Design)
+			if brief.Design.Brief != "" {
+				fmt.Fprintf(stdout, "Brief:\n%s\n", brief.Design.Brief)
 			}
 			showConversation(stdout, list, "design send")
 			return 0
 		case "start":
-			result, err := c.DesignStart(ctx, id)
+			brief, err := c.Design(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if brief.Design.BriefRevision > 0 {
+				writer := stdout
+				if o.json {
+					writer = stderr
+				}
+				fmt.Fprintln(writer, "Starting with:")
+				showDesignBrief(writer, brief.Design)
+			}
+			result, err := c.DesignStartWithBriefRevision(ctx, id, brief.Design.BriefRevision)
 			if err != nil {
 				return fail(err)
 			}
@@ -1830,6 +1853,17 @@ func showAgentStatus(w io.Writer, agents []wire.AgentStatus) {
 			fmt.Fprintf(w, " question_id=%s", a.QuestionID)
 		}
 		fmt.Fprintln(w)
+	}
+}
+
+func showDesignBrief(w io.Writer, d wire.DesignView) {
+	fmt.Fprintf(w, "Brief revision: %d\nProjects:\n", d.BriefRevision)
+	for _, project := range d.Projects {
+		marker := ""
+		if project == d.Project {
+			marker = " (home)"
+		}
+		fmt.Fprintf(w, "  %s%s\n", project, marker)
 	}
 }
 
