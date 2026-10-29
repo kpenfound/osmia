@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -552,48 +551,22 @@ func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Contr
 			if !current.Active(target.ID) {
 				return nil, fmt.Errorf("repo %q is not an active project", in.Repo)
 			}
-			cmd := exec.CommandContext(ctx, "git", "-C", target.Clone, "rev-parse", "--verify", "HEAD^{commit}")
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
-			out, err := cmd.Output()
+			out, err := commitGit(ctx, target.Clone, "rev-parse", "--verify", "HEAD^{commit}")
 			if err != nil {
 				return nil, err
 			}
 			commit := strings.TrimSpace(string(out))
-			dir, err := os.MkdirTemp("", "osmia-design-read-")
+			read, err := ReadCommitPath(ctx, target.Clone, commit, in.Path)
 			if err != nil {
 				return nil, err
 			}
-			defer os.RemoveAll(dir)
-			if err := CopyCommit(ctx, target.Clone, commit, dir); err != nil {
-				return nil, err
-			}
-			root, err := os.OpenRoot(dir)
-			if err != nil {
-				return nil, err
-			}
-			defer root.Close()
-			stat, err := root.Stat(in.Path)
-			if err != nil {
-				return nil, err
-			}
-			if stat.IsDir() {
-				entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(in.Path)))
-				if err != nil {
-					return nil, err
-				}
-				names := []string{}
-				for _, e := range entries {
-					names = append(names, e.Name())
-				}
-				slices.Sort(names)
+			if read.Dir {
+				names := read.Names
 				start := min(len(names), in.Start-1)
 				end := min(len(names), start+in.Lines)
 				return json.Marshal(map[string]any{"repo": target.ID, "commit": commit, "path": in.Path, "files": names[start:end], "total": len(names)})
 			}
-			data, err := root.ReadFile(in.Path)
-			if err != nil {
-				return nil, err
-			}
+			data := read.Data
 			lines := strings.Split(string(data), "\n")
 			start := min(len(lines), in.Start-1)
 			end := min(len(lines), start+in.Lines)

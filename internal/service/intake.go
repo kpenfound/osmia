@@ -338,6 +338,8 @@ var recoveryActor = intake.RecoveryActor
 
 var copyCommit = intake.CopyCommit
 
+var readCommitPath = intake.ReadCommitPath
+
 const readRemoteFileTool = intake.ReadRemoteFileTool
 
 var sealedUnit = intake.SealedUnit

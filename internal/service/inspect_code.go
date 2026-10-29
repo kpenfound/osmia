@@ -10,8 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -123,41 +121,17 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 				commit = report.Candidate
 			}
 		}
-		dir, err := os.MkdirTemp("", "osmia-inspection-")
+		read, err := readCommitPath(ctx, project.Project.Clone, commit, in.Path)
 		if err != nil {
 			return nil, err
 		}
-		defer os.RemoveAll(dir)
-		if err := copyCommit(ctx, project.Project.Clone, commit, dir); err != nil {
-			return nil, err
-		}
-		root, err := os.OpenRoot(dir)
-		if err != nil {
-			return nil, err
-		}
-		defer root.Close()
-		stat, err := root.Stat(in.Path)
-		if err != nil {
-			return nil, err
-		}
-		if stat.IsDir() {
-			entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(in.Path)))
-			if err != nil {
-				return nil, err
-			}
-			names := []string{}
-			for _, entry := range entries {
-				names = append(names, entry.Name())
-			}
-			slices.Sort(names)
+		if read.Dir {
+			names := read.Names
 			start := min(len(names), in.Start-1)
 			end := min(len(names), start+in.Lines)
 			return json.Marshal(map[string]any{"commit": commit, "path": in.Path, "files": names[start:end], "total": len(names)})
 		}
-		data, err := root.ReadFile(in.Path)
-		if err != nil {
-			return nil, err
-		}
+		data := read.Data
 		lines := strings.Split(string(data), "\n")
 		start := min(len(lines), in.Start-1)
 		end := min(len(lines), start+in.Lines)
