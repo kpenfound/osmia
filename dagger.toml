@@ -4,7 +4,7 @@
 [modules]
 
 [modules.go]
-source = "dagger.io/go@collections"
+source = "dagger.io/go"
 
 [modules.go.settings]
 base = "dag://osmia-dev/test-runtime"
@@ -43,4 +43,4 @@ goflags = "-count=1 -timeout=30m -race"
 goflags = "-count=5 -timeout=30m"
 
 [modules.staticcheck]
-source = "dagger.io/go/staticcheck@collections"
+source = "dagger.io/go/staticcheck"
