@@ -660,6 +660,8 @@
   let engineOpening = 0;
 
   function setupOutcomeScopes() {
+    const preview = byId('project-preview');
+    scopeOutcome(preview.querySelector('.result'), () => previewOpening, preview.querySelectorAll('button'));
     for (const action of ['restart', 'prune']) {
       scopeOutcome(byId('engine-' + action + '-result'), () => engineOpening, [byId('engine-' + action)]);
     }
@@ -1584,6 +1586,7 @@
     const changed = ui.view !== view;
     if (changed && ['project-pane', 'workstream', 'workgroup', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
     ui.view = view;
+    if (view === 'projects') resetPreviewOpening();
     if (changed) ui.toEnd = true;
     if (view === 'project-pane') history.replaceState(null, '', location.pathname + location.search);
     setPicker(false);
@@ -3521,6 +3524,42 @@
   let charterRead = null;
   let charterProject = '';
   const managementRepos = new Map();
+  let previewOpening = 0;
+  let previewConfigKey;
+  let previewDirty = false;
+
+  function resetPreviewOpening() {
+    previewOpening++;
+    previewConfigKey = undefined;
+    previewDirty = false;
+    outcomeScopes.get(byId('project-preview').querySelector('.result')).entries.clear();
+    renderOutcomes();
+  }
+
+  function fillPreview(preview) {
+    const form = byId('project-preview');
+    form.elements.call.value = preview ? JSON.stringify(preview.call) : '';
+    for (const field of ['port', 'path', 'timeout']) form.elements[field].value = preview?.[field] ?? '';
+  }
+
+  function renderPreview(configured) {
+    const preview = views.config?.effective?.projects?.find(p => p.id === configured?.id)?.preview;
+    const key = JSON.stringify(preview || null);
+    if (key !== previewConfigKey) {
+      if (!previewDirty) fillPreview(preview);
+      previewConfigKey = key;
+    }
+    byId('preview-state').textContent = !configured ? 'Choose a project to manage its preview.' : preview ? 'Previews are enabled.' : 'Previews are off.';
+    byId('preview-settings').replaceChildren(...(preview ? [
+      ['Call', JSON.stringify(preview.call)], ['Port', preview.port], ['Path', preview.path], ['Timeout', preview.timeout],
+    ].flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, String(value))]) : []));
+    const form = byId('project-preview');
+    form.querySelector('fieldset').disabled = !configured;
+    const save = form.querySelector('[type=submit]');
+    save.textContent = preview ? 'Save preview' : 'Enable preview';
+    block(save, !configured);
+    block(form.querySelector('[data-action=disable-preview]'), !preview);
+  }
 
   function receiveCharter(project, out, explicit = false) {
     const form = byId('project-edit');
@@ -3546,6 +3585,7 @@
     const project = form.elements.project.value;
     if (charterProject === project) return;
     charterProject = project;
+    resetPreviewOpening();
     charterRead = null;
     form.elements.content.value = '';
     show(form.querySelector('.result'), '', '');
@@ -3563,6 +3603,7 @@
     selectManagedProject();
     const project = byId('project-edit').elements.project.value;
     const configured = projects().find(p => p.id === project);
+    renderPreview(configured);
     const state = configured?.charter_state;
     byId('charter-state').textContent = state ? (state.ready ? 'Ready for hand-in' : 'Not ready for hand-in') +
       ' · ' + state.rules + ' rules · revision ' + state.revision + '.' : (project ? 'Charter readiness not reported.' : 'Choose a project to manage its charter and repos.');
@@ -3744,6 +3785,38 @@
       }, { reset: true });
     });
     const charter = byId('project-edit');
+    const preview = byId('project-preview');
+    preview.addEventListener('input', () => { previewDirty = true; });
+    const savePreview = (button, clear) => {
+      const project = charter.elements.project.value;
+      if (!project) return;
+      const opening = previewOpening;
+      // Keep the submitted draft through config events and refusals.
+      previewDirty = true;
+      const fields = Object.fromEntries(['call', 'port', 'path', 'timeout'].map(name => [name, preview.elements[name].value]));
+      formAction(preview, button, () => {
+        let body;
+        if (!clear) {
+          let call;
+          try { call = JSON.parse(fields.call); }
+          catch { throw new Error('preview.call: enter a JSON array of arguments.'); }
+          body = { call, port: Number(fields.port) };
+          for (const name of ['path', 'timeout']) if (fields[name] !== '') body[name] = fields[name];
+        }
+        return request(clear ? 'DELETE' : 'PUT', '/projects/preview/' + project, body);
+      }, out => {
+        if (opening === previewOpening && charter.elements.project.value === project) {
+          fillPreview(out.preview);
+          previewDirty = false;
+        }
+        return clear ? 'Previews disabled.' : 'Preview settings saved.';
+      });
+    };
+    preview.addEventListener('submit', event => {
+      event.preventDefault();
+      savePreview(event.submitter, false);
+    });
+    preview.querySelector('[data-action=disable-preview]').addEventListener('click', event => savePreview(event.target, true));
     charter.elements.project.addEventListener('change', () => {
       selectManagedProject();
       show(byId('project-result'), '', '');
