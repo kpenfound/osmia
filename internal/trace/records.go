@@ -252,6 +252,10 @@ func validUsage(u coreadapter.Usage) bool {
 func validSession(s coreadapter.BackendSession) bool { return present(s.Backend) && present(s.ID) }
 func kind(r Record) string {
 	switch r.(type) {
+	case Image:
+		return "image"
+	case ImageReference:
+		return "image-reference"
 	case Document:
 		return "document"
 	case Transition:
@@ -302,6 +306,10 @@ func validate(r Record) error {
 	}
 	valid := false
 	switch v := r.(type) {
+	case Image:
+		valid = h.Revision == 1 && present(v.Key) && h.ID == imageIdentity(v.Key) && ValidateImage(v.ContentType, v.Data) == nil
+	case ImageReference:
+		valid = h.Revision == 1 && config.CheckWorkstreamIDs(v.Member) == nil && key(v.ImageID) && h.ID == imageIdentity(string(v.Member)+"/"+v.ImageID)
 	case Document:
 		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n"))
 	case Transition:
@@ -516,6 +524,10 @@ func scopePath(h Header) string {
 func recordPath(r Record) string {
 	prefix := scopePath(r.header())
 	switch v := r.(type) {
+	case Image:
+		return prefix + "images/" + v.ID + ".jsonl"
+	case ImageReference:
+		return prefix + "image-references/" + v.ID + ".jsonl"
 	case Document:
 		return prefix + "documents.jsonl"
 	case Transition:

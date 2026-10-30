@@ -657,7 +657,7 @@ type RoleCapacity struct {
 }
 
 // SlotWait identifies a queued turn, a deferred ready unit, or a check run.
-// For check runs, exactly one of Unit, Review or Session identifies the kind.
+// For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.
 // Reason is capacity when every slot of the pool is taken, priority when
 // higher-priority workstreams start a unit first, and workstream-cap when the
 // workstream holds capacity.per_workstream agent turns.
@@ -667,6 +667,7 @@ type SlotWait struct {
 	Unit       string              `json:"unit,omitempty"`
 	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
 	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
+	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run chief preview."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
 	Reason     string              `json:"reason"`
@@ -1076,6 +1077,14 @@ type FeedResponse struct {
 	Entries    []FeedEntry         `json:"entries"`
 }
 
+// FeedImage is attachment metadata. Removed references have a placeholder and no URL.
+type FeedImage struct {
+	ID          string `json:"id"`
+	URL         string `json:"url,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
 // FeedEntry is one event of a workstream's feed. Kind "message", "response"
 // and "action" are the conversation with the chief of staff, as
 // ConversationEntry describes them, with Turn, Text and State. Kind "status"
@@ -1083,9 +1092,11 @@ type FeedResponse struct {
 // agent turn that started, with Session. Kind "transition" is any recorded
 // workflow state change, with Transition. Kind "unit_checks" summarizes a
 // unit check run, "final_checks" a final check attempt, and "final_review"
-// a final review outcome. At is when the entry first became observable;
+// a final review outcome. Kind "image" carries attachment metadata in Image,
+// with a URL or an archived-member placeholder. At is when the entry first became observable;
 // sessions and final check attempts use their recorded start time.
 type FeedEntry struct {
+	Image         *FeedImage          `json:"image,omitempty"`
 	Workstream    config.WorkstreamID `json:"workstream,omitempty"`
 	Repo          config.ProjectID    `json:"repo,omitempty"`
 	QueuedReason  string              `json:"queued_reason,omitempty"`
@@ -1213,6 +1224,7 @@ const (
 	EventWorkstream   EventKind = "workstream"
 	EventInbox        EventKind = "inbox"
 	EventConversation EventKind = "conversation"
+	EventImage        EventKind = "image"
 	EventRuntime      EventKind = "runtime"
 	EventConfig       EventKind = "config"
 	EventSpend        EventKind = "spend"
@@ -1225,7 +1237,8 @@ const (
 )
 
 // Event is one notification of the client event stream. It names what
-// changed, never its new state, which the read endpoints report.
+// changed, never its new state, which the read endpoints report. Image
+// notifications ask clients to refresh the corresponding feed.
 type Event struct {
 	Kind       EventKind           `json:"kind"`
 	Project    config.ProjectID    `json:"project,omitempty"`

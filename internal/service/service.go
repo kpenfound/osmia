@@ -326,6 +326,12 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		if err := splitProjects(ctx, cfg, opts.Config.Home, s.step); err != nil {
 			return nil, fmt.Errorf("split projects: %w", err)
 		}
+		// Migration may have edited project files; load their saved bytes as
+		// the baseline before serving configuration writes.
+		cfg, err = config.Load(opts.Config)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.cfg = cfg
 	projects, err := s.openAll(cfg)

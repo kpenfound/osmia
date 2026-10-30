@@ -35,6 +35,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
+  project preview <project-id> --call ARG [--call ARG]... --port PORT [--path PATH] [--timeout DURATION] [--json]
+  project preview <project-id> --clear [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -61,6 +63,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
+  feed <workstream-id|workgroup-id> [--json]
   inbox [--json]
   answer <inbox-number> <ruling>|--accept [--project ID] [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
@@ -90,6 +93,10 @@ serve runs in the foreground unless --detach is set. Detached logs are in root/s
 `
 
 type options struct {
+	previewCall                                     []string
+	previewPort                                     int
+	previewPath, previewTimeout                     *string
+	previewClear, previewFlags                      bool
 	root, socket, reason, project, base             string
 	messageFile, messagesFile                       string
 	upstream, fork, clone, baseBranch               string
@@ -110,12 +117,12 @@ func parse(args []string) (o options, err error) {
 			continue
 		}
 		key, value, has := strings.Cut(a, "=")
-		if seen[key] && key != "--with" {
+		if seen[key] && key != "--with" && key != "--call" {
 			return o, errors.New("duplicate flag")
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--call", "--port", "--path", "--timeout", "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -123,10 +130,26 @@ func parse(args []string) (o options, err error) {
 				}
 				value = args[i]
 			}
-			if value == "" && key != "--reason" && key != "--title" {
+			if value == "" && key != "--reason" && key != "--title" && key != "--call" && key != "--path" && key != "--timeout" {
 				return o, errors.New("empty value")
 			}
 			switch key {
+			case "--call":
+				o.previewCall = append(o.previewCall, value)
+				o.previewFlags = true
+			case "--port":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					return o, errors.New("preview.port must be an integer")
+				}
+				o.previewPort = n
+				o.previewFlags = true
+			case "--path":
+				o.previewPath = &value
+				o.previewFlags = true
+			case "--timeout":
+				o.previewTimeout = &value
+				o.previewFlags = true
 			case "--message-file":
 				o.messageFile = value
 			case "--messages-file":
@@ -176,11 +199,13 @@ func parse(args []string) (o options, err error) {
 					o.planRevision = n
 				}
 			}
-		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
+		case "--clear", "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
 			switch key {
+			case "--clear":
+				o.previewClear = true
 			case "--detach":
 				o.detach = true
 			case "--json":
@@ -267,7 +292,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
-	case "conversation":
+	case "conversation", "feed":
 		valid = len(a) == 1
 	case "inbox", "reload", "config":
 		valid = len(a) == 0
@@ -294,7 +319,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "preview" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -308,6 +333,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	explicitRatify := o.projectSpecRevision > 0 || o.specRevision > 0 || o.planRevision > 0
 	if explicitRatify && (cmd != "ratify" || o.projectSpecRevision == 0 || o.specRevision == 0 || o.planRevision == 0) {
 		return invalid()
+	}
+	previewProject := cmd == "project" && len(a) > 0 && a[0] == "preview"
+	if (o.previewFlags || o.previewClear) && !previewProject || previewProject && o.previewClear && o.previewFlags {
+		valid = false
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
@@ -351,7 +380,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -403,6 +432,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 4
 		}
 		return fail(err)
+	}
+	if cmd == "project" && a[0] == "preview" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return refuse(err)
+		}
+		var result wire.ProjectPreviewResponse
+		if o.previewClear {
+			result, err = c.ClearProjectPreview(ctx, id)
+		} else {
+			result, err = c.SetProjectPreview(ctx, id, wire.ProjectPreviewRequest{Call: o.previewCall, Port: o.previewPort, Path: o.previewPath, Timeout: o.previewTimeout})
+		}
+		if err != nil {
+			return refuse(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		if result.Preview == nil {
+			fmt.Fprintf(stdout, "Previews disabled for project %s\n", id)
+		} else {
+			fmt.Fprintf(stdout, "Preview for project %s: call %q, port %d, path %s, timeout %s\n", id, result.Preview.Call, result.Preview.Port, result.Preview.Path, result.Preview.Timeout)
+		}
+		return 0
 	}
 	if cmd == "project" && a[0] == "extract" {
 		id, err := config.ParseProjectID(a[1])
@@ -931,6 +984,32 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		showTrace(stdout, result)
+		return 0
+	}
+	if cmd == "feed" {
+		var list wire.FeedResponse
+		var err error
+		if group, e := config.ParseWorkgroupID(a[0]); e == nil {
+			var out wire.WorkgroupFeedResponse
+			err = c.Do(ctx, http.MethodGet, wire.Prefix+"/workgroups/"+string(group)+"/feed", nil, &out)
+			if err == nil && o.json {
+				return output(stdout, stderr, out)
+			}
+			list.Entries = out.Entries
+		} else {
+			id, e := config.ParseWorkstreamID(a[0])
+			if e != nil {
+				return invalid()
+			}
+			err = c.Do(ctx, http.MethodGet, wire.Prefix+"/feed/"+string(id), nil, &list)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, list)
+		}
+		showFeed(stdout, list.Entries)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
@@ -1712,6 +1791,8 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 				what = "turn " + wait.Turn + " of " + wait.Agent
 			} else if wait.Review != 0 {
 				what = fmt.Sprintf("final review %d", wait.Review)
+			} else if wait.Preview {
+				what = "preview"
 			} else if wait.Session {
 				what = "session"
 			}
@@ -2112,5 +2193,25 @@ func showEngine(w io.Writer, s wire.EngineStatus) {
 	}
 	if s.ReachabilityError != "" {
 		fmt.Fprintln(w, s.ReachabilityError)
+	}
+}
+
+// showFeed renders attachments without downloading their bytes.
+func showFeed(w io.Writer, entries []wire.FeedEntry) {
+	for _, e := range entries {
+		fmt.Fprintf(w, "%s %s", e.At.Format(time.RFC3339), e.Kind)
+		if e.Workstream != "" {
+			fmt.Fprintf(w, " [%s]", e.Workstream)
+		}
+		fmt.Fprintln(w)
+		if e.Kind == "image" && e.Image != nil {
+			if e.Image.Placeholder != "" {
+				fmt.Fprintf(w, "  %s\n", e.Image.Placeholder)
+			} else {
+				fmt.Fprintf(w, "  [image: %s]\n", e.Image.URL)
+			}
+		} else if e.Text != "" {
+			fmt.Fprintf(w, "  %s\n", e.Text)
+		}
 	}
 }

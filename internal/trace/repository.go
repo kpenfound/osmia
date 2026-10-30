@@ -1092,6 +1092,9 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 // append requires r.mu. It checks v against the committed records of its
 // identity and path alone, and commits it.
 func (r *Repository) append(ctx context.Context, v Record) error {
+	if _, ok := v.(Image); ok && !r.imageStorageScope() {
+		return fmt.Errorf("images belong only to member or session traces")
+	}
 	if err := validate(v); err != nil {
 		return err
 	}

@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // SessionWebFixture starts a service with a web listener and a registered
@@ -32,8 +34,9 @@ func SessionWebFixture(t *testing.T) (*service.Service, *service.Client, config.
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	engine := &fixturekit.SessionEngine{}
-	enforced := service.EnforceThreadsForTest(opts, service.Enforcement{Engine: engine})
+	engine := &fixturekit.SessionEngine{Sessions: &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}}
+	hosts := &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: engine.Sessions}}
+	enforced := service.EnforceThreadsForTest(opts, service.Enforcement{Engine: engine, Hosts: hosts})
 	opts = enforced
 	s, c := Start(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))

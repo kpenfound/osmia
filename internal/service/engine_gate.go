@@ -40,7 +40,9 @@ func (e *EngineBusyError) Error() string {
 	var blockers []string
 	for _, run := range e.Checks {
 		kind := "session"
-		if run.Unit != "" {
+		if run.Preview {
+			kind = "preview"
+		} else if run.Unit != "" {
 			kind = "unit " + run.Unit
 		} else if run.Review != 0 {
 			kind = fmt.Sprintf("review %d", run.Review)

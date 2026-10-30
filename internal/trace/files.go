@@ -36,6 +36,10 @@ func decodeRecord(data []byte) (Record, error) {
 	}
 	var r Record
 	switch marker.Schema {
+	case "osmia.trace.image":
+		r = Image{}
+	case "osmia.trace.image-reference":
+		r = ImageReference{}
 	case "osmia.trace.document":
 		r = Document{}
 	case "osmia.trace.transition":
@@ -63,6 +67,12 @@ func decodeRecord(data []byte) (Record, error) {
 	}
 	// Decode into the concrete value without exposing pointers as record variants.
 	switch v := r.(type) {
+	case Image:
+		err := decode(data, &v)
+		return v, err
+	case ImageReference:
+		err := decode(data, &v)
+		return v, err
 	case Document:
 		err := decode(data, &v)
 		return v, err

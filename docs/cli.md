@@ -67,6 +67,29 @@ osmia reload
 osmia status --json
 ```
 
+## Project previews
+
+Configure a project's preview Service through the API:
+
+```sh
+osmia project preview <project-id> --call dev --call=--port --call 8080 --port 8080
+osmia project preview <project-id> --call dev --port 8080 --path /settings --timeout 2m
+osmia project preview <project-id> --clear
+```
+
+Repeat `--call` once per argument to `dagger call`, in order; use `--call=--flag`
+for arguments beginning with `-`. There is no shell parsing. The call must return
+a Dagger Service. `--call` and `--port` are required when enabling previews;
+`--path` defaults to `/` and `--timeout` to `5m`. The port must be 1–65535,
+the path must start with `/`, and the timeout must be from `1m` to `30m`.
+`--clear` disables previews and cannot be combined with setting flags.
+`--json` prints the saved preview, or `null` in the `preview` field after clearing.
+
+Settings take effect immediately. The command prints the API's field validation
+or drift conflict message when refused. Saves preserve all other project file
+bytes. If the file has hand edits, including comments or formatting, run
+`osmia reload` before saving; a refusal leaves those edits untouched.
+
 ## Design Sessions
 
 `osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and KB are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo` and `draft_brief`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
@@ -1016,3 +1039,8 @@ Startup and reload only create a missing managed engine or start a stopped
 one. A running engine keeps its version across reloads; status reports a
 configuration mismatch until an idle `osmia engine restart` applies the new
 version.
+
+`osmia feed <workstream-id|workgroup-id> [--json]` reads the feed for a
+workstream, exploratory session or shared workgroup conversation. Image entries
+print an `[image: URL]` placeholder. An archived member's image reference prints
+`image removed when <member> was archived`; its image is no longer available.

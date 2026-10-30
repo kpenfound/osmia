@@ -213,6 +213,12 @@ func WriteProjectConfig(path string, p Project) error {
 	if p.Fork == "" || strings.EqualFold(p.Upstream, p.Fork) {
 		text = strings.Replace(text, "fork = "+tomlString(p.Fork)+"\n", "", 1)
 	}
+	if p.Preview != nil {
+		if err := p.Preview.validate(path); err != nil {
+			return err
+		}
+		text += previewTable(p.Preview)
+	}
 	var check Project
 	if _, err := toml.Decode(text, &check); err != nil {
 		return err

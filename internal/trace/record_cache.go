@@ -362,7 +362,10 @@ func cloneRecord(record Record) Record {
 	case PriorityChange:
 		v.Order = slices.Clone(v.Order)
 		return v
-	case Document, Transition, Agent, Cost, nil:
+	case Image:
+		v.Data = slices.Clone(v.Data)
+		return v
+	case Document, Transition, Agent, Cost, ImageReference, nil:
 		return record
 	default:
 		panic(fmt.Sprintf("unsupported cached record %T", record))

@@ -1529,6 +1529,62 @@
         }
       }
     },
+    "/v1/images/{workstream}/{image}": {
+      "get": {
+        "summary": "Read a live PNG or JPEG attachment with nosniff",
+        "description": "Exact stored image bytes; X-Content-Type-Options: nosniff and Cache-Control: no-store. Only live PNG and JPEG attachments are served.",
+        "operationId": "getImagesByWorkstreamByImage",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "image",
+            "in": "path",
+            "description": "Recorded image ID.",
+            "required": true,
+            "schema": {
+              "description": "Recorded image ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/inbox": {
       "get": {
         "summary": "List open owner decisions",
@@ -1983,6 +2039,95 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemorySetup"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/preview/{project}": {
+      "put": {
+        "summary": "Set preview settings, preserving other file bytes and refusing byte drift",
+        "description": "Sets or removes only the project's preview statements in config.toml.\nThe change takes effect immediately. Every save, including an idempotent one,\nis refused with conflict if any byte differs from the file last loaded or saved.\nReload to apply hand edits before saving.\n\nPUT requires call (a non-empty argv list) and port (1–65535). Path defaults to /\nand must start with /. Timeout defaults to 5m and must be a Go duration from\n1m to 30m. Unknown or nested keys and wrong types are refused with the field name.\nDELETE disables previews.",
+        "operationId": "putProjectsPreviewByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPreviewResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Disable previews, refusing config.toml byte drift",
+        "description": "Sets or removes only the project's preview statements in config.toml.\nThe change takes effect immediately. Every save, including an idempotent one,\nis refused with conflict if any byte differs from the file last loaded or saved.\nReload to apply hand edits before saving.\n\nPUT requires call (a non-empty argv list) and port (1–65535). Path defaults to /\nand must start with /. Timeout defaults to 5m and must be a Go duration from\n1m to 30m. Unknown or nested keys and wrong types are refused with the field name.\nDELETE disables previews.",
+        "operationId": "deleteProjectsPreviewByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPreviewResponse"
                 }
               }
             }
@@ -4429,6 +4574,32 @@
         },
         "type": "object"
       },
+      "ConfigPreview": {
+        "properties": {
+          "call": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "timeout": {
+            "type": "string"
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "ConfigProfile": {
         "properties": {
           "agent": {
@@ -4489,6 +4660,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/ConfigPreview"
           },
           "pull_request_poll": {
             "type": "string"
@@ -5370,6 +5544,9 @@
           "final_review": {
             "$ref": "#/components/schemas/FeedFinalReview"
           },
+          "image": {
+            "$ref": "#/components/schemas/FeedImage"
+          },
           "kind": {
             "type": "string"
           },
@@ -5484,6 +5661,23 @@
             "type": "string"
           },
           "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedImage": {
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         },
@@ -6214,6 +6408,48 @@
       },
       "ProjectExtractRequest": {
         "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectPreviewRequest": {
+        "properties": {
+          "call": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "path": {
+            "default": "/",
+            "pattern": "^/",
+            "type": "string"
+          },
+          "port": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "timeout": {
+            "default": "5m",
+            "description": "Go duration from 1m to 30m",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "port"
+        ],
+        "type": "object"
+      },
+      "ProjectPreviewResponse": {
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/ConfigPreview"
+          },
           "project": {
             "type": "string"
           }
@@ -7233,6 +7469,10 @@
         "properties": {
           "agent": {
             "type": "string"
+          },
+          "preview": {
+            "description": "True for a waiting service-run chief preview.",
+            "type": "boolean"
           },
           "project": {
             "description": "Project of a waiting check run.",

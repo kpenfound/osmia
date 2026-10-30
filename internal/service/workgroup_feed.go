@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/readview"
@@ -217,6 +218,33 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 			if _, err := chiefActionsWithIdentity(a.chief, m.Workstream, emit); err != nil {
 				return WorkgroupFeedResponse{}, err
 			}
+		}
+		refs, err := trace.Read[trace.ImageReference](a.chief, a.host)
+		if err != nil {
+			return WorkgroupFeedResponse{}, err
+		}
+		for _, ref := range refs {
+			var source *trace.Repository
+			for _, m := range a.members {
+				if m.Workstream == ref.Member {
+					source = m.Project
+					break
+				}
+			}
+			if source == nil {
+				return WorkgroupFeedResponse{}, fmt.Errorf("image reference names an unknown member")
+			}
+			entry := FeedEntry{Kind: "image", At: ref.At, Turn: ref.Turn, Workstream: ref.Member, Repo: source.Project(), Image: &wire.FeedImage{ID: ref.ImageID}}
+			if _, archived := s.archivedWorkstream(string(ref.Member)); archived {
+				entry.Image.Placeholder = fmt.Sprintf("image removed when %s was archived", ref.Member)
+			} else {
+				v, err := source.StoredImage(ref.Member, ref.ImageID)
+				if err != nil {
+					return WorkgroupFeedResponse{}, err
+				}
+				entry.Image.URL, entry.Image.ContentType = imageURL(ref.Member, ref.ImageID), v.ContentType
+			}
+			entries = append(entries, entry)
 		}
 		slices.SortStableFunc(entries, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
 		return WorkgroupFeedResponse{Workgroup: config.WorkgroupID(raw), Entries: entries, Members: summaries}, nil
