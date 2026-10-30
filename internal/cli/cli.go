@@ -1791,6 +1791,8 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 				what = "turn " + wait.Turn + " of " + wait.Agent
 			} else if wait.Review != 0 {
 				what = fmt.Sprintf("final review %d", wait.Review)
+			} else if wait.Preview {
+				what = "preview"
 			} else if wait.Session {
 				what = "session"
 			}

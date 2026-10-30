@@ -57,7 +57,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 					}
 					var logs bytes.Buffer
 					ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&logs, nil)))
-					for _, operation := range []string{"check", "list"} {
+					for _, operation := range []string{"check", "list", "call", "core"} {
 						var output bytes.Buffer
 						exit, prep, err := d.dagger(ctx, t.TempDir(), id, operation == "check" && token != "", &output, operation)
 						if engine == "cloud" && token == "" {
@@ -95,7 +95,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 								want["_EXPERIMENTAL_DAGGER_RUNNER_HOST"] = engine
 							}
 						}
-						if token != "" && (operation == "check" || engine == "cloud") {
+						if token != "" && (operation == "check" || operation == "call" || operation == "core" || engine == "cloud") {
 							want["DAGGER_CLOUD_TOKEN"] = token
 						}
 						if token != "" && operation == "check" && !fallback {

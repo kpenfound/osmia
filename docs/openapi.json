@@ -7470,6 +7470,10 @@
           "agent": {
             "type": "string"
           },
+          "preview": {
+            "description": "True for a waiting service-run chief preview.",
+            "type": "boolean"
+          },
           "project": {
             "description": "Project of a waiting check run.",
             "type": "string"

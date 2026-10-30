@@ -92,6 +92,10 @@ func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, 
 // dagger runs the Dagger CLI in dir with args and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
 func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (exitCode int, preparation Preparation, runErr error) {
+	return d.daggerOutput(ctx, dir, identity, withIdentity, output, output, args...)
+}
+
+func (d DaggerChecks) daggerOutput(ctx context.Context, dir string, identity Identity, withIdentity bool, stdout, stderr io.Writer, args ...string) (exitCode int, preparation Preparation, runErr error) {
 	redact.Register(d.CloudToken)
 	defer func() {
 		if runErr != nil {
@@ -164,13 +168,14 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 		}
 	}
 	isCheck := len(args) > 0 && args[0] == "check"
-	if d.CloudToken != "" && (isCheck || d.Engine == "cloud") {
+	isPreview := len(args) > 0 && (args[0] == "call" || args[0] == "core")
+	if d.CloudToken != "" && (isCheck || isPreview || d.Engine == "cloud") {
 		cmd.Env = append(cmd.Env, "DAGGER_CLOUD_TOKEN="+d.CloudToken)
 	}
 	if isCheck && d.CloudToken != "" && preparation.CIIdentity {
 		cmd.Env = append(cmd.Env, "CI=true")
 	}
-	cmd.Stdout, cmd.Stderr = output, output
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err = cmd.Run()
 	exit := -1
 	if cmd.ProcessState != nil {

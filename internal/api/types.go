@@ -657,7 +657,7 @@ type RoleCapacity struct {
 }
 
 // SlotWait identifies a queued turn, a deferred ready unit, or a check run.
-// For check runs, exactly one of Unit, Review or Session identifies the kind.
+// For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.
 // Reason is capacity when every slot of the pool is taken, priority when
 // higher-priority workstreams start a unit first, and workstream-cap when the
 // workstream holds capacity.per_workstream agent turns.
@@ -667,6 +667,7 @@ type SlotWait struct {
 	Unit       string              `json:"unit,omitempty"`
 	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
 	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
+	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run chief preview."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
 	Reason     string              `json:"reason"`
