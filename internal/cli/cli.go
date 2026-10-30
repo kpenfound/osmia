@@ -1582,6 +1582,16 @@ func showTailnet(w io.Writer, t *wire.TailnetStatus) {
 		line += " (" + t.Reason + ")"
 	}
 	fmt.Fprintln(w, line)
+	if t.HTTPSState != "" {
+		line = "Tailnet HTTPS: " + t.HTTPSState
+		if t.HTTPSAddress != "" {
+			line += " " + t.HTTPSAddress
+		}
+		if t.HTTPSReason != "" {
+			line += " (" + t.HTTPSReason + ")"
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 func showRuntime(w io.Writer, rt wire.RuntimeResponse) {
 	fmt.Fprintln(w, "Pauses (absent scopes are unpaused):")

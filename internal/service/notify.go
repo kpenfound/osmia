@@ -405,12 +405,14 @@ func notificationBody(project config.ProjectID, e InboxEntry, link string) strin
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// link is the page's address on the tailnet: the node's first tailnet name,
-// or its configured hostname while it has none. It is empty without
-// listen.tailnet.
+// link uses the full HTTPS address while TLS serves, otherwise HTTP at the
+// node's first name or configured hostname. It is empty without listen.tailnet.
 func (n *notifier) link(ctx context.Context, cfg *config.Config) string {
 	if cfg.Listen.Tailnet == "" || n.s.tailnet == nil {
 		return ""
+	}
+	if status := n.s.tailnetStatus(ctx); status.HTTPSState == TailnetHTTPSUp {
+		return status.HTTPSAddress
 	}
 	host := cfg.Listen.Tailnet
 	names, cancel := context.WithTimeout(ctx, 5*time.Second)

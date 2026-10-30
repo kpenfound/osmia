@@ -200,7 +200,8 @@ svg {
   display: none;
 }
 
-#pause-button[data-paused="true"] {
+#pause-button[data-paused="true"],
+.dictate-icon[aria-pressed="true"] {
   color: var(--accent);
 }
 
@@ -892,6 +893,10 @@ svg {
 
 .composer .actions {
   justify-content: flex-end;
+}
+
+.composer .dictation-https {
+  font-size: 0.875rem;
 }
 
 [data-panel] .control:first-child {

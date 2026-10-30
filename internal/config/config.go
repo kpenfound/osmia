@@ -60,6 +60,8 @@ type Listen struct {
 	// Tailnet is an optional hostname under which the service joins the
 	// owner's tailnet and serves the same API; empty disables it.
 	Tailnet string `toml:"tailnet" json:"tailnet,omitempty"`
+	// TailnetHTTPS serves HTTPS on the tailnet in addition to HTTP. Defaults to true.
+	TailnetHTTPS bool `toml:"tailnet_https" json:"tailnet_https"`
 }
 type Capacity struct {
 	Checks        int `toml:"checks" json:"checks"`
@@ -317,7 +319,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
 	c.Dagger.Engine = string(DaggerEngineAuto)
 	md, err := decode(path, c, false)
 	if err != nil {
@@ -759,7 +761,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "dagger", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

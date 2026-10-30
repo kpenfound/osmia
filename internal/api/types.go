@@ -85,16 +85,24 @@ const (
 	TailnetConnecting = "connecting"
 	TailnetNeedsLogin = "needs_login"
 	TailnetDown       = "down"
+
+	TailnetHTTPSOff         = "off"
+	TailnetHTTPSUp          = "up"
+	TailnetHTTPSUnavailable = "unavailable"
 )
 
 // TailnetStatus is the state of the tailnet listener: one of the Tailnet
 // constants. LoginURL is the address that approves the node, given with
 // needs_login when Tailscale supplies one. Reason says why the listener is
-// down.
+// down. HTTPSState is off, up or unavailable; HTTPSReason explains non-up
+// states, and HTTPSAddress is the full MagicDNS URL only while HTTPS is up.
 type TailnetStatus struct {
-	State    string `json:"state"`
-	LoginURL string `json:"login_url,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	State        string `json:"state"`
+	LoginURL     string `json:"login_url,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	HTTPSState   string `json:"https_state"`
+	HTTPSReason  string `json:"https_reason,omitempty"`
+	HTTPSAddress string `json:"https_address,omitempty"`
 }
 
 type Diagnostic struct {

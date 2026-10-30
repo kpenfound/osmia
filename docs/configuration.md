@@ -210,8 +210,10 @@ socket = "osmia.sock"
 # Optional loopback host:port serving the same API over TCP; empty disables.
 web = ""
 # Optional hostname under which the service joins your tailnet and serves the
-# same API on port 80; empty disables.
+# same API on HTTP port 80 and HTTPS port 443; empty disables.
 tailnet = ""
+# Also serve HTTPS using Tailscale-issued certificates; restart to change.
+tailnet_https = true
 
 [capacity]
 masons = 4
@@ -278,6 +280,22 @@ embedded Tailscale, keeps the node's state in `<root>/tailnet`, and logs in
 with the auth key in the `TS_AUTHKEY` environment variable or, without one,
 logs a login URL on first run, in its [structured log](running.md#service-log).
 The auth key never belongs in these files.
+
+`listen.tailnet_https` defaults to `true`: with `listen.tailnet` set, the node
+also serves HTTPS on port 443 at its full MagicDNS address,
+`https://<host>.<tailnet>.ts.net/`. Set `listen.tailnet_https = false` to opt out.
+Changing it requires a restart, just like `listen.tailnet`. Enable **HTTPS
+certificates** in the tailnet admin console before using it. Issuing a
+certificate publishes the node's `*.ts.net` name in public Certificate
+Transparency logs: the name becomes public, but access does not. HTTPS setup
+or listener failures leave HTTP on port 80 serving; status reports HTTPS as
+unavailable with a reason. HTTP does not redirect to HTTPS.
+
+Dictation uses the browser's speech recognition over HTTPS or localhost.
+Osmia never receives audio: Chrome sends audio to Google for processing, and
+Safari sends audio to Apple. See [dictation](running.md#dictation) for use in
+conversation composers.
+
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long
@@ -920,8 +938,8 @@ in `runtime.json`, never these files.
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
-`listen.web` and `listen.tailnet` keep their loaded values until the service
-restarts. Role skills and `skills.refresh` apply to turns that start after a
+`listen.web`, `listen.tailnet` and `listen.tailnet_https` keep their loaded
+values until the service restarts. Role skills and `skills.refresh` apply to turns that start after a
 reload. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
 

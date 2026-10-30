@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -516,5 +518,60 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 	}
 	if code, out, diag := invoke(t, root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
 		t.Fatalf("config with arguments: %d %q %q", code, out, diag)
+	}
+}
+
+func TestStatusShowsTailnetHTTPS(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		status wire.TailnetStatus
+		line   string
+	}{
+		{wire.TailnetStatus{State: "up", HTTPSState: "up", HTTPSAddress: "https://osmia.tail0.ts.net/"}, "Tailnet HTTPS: up https://osmia.tail0.ts.net/\n"},
+		{wire.TailnetStatus{State: "up", HTTPSState: "off", HTTPSReason: "disabled by listen.tailnet_https"}, "Tailnet HTTPS: off (disabled by listen.tailnet_https)\n"},
+		{wire.TailnetStatus{State: "up", HTTPSState: "unavailable", HTTPSReason: "enable HTTPS certificates in the tailnet admin console"}, "Tailnet HTTPS: unavailable (enable HTTPS certificates in the tailnet admin console)\n"},
+		{wire.TailnetStatus{State: "up", HTTPSState: "unavailable", HTTPSReason: "certificate retrieval failed"}, "Tailnet HTTPS: unavailable (certificate retrieval failed)\n"},
+	} {
+		var out bytes.Buffer
+		showTailnet(&out, &tc.status)
+		if out.String() != "Tailnet: up\n"+tc.line {
+			t.Fatal(out.String())
+		}
+	}
+}
+
+func TestStatusCommandReportsTailnetHTTPS(t *testing.T) {
+	for _, tc := range []struct{ setting, reason, want string }{
+		{"", "", "Tailnet HTTPS: up https://osmia.tail0.ts.net/\n"},
+		{"tailnet_https = false\n", "", "Tailnet HTTPS: off (disabled by listen.tailnet_https)\n"},
+		{"", "enable HTTPS certificates in the tailnet admin console", "Tailnet HTTPS: unavailable (enable HTTPS certificates in the tailnet admin console)\n"},
+		{"", "certificate retrieval failed", "Tailnet HTTPS: unavailable (certificate retrieval failed)\n"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			opts := fixture(t)
+			fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n"+tc.setting)
+			join, _ := fixturekit.TailnetJoiner("osmia.tail0.ts.net")
+			opts.JoinTailnet = func(host, dir string) (service.TailnetListener, error) {
+				node, err := join(host, dir)
+				if node != nil && tc.reason != "" {
+					node.HTTPSFailure = errors.New(tc.reason)
+				}
+				return node, err
+			}
+			s, err := service.Start(context.Background(), opts)
+			must(t, err)
+			t.Cleanup(func() { s.Close() })
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				output := successful(t, opts.Config.Root, "status")
+				if strings.Contains(output, tc.want) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("status did not show HTTPS state:\n%s", output)
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		})
 	}
 }

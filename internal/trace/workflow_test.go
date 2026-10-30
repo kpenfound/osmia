@@ -38,6 +38,50 @@ func ready(t *testing.T, r *Repository, now time.Time) []OutboxEntry {
 	return entries
 }
 
+func TestTransactWhileFeature(t *testing.T) {
+	t.Parallel()
+	r, root, project := create(t)
+	ctx := context.Background()
+	tx := transaction("draft-1", 0, "", "drafting-1", 1)
+	tx.Transition.Subject = "draft"
+	if _, err := r.TransactWhileFeature(ctx, tx, "handed"); !errors.Is(err, ErrFeatureState) {
+		t.Fatalf("absent feature: %v", err)
+	}
+	transact(t, r, transaction("handed", 0, "", "handed", 0))
+	want := WorkflowState{Version: 1, Value: "drafting-1"}
+	for range 2 {
+		if got, err := r.TransactWhileFeature(ctx, tx, "handed"); err != nil || got != want {
+			t.Fatalf("request or retry: %+v %v", got, err)
+		}
+	}
+	transact(t, r, transaction("abandon", 1, "handed", "abandoned", 0))
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(root, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	before, err := r.Outbox(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := transaction("draft-2", 1, "drafting-1", "drafting-2", 1)
+	next.Transition.Subject = "draft"
+	for _, request := range []Transaction{tx, next} {
+		if _, err := r.TransactWhileFeature(ctx, request, "handed"); !errors.Is(err, ErrFeatureState) {
+			t.Fatalf("request after abandonment: %v", err)
+		}
+	}
+	if got, err := r.Workflow(streamID, "draft"); err != nil || got != want {
+		t.Fatalf("draft changed: %+v %v", got, err)
+	}
+	if after, err := r.Outbox(streamID); err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("outbox changed after refusal: %+v %v", after, err)
+	}
+}
+
 func TestWorkflowRoundTripAndIdentity(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()

@@ -552,7 +552,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 			},
 			Start: f.start, Stop: f.stop, Running: func() bool { return f.s != nil },
 		}
-	}, configuration.handIn, configuration.wait != nil, configuration.checkpoint)
+	}, configuration.handIn, configuration.checkpoint)
 }
 
 func newTwoProjectFixture(t *testing.T) *twoProjectFixture {

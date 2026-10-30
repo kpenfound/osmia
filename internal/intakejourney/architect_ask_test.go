@@ -107,7 +107,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 	}
 
 	f.rule(t, "1")
-	f.await(t, stream, sketched)
+	f.await(t, stream, f.transitionRecorded(t, stream, SketchedState))
 	p.Check(t)
 	if moves, want := f.draftMoves(t, stream), []string{"draft-1  -> drafting-1", "draft-1-waiting-1 drafting-1 -> waiting-1", "draft-1-resume-1 waiting-1 -> drafting-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("draft went %v, want %v", moves, want)

@@ -27,7 +27,22 @@ applies neither check.
 When `listen.tailnet` is set, the service joins your tailnet through embedded
 Tailscale under that hostname and serves the same API and page on the node's
 port 80, so a phone or laptop on the tailnet reaches it at `http://<hostname>/`.
-The socket and any web listener keep serving beside it.
+HTTPS also serves on port 443 by default, using a Tailscale-issued certificate
+for the full MagicDNS name: `https://<host>.<tailnet>.ts.net/`. The certificate
+covers that full name, so use it instead of the short hostname. The socket and
+any web listener keep serving beside it. HTTP on port 80 remains available
+and does not redirect.
+
+Enable **HTTPS certificates** in the tailnet admin console. Issuing a
+certificate puts the node's `*.ts.net` name in public Certificate Transparency
+logs: the name becomes public, but access does not. To opt out, set
+`listen.tailnet_https = false` under `[listen]`. It defaults to `true`, and
+changing it requires restarting the service, just like `listen.tailnet`.
+
+If certificates are disabled, certificate retrieval fails, or the HTTPS
+listener stops, the service stays up and HTTP keeps serving. HTTPS is reported
+as unavailable with a reason. HTTPS belongs to its node: replacing the node or
+shutting down closes that node's TLS listener.
 
 The node's state, including its identity and keys, lives in `<root>/tailnet`,
 mode 0700, outside every target repository. On first run the node needs to log
@@ -65,6 +80,11 @@ the socket throughout.
 | `needs_login` | The node must be approved. The login URL is shown when Tailscale gives one; otherwise the reason says the node awaits approval by a tailnet admin. |
 | `down` | There is no working node. The reason says why, such as the error from the last join. |
 
+`osmia status` also prints a `Tailnet HTTPS:` line, and the API's tailnet
+status includes `https_state`, `https_reason` and `https_address`. HTTPS is
+`up` with the full HTTPS address, `off` with the configuration reason, or
+`unavailable` with the failure reason. The address is present only when up.
+
 ### Reach Osmia from your phone
 
 [Getting started](getting-started.md#2-write-configosmiaconfigtoml) puts this setup in
@@ -88,7 +108,8 @@ the order of a first run.
 
 Any device your tailnet's access rules let reach the node can read everything
 and make owner decisions, with no login of Osmia's own. Restrict who reaches
-the node with tailnet access rules. The connection is plain HTTP on port 80
+the node with tailnet access rules. Use the full HTTPS address from
+`osmia status` when available. Plain HTTP on port 80 also remains served
 inside the tailnet's encrypted transport.
 
 ## Web page
@@ -257,6 +278,18 @@ When the connection drops, the page shows that it is reconnecting and retries
 with a growing delay up to 10 seconds, immediately when the browser comes back
 online or the page becomes visible again.
 
+## Dictation
+
+Each conversation composer offers a microphone when the browser supports speech
+recognition and the page uses HTTPS or localhost. On a plain HTTP tailnet page,
+the composer offers a link to HTTPS when it is available, keeping the selected
+conversation. Tap the microphone to start or stop dictation, edit the text, then
+press Send. Dictation never sends a message automatically.
+The Settings menu shows the tailnet HTTPS address or the reason it is unavailable.
+
+Dictation uses the browser's speech recognition. Osmia never receives audio:
+Chrome sends audio to Google for processing, and Safari sends audio to Apple.
+
 ## Sessions
 
 A session is a lighter-weight workstream for exploratory work: a direct chat
@@ -361,8 +394,8 @@ next. A turn already running finishes on the configuration it started with.
 Projects added to `active_projects` start; projects removed from it stop
 taking new work and drain what is in flight before the reload returns.
 
-The root, `listen.socket`, `listen.web` and `listen.tailnet` keep their loaded
-values until the service restarts; the reload lists the ones the files change
+The root, `listen.socket`, `listen.web`, `listen.tailnet` and
+`listen.tailnet_https` keep their loaded values until the service restarts; the reload lists the ones the files change
 as requiring a restart.
 
 Pauses, priorities and profile overrides are runtime state, not
@@ -408,7 +441,9 @@ Clears: <next local midnight, RFC 3339>
 Open: http://<tailnet-name>/
 ```
 
-The `Open` line appears only with `listen.tailnet` set. Any `2xx` response
+The `Open` line appears only with `listen.tailnet` set. When tailnet HTTPS is
+up it uses the full `https://<host>.<tailnet>.ts.net/` address; otherwise it uses
+the HTTP address shown above. Any `2xx` response
 counts as delivered. `or more` follows the spend while some attempts have
 unknown cost. A per-unit budget crossing files an amendment request, which is
 an inbox entry and is posted as one. A provider usage-limit pause is not

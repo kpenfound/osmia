@@ -24,7 +24,7 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 	opts, inbox := notifyFixture(t, "")
 	hook.records(opts)
 	withTailnet(t, &opts, "osmia.example.ts.net", "osmia")
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	withListen(t, opts, "tailnet = \"osmia\"\ntailnet_https = false\n")
 	setWebhook(t, opts, hook.hook())
 	old := entryOf(InboxEscalation, 1)
 	inbox.set(old)

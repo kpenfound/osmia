@@ -252,7 +252,10 @@ func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.Header(transition, stream, cause, d.S.Now()), Subject: DraftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", in.Draft), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: "draft", Body: body, Operation: &op}}}
-	_, err = d.Repository.Transact(ctx, tx)
+	_, err = d.Repository.TransactWhileFeature(ctx, tx, HandedState)
+	if errors.Is(err, trace.ErrFeatureState) {
+		return nil
+	}
 	return err
 }
 

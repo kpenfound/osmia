@@ -4396,6 +4396,9 @@
           "tailnet": {
             "type": "string"
           },
+          "tailnet_https": {
+            "type": "boolean"
+          },
           "web": {
             "type": "string"
           }
@@ -7357,6 +7360,15 @@
       },
       "TailnetStatus": {
         "properties": {
+          "https_address": {
+            "type": "string"
+          },
+          "https_reason": {
+            "type": "string"
+          },
+          "https_state": {
+            "type": "string"
+          },
           "login_url": {
             "type": "string"
           },

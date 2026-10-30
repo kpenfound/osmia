@@ -196,7 +196,7 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 	if s.TailnetAddr() != "" {
 		t.Fatalf("tailnet address while down: %s", s.TailnetAddr())
 	}
-	want := TailnetStatus{State: TailnetDown, Reason: "control server unreachable"}
+	want := TailnetStatus{State: TailnetDown, Reason: "control server unreachable", HTTPSState: "unavailable", HTTPSReason: "the tailnet node is unavailable: control server unreachable"}
 	h, err := c.Health(ctx)
 	must(t, err)
 	if !h.Ready || !reflect.DeepEqual(h.Tailnet, &want) {
@@ -312,7 +312,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	withListen(t, opts, "tailnet = \"osmia\"\ntailnet_https = false\n")
 	joined := withTailnet(t, &opts)
 	_, c := start(t, opts)
 	node := *joined
@@ -323,6 +323,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 		{State: TailnetUp},
 	} {
 		node.SetState(want)
+		want.HTTPSState, want.HTTPSReason = "off", "disabled by listen.tailnet_https"
 		h, err := c.Health(ctx)
 		must(t, err)
 		st, err := c.Statuses(ctx)

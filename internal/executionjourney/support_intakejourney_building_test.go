@@ -25,7 +25,9 @@ func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, tr
 
 func (f *architectFixture) checkUnits(t *testing.T, stream config.WorkstreamID, want []UnitStatus) {
 	t.Helper()
-	intakefixture.CheckUnits(t, f.c, f.checkStatusError, stream, want)
+	wait, close := serviceChanges(t, f.s)
+	t.Cleanup(close)
+	intakefixture.CheckUnits(t, f.c, f.checkStatusError, wait, stream, want)
 }
 
 func (f *architectFixture) checkStatusError(t *testing.T, err error, elapsed time.Duration) {

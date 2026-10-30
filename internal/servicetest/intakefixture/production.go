@@ -985,17 +985,15 @@ type ProductionDesignStart[F any] struct {
 }
 
 // NewProductionDesign prepares and starts the real-service design scenario.
-func NewProductionDesign[F any](t *testing.T, create func(*fixturekit.FixedClock) ProductionDesignStart[F], handIn, customWait bool, checkpoint func(context.Context, string) error) F {
+func NewProductionDesign[F any](t *testing.T, create func(*fixturekit.FixedClock) ProductionDesignStart[F], handIn bool, checkpoint func(context.Context, string) error) F {
 	t.Helper()
 	f := create(&fixturekit.FixedClock{At: fixturekit.DemoStart})
 	f.Bind(f.Scenario.BindProductionDesign(f.Threads, f.Unwrap), DesignBoundary(f.Hooks, checkpoint))
-	if customWait {
-		t.Cleanup(func() {
-			if f.Running() {
-				f.Stop(t)
-			}
-		})
-	}
+	t.Cleanup(func() {
+		if f.Running() {
+			f.Stop(t)
+		}
+	})
 	f.Start(t)
 	f.Scenario.Setup(t, handIn)
 	return f.Fixture
