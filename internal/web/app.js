@@ -1066,7 +1066,7 @@
 
   function groupActivity(id) {
     const feed = views[groupFeed(id)];
-    return feed ? JSON.stringify(feed.entries.filter(e => conversationKinds.has(e.kind) || e.kind === 'status')) : null;
+    return feed ? JSON.stringify(feed.entries.filter(e => conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status')) : null;
   }
 
   function selectWorkgroup(id, aboutMember = null) {
@@ -1101,7 +1101,7 @@
     const key = JSON.stringify([feed, group.edges, views.config]);
     if (c.shown !== key) {
       c.shown = key;
-      const entries = (feed?.entries || []).filter(e => conversationKinds.has(e.kind) || e.kind === 'status');
+      const entries = (feed?.entries || []).filter(e => conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status');
       const latest = entries.findLastIndex(e => e.kind === 'status');
       c.entries.replaceChildren(feed ? el('ol', {}, ...entries.map((e, i) => {
         const node = e.kind === 'status' ? renderStatus(e, i === latest) : renderConversationEntry(e);
@@ -1816,11 +1816,12 @@
     }
   }
 
-  // renderConversationEntry shows one message, response or action of a
+  // renderConversationEntry shows one message, response, action or image of a
   // conversation. agentLabel names who answered: it defaults to the chief
   // of staff, but a session (which has no chief of staff, spec#5, spec#20)
   // passes its own agent's label instead.
   function renderConversationEntry(e, agentLabel) {
+    if (e.kind === 'image') return renderImage(e, agentLabel);
     const who = { message: 'You', action: (agentLabel || 'Chief of staff') + ' acted' }[e.kind] || agentLabel || 'Chief of staff';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
       el('div', { class: 'meta' },
@@ -1829,6 +1830,19 @@
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state),
         e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, ' · ' + e.queued_reason) : null),
       el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
+  }
+
+  function renderImage(e, agentLabel) {
+    const image = e.image;
+    return el('li', { id: 'feed-image-' + image.id, class: 'entry', 'data-kind': 'image', 'data-image': image.id, 'data-turn': e.turn, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
+      el('div', { class: 'meta' },
+        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' · ',
+        el('span', { 'data-ann': 'action' }, 'image'), ' · ',
+        el('span', { 'data-ann': 'when' }, when(e.at))),
+      image.placeholder
+        ? el('p', { class: 'meta', 'data-field': 'placeholder' }, image.placeholder)
+        : el('a', { class: 'image-thumbnail', href: image.url, target: '_blank', rel: 'noopener noreferrer', 'data-field': 'image-link', 'aria-label': 'Open full-size image ' + image.id },
+          el('img', { src: image.url, alt: 'Image ' + image.id, 'data-field': 'image' })));
   }
 
   // renderStatus shows a status the chief of staff wrote. Only the latest
@@ -2150,7 +2164,7 @@
     const seen = new Set();
     if (feed) {
       for (const e of feed.entries) {
-        if (e.kind === 'session_checks') {
+        if (e.kind === 'session_checks' || e.kind === 'image') {
           out.push(e);
           continue;
         }
