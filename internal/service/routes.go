@@ -24,6 +24,8 @@ type Route struct {
 
 // Routes lists every endpoint Service.handle serves under api.Prefix.
 var Routes = []Route{
+	{Method: http.MethodPut, Path: api.Prefix + "/projects/preview/{project}", Summary: "Set preview settings, preserving other file bytes and refusing byte drift", Request: api.ProjectPreviewRequest{}, Response: api.ProjectPreviewResponse{}},
+	{Method: http.MethodDelete, Path: api.Prefix + "/projects/preview/{project}", Summary: "Disable previews, refusing config.toml byte drift", Response: api.ProjectPreviewResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/engine/status", Summary: "Report Dagger engine mode, reachability, versions and cache size", Response: api.EngineStatus{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/restart", Summary: "Restart the managed Dagger engine when no checks or Dagger turns are active", Response: api.MutationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/prune", Summary: "Prune the managed Dagger engine cache when idle", Response: api.MutationResponse{}},

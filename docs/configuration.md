@@ -928,6 +928,33 @@ each with a 30 second maximum timeout. Invalid or unavailable answers retain
 the code classification. With the Jev boost on, a Jev judgment classifies the
 response first, and the classifier runs only when that judgment falls back.
 
+### Previews
+
+The optional `[preview]` table configures the Dagger Service captured by the
+chief's preview tool. Without the table, previews are off.
+
+```toml
+[preview]
+call = ["dev", "--port", "8080"] # required: dagger call arguments returning a Service
+port = 8080                     # required: Service port, 1–65535
+path = "/"                      # optional, defaults to /
+timeout = "5m"                   # optional, defaults to 5m
+```
+
+`call` is a non-empty argv list. Each element is passed directly to
+`dagger call`; there is no shell parsing. `path` must start with `/`. `timeout` is a Go duration from `1m` to `30m`. Unknown or nested
+keys, wrong types and missing required fields are refused with the field name.
+The loader, API and CLI apply the same defaults when `path` or `timeout` is omitted.
+
+`PUT /v1/projects/preview/{project}` takes a JSON object with these four fields;
+`DELETE` at the same route disables previews. Saves change only preview statements
+in the project file and take effect immediately, without `osmia reload`.
+The API refuses every set or clear with a drift conflict if any file byte has
+changed since its last load or save, including comments or formatting and even
+when the requested setting is already in effect. Reload to apply hand edits
+before saving. Successful saves and reloads refresh that baseline.
+`GET /v1/config` includes each project's preview in its effective configuration.
+
 ## Configuration and restart behavior
 
 Loading accepts profiles, bindings, capacity, budgets, shed limits, repository identity

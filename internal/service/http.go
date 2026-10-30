@@ -542,6 +542,10 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		fail(w, RestartRequired)
 		return
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/projects/preview/"); ok && (r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		s.previewHTTP(w, r, id)
+		return
+	}
 	if r.URL.Path == Prefix+"/projects" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 		if r.Method == http.MethodPost {
 			if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(addProjectTimeout)); err != nil {
