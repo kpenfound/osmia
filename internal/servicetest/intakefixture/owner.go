@@ -286,21 +286,35 @@ func AwaitNamedTurn(t *testing.T, repository *trace.Repository, stream config.Wo
 	}
 }
 
-func CheckUnits(t *testing.T, client UnitStatusClient, checkError func(*testing.T, error, time.Duration), stream config.WorkstreamID, want []api.UnitStatus) {
+func CheckUnits(t *testing.T, client UnitStatusClient, checkError func(*testing.T, error, time.Duration), wait func(), stream config.WorkstreamID, want []api.UnitStatus) {
 	t.Helper()
 	ctx := context.Background()
-	started := time.Now()
-	one, err := client.Status(ctx, stream)
-	checkError(t, err, time.Since(started))
-	if one.State == nil || *one.State != intake.BuildingState || !reflect.DeepEqual(one.Units, want) {
-		t.Fatalf("status %+v, want units %+v", one, want)
+	deadline := time.Now().Add(DemoTimeout)
+	for {
+		started := time.Now()
+		one, err := client.Status(ctx, stream)
+		checkError(t, err, time.Since(started))
+		if one.State != nil && *one.State == intake.BuildingState && reflect.DeepEqual(one.Units, want) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status %+v, want units %+v", one, want)
+		}
+		wait()
 	}
-	started = time.Now()
-	list, err := client.Statuses(ctx)
-	checkError(t, err, time.Since(started))
-	i := slices.IndexFunc(list.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == stream })
-	if i < 0 || !reflect.DeepEqual(list.Workstreams[i].Units, want) {
-		t.Fatalf("status list %+v, want units %+v", list, want)
+	// The detail endpoint and the cached list settle independently.
+	for {
+		started := time.Now()
+		list, err := client.Statuses(ctx)
+		checkError(t, err, time.Since(started))
+		i := slices.IndexFunc(list.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == stream })
+		if i >= 0 && reflect.DeepEqual(list.Workstreams[i].Units, want) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status list %+v, want units %+v", list, want)
+		}
+		wait()
 	}
 }
 

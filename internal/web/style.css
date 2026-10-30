@@ -200,7 +200,8 @@ svg {
   display: none;
 }
 
-#pause-button[data-paused="true"] {
+#pause-button[data-paused="true"],
+.dictate-icon[aria-pressed="true"] {
   color: var(--accent);
 }
 

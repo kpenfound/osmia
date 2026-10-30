@@ -35,7 +35,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.Eval(`window.notReloaded = true`, nil)
 
 	// An empty message is refused on the page and never sent.
-	p.Click(send + "button")
+	p.Click(send + "button[type=submit]")
 	p.AwaitText(send+".result", "Write a message first.")
 	list, err := f.c.Conversation(ctx, quiet)
 	must(t, err)
@@ -44,7 +44,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	}
 
 	p.TypeInto(send+"textarea", "Pick the uploads back up on Friday.")
-	p.Click(send + "button")
+	p.Click(send + "button[type=submit]")
 	p.AwaitText(send+".result", "Sent")
 	p.Await("an emptied message field", `document.querySelector(`+quote(send+"textarea")+`).value === ''`)
 	// The message is queued on the chief of staff's thread in the trace, as

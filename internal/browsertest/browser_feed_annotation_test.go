@@ -18,7 +18,7 @@ func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamI
 	t.Helper()
 	send := `[data-workstream="` + string(ws) + `"] [data-field=send] `
 	p.TypeInto(send+"textarea", message)
-	p.Click(send + "button")
+	p.Click(send + "button[type=submit]")
 	p.AwaitText(send+".result", "Sent")
 	ctx := context.Background()
 	list, err := f.c.Conversation(ctx, ws)

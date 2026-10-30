@@ -22,6 +22,10 @@ parallel with the other packages. The release check builds and exercises the
 versioned archive. See [dagger.toml](../dagger.toml) for the registered
 checks.
 
+Each Go package runs at most four tests concurrently, including race and flake
+runs. This bounds the number of service fixtures competing for CPU and filesystem
+operations within a check. Use `--parallel 4` to bound concurrent checks as well.
+
 Never run `go test` on the host. Tests can leave processes behind on the
 machine running them. For a focused package or test, use the Go check's
 selection flags described in [AGENTS.md](../AGENTS.md#validation), such as

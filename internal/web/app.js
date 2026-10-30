@@ -665,10 +665,10 @@
     }
     const selected = () => ui.selected;
     for (const [result, buttons] of [
-      ['#design-result', '#design-form button'],
+      ['#design-result', '#design-form [type=submit]'],
       ['#design-start-result', '#design-start'],
       ['#design-destroy-result', '#design-destroy'],
-      ['#session-result', '#session-form button'],
+      ['#session-result', '#session-form [type=submit]'],
       ['#session-control-result', '#session-stop, #session-check, #session-push, #session-end, #session-destroy'],
       ['#session-commit-form .result', '#session-commit-form [type=submit]'],
     ]) {
@@ -1611,7 +1611,90 @@
   // another workstream and back.
   const cards = new Map();
 
+  const dictationComposers = new Map();
+
+  // This is the visibility hook for browsers that need a secure-page link.
+  function renderDictationAvailability(button) {
+    button.hidden = !window.isSecureContext || !(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  function setupDictation(form, result, owner) {
+    const button = form.querySelector('[aria-label="Dictate"]');
+    const text = form.elements.text;
+    let current = null;
+    button.setAttribute('aria-pressed', 'false');
+    function finish(stop = true) {
+      const session = current;
+      current = null;
+      button.setAttribute('aria-pressed', 'false');
+      if (stop && session) {
+        try { session.recognition.stop(); } catch (_) { /* The browser may already have ended it. */ }
+      }
+    }
+    function active(session) {
+      return current === session && owner() === session.owner;
+    }
+    function render() {
+      renderDictationAvailability(button);
+      button.disabled = text.disabled || form.querySelector('[type=submit]').disabled;
+      if (current && (!active(current) || !form.isConnected || button.hidden || button.disabled)) finish();
+    }
+    dictationComposers.set(form, { stop: finish, render });
+    button.addEventListener('click', () => {
+      if (current) {
+        finish();
+        return;
+      }
+      const key = owner();
+      if (!key) return;
+      try {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!window.isSecureContext || !Recognition) throw new Error('Speech recognition is not supported in this browser.');
+        const recognition = new Recognition();
+        const session = { recognition, owner: key, start: text.selectionStart, end: text.selectionEnd };
+        recognition.interimResults = true;
+        recognition.lang = document.documentElement.lang || navigator.language;
+        recognition.onresult = event => {
+          if (!active(session)) return;
+          const transcript = Array.from(event.results, result => result[0].transcript).join('');
+          text.setRangeText(transcript, session.start, session.end, 'end');
+          session.end = session.start + transcript.length;
+        };
+        recognition.onerror = event => {
+          if (!active(session)) return;
+          const message = {
+            'not-allowed': 'Microphone permission denied.',
+            'service-not-allowed': 'Speech recognition permission denied.',
+            'no-speech': 'No speech was detected. Try dictating again.',
+            network: 'Speech recognition network error. Try again.',
+          }[event.error] || 'Speech recognition is unavailable (' + event.error + ').';
+          finish();
+          show(result, 'error', message);
+        };
+        recognition.onend = () => {
+          if (active(session)) finish(false);
+        };
+        current = session;
+        button.setAttribute('aria-pressed', 'true');
+        recognition.start();
+      } catch (err) {
+        finish();
+        show(result, 'error', 'Could not start dictation: ' + err.message);
+      }
+    });
+    render();
+  }
+
+  function stopDictation(form) {
+    dictationComposers.get(form)?.stop();
+  }
+
+  function renderDictation() {
+    for (const composer of dictationComposers.values()) composer.render();
+  }
+
   function send(id, c, group = false) {
+    stopDictation(c.form);
     const text = c.text.value.trim();
     if (text === '') {
       show(c.result, 'error', 'Write a message first.');
@@ -1636,6 +1719,10 @@
     return el('button', { type: 'submit', class: 'primary icon send-icon', 'aria-label': 'Send' }, svg);
   }
 
+  function dictationButton() {
+    return byId('design-form').querySelector('[aria-label="Dictate"]').cloneNode(true);
+  }
+
   function card(id, group = false) {
     const key = group ? 'workgroup:' + id : id;
     let c = cards.get(key);
@@ -1656,7 +1743,7 @@
       opened: new Set(),
     };
     const form = el('form', { class: 'send composer', 'data-field': 'send' },
-      c.about, el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, c.button)), c.result);
+      c.about, el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, dictationButton(), c.button)), c.result);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       send(id, c, group);
@@ -1673,6 +1760,11 @@
     c.node = el('article', { class: 'workstream', 'data-workstream': id },
       el('div', { class: 'thread' }, c.entries, c.decisions, form));
     scopeOutcome(c.result, () => ui.view === (group ? 'workgroup' : 'workstream') ? (group ? ui.workgroup : shown()?.workstream) : null, [c.button]);
+    setupDictation(form, c.result, () => {
+      const selected = ui.view === (group ? 'workgroup' : 'workstream') && (group || ui.tab === 'feed')
+        ? (group ? ui.workgroup : shown()?.workstream) : null;
+      return selected === id ? key : null;
+    });
     cards.set(key, c);
     return c;
   }
@@ -1965,6 +2057,9 @@
     const ids = new Set(streams().map((w) => w.workstream));
     for (const id of cards.keys()) {
       if (!ids.has(id) && !workgroups().some(g => id === 'workgroup:' + g.id)) {
+        const form = cards.get(id).form;
+        stopDictation(form);
+        dictationComposers.delete(form);
         cards.delete(id);
       }
     }
@@ -2083,13 +2178,14 @@
   // naming a session that has ended, shows in the composer's result.
   function sendSession(id) {
     const form = byId('session-form');
+    stopDictation(form);
     const result = byId('session-result');
     const text = form.elements.text.value.trim();
     if (text === '') {
       show(result, 'error', 'Write a message first.');
       return;
     }
-    act(result, form.querySelector('button'), () => request('POST', '/sessions/' + id + '/message', { text }), (entry) => {
+    act(result, form.querySelector('[type=submit]'), () => request('POST', '/sessions/' + id + '/message', { text }), (entry) => {
       if (ui.selected === id) form.elements.text.value = '';
       sessionEchoesFor(id).set(entry.turn, entry);
       mark(['status', 'feed/' + id]);
@@ -2240,7 +2336,7 @@
     block(byId('session-destroy'), false);
     const form = byId('session-form');
     form.elements.text.disabled = ended;
-    block(form.querySelector('button'), ended);
+    block(form.querySelector('[type=submit]'), ended);
     block(byId('session-stop'), ended || w.state !== 'working');
     block(byId('session-check'), ended);
     block(byId('session-push'), ended);
@@ -2365,13 +2461,14 @@
   // read of the conversation shows them.
   function sendDesign(id) {
     const form = byId('design-form');
+    stopDictation(form);
     const result = byId('design-result');
     const text = form.elements.text.value.trim();
     if (text === '') {
       show(result, 'error', 'Write a message first.');
       return;
     }
-    act(result, form.querySelector('button'), () => request('POST', '/design/' + id + '/message', { text }), (entry) => {
+    act(result, form.querySelector('[type=submit]'), () => request('POST', '/design/' + id + '/message', { text }), (entry) => {
       if (ui.selected === id) form.elements.text.value = '';
       mark(['design/' + id + '/conversation']);
       return 'Sent; the design agent answers in its next turn (' + entry.state + ').';
@@ -3750,6 +3847,7 @@
       }, { reset: true });
     });
     const form = byId('session-form');
+    setupDictation(form, byId('session-result'), () => ui.view === 'session' ? shownSession()?.workstream : null);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const w = shownSession();
@@ -3814,6 +3912,7 @@
       }, { reset: true });
     });
     const form = byId('design-form');
+    setupDictation(form, byId('design-result'), () => ui.view === 'design' ? shownDesign()?.workstream : null);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const w = shownDesign();
@@ -3922,6 +4021,7 @@
     renderProfiles();
     renderProviders();
     renderConfig();
+    renderDictation();
     snapFeed();
   }
 
@@ -3931,6 +4031,9 @@
   setupOwnerForms();
   setupSessionForms();
   setupDesignForms();
+  window.addEventListener('pagehide', () => {
+    for (const composer of dictationComposers.values()) composer.stop();
+  });
   render();
   byId('pause-form').addEventListener('submit', pause);
   byId('priority-form').addEventListener('submit', setPriority);

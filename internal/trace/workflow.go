@@ -436,6 +436,29 @@ func (r *Repository) Transact(ctx context.Context, tx Transaction) (WorkflowStat
 	return r.transact(ctx, tx)
 }
 
+// TransactWhileFeature is Transact with an atomic check that the workstream's
+// feature still has the required value. A mismatch returns ErrFeatureState
+// without writing anything, including on a retry of a committed transaction.
+func (r *Repository) TransactWhileFeature(ctx context.Context, tx Transaction, required string) (WorkflowState, error) {
+	r, err := r.scoped(tx.Transition.Workstream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return WorkflowState{}, err
+	}
+	_, v, err := r.loadWorkflow(tx.Transition.Workstream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	if v.states[FeatureSubject].Value != required {
+		return WorkflowState{}, ErrFeatureState
+	}
+	return r.transact(ctx, tx)
+}
+
 func (r *Repository) transact(ctx context.Context, tx Transaction) (WorkflowState, error) {
 	if err := ctx.Err(); err != nil {
 		return WorkflowState{}, err
