@@ -1529,6 +1529,62 @@
         }
       }
     },
+    "/v1/images/{workstream}/{image}": {
+      "get": {
+        "summary": "Read a live PNG or JPEG attachment with nosniff",
+        "description": "Exact stored image bytes; X-Content-Type-Options: nosniff and Cache-Control: no-store. Only live PNG and JPEG attachments are served.",
+        "operationId": "getImagesByWorkstreamByImage",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "image",
+            "in": "path",
+            "description": "Recorded image ID.",
+            "required": true,
+            "schema": {
+              "description": "Recorded image ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/inbox": {
       "get": {
         "summary": "List open owner decisions",
@@ -5488,6 +5544,9 @@
           "final_review": {
             "$ref": "#/components/schemas/FeedFinalReview"
           },
+          "image": {
+            "$ref": "#/components/schemas/FeedImage"
+          },
           "kind": {
             "type": "string"
           },
@@ -5602,6 +5661,23 @@
             "type": "string"
           },
           "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedImage": {
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         },

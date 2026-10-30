@@ -202,6 +202,14 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	}()
 	repo := <-lives
 	current = repo
+	// A tool's durable effect can become visible before its MCP response
+	// reaches the chief. Restart only after the chief has finished the turn.
+	chiefSettled := func(repository *trace.Repository) bool {
+		chief, err := repository.ChiefOfStaffThread(stream)
+		return err == nil && len(chief.Turns) > 0 && !slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
+			return q.CompletedAt.IsZero()
+		})
+	}
 	// Let both masons ask their questions, then close the event window so
 	// the chief-of-staff turns that deliver the two notices are dispatched.
 	f.settle(t, s)
@@ -216,7 +224,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			return false
 		}
 		th, err := repo.Thread(stream, demoAgent)
-		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") })
+		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && chiefSettled(repo)
 	}
 	pump(s, escalatedAndAnswered)
 
@@ -299,7 +307,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	clock.Advance(time.Minute)
 	pump(s2, func() bool {
 		th, err := repo2.Thread(second, "agent_second")
-		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") })
+		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && chiefSettled(repo2)
 	})
 
 	// The owner's answer resumes the original asking role and turn in its

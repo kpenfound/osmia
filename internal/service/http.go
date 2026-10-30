@@ -27,6 +27,8 @@ func respond(w http.ResponseWriter, status int, value any) {
 func fail(w http.ResponseWriter, code Code) {
 	status, message := http.StatusInternalServerError, "operation failed"
 	switch code {
+	case NotFound:
+		status, message = 404, "record not found"
 	case NoProject:
 		status, message = 409, "no project is configured; add one with osmia project add"
 	case Malformed:
@@ -191,6 +193,9 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 const sessionCheckWriteMargin = time.Minute
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
+	if s.imageRequest(w, r) {
+		return
+	}
 	if s.engineHTTP(w, r) {
 		return
 	}

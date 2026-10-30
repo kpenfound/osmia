@@ -70,6 +70,7 @@ on /v1/events tell an open client to read this feed again.`
 var parameters = map[string]string{
 	"workstream": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
 	"project":    "Project ID.",
+	"image":      "Recorded image ID.",
 	"number":     "Inbox entry number.",
 	"unit":       "Unit ID from the workstream's plan.",
 	"amendment":  "Amendment number within the workstream.",
@@ -121,7 +122,11 @@ func Spec() ([]byte, error) {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		if route.Stream {
+		if route.Binary {
+			oc.SetDescription("Exact stored image bytes; X-Content-Type-Options: nosniff and Cache-Control: no-store. Only live PNG and JPEG attachments are served.")
+			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("image/png"))
+			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("image/jpeg"))
+		} else if route.Stream {
 			oc.SetDescription(streamDescription)
 			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("text/event-stream"))
 		} else {

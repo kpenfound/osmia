@@ -39,7 +39,7 @@ func newSessionControlsFixture(t *testing.T, configure ...func(*Options)) (*Serv
 	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	demoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 	engine := &sessionEngine{}
-	enforced := Enforce(opts, Enforcement{Engine: engine})
+	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: sessionImageHosts()})
 	opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))

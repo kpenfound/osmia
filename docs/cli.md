@@ -1039,3 +1039,8 @@ Startup and reload only create a missing managed engine or start a stopped
 one. A running engine keeps its version across reloads; status reports a
 configuration mismatch until an idle `osmia engine restart` applies the new
 version.
+
+`osmia feed <workstream-id|workgroup-id> [--json]` reads the feed for a
+workstream, exploratory session or shared workgroup conversation. Image entries
+print an `[image: URL]` placeholder. An archived member's image reference prints
+`image removed when <member> was archived`; its image is no longer available.

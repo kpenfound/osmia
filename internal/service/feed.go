@@ -31,7 +31,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 
 // feedEntries merges the workstream's records into one feed ordered by time.
 // Entries recorded at the same time keep the conversation first, then
-// statuses, transitions, sessions and check/review entries. chief is the repository the
+// statuses, transitions, sessions, check/review entries and images. chief is the repository the
 // workstream's chief-of-staff conversation is read from: repository itself,
 // unless stream belongs to a cross-repo workgroup, whose shared thread
 // lives only in that workgroup's own trace.
@@ -75,6 +75,11 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	out = append(out, checks...)
+	images, err := memberImageEntries(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, images...)
 	slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
 	return out, nil
 }

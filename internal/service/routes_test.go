@@ -18,6 +18,7 @@ var routeSamples = strings.NewReplacer(
 	"{project}", string(project),
 	"{number}", "1",
 	"{unit}", "u1",
+	"{image}", "image-unknown",
 	"{amendment}", "1",
 	"{question}", "1",
 	"{criterion}", "spec#1",
