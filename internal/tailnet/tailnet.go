@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/redact"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
 
@@ -29,6 +31,9 @@ type Listener interface {
 	Names(context.Context) []string
 	// State reports whether the node is up, connecting or waiting for login.
 	State(context.Context) api.TailnetStatus
+	// HTTPS opens TLS on port 443 using a certificate for the full MagicDNS
+	// name, returned alongside the listener. Failure leaves HTTP serving.
+	HTTPS(context.Context) (net.Listener, string, error)
 	// Leave leaves the tailnet, which ends every connection still open.
 	Leave() error
 }
@@ -79,6 +84,50 @@ func JoinTailscale(logger *slog.Logger) Join {
 type tsnetListener struct {
 	net.Listener
 	server *tsnet.Server
+}
+
+func (l tsnetListener) HTTPS(ctx context.Context) (net.Listener, string, error) {
+	client, err := l.server.LocalClient()
+	if err != nil {
+		return nil, "", err
+	}
+	return listenHTTPS(ctx, client, l.server.Listen)
+}
+
+type certificateClient interface {
+	StatusWithoutPeers(context.Context) (*ipnstate.Status, error)
+	CertPair(context.Context, string) ([]byte, []byte, error)
+	GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
+}
+
+func listenHTTPS(ctx context.Context, client certificateClient, listen func(string, string) (net.Listener, error)) (net.Listener, string, error) {
+	status, err := client.StatusWithoutPeers(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if status.Self == nil {
+		return nil, "", errors.New("the node has no MagicDNS name")
+	}
+	name := strings.TrimSuffix(status.Self.DNSName, ".")
+	if !strings.HasSuffix(name, ".ts.net") {
+		return nil, "", errors.New("the node has no full MagicDNS name")
+	}
+	if !containsFold(status.CertDomains, name) {
+		return nil, "", errors.New("enable HTTPS certificates in the tailnet admin console for " + name)
+	}
+	// Fetch ahead of serving so issuance failures are visible without a handshake.
+	certPEM, keyPEM, err := client.CertPair(ctx, name)
+	if err == nil {
+		_, err = tls.X509KeyPair(certPEM, keyPEM)
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("certificate for %s: %w", name, err)
+	}
+	listener, err := listen("tcp", ":443")
+	if err != nil {
+		return nil, "", err
+	}
+	return tls.NewListener(listener, &tls.Config{GetCertificate: client.GetCertificate}), name, nil
 }
 
 func (l tsnetListener) Leave() error {
@@ -162,9 +211,14 @@ type taggedConn struct {
 
 func ConnContext(ctx context.Context, conn net.Conn) context.Context {
 	if c, ok := conn.(taggedConn); ok {
-		return context.WithValue(ctx, listenerKindKey{}, c.Kind)
+		return WithKind(ctx, c.Kind)
 	}
 	return ctx
+}
+
+// WithKind tags a connection context with the listener that accepted it.
+func WithKind(ctx context.Context, kind ListenerKind) context.Context {
+	return context.WithValue(ctx, listenerKindKey{}, kind)
 }
 
 // ArrivedOn reports the kind of listener r arrived on, or zero for the Unix
@@ -202,6 +256,9 @@ type Link struct {
 	mu   sync.Mutex
 	node Listener // nil while the tailnet is down
 	down string   // why there is no node
+	// HTTPSEnabled is fixed at startup.
+	HTTPSEnabled                          bool
+	httpsState, httpsReason, httpsAddress string
 }
 
 func (l *Link) Current() Listener {
@@ -214,6 +271,14 @@ func (l *Link) Set(node Listener, down string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.node, l.down = node, down
+	l.httpsState, l.httpsAddress = api.TailnetHTTPSUnavailable, ""
+	l.httpsReason = "HTTPS is being set up"
+	if node == nil {
+		l.httpsReason = "the tailnet node is unavailable: " + down
+	}
+	if !l.HTTPSEnabled {
+		l.httpsState, l.httpsReason = api.TailnetHTTPSOff, "disabled by listen.tailnet_https"
+	}
 }
 
 // Status returns the current node state, bounding the node query to one second.
@@ -221,16 +286,25 @@ func (l *Link) Status(ctx context.Context) *api.TailnetStatus {
 	if l == nil {
 		return nil
 	}
-	node := l.Current()
-	if node == nil {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		return &api.TailnetStatus{State: api.TailnetDown, Reason: l.down}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	state := api.TailnetStatus{State: api.TailnetDown, Reason: l.down}
+	if l.node != nil {
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		state = l.node.State(ctx)
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	state := node.State(ctx)
+	state.HTTPSState, state.HTTPSReason, state.HTTPSAddress = l.httpsState, l.httpsReason, l.httpsAddress
 	return &state
+}
+
+// SetHTTPS records a listener's state only while its node is current.
+func (l *Link) SetHTTPS(node Listener, state, reason, address string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.node == node {
+		l.httpsState, l.httpsReason, l.httpsAddress = state, reason, address
+	}
 }
 
 // Names returns the names of the current node, or none while it is down.

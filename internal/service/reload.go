@@ -228,6 +228,9 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	if next.Listen.Tailnet != cfg.Listen.Tailnet {
 		restart = append(restart, "listen.tailnet")
 	}
+	if next.Listen.TailnetHTTPS != cfg.Listen.TailnetHTTPS {
+		restart = append(restart, "listen.tailnet_https")
+	}
 	if next.Listen != cfg.Listen {
 		pinned := *next
 		pinned.Listen = cfg.Listen

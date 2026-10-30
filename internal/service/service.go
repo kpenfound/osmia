@@ -392,7 +392,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 	}
 	if cfg.Listen.Tailnet != "" {
-		s.tailnet, s.tailnetDone = &tailnet.Link{}, make(chan struct{})
+		s.tailnet, s.tailnetDone = &tailnet.Link{HTTPSEnabled: cfg.Listen.TailnetHTTPS}, make(chan struct{})
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
@@ -787,6 +787,7 @@ func (s *Service) cleanupSocket() {
 		if node := s.tailnet.Current(); node != nil {
 			node.Close()
 			node.Leave()
+			s.tailnet.Set(nil, "the service has stopped")
 		}
 	}
 	if info, err := os.Lstat(s.cfg.Listen.Socket); err == nil && os.SameFile(info, s.socketInfo) {

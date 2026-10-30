@@ -178,6 +178,12 @@ const TailnetNeedsLogin = api.TailnetNeedsLogin
 
 const TailnetDown = api.TailnetDown
 
+const TailnetHTTPSOff = api.TailnetHTTPSOff
+
+const TailnetHTTPSUp = api.TailnetHTTPSUp
+
+const TailnetHTTPSUnavailable = api.TailnetHTTPSUnavailable
+
 type TailnetStatus = api.TailnetStatus
 
 type Diagnostic = api.Diagnostic

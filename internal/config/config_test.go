@@ -776,3 +776,22 @@ func TestProjectGitOperationCapacity(t *testing.T) {
 		t.Fatalf("git operation capacity: %+v", c.Project.Capacity)
 	}
 }
+
+// Serial: the configuration fixture sets environment variables.
+func TestListenTailnetHTTPS(t *testing.T) {
+	for _, tc := range []struct {
+		setting string
+		want    bool
+	}{{"", true}, {"tailnet_https = true", true}, {"tailnet_https = false", false}} {
+		c, err := Load(fixture(t, topConfig+"[listen]\n"+tc.setting+"\n", projectConfig))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Listen.TailnetHTTPS != tc.want {
+			t.Fatalf("%s: HTTPS = %v", tc.setting, c.Listen.TailnetHTTPS)
+		}
+	}
+	if _, err := Load(fixture(t, topConfig+"[listen]\ntailnet_https = 'false'\n", projectConfig)); err == nil {
+		t.Fatal("accepted non-boolean HTTPS setting")
+	}
+}
