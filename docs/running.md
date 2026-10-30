@@ -278,6 +278,18 @@ When the connection drops, the page shows that it is reconnecting and retries
 with a growing delay up to 10 seconds, immediately when the browser comes back
 online or the page becomes visible again.
 
+## Dictation
+
+Each conversation composer offers a microphone when the browser supports speech
+recognition and the page uses HTTPS or localhost. On a plain HTTP tailnet page,
+the composer offers a link to HTTPS when it is available, keeping the selected
+conversation. Tap the microphone to start or stop dictation, edit the text, then
+press Send. Dictation never sends a message automatically.
+The Settings menu shows the tailnet HTTPS address or the reason it is unavailable.
+
+Dictation uses the browser's speech recognition. Osmia never receives audio:
+Chrome sends audio to Google for processing, and Safari sends audio to Apple.
+
 ## Sessions
 
 A session is a lighter-weight workstream for exploratory work: a direct chat

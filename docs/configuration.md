@@ -291,6 +291,11 @@ Transparency logs: the name becomes public, but access does not. HTTPS setup
 or listener failures leave HTTP on port 80 serving; status reports HTTPS as
 unavailable with a reason. HTTP does not redirect to HTTPS.
 
+Dictation uses the browser's speech recognition over HTTPS or localhost.
+Osmia never receives audio: Chrome sends audio to Google for processing, and
+Safari sends audio to Apple. See [dictation](running.md#dictation) for use in
+conversation composers.
+
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long

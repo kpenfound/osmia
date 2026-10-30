@@ -1613,13 +1613,32 @@
 
   const dictationComposers = new Map();
 
-  // This is the visibility hook for browsers that need a secure-page link.
-  function renderDictationAvailability(button) {
+  function dictationHTTPSAddress() {
+    const tailnet = views.status?.tailnet;
+    // The web listener accepts only localhost hosts; a non-localhost page
+    // served by Osmia comes through the tailnet listener.
+    if (window.isSecureContext || location.protocol !== 'http:' ||
+        location.hostname === 'localhost' || location.hostname.endsWith('.localhost') ||
+        tailnet?.https_state !== 'up' || !tailnet.https_address) return '';
+    const address = new URL(tailnet.https_address);
+    address.pathname = location.pathname;
+    address.search = location.search;
+    address.hash = location.hash;
+    return address.href;
+  }
+
+  function renderDictationAvailability(button, link) {
     button.hidden = !window.isSecureContext || !(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const address = dictationHTTPSAddress();
+    link.hidden = !address;
+    if (address) link.href = address;
+    else link.removeAttribute('href');
   }
 
   function setupDictation(form, result, owner) {
     const button = form.querySelector('[aria-label="Dictate"]');
+    const link = el('a', { class: 'dictation-https', hidden: true }, 'Use HTTPS for dictation');
+    button.before(link);
     const text = form.elements.text;
     let current = null;
     button.setAttribute('aria-pressed', 'false');
@@ -1635,7 +1654,7 @@
       return current === session && owner() === session.owner;
     }
     function render() {
-      renderDictationAvailability(button);
+      renderDictationAvailability(button, link);
       button.disabled = text.disabled || form.querySelector('[type=submit]').disabled;
       if (current && (!active(current) || !form.isConnected || button.hidden || button.disabled)) finish();
     }
@@ -2540,6 +2559,11 @@
   // renderHeader shows the slots in use per role, the pauses in force and
   // whether a reload has something to apply.
   function renderHeader() {
+    const tailnet = views.status?.tailnet;
+    const https = byId('tailnet-https-status');
+    https.hidden = !tailnet;
+    https.textContent = tailnet ? 'Tailnet HTTPS: ' + (tailnet.https_state === 'up'
+      ? tailnet.https_address || tailnet.https_state : tailnet.https_state + (tailnet.https_reason ? ' — ' + tailnet.https_reason : '')) : '';
     const capacity = views.status ? views.status.capacity : null;
     const meters = byId('meters');
     if (!capacity) {
