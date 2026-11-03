@@ -14,15 +14,13 @@ import (
 	"github.com/kpenfound/osmia/internal/gitdiff"
 )
 
-// Task names the judgment. Bump Version whenever its questions, their
-// interpretation or Threshold change.
+// Task names the judgment. Bump Version whenever its questions or their
+// interpretation change. The threshold is configured, and each judgment's
+// identity includes the one it applied.
 const (
 	Task    = "check-selection"
 	Version = 2
 )
-
-// Threshold is the probability at or above which a check is selected.
-const Threshold = 0.5
 
 // MaxQuestions bounds the checks asked about in one judgment; a project with
 // more is asked about its collections' items, collapsed as Candidates

@@ -75,17 +75,19 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 	if !ok {
 		return FullSelection(SelectionTooLarge, "the changed files do not fit a judgment")
 	}
+	threshold := j.Config().CheckThreshold
 	decision := j.Evaluate(ctx, repository, jev.Judgment{
-		Scope:   scope,
-		Cause:   cause,
-		Depth:   1,
-		Task:    checkselect.Task,
-		Version: checkselect.Version,
-		Sources: sources,
-		Request: checkselect.Request(state, candidates),
+		Scope:      scope,
+		Cause:      cause,
+		Depth:      1,
+		Task:       checkselect.Task,
+		Version:    checkselect.Version,
+		Acceptance: fmt.Sprintf("threshold=%g", threshold),
+		Sources:    sources,
+		Request:    checkselect.Request(state, candidates),
 		Accept: func(r systemone.Response) string {
-			if len(checkselect.Selected(r, candidates, checkselect.Threshold)) == 0 {
-				return fmt.Sprintf("no check reached probability %.2f", checkselect.Threshold)
+			if len(checkselect.Selected(r, candidates, threshold)) == 0 {
+				return fmt.Sprintf("no check reached probability %.2f", threshold)
 			}
 			return ""
 		},
@@ -96,5 +98,5 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 		s.Candidates = len(candidates)
 		return s
 	}
-	return api.CheckSelection{Mode: SelectionSelected, Links: checkselect.Selected(*decision.Response, candidates, checkselect.Threshold), Candidates: len(candidates), Judgment: decision.ID}
+	return api.CheckSelection{Mode: SelectionSelected, Links: checkselect.Selected(*decision.Response, candidates, threshold), Candidates: len(candidates), Judgment: decision.ID}
 }

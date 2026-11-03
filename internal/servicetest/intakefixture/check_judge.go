@@ -10,6 +10,6 @@ import (
 
 // CheckJudge supplies deterministic smart-check selection for fixture controllers.
 func CheckJudge(now func() time.Time, p *jevtest.Provider) *jev.Judge {
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s"}
+	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: config.DefaultJevCheckThreshold}
 	return &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: now}
 }

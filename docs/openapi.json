@@ -4373,6 +4373,10 @@
           "api_key_env": {
             "type": "string"
           },
+          "check_threshold": {
+            "format": "double",
+            "type": "number"
+          },
           "enabled": {
             "type": "boolean"
           },

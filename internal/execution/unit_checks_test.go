@@ -158,6 +158,54 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	}
 }
 
+// The selection applies the configured threshold, and a decision is reused only
+// under the threshold it was made with, so a reload never reinterprets one.
+func TestChecksApplyTheConfiguredThreshold(t *testing.T) {
+	t.Parallel()
+	links := []string{
+		"dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestBuilt",
+		"dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestChunks",
+		"dag+check://release/version-round-trip",
+	}
+	checks := &fakeChecks{Links: links, Outcomes: passing()}
+	f, stream, repository := newChecksFixture(t, "checks-threshold", checks)
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
+		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.55), "check-2": jevtest.Noul(0.02)}}}}}
+	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: 0.9}
+	f.s.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
+
+	runChecks(t, f.s, repository, stream)
+	run := onlyRun(t, repository, stream)
+	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, links[:1]) {
+		t.Fatalf("selection at 0.9: %+v", run.Selection)
+	}
+
+	c := &checkers{masons: f.controller()}
+	ops, err := checkOperations(repository, stream)
+	must(t, err)
+	g, err := newUnitWorkspaces(f.cfg, repository).Of(stream)
+	must(t, err)
+	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
+	must(t, err)
+	selectAt := func(threshold float64) api.CheckSelection {
+		settings.CheckThreshold = threshold
+		return c.selectChecks(context.Background(), ops[0].input, t.TempDir(), diff, checks)
+	}
+
+	lower := selectAt(0.5)
+	if lower.Mode != checkrun.SelectionSelected || !slices.Equal(lower.Links, links[:2]) || lower.Judgment == run.Selection.Judgment || len(p.Requests()) != 2 {
+		t.Fatalf("selection at 0.5: %+v after %d requests", lower, len(p.Requests()))
+	}
+	above := selectAt(0.99)
+	if above.Mode != checkrun.SelectionFull || above.Reason != string(jev.ReasonDeclined) || !strings.Contains(above.Detail, "probability 0.99") || len(above.Links) != 0 || len(p.Requests()) != 3 {
+		t.Fatalf("selection at 0.99: %+v after %d requests", above, len(p.Requests()))
+	}
+	again := selectAt(0.9)
+	if again.Mode != checkrun.SelectionSelected || !slices.Equal(again.Links, links[:1]) || again.Judgment != run.Selection.Judgment || len(p.Requests()) != 3 {
+		t.Fatalf("selection back at 0.9: %+v after %d requests", again, len(p.Requests()))
+	}
+}
+
 func TestChecksFallBackToEveryCheck(t *testing.T) {
 	t.Parallel()
 	many := make([]string, checkselect.MaxQuestions+1)

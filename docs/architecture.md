@@ -164,9 +164,11 @@ agentcore `jev/systemone` request, and an acceptance function
 holding the task's thresholds. Two rules keep recorded decisions meaningful:
 
 - Bump the version whenever the questions, the meaning given to their answers
-  or the thresholds change. The request is part of a judgment's identity, but
-  the acceptance function is not, so a changed threshold under the same
-  version leaves earlier decisions as they were recorded.
+  or the thresholds held in code change. The request is part of a judgment's
+  identity, but the acceptance function is not, so a changed threshold under
+  the same version leaves earlier decisions as they were recorded. A threshold
+  the owner configures, such as the check selection's, goes in the judgment's
+  `Acceptance` value instead, which is part of its identity and record.
 - Use the answers only when the decision is `Accepted`. A fallback, whatever
   its reason, takes the path the workflow takes with the boost off, so that
   path must exist and be the one tested with Jev disabled. A declined

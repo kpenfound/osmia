@@ -71,7 +71,7 @@ func (h harness) parse(args []string) (options, error) {
 	fs.BoolVar(&o.verbose, "v", false, "show the changed files, Jev's answers and the selection")
 	fs.BoolVar(&o.verbose, "verbose", false, "same as -v")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "print the selected check links instead of running them")
-	fs.Float64Var(&o.threshold, "threshold", checkselect.Threshold, "select checks at or above this `probability`")
+	fs.Float64Var(&o.threshold, "threshold", config.DefaultJevCheckThreshold, "select checks at or above this `probability`")
 	fs.StringVar(&o.url, "url", config.DefaultJevURL, "base `URL` of the TypeSafe-compatible API")
 	fs.StringVar(&o.model, "model", config.DefaultJevModel, "Jev `model` to ask")
 	fs.StringVar(&o.keyEnv, "api-key-env", config.DefaultJevAPIKeyEnv, "environment `variable` holding the API key")

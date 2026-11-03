@@ -53,8 +53,9 @@ requested tests exist and exercise the behaviour.
    generated files the change affects. The service's `jev.Judge` sends it as
    task `check-selection`, with the request timeout, retry and cool-down every
    judgment shares.
-7. **Accept.** The links whose probability is at least 0.5 are selected. A
-   response that selects none is declined, and the run checks everything.
+7. **Accept.** The links whose probability is at least
+   [`jev.check_threshold`](configuration.md#optional-jev-boost), 0.5 by
+   default, are selected. A response that selects none is declined, and the run checks everything.
 8. **Run.** `dagger check --progress=report --fail-fast --parallel 4` runs with
    the selected links, or with none to run every check, bounded by the
    project's `checks_timeout`. At most four checks run concurrently.
@@ -124,13 +125,13 @@ asked:
 | `change_too_large` | The changed files alone do not fit the state |
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
-when no check reached 0.5, `unconfigured`, `cooling_down`, `timeout`,
+when no check reached the threshold, `unconfigured`, `cooling_down`, `timeout`,
 `rate_limited`, `unavailable`, `rejected`, `unusable`, `interrupted`,
 `unrecorded` or `cancelled`.
 
 The judgment itself is recorded under the workstream as
-`judgments/<id>.json`, with the request (or its digest above 64 KiB), the
-configured and resolved model, every answer with its probability, the outcome
+`judgments/<id>.json`, with the threshold it applied, the request (or its
+digest above 64 KiB), the configured and resolved model, every answer with its probability, the outcome
 and usage. Its cost enters the ledger under the `jev` role. A declined
 judgment keeps its answers for evaluation; they never select checks.
 
@@ -162,7 +163,7 @@ shutdown error after all checks passed.
 ## Restarts and new runs
 
 A unit judgment is identified by the check run that asked, the task, its
-version and the exact request. A unit run retried after a restart reads back
+version, the threshold and the exact request. A unit run retried after a restart reads back
 its selection record, including a full run's fallback, instead of listing or
 asking again. Recording the same run again keeps one selection record. A new run, for a revised or rebased
 candidate, asks afresh. A judgment interrupted twice falls back as
@@ -171,8 +172,8 @@ candidate, asks afresh. A judgment interrupted twice falls back as
 Final-review judgments are keyed by the review number and rebased commit,
 not the attempt number. An incomplete run's retry or an attempt resumed after
 a service restart lists the checks again and reuses the recorded judgment
-for the same request. A new review, commit or changed judgment input asks
-afresh. Each attempt keeps its own start and result evidence.
+for the same request and threshold. A new review, commit or changed judgment
+input asks afresh. Each attempt keeps its own start and result evidence.
 
 ## What Jev sees
 
@@ -194,7 +195,7 @@ collections runs more than it would with each link judged.
 
 | Part | Code |
 | --- | --- |
-| Questions, state, narrowing, threshold and version | [checkselect](../internal/checkselect) |
+| Questions, state, narrowing, selection and version | [checkselect](../internal/checkselect) |
 | The check run, its record and the selection's fallbacks | [service](../internal/service): `unit_checks.go`, `final_checks.go`, `session_controls.go`, `smart_checks.go`, `review_checks.go` |
 | Recording and reuse shared by every judgment | [jev](../internal/jev) |
 | The System One API client, retries and cool-down | agentcore `jev` and `jev/systemone` |
@@ -227,7 +228,7 @@ with `dagger check`'s status.
 | `-v`, `--verbose` | off | Print the changed files, each candidate's probability and the selection to standard error |
 | `--dry-run` | off | Print the selected links, or `every check`, instead of running them |
 | `--base` | `main` | Compare against the merge base of this revision |
-| `--threshold` | `0.5` | The probability a check needs to be selected |
+| `--threshold` | the `[jev]` default, `0.5` | The probability a check needs to be selected |
 | `-C` | `.` | Run in another working tree |
 | `--model`, `--url` | the `[jev]` defaults | Which Jev model to ask, and where |
 | `--api-key-env` | `OPENROUTER_API_KEY` | The variable holding the API key; the command stops when it is unset |
@@ -257,8 +258,10 @@ rather than in a fresh export with a scrubbed one.
    a versioned model, since thresholds are tuned against one.
 2. Try other thresholds with `--threshold` until misses and over-selection
    are acceptable.
-3. Change `checkselect.Threshold`, or the questions and state in
-   `checkselect`, and bump `checkselect.Version`, so earlier recorded
-   decisions stay as they were made.
-4. Update the selection tests in `internal/checkselect`,
-   `internal/service/unit_checks_test.go` and `cmd/smartcheck`.
+3. Set `check_threshold` in `[jev]` and run `osmia reload`. Each judgment
+   records the threshold it applied and a changed value is a new judgment, so
+   earlier decisions stay as they were made.
+4. A change to the questions or state in `checkselect` also bumps
+   `checkselect.Version` and updates the selection tests in
+   `internal/checkselect`, `internal/execution/unit_checks_test.go` and
+   `cmd/smartcheck`.

@@ -74,7 +74,7 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
-	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s"}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
+	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
 		t.Fatalf("jev defaults: %+v", c.Jev)
 	}
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
@@ -105,6 +105,18 @@ func TestJevBoostIsOneSwitch(t *testing.T) {
 	c, err := Load(fixture(t, topConfig+"[jev]\nenabled = true\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
 	if err != nil || !c.Jev.Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
 		t.Fatalf("jev: %+v %v", c.Jev, err)
+	}
+}
+
+func TestJevCheckThreshold(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  float64
+	}{{"0.7", 0.7}, {"1", 1}} {
+		cfg, err := Load(fixture(t, topConfig+"[jev]\ncheck_threshold = "+c.value+"\n", projectConfig))
+		if err != nil || cfg.Jev.CheckThreshold != c.want {
+			t.Fatalf("check_threshold = %s: %+v %v", c.value, cfg, err)
+		}
 	}
 }
 
@@ -289,6 +301,10 @@ func TestInvalid(t *testing.T) {
 		{"jev key value", topConfig + "[jev]\napi_key_env = 'sk-or-123'\n", "", "jev.api_key_env"},
 		{"jev timeout long", topConfig + "[jev]\ntimeout = '5m'\n", "", "jev.timeout"},
 		{"jev timeout zero", topConfig + "[jev]\ntimeout = '0s'\n", "", "jev.timeout"},
+		{"jev check threshold zero", topConfig + "[jev]\ncheck_threshold = 0\n", "", "jev.check_threshold"},
+		{"jev check threshold negative", topConfig + "[jev]\ncheck_threshold = -0.1\n", "", "jev.check_threshold"},
+		{"jev check threshold above one", topConfig + "[jev]\ncheck_threshold = 1.5\n", "", "jev.check_threshold"},
+		{"jev check threshold nan", topConfig + "[jev]\ncheck_threshold = nan\n", "", "jev.check_threshold"},
 		{"jev unknown key", topConfig + "[jev]\nclassification = true\n", "", "jev.classification"},
 		{"beekeeper unknown key", topConfig + "[beekeeper]\nfoo = 1\n", "", "beekeeper.foo"},
 		{"pause override", topConfig + "[pause]\n", "", "runtime overrides belong in runtime.json"},

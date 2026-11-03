@@ -1059,6 +1059,9 @@ model = "~typesafe/jev-latest"
 api_key_env = "OPENROUTER_API_KEY"
 # How long one request may take, at most 1m.
 timeout = "10s"
+# The probability at or above which smart checks run a check, above 0 and at
+# most 1. Tune it against a versioned model.
+check_threshold = 0.5
 ```
 
 The settings are validated whether or not the boost is on, and apply through
@@ -1086,7 +1089,9 @@ names its judgment, which the chief of staff's notice cites.
 
 With the boost on, a unit's check run lists the project's checks with
 `dagger list checks --all --format=link` and asks Jev which of them the
-candidate's changed files can affect, then runs only those links. A project
+candidate's changed files can affect, then runs the links at or above
+`check_threshold`. A lower value runs more checks and is less likely to miss
+an affected one. A project
 with more than 128 check links is asked about its collections' items, such as
 a Go package's tests rather than each test. When Jev selects no check, or any
 judgment fallback applies, the run checks everything, and the run records why.

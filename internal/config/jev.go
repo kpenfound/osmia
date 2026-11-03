@@ -16,6 +16,10 @@ const (
 	DefaultJevTimeout   = "10s"
 )
 
+// DefaultJevCheckThreshold is the probability at or above which the check
+// selection runs a check.
+const DefaultJevCheckThreshold = 0.5
+
 // MaxJevTimeout bounds one Jev request, so a judgment never holds a turn for
 // long.
 const MaxJevTimeout = jev.MaxTimeout
@@ -32,10 +36,13 @@ type Jev struct {
 	Model     string `toml:"model" json:"model"`
 	APIKeyEnv string `toml:"api_key_env" json:"api_key_env"`
 	Timeout   string `toml:"timeout" json:"timeout"`
+	// CheckThreshold is the probability at or above which the check selection
+	// runs a check, above 0 and at most 1.
+	CheckThreshold float64 `toml:"check_threshold" json:"check_threshold"`
 }
 
 func defaultJev() Jev {
-	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout}
+	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout, CheckThreshold: DefaultJevCheckThreshold}
 }
 
 // Settings are j as a Jev judge reads them, with the timeout parsed.
@@ -59,6 +66,9 @@ func (j Jev) validate(path string) error {
 	}
 	if d, err := time.ParseDuration(j.Timeout); err != nil || d <= 0 || d > MaxJevTimeout {
 		return fieldError(path, "jev.timeout", "must be a positive Go duration of at most 1m")
+	}
+	if !(j.CheckThreshold > 0 && j.CheckThreshold <= 1) {
+		return fieldError(path, "jev.check_threshold", "must be a probability above 0 and at most 1")
 	}
 	return nil
 }

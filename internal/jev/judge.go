@@ -58,11 +58,16 @@ type Judgment struct {
 	Depth int
 	// Task names what is judged, in lowercase letters, digits and hyphens.
 	// Version numbers its questions, the meaning given to their answers and
-	// Accept's thresholds; bump it whenever any of them changes. Decisions
-	// recorded under the old version stay as they were.
+	// the thresholds Accept holds in code; bump it whenever any of them
+	// changes. Decisions recorded under the old version stay as they were.
 	Task    string
 	Version int
-	Sources []Source
+	// Acceptance names the configured values Accept applies, such as a
+	// threshold the owner sets. It is part of the judgment's identity and
+	// record, so a changed value is a new judgment and a recorded decision
+	// keeps the value it was made with.
+	Acceptance string
+	Sources    []Source
 	// Request is the state and questions sent. Include only what the
 	// question needs; it is recorded in the trace.
 	Request systemone.Request
@@ -115,6 +120,8 @@ type Record struct {
 	Scope   coreadapter.Scope `json:"scope"`
 	Task    string            `json:"task"`
 	Version int               `json:"version"`
+	// Acceptance is the judgment's configured acceptance values.
+	Acceptance string `json:"acceptance,omitempty"`
 	// Model is the configured model; ResolvedModel the versioned model
 	// that answered.
 	Model   string   `json:"model"`
@@ -199,8 +206,8 @@ var traceKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 // Evaluate returns the judgment's decision; repo is the trace of the
 // judgment's project. While the boost is off it returns a disabled fallback
 // and neither sends nor records anything. Otherwise the
-// judgment is identified by its cause, task, version and exact request, so
-// the same judgment asked again, after a restart included, returns the
+// judgment is identified by its cause, task, version, acceptance and exact
+// request, so the same judgment asked again, after a restart included, returns the
 // decision recorded the first time instead of asking again, and changed
 // inputs are a new judgment. Every failure is a fallback; Evaluate never
 // returns accepted answers it could not record. It waits for at most two
@@ -222,7 +229,11 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		return Decision{Outcome: Fallback, Reason: ReasonRejected, Detail: err.Error()}
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(body))
-	identity, _ := json.Marshal([]any{judgment.Cause, judgment.Task, judgment.Version, digest})
+	parts := []any{judgment.Cause, judgment.Task, judgment.Version, digest}
+	if judgment.Acceptance != "" {
+		parts = append(parts, judgment.Acceptance)
+	}
+	identity, _ := json.Marshal(parts)
 	id := fmt.Sprintf("judgment_%x", sha256.Sum256(identity))
 	stream := config.WorkstreamID(judgment.Scope.Workstream)
 
@@ -233,7 +244,7 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	if revision > 0 && latest.State != StateStarted {
 		return latest.decision(id, true)
 	}
-	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
+	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Acceptance: judgment.Acceptance, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
 	if len(body) <= maxRecordedRequest {
 		base.Request = body
 	}

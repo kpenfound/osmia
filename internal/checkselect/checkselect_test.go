@@ -84,10 +84,10 @@ func TestSelectedAppliesTheThreshold(t *testing.T) {
 	}
 	response := systemone.Response{Answers: map[string]systemone.Answer{
 		Question(0): {Kind: systemone.KindNoul, Noul: 0.9},
-		Question(1): {Kind: systemone.KindNoul, Noul: Threshold},
+		Question(1): {Kind: systemone.KindNoul, Noul: 0.5},
 		Question(2): {Kind: systemone.KindNoul, Noul: 0.29},
 	}}
-	if got, want := Selected(response, candidates, Threshold), candidates[:2]; !slices.Equal(got, want) {
+	if got, want := Selected(response, candidates, 0.5), candidates[:2]; !slices.Equal(got, want) {
 		t.Fatalf("selected %q, want %q", got, want)
 	}
 	if got := Selected(response, candidates, 0.95); got != nil {

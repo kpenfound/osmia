@@ -224,9 +224,15 @@ func TestChangedInputsAreANewJudgment(t *testing.T) {
 	third := j.Evaluate(context.Background(), f.repo, newer)
 	settings.Model = "jev-1.13.0"
 	fourth := j.Evaluate(context.Background(), f.repo, judgment("Done."))
-	ids := map[string]bool{first.ID: true, second.ID: true, third.ID: true, fourth.ID: true}
-	if len(ids) != 4 || len(p.Requests()) != 4 || second.Recovered || third.Recovered || fourth.Recovered {
+	stricter := judgment("Done.")
+	stricter.Acceptance = "threshold=0.9"
+	fifth := j.Evaluate(context.Background(), f.repo, stricter)
+	ids := map[string]bool{first.ID: true, second.ID: true, third.ID: true, fourth.ID: true, fifth.ID: true}
+	if len(ids) != 5 || len(p.Requests()) != 5 || second.Recovered || third.Recovered || fourth.Recovered || fifth.Recovered {
 		t.Fatalf("ids = %v, requests = %d", ids, len(p.Requests()))
+	}
+	if records := f.records(t, fifth.ID); records[len(records)-1].Acceptance != "threshold=0.9" {
+		t.Fatalf("judgment records %+v", records)
 	}
 }
 
