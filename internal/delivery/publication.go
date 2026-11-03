@@ -325,9 +325,11 @@ func (p *Publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 // workstream recorded, it is pushed with that commit as the expected one;
 // at any other commit the publication is refused. An existing pull request
 // must match the approved base, description and current branch tip before a
-// push. final/publication.json records the delivery commit before the push.
-// After the push the pull request head is checked at the delivery commit; if
-// none exists, one is opened and checked. A maintenance retarget instead
+// push, or be otherwise matching with its head still at a commit an earlier
+// publication recorded. final/publication.json records the delivery commit
+// before the push. After the push the pull request head is checked at the
+// delivery commit, and a head still at such a recorded commit leaves the
+// operation pending; if none exists, one is opened and checked. A maintenance retarget instead
 // reconciles the recorded request and updates its base and approved text. One commit then records the opened
 // publication, the workstream's move to delivered with a notice, and the
 // publication's outcome. A refusal records the reason and tells the chief of
@@ -475,7 +477,7 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if in.Retarget != nil && len(before) == 0 {
 		return p.Refuse(ctx, stream, in, "the delivered pull request is missing")
 	}
-	if len(before) != 0 && (len(before) != 1 || !MatchingPublicationPR(before[0], in, branch, title, approval.Description, tip) && !MatchingRetargetPR(before[0], in, branch, tip)) {
+	if len(before) != 0 && (len(before) != 1 || !MatchingPublicationPR(before[0], in, branch, title, approval.Description, tip) && !MatchingRetargetPR(before[0], in, branch, tip) && !pullRequestHeadBehind(before[0], in, branch, title, approval.Description, tip, prior)) {
 		return p.RefusePR(ctx, stream, in, branch, published, before)
 	}
 	if !exists || tip != published {
@@ -497,6 +499,9 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	found, err := client.Find(ctx, in.Upstream, in.Fork, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if len(found) == 1 && pullRequestHeadBehind(found[0], in, branch, title, approval.Description, published, prior) {
+		return coreadapter.OperationResult{}, fmt.Errorf("pull request #%d of %s is still at %s after %s was pushed to %s", found[0].Number, in.Upstream, found[0].HeadCommit, published, branch)
 	}
 	if in.Retarget != nil {
 		if len(found) != 1 || found[0].Number != in.Retarget.Number || found[0].URL != in.Retarget.URL {
@@ -562,6 +567,21 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 
 func MatchingPublicationPR(pr pulls.PullRequest, in PublishInput, branch, title, description, commit string) bool {
 	return (!in.Draft || pr.Draft) && (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Title == title && pr.Body == description
+}
+
+// pullRequestHeadBehind reports whether pr is the expected pull request in
+// every way except a head that has not reached tip yet: it is still at a commit
+// an earlier publication of the workstream recorded. The host moves a pull
+// request's head shortly after its branch moves, so this is a state to wait out
+// rather than a conflict to refuse.
+func pullRequestHeadBehind(pr pulls.PullRequest, in PublishInput, branch, title, description, tip string, prior []DeliveryPublication) bool {
+	if pr.HeadCommit == tip || !slices.ContainsFunc(prior, func(d DeliveryPublication) bool {
+		return d.Commit == pr.HeadCommit && d.Branch == branch && d.Fork == in.Fork
+	}) {
+		return false
+	}
+	pr.HeadCommit = tip
+	return MatchingPublicationPR(pr, in, branch, title, description, tip) || MatchingRetargetPR(pr, in, branch, tip)
 }
 
 func (p *Publisher) RefusePR(ctx context.Context, stream config.WorkstreamID, in PublishInput, branch, commit string, found []pulls.PullRequest) (coreadapter.OperationResult, error) {

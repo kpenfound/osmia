@@ -22,11 +22,15 @@ type FakePulls struct {
 	Prs      []pulls.PullRequest
 	Finds    int
 	SyncHead bool
-	Updates  int
-	Creates  int
-	Readies  int
-	Lose     bool
-	Fork     func() string
+	// HeadLag counts the Finds, among those with SyncHead set, that still answer
+	// with a pull request's earlier head after its branch moved, as a host does
+	// while it processes a push.
+	HeadLag int
+	Updates int
+	Creates int
+	Readies int
+	Lose    bool
+	Fork    func() string
 	// findErr, when set, fails every Find as a refusing host does.
 	FindErr error
 	// uncredentialed reports the client holding no credential, as GitHub
@@ -48,12 +52,17 @@ func (c *FakePulls) Find(_ context.Context, repository, headRepository, branch s
 		return nil, c.FindErr
 	}
 	var out []pulls.PullRequest
-	for _, pr := range c.Prs {
+	for i := range c.Prs {
+		pr := &c.Prs[i]
 		if pr.HeadRepository == headRepository && pr.Head == branch {
 			if c.SyncHead {
-				pr.HeadCommit = c.Fork()
+				if tip := c.Fork(); tip != pr.HeadCommit && c.HeadLag > 0 {
+					c.HeadLag--
+				} else {
+					pr.HeadCommit = tip
+				}
 			}
-			out = append(out, pr)
+			out = append(out, *pr)
 		}
 	}
 	return out, nil

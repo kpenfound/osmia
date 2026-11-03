@@ -149,6 +149,80 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 	}
 }
 
+func TestMaintenancePublicationWaitsForThePullRequestHeadAfterItsPush(t *testing.T) {
+	t.Parallel()
+	// A lagging Find after the push fails its attempt; a lagging Find before a
+	// retry's push check lets that attempt go on to the check after it.
+	for _, tc := range []struct {
+		name          string
+		lag, attempts int
+	}{
+		{name: "after the push", lag: 1, attempts: 2},
+		{name: "before the retry's check", lag: 2, attempts: 2},
+		{name: "across a whole retry", lag: 3, attempts: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := sameRepositoryMaintenance(t)
+			approveMaintenance(t, p)
+			ctx := context.Background()
+			op := actionOperation(t, p.repository, p.stream, publishUpstreamAction)
+			old, _ := p.forkBranch(t)
+			p.pulls.Prs[0].HeadCommit, p.pulls.HeadLag = old, tc.lag
+			pushed := ""
+			for attempt := 1; attempt < tc.attempts; attempt++ {
+				if result, err := p.publisher().Apply(ctx, op); err == nil {
+					t.Fatalf("attempt %d settled while the pull request head was behind: %+v", attempt, result)
+				}
+				tip, _ := p.forkBranch(t)
+				if tip == old || pushed != "" && tip != pushed {
+					t.Fatalf("attempt %d left the branch at %s, old %s, first push %s", attempt, tip, old, pushed)
+				}
+				pushed = tip
+			}
+			result, err := p.publisher().Apply(ctx, op)
+			must(t, err)
+			if tip, _ := p.forkBranch(t); result.Outcome != "succeeded" || tip != pushed || p.pulls.Prs[0].HeadCommit != pushed || p.pulls.Updates != 1 || p.feature(t) != DeliveredState {
+				t.Fatalf("%+v tip %s pushed %s pull request %+v updates %d", result, tip, pushed, p.pulls.Prs[0], p.pulls.Updates)
+			}
+		})
+	}
+}
+
+func TestMaintenancePublicationRefusesABehindPullRequestThatDiffersOtherwise(t *testing.T) {
+	t.Parallel()
+	t.Run("edited after the push", func(t *testing.T) {
+		t.Parallel()
+		p := sameRepositoryMaintenance(t)
+		approveMaintenance(t, p)
+		old, _ := p.forkBranch(t)
+		p.pulls.Prs[0].HeadCommit, p.pulls.HeadLag = old, 1
+		p.s.boundary = func(step string) error {
+			if step == "publish-pushed" {
+				p.pulls.Prs[0].Body = "external edit"
+			}
+			return nil
+		}
+		result, err := p.publisher().Apply(context.Background(), actionOperation(t, p.repository, p.stream, publishUpstreamAction))
+		must(t, err)
+		if result.Outcome != "failed" {
+			t.Fatalf("edited pull request was not refused: %+v", result)
+		}
+	})
+	t.Run("at a commit no publication recorded", func(t *testing.T) {
+		t.Parallel()
+		p := sameRepositoryMaintenance(t)
+		approveMaintenance(t, p)
+		before, _ := p.forkBranch(t)
+		p.pulls.Prs[0].HeadCommit, p.pulls.HeadLag = p.report.Upstream.Commit, 1
+		result, err := p.publisher().Apply(context.Background(), actionOperation(t, p.repository, p.stream, publishUpstreamAction))
+		must(t, err)
+		if after, _ := p.forkBranch(t); result.Outcome != "failed" || after != before {
+			t.Fatalf("unrecorded pull request head was not refused: %+v, branch %s to %s", result, before, after)
+		}
+	})
+}
+
 func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
 	t.Parallel()
 	for _, change := range []string{"body", "base", "closed", "merged", "missing"} {
