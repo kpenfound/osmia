@@ -39,8 +39,8 @@ func newSessionChatFixture(t *testing.T) (*Service, *Client, config.ProjectID, c
 	must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	demoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	engine := &sessionEngine{}
-	enforced := Enforce(opts, Enforcement{Engine: engine})
+	engine := &sessionEngine{Sessions: &demoSessions{ByKey: map[string]*mcp.ClientSession{}}}
+	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
 	opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
@@ -104,7 +104,7 @@ func TestSessionMessageStartsOneTurnAndRecordsTheReply(t *testing.T) {
 // TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox covers
 // spec#7: the agent's workspace reflects the session's worktree, a file it
 // writes persists into the next turn, and the sandbox has no VCS metadata,
-// no VCS or delivery credentials, and no custom or MCP tool.
+// no VCS or delivery credentials, and only the show_image MCP tool.
 func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
@@ -117,12 +117,23 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 			t.Errorf("session turn granted VCS: %+v", req.Grants)
 		}
 		for _, name := range req.Grants.Tools {
-			if strings.HasPrefix(name, "mcp__") {
-				t.Errorf("session turn has an MCP tool: %s", name)
+			if strings.HasPrefix(name, "mcp__") && !strings.HasPrefix(name, "mcp__osmia_") {
+				t.Errorf("session turn has an unexpected MCP tool: %s", name)
 			}
 		}
-		if _, ok := req.Env[coreadapter.TokenEnvironment]; ok {
-			t.Error("a session turn carries a factory MCP token")
+		if _, ok := req.Env[coreadapter.TokenEnvironment]; !ok {
+			t.Error("session attachment tool has no scoped MCP token")
+		}
+		engine.Sessions.Mu.Lock()
+		tools := engine.Sessions.ByKey[req.Env[coreadapter.TokenEnvironment]]
+		engine.Sessions.Mu.Unlock()
+		if tools == nil {
+			t.Error("missing session tools")
+		} else {
+			list, err := tools.ListTools(context.Background(), nil)
+			if err != nil || len(list.Tools) != 1 || list.Tools[0].Name != "show_image" {
+				t.Errorf("session tool registry: %+v %v", list, err)
+			}
 		}
 		if req.VCSEnv != nil || len(req.VCSContainerEnv) != 0 {
 			t.Error("a session turn carries VCS credentials")
@@ -418,7 +429,7 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 		}
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Recovered reply"}, nil
 	}
-	enforced := Enforce(Options{Options: service.Options{Config: config.Options{Root: root}}}, Enforcement{Engine: engine})
+	enforced := Enforce(Options{Options: service.Options{Config: config.Options{Root: root}}}, Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
 	s2, c2 := start(t, Options{Options: service.Options{
 		Config: config.Options{Root: root}, Build: Identity{Version: "test", Commit: "abc"}, ShutdownTimeout: 100 * time.Millisecond,
 		Threads: enforced.Threads,
@@ -973,4 +984,12 @@ func asAPIError(err error) (*APIError, bool) {
 		e = u.Unwrap()
 	}
 	return nil, false
+}
+
+func sessionImageHosts(input ...*demoSessions) coreadapter.MCPHosts {
+	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	if len(input) > 0 && input[0] != nil {
+		sessions = input[0]
+	}
+	return &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}
 }

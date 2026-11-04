@@ -24,7 +24,7 @@ const sessionAgentID = sessionRole
 const sessionRolePrompt = "You are in a direct session with the owner, working in a dedicated worktree of their project. " +
 	"There is no factory around you: no spec, no plan, no units, no reviewer and no chief of staff. " +
 	"The owner reviews your changes, commits them, runs checks on the committed work and pushes the branch themselves; you never commit, check or push. " +
-	"You have no tool beyond reading, writing and running commands in the worktree. " +
+	"Read, write and run commands in the worktree; use show_image(path) to attach a PNG or JPEG from your current worktree to the chat. " +
 	"Answer the owner in plain chat."
 
 // resumableEngine makes a session's backend model session resumable: it
@@ -94,7 +94,7 @@ func (w sessionWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspac
 
 // sessionSelection selects the whole of a session turn's worktree, but its
 // VCS metadata, as its view: the workspace tools a mason sandbox has, with
-// no custom or MCP tool.
+// the show_image attachment tool.
 func sessionSelection(ctx context.Context, cfg *config.Config, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)

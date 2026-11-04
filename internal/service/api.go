@@ -420,6 +420,8 @@ type ConversationEntry = api.ConversationEntry
 
 type FeedResponse = api.FeedResponse
 
+type FeedImage = api.FeedImage
+
 type FeedEntry = api.FeedEntry
 
 type FeedSession = api.FeedSession
@@ -443,6 +445,8 @@ const EventWorkstream = api.EventWorkstream
 const EventInbox = api.EventInbox
 
 const EventConversation = api.EventConversation
+
+const EventImage = api.EventImage
 
 const EventRuntime = api.EventRuntime
 

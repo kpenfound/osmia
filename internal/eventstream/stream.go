@@ -155,6 +155,8 @@ func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamI
 			}
 			add(api.EventWorkstream, stream)
 			switch {
+			case parts[2] == "images" || parts[2] == "image-references":
+				add(api.EventImage, stream)
 			case parts[2] == "questions" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl":
 				// Questions carry the inbox's escalations and rulings,
 				// transitions open and close the other decisions and abandon

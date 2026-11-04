@@ -164,7 +164,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == "classifier" && scope.Project == project {
 					workspace := filepath.Join(root, "classifier", project)
@@ -260,6 +260,12 @@ func Enforce(opts Options, e Enforcement) Options {
 				// Both tools are registered unconditionally; Select's Narrow
 				// decides, per turn, whether either is actually reachable.
 				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope)), nil
+			},
+			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
+				if scope.Role == sessionRole && scope.Project == project {
+					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
+				}
+				return nil, nil
 			},
 			Hosts: e.Hosts,
 			// resumableEngine's heuristic fallback (used only when e.Engine has

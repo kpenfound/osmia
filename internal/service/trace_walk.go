@@ -265,6 +265,10 @@ func refOf(r trace.Record) TraceRef {
 	var ref TraceRef
 	var h trace.Header
 	switch v := r.(type) {
+	case trace.Image:
+		ref.Kind, h = "image", v.Header
+	case trace.ImageReference:
+		ref.Kind, h = "image-reference", v.Header
 	case trace.Document:
 		ref.Kind, ref.Path, h = "document", v.Path, v.Header
 	case trace.Transition:
@@ -292,6 +296,10 @@ func refOf(r trace.Record) TraceRef {
 
 func recordHeader(r trace.Record) trace.Header {
 	switch v := r.(type) {
+	case trace.Image:
+		return v.Header
+	case trace.ImageReference:
+		return v.Header
 	case trace.Document:
 		return v.Header
 	case trace.Transition:
@@ -561,6 +569,10 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 		}
 		var summary string
 		switch v := r.(type) {
+		case trace.Image:
+			summary = "image: " + imageURL(v.Workstream, v.ID)
+		case trace.ImageReference:
+			summary = "image reference: " + imageURL(v.Member, v.ImageID)
 		case trace.Transition:
 			summary = fmt.Sprintf("%s: %s -> %s: %s", v.Subject, orNone(v.From), v.To, v.Reason)
 		case trace.Document:

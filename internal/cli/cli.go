@@ -63,6 +63,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
+  feed <workstream-id|workgroup-id> [--json]
   inbox [--json]
   answer <inbox-number> <ruling>|--accept [--project ID] [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
@@ -291,7 +292,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
-	case "conversation":
+	case "conversation", "feed":
 		valid = len(a) == 1
 	case "inbox", "reload", "config":
 		valid = len(a) == 0
@@ -379,7 +380,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -983,6 +984,32 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		showTrace(stdout, result)
+		return 0
+	}
+	if cmd == "feed" {
+		var list wire.FeedResponse
+		var err error
+		if group, e := config.ParseWorkgroupID(a[0]); e == nil {
+			var out wire.WorkgroupFeedResponse
+			err = c.Do(ctx, http.MethodGet, wire.Prefix+"/workgroups/"+string(group)+"/feed", nil, &out)
+			if err == nil && o.json {
+				return output(stdout, stderr, out)
+			}
+			list.Entries = out.Entries
+		} else {
+			id, e := config.ParseWorkstreamID(a[0])
+			if e != nil {
+				return invalid()
+			}
+			err = c.Do(ctx, http.MethodGet, wire.Prefix+"/feed/"+string(id), nil, &list)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, list)
+		}
+		showFeed(stdout, list.Entries)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
@@ -2164,5 +2191,25 @@ func showEngine(w io.Writer, s wire.EngineStatus) {
 	}
 	if s.ReachabilityError != "" {
 		fmt.Fprintln(w, s.ReachabilityError)
+	}
+}
+
+// showFeed renders attachments without downloading their bytes.
+func showFeed(w io.Writer, entries []wire.FeedEntry) {
+	for _, e := range entries {
+		fmt.Fprintf(w, "%s %s", e.At.Format(time.RFC3339), e.Kind)
+		if e.Workstream != "" {
+			fmt.Fprintf(w, " [%s]", e.Workstream)
+		}
+		fmt.Fprintln(w)
+		if e.Kind == "image" && e.Image != nil {
+			if e.Image.Placeholder != "" {
+				fmt.Fprintf(w, "  %s\n", e.Image.Placeholder)
+			} else {
+				fmt.Fprintf(w, "  [image: %s]\n", e.Image.URL)
+			}
+		} else if e.Text != "" {
+			fmt.Fprintf(w, "  %s\n", e.Text)
+		}
 	}
 }
