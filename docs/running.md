@@ -231,6 +231,15 @@ The member view is laid out like a chat client:
   that need a restart. The settings button is marked while a reload has
   something to apply.
 
+Images appear as inline thumbnails in workstream, shared workgroup and
+exploratory session feeds. Select a thumbnail to open the full-size image in a
+new tab, served by `GET /v1/images/{workstream}/{image}`. Workgroup images are
+attributed to the member's repository. After that member is archived, its
+shared image entry shows “image removed when <member> was archived” without
+requesting the deleted image. New images appear over the event stream without
+a reload. Opening a feed or receiving a new entry snaps to its end; refreshing
+an existing entry keeps the scroll position.
+
 Which workstream is selected and what you have seen are kept in the browser,
 so another browser has its own. The list's order comes from the service and
 is the same in every browser.
