@@ -1019,6 +1019,23 @@ svg {
   border-radius: 0.75rem;
 }
 
+#project-preview fieldset {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#project-preview input[type="number"] {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+}
+
 .row .sub .tag {
   margin-right: 0.3rem;
 }

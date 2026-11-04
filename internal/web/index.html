@@ -346,6 +346,25 @@
         </div>
         <p class="result" role="status"></p>
       </form>
+      <form id="project-preview" class="control" aria-labelledby="preview-title" novalidate>
+        <h3 id="preview-title">Preview</h3>
+        <p id="preview-state" class="meta" role="status"></p>
+        <dl id="preview-settings"></dl>
+        <fieldset>
+          <legend>Preview settings</legend>
+          <label>Call <textarea name="call" rows="3" placeholder='["serve", "--port", "8080"]' aria-describedby="preview-call-help"></textarea></label>
+          <p id="preview-call-help" class="meta">A JSON array of dagger call arguments returning a Service. Each item is one argument; no shell parsing.</p>
+          <label>Port <input name="port" type="number" inputmode="numeric"></label>
+          <label>Path <input name="path" type="text" placeholder="/"></label>
+          <label>Timeout <input name="timeout" type="text" placeholder="5m"></label>
+          <p class="meta">Leave path and timeout empty to use / and 5m. Timeout must be from 1m to 30m.</p>
+          <div class="actions">
+            <button type="submit" disabled>Enable preview</button>
+            <button type="button" data-action="disable-preview" disabled>Disable preview</button>
+          </div>
+        </fieldset>
+        <p class="result" role="status"></p>
+      </form>
       <div class="control">
         <div class="actions">
           <button type="button" id="project-remove">Remove project from active work</button>

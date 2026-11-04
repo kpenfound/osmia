@@ -147,6 +147,16 @@ loads the latest text.
 
 Project management shows the project's name, upstream, optional fork, clone, base branch and knowledge extraction state. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
+The **Preview** section shows the current call, port, path and timeout, or that
+previews are off. Enter the `dagger call` arguments as a JSON array (for example,
+`["serve", "--port", "8080"]`) and the Service port, then choose **Enable preview**
+or **Save preview**. Empty path and timeout fields use `/` and `5m`; timeout must
+be from `1m` to `30m`. **Disable preview** removes the project's `[preview]` table.
+Changes apply immediately through the project preview API. Validation refusals
+and configuration file drift conflicts keep your input and show the reason in
+the section. If the file has changed on disk, reload the configuration before
+retrying. Other project configuration fields remain read-only.
+
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,
 unmerged PR shows **PR open**; ready, draft and closed-without-merge PRs remain
