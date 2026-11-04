@@ -131,6 +131,32 @@ func write(t *testing.T, dir, name, content string) {
 
 // An uncommitted change against main runs only the checks Jev selects, and
 // without -v prints nothing of the selection.
+func TestRunsSelectionsWithDifferentFiltersSeparately(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		exit int
+		want [][]string
+	}{
+		"both pass":             {0, [][]string{{"--fail-fast", traceTests}, {"--fail-fast", release}}},
+		"a failure stops later": {3, [][]string{{"--fail-fast", traceTests}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := newRepository(t)
+			write(t, dir, "internal/trace/trace.go", "package trace\n\nconst Version = 2\n")
+			d := &fakeDagger{links: []string{release, traceTests}, exit: c.exit}
+			j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95, release: 0.95}}
+			r := runHarness(t, d, j, withKey, "-C", dir)
+			if r.code != c.exit {
+				t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
+			}
+			if !slices.EqualFunc(d.checks, c.want, slices.Equal) {
+				t.Fatalf("ran %q, want %q", d.checks, c.want)
+			}
+		})
+	}
+}
+
 func TestRunsTheSelectedChecks(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
@@ -141,7 +167,7 @@ func TestRunsTheSelectedChecks(t *testing.T) {
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 	}
-	if want := [][]string{{"--fail-fast", "--progress=report", serviceTests, traceTests}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
+	if want := [][]string{{"--fail-fast", "--progress=report", serviceTests + "&go-package=internal/trace"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
 		t.Fatalf("ran %q, want %q", d.checks, want)
 	}
 	c := j.clients[0]

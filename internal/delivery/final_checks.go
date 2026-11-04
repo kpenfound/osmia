@@ -232,7 +232,8 @@ func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, strea
 	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := checks.Check(bounded, dir, identity, selection.Links)
+	result, ran, err := checkrun.RunSelection(bounded, checks, dir, identity, selection)
+	run.Selection, run.Command = &ran, checkrun.Command(ran.Links)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}

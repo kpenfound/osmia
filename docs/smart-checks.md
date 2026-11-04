@@ -56,9 +56,23 @@ requested tests exist and exercise the behaviour.
 7. **Accept.** The links whose probability is at least
    [`jev.check_threshold`](configuration.md#optional-jev-boost), 0.5 by
    default, are selected. A response that selects none is declined, and the run checks everything.
-8. **Run.** `dagger check --progress=report --fail-fast --parallel 4` runs with
-   the selected links, or with none to run every check, bounded by the
-   project's `checks_timeout`. At most four checks run concurrently.
+8. **Group.** Dagger evaluates one `dagger check` under a single filtered view
+   of the workspace, so it refuses links whose filters differ, and the filters
+   of one link AND together. Links combine into one only where that selects
+   the same checks: when they differ in the values of one filter, or when one
+   covers another. `go-package=a` and `go-package=b` become
+   `go-package=a&go-package=b`, but `go-package=a&go-test=T` and `go-package=b`
+   need separate runs, because together they would run only `T`.
+9. **Run.** `dagger check --progress=report --fail-fast --parallel 4` runs once
+   for each group, one after another, or once with no link to run every check.
+   The first run that does not pass stops the rest and decides the result. All
+   the runs share one export and the project's `checks_timeout`, and at most
+   four checks run concurrently.
+10. **Run everything if refused.** When Dagger exits with an error before any
+    check starts, without its engine session being lost, it has refused the
+    links, for example because one no longer matches a check. The same run then
+    checks everything, under the same `checks_timeout`, rather than retrying
+    links Dagger will refuse again.
 
 Unit, final-review and session check runs all use this selection. Before a
 final review, the service judges the rebased feature branch commit against
@@ -84,7 +98,12 @@ This immutable start evidence holds the unit, run, operation, candidate, base,
 report revision, diff digest, start time and selection. It has no result, so
 an interrupted run remains started and unfinished. The finished run's record,
 `units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
-exit status and output. Final-review attempts record their selection in
+exit status and output. The command lists every `dagger check` in the order it
+ran, joined by `&&`, and the output holds each run's report under its command.
+After a refusal, the finished record's selection and command describe the full
+run, its output holds the refused run above it, and the start evidence keeps
+the links Jev selected.
+Final-review attempts record their selection in
 `final/checks-<review>-attempt-<attempt>-started.json` immediately before
 execution, and in `final/checks-<review>.json` beside the command and result.
 Older final records without a selection remain readable.
@@ -107,7 +126,7 @@ The selection has this shape:
 | Field | Meaning |
 | --- | --- |
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
-| `links` | The links passed to `dagger check`, for a selected run |
+| `links` | The links Jev selected, for a selected run; the command shows how they were grouped |
 | `candidates` | How many links Jev was asked about, after narrowing |
 | `listed` | Total links the project listed, before narrowing; absent when listing was skipped or failed, and in older records |
 | `judgment` | The judgment record the selection rests on, also set on a full run whose judgment fell back |
@@ -123,6 +142,7 @@ asked:
 | `no_checks` | The project lists no check links |
 | `too_many_checks` | The links do not narrow to 128 |
 | `change_too_large` | The changed files alone do not fit the state |
+| `refused` | Dagger refused the selected links before any check started; `detail` holds its error |
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
 when no check reached the threshold, `unconfigured`, `cooling_down`, `timeout`,
@@ -158,7 +178,8 @@ read the captured output in chunks through `factory_context`. Classification
 uses the complete output, independently of the excerpt limit. A non-zero exit
 with a failed check under the report's `CHECKS` heading is recorded as failed.
 A non-zero exit without a failed check remains incomplete, including a session
-shutdown error after all checks passed.
+shutdown error after all checks passed, and its reason repeats the last error
+Dagger printed.
 
 ## Restarts and new runs
 
@@ -201,6 +222,7 @@ collections runs more than it would with each link judged.
 | The System One API client, retries and cool-down | agentcore `jev` and `jev/systemone` |
 | Changed files from a diff | [gitdiff](../internal/gitdiff) |
 | The local command | [smartcheck](../cmd/smartcheck) |
+| The runner against the real Dagger CLI, run by the `dagger-cli-contract` check | `internal/checks/daggercli_test.go` |
 
 ## Run smart checks locally
 
@@ -219,9 +241,10 @@ It diffs the working tree, including uncommitted changes to tracked files but
 not untracked files, against the merge base of `--base` (`main` by default),
 lists the checks of the Dagger workspace at the repository root, and runs
 `dagger check --fail-fast` with the selected links, stopping at the first
-failure. When the factory would fall back, it says why and runs every check;
-when nothing changed, it runs nothing. It exits
-with `dagger check`'s status.
+failure. When the factory would fall back before running a check, it says why
+and runs every check; when nothing changed, it runs nothing. Links Dagger
+refuses stop the command with Dagger's error. It exits with `dagger check`'s
+status.
 
 | Flag | Default | Effect |
 | --- | --- | --- |

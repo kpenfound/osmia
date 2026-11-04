@@ -108,6 +108,54 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 }
 
+func TestChecksRunEveryCheckWhenDaggerRefusesTheLinksJevSelects(t *testing.T) {
+	t.Parallel()
+	links := []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web"}
+	const message = "no checks matched pattern \"dag+check://release/version-round-trip\""
+	checks := &fakeChecks{Links: links, Outcomes: []checkOutcome{
+		{Result: checkrun.CheckResult{ExitCode: 1, Output: "Error: " + message + "\n", Refusal: message}},
+		{Result: checkrun.CheckResult{Output: "CHECKS  ✔ 2 passed\n"}},
+	}}
+	f, stream, repository := newChecksFixture(t, "checks-refused", checks)
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
+		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.92)}}}}}
+	boostJev(f.s, p)
+	runChecks(t, f.s, repository, stream)
+	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
+		t.Fatalf("unit is %s, want reviewing", got)
+	}
+	if ran := checks.Runs(); len(ran) != 2 || len(ran[0]) != 2 || ran[1] != nil {
+		t.Fatalf("checks ran %q", ran)
+	}
+	run := onlyRun(t, repository, stream)
+	if run.Status != ChecksPassed || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != checkrun.SelectionRefused || run.Selection.Detail != message || run.Selection.Judgment == "" {
+		t.Fatalf("check run %+v, selection %+v", run, run.Selection)
+	}
+	if !slices.Equal(run.Command, checkrun.Command(nil)) {
+		t.Fatalf("command %q", run.Command)
+	}
+	c := &checkers{masons: f.controller()}
+	var start UnitCheckSelection
+	ops, err := checkOperations(repository, stream)
+	must(t, err)
+	if len(ops) != 1 {
+		t.Fatalf("operations %+v", ops)
+	}
+	docs, err := trace.Read[trace.Document](c.repository, stream)
+	must(t, err)
+	for _, d := range docs {
+		if d.Path == checkSelectionPath("resume", run.Run) {
+			must(t, json.Unmarshal([]byte(d.Content), &start))
+		}
+	}
+	if start.Selection.Mode != checkrun.SelectionSelected || len(start.Selection.Links) != 2 {
+		t.Fatalf("start evidence %+v", start)
+	}
+	if req := reviewTurn(t, f, repository, stream); !strings.Contains(req.Prompt, "every check ran: Dagger refused the links Jev selected") {
+		t.Fatalf("review prompt lacks the refusal:\n%s", req.Prompt)
+	}
+}
+
 func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	t.Parallel()
 	links := []string{
@@ -130,7 +178,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
-	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, selected...)) {
+	if run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) || run.Selection.Judgment == "" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4", selected[0] + "&go-test=TestChunks"}) {
 		t.Fatalf("check run %+v", run)
 	}
 	requests := p.Requests()
@@ -476,5 +524,14 @@ func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing || len(checks.Runs()) != 2 {
 		t.Fatalf("unit is %s after %d check runs", got, len(checks.Runs()))
+	}
+}
+
+func TestQuoteLinksKeepsRunSeparatorsReadableAsACommand(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(quoteLinks([]string{"dagger", "check", "dag://?check=test&go-package=a", "&&", "dagger", "check", "dag+check://release/version"}), " ")
+	want := `dagger check "dag://?check=test&go-package=a" && dagger check dag+check://release/version`
+	if got != want {
+		t.Fatalf("command %s, want %s", got, want)
 	}
 }

@@ -76,48 +76,107 @@ func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) (
 	return checkselect.Links(redact.Secrets(output.String(), redact.KnownSecrets()...)), nil
 }
 
-// Command builds the check invocation recorded and run for unit, final review
-// and session checks. Empty links select every check.
+// Command is the record of the check runs for links: each dagger check in the
+// order it runs, joined by && because a failed run stops the rest. Empty links
+// select every check.
 func Command(links []string) []string {
-	return append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, links...)
-}
-
-func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
-	output := &bytes.Buffer{}
-	exit, preparation, err := d.dagger(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "", output, Command(links)[1:]...)
-	clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
-	return CheckResult{ExitCode: exit, Output: clean, TraceURL: cloudTraceURL(clean), CIIdentityFallback: preparation.FallbackReason}, err
-}
-
-// dagger runs the Dagger CLI in dir with args and returns its exit status,
-// -1 when it did not exit. A non-zero exit is not an error.
-func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (exitCode int, preparation Preparation, runErr error) {
-	redact.Register(d.CloudToken)
-	defer func() {
-		if runErr != nil {
-			clean := redact.Secrets(runErr.Error(), redact.KnownSecrets()...)
-			if clean != runErr.Error() {
-				runErr = &redactedError{message: clean, cause: runErr}
-			}
+	var command []string
+	for i, addresses := range checkselect.Invocations(links) {
+		if i > 0 {
+			command = append(command, "&&")
 		}
-	}()
+		command = append(append(command, "dagger"), checkArgs(addresses)...)
+	}
+	return command
+}
+
+func checkArgs(addresses []string) []string {
+	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", "4"}, addresses...)
+}
+
+// Check runs links as the separate dagger check runs they need, in one export
+// and one after another so no more than four checks run at once. The first run
+// that does not pass stops the rest and supplies the exit code and any refusal.
+// Output holds every run's report, and TraceURL is the trace of the latest run
+// that has one.
+func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
+	env, preparation, cleanup, err := d.prepare(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "")
+	if err != nil {
+		return CheckResult{ExitCode: -1, CIIdentityFallback: preparation.FallbackReason}, redactError(err)
+	}
+	defer cleanup()
+	result := CheckResult{CIIdentityFallback: preparation.FallbackReason}
+	invocations := checkselect.Invocations(links)
+	var all strings.Builder
+	for _, addresses := range invocations {
+		args := checkArgs(addresses)
+		output := &bytes.Buffer{}
+		exit, err := d.run(ctx, dir, env, preparation, output, args...)
+		clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
+		if len(invocations) > 1 {
+			fmt.Fprintf(&all, "$ dagger %s\n", strings.Join(args, " "))
+		}
+		all.WriteString(clean)
+		if len(invocations) > 1 && !strings.HasSuffix(clean, "\n") {
+			all.WriteString("\n")
+		}
+		result.ExitCode, result.Output, result.Refusal = exit, all.String(), refusal(clean, exit)
+		if url := cloudTraceURL(clean); url != "" {
+			result.TraceURL = url
+		}
+		if err != nil || exit != 0 {
+			return result, redactError(err)
+		}
+	}
+	return result, nil
+}
+
+// dagger runs the Dagger CLI once in dir with args and returns its exit status,
+// -1 when it did not exit. A non-zero exit is not an error.
+func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (int, Preparation, error) {
+	env, preparation, cleanup, err := d.prepare(ctx, dir, identity, withIdentity)
+	if err != nil {
+		return -1, preparation, redactError(err)
+	}
+	defer cleanup()
+	exit, err := d.run(ctx, dir, env, preparation, output, args...)
+	return exit, preparation, redactError(err)
+}
+
+// redactError withholds known secrets from err's message, keeping cancellation
+// and other typed errors discoverable.
+func redactError(err error) error {
+	if err == nil {
+		return nil
+	}
+	clean := redact.Secrets(err.Error(), redact.KnownSecrets()...)
+	if clean != err.Error() {
+		return &redactedError{message: clean, cause: err}
+	}
+	return err
+}
+
+// prepare readies dir for Dagger runs and returns the environment they share,
+// and a cleanup to call once they have finished.
+func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity, withIdentity bool) (env []string, preparation Preparation, cleanup func(), err error) {
+	redact.Register(d.CloudToken)
 	if d.Engine == "cloud" && d.CloudToken == "" {
-		return -1, Preparation{}, errors.New("cloud engine requires a Dagger Cloud token")
+		return nil, Preparation{}, nil, errors.New("cloud engine requires a Dagger Cloud token")
 	}
 	home, err := os.MkdirTemp("", "osmia-check-home-")
 	if err != nil {
-		return -1, Preparation{}, err
+		return nil, Preparation{}, nil, err
 	}
-	defer os.RemoveAll(home)
+	cleanup = func() { os.RemoveAll(home) }
 	// Dagger's report colors its output even off a terminal; agents read it
 	// and FailedChecks parses it as plain text.
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
-	preparation = Preparation{}
+	env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
 	if withIdentity {
 		if err := prepareIdentity(ctx, dir, env, identity); err != nil {
 			preparation.FallbackReason = redact.Secrets(err.Error(), redact.KnownSecrets()...)
 			if removeErr := os.RemoveAll(filepath.Join(dir, ".git")); removeErr != nil {
-				return -1, preparation, fmt.Errorf("remove export metadata for anonymous checks: %w", removeErr)
+				cleanup()
+				return nil, preparation, nil, fmt.Errorf("remove export metadata for anonymous checks: %w", removeErr)
 			}
 			ghlog.Logger(ctx).WarnContext(ctx, "check export uses anonymous Git identity", "candidate", redact.Secrets(identity.Candidate, redact.KnownSecrets()...), "reason", preparation.FallbackReason)
 		} else {
@@ -130,9 +189,16 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 		initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
 		initialise.Env = env
 		if out, err := initialise.CombinedOutput(); err != nil {
-			return -1, preparation, fmt.Errorf("git init: %w: %s", err, out)
+			cleanup()
+			return nil, preparation, nil, fmt.Errorf("git init: %w: %s", err, out)
 		}
 	}
+	return env, preparation, cleanup, nil
+}
+
+// run executes the Dagger CLI in a prepared dir and returns its exit status,
+// -1 when it did not exit. A non-zero exit is not an error.
+func (d DaggerChecks) run(ctx context.Context, dir string, env []string, preparation Preparation, output io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
@@ -171,19 +237,19 @@ func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity,
 		cmd.Env = append(cmd.Env, "CI=true")
 	}
 	cmd.Stdout, cmd.Stderr = output, output
-	err = cmd.Run()
+	err := cmd.Run()
 	exit := -1
 	if cmd.ProcessState != nil {
 		exit = cmd.ProcessState.ExitCode()
 	}
 	if ctx.Err() != nil {
-		return exit, preparation, ctx.Err()
+		return exit, ctx.Err()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exit, preparation, nil
+		return exit, nil
 	}
-	return exit, preparation, err
+	return exit, err
 }
 
 // checkOutput keeps the last limit bytes written to it, starting at a whole

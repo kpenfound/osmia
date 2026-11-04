@@ -412,7 +412,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	selection := checkrun.Select(ctx, s.jev, repository, scope, cause, nil, dir, diff, identity, checks)
 	timeout := s.about(repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, checkErr := checks.Check(bounded, dir, identity, selection.Links)
+	result, selection, checkErr := checkrun.RunSelection(bounded, checks, dir, identity, selection)
 	cancel()
 	if errors.Is(checkErr, context.DeadlineExceeded) {
 		checkErr = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)

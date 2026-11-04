@@ -52,7 +52,7 @@
 - Add `--env=race` to run the selected tests with the race detector, or `--env=flake` to run each selected test five times when reproducing a flake.
 - Browser tests in `internal/browsertest`, `internal/intakejourney`, `internal/executionjourney` and `internal/lifecycle` run in the Go check, whose container installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
-- Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
+- Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests. The one exception is `internal/checks/daggercli_test.go`, built only with the `daggercli` tag: the `dagger-cli-contract` check runs it against the real Dagger CLI inside its own container.
 - Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.
 - `dagger check` runs automatically on pull requests using Dagger Native CI
 

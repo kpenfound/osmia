@@ -20,7 +20,44 @@ type OsmiaDev {
       # restarts still reopen their files; container-layer fsync is expensive.
       .withMountedTemp("/tmp")
   }
+
+  """
+  Run Osmia's check runner against the Dagger CLI of this engine's release, on
+  a small workspace: its grouped selections, failed checks and refused links.
+  """
+  pub daggerCliContract(ws: Workspace!): Void @check {
+    let result = container
+      .from("golang:1.26-bookworm")
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withEnvVariable("DAGGER_VERSION", version)
+      .withExec(["sh", "-c", cliInstall])
+      .withDirectory(
+        "/src",
+        ws.directory(
+          "/",
+          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "dagger.lock"],
+          exclude: [".bees/**", ".dagger/**"],
+        ),
+      )
+      .withWorkdir("/src")
+      .withExec(
+        [
+          "go", "test", "-tags=daggercli", "-count=1", "-timeout=15m", "-v",
+          "-run", "^TestRealDaggerCLI", "./internal/checks/",
+        ],
+        experimentalPrivilegedNesting: true,
+      )
+      .sync
+    null
+  }
 }
+
+"""
+Shell script installing the release of the Dagger CLI named by DAGGER_VERSION,
+which the engine reports with a v prefix and a commit suffix.
+"""
+let cliInstall: String! = "set -e; v=${DAGGER_VERSION%%+*}; cd /usr/local; curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=${v#v} sh; dagger version"
 
 """
 Shell script installing the pinned Jujutsu release that provider tests run

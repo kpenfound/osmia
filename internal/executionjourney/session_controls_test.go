@@ -7,6 +7,7 @@ import (
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	systemone "github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/api"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	config "github.com/kpenfound/osmia/internal/config"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
@@ -402,6 +403,48 @@ func TestSessionCheckRunsSmartSelectionUnderJEV(t *testing.T) {
 	if run.Kind != "smart" || !slices.Equal(run.Checks, []string{links[0]}) || run.Status != ChecksPassed {
 		t.Fatalf("check run: %+v", run)
 	}
+}
+
+func TestSessionCheckRunsFullWhenDaggerRefusesTheSelection(t *testing.T) {
+	t.Parallel()
+	s, c, _, _, stream, _, _ := newSessionControlsFixture(t)
+	links := []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web&go-test=TestPage"}
+	const message = "no checks matched pattern"
+	refused := &refusingChecks{links: links, message: message}
+	service.InspectForTest(s.core()).SetReviewChecks(refused)
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.0", Answers: map[string]systemone.Answer{
+		"check-0": jevtest.Noul(0.02), "check-1": jevtest.Noul(0.92)}}}}}
+	boostJev(s, p)
+	run, err := c.SessionCheck(context.Background(), stream)
+	must(t, err)
+	if run.Kind != "full" || len(run.Checks) != 0 || run.Status != ChecksPassed || run.Selection.Reason != checkrun.SelectionRefused || run.Selection.Detail != message {
+		t.Fatalf("check run: %+v, selection %+v", run, run.Selection)
+	}
+	if !slices.Equal(run.Command, checkrun.Command(nil)) || !strings.Contains(run.Output, "CHECKS") {
+		t.Fatalf("check run: %+v", run)
+	}
+	if len(refused.ran) != 2 || len(refused.ran[0]) != 1 || refused.ran[1] != nil {
+		t.Fatalf("ran %q", refused.ran)
+	}
+}
+
+// refusingChecks refuses any run with links and passes a run of every check.
+type refusingChecks struct {
+	links   []string
+	message string
+	ran     [][]string
+}
+
+func (r *refusingChecks) List(context.Context, string, checkrun.Identity) ([]string, error) {
+	return r.links, nil
+}
+
+func (r *refusingChecks) Check(_ context.Context, _ string, _ checkrun.Identity, links []string) (CheckResult, error) {
+	r.ran = append(r.ran, links)
+	if len(links) > 0 {
+		return CheckResult{ExitCode: 1, Output: "Error: " + r.message + "\n", Refusal: r.message}, nil
+	}
+	return CheckResult{Output: "CHECKS  ✔ 2 passed\n"}, nil
 }
 
 // TestSessionCheckExcludesUncommittedChanges covers spec#17's "uncommitted

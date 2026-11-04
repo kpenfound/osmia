@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/api"
@@ -19,6 +20,7 @@ const (
 	SelectionNoChecks = "no_checks"
 	SelectionTooMany  = "too_many_checks"
 	SelectionTooLarge = "change_too_large"
+	SelectionRefused  = "refused"
 )
 
 // The modes of a check selection.
@@ -35,6 +37,9 @@ func DescribeSelection(s api.CheckSelection) string {
 	if s.Reason == string(jev.ReasonDisabled) {
 		return "every check ran: the Jev boost is off"
 	}
+	if s.Reason == SelectionRefused {
+		return "every check ran: Dagger refused the links Jev selected (" + s.Detail + ")"
+	}
 	why := s.Reason
 	if s.Detail != "" {
 		why += ": " + s.Detail
@@ -45,6 +50,26 @@ func DescribeSelection(s api.CheckSelection) string {
 // FullSelection runs every check for reason.
 func FullSelection(reason, detail string) api.CheckSelection {
 	return api.CheckSelection{Mode: SelectionFull, Reason: reason, Detail: detail}
+}
+
+// RunSelection runs selection's checks in the export at dir and returns the
+// result with the selection that produced it. Selected links Dagger refuses
+// before any check starts run every check instead, under the same ctx, and the
+// returned selection says why. Output holds the refused run above the full one.
+func RunSelection(ctx context.Context, checks ReviewChecks, dir string, identity Identity, selection api.CheckSelection) (CheckResult, api.CheckSelection, error) {
+	refused, err := checks.Check(ctx, dir, identity, selection.Links)
+	if err != nil || refused.Refusal == "" || len(selection.Links) == 0 {
+		return refused, selection, err
+	}
+	full := FullSelection(SelectionRefused, refused.Refusal)
+	full.Candidates, full.Listed, full.Judgment = selection.Candidates, selection.Listed, selection.Judgment
+	result, err := checks.Check(ctx, dir, identity, nil)
+	result.Output = fmt.Sprintf("%s\nDagger refused the selected links, so every check runs.\n$ %s\n%s", refused.Output, strings.Join(Command(nil), " "), result.Output)
+	result.Truncated = result.Truncated || refused.Truncated
+	if result.TraceURL == "" {
+		result.TraceURL = refused.TraceURL
+	}
+	return result, full, err
 }
 
 // Select is the service's smart-check selection: it asks Jev which

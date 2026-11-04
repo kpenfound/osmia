@@ -117,12 +117,17 @@ func (h harness) run(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
-	exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--fail-fast"}, o.checkArgs, links)...)
-	if err != nil {
-		fmt.Fprintln(h.stderr, "smartcheck: dagger check:", err)
-		return 1
+	for _, addresses := range checkselect.Invocations(links) {
+		exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--fail-fast"}, o.checkArgs, addresses)...)
+		if err != nil {
+			fmt.Fprintln(h.stderr, "smartcheck: dagger check:", err)
+			return 1
+		}
+		if exit != 0 {
+			return exit
+		}
 	}
-	return exit
+	return 0
 }
 
 // selection returns the check links to run in the working tree at o.dir:

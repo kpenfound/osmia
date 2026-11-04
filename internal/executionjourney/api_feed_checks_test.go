@@ -15,6 +15,24 @@ import (
 	time "time"
 )
 
+func TestFeedUnitCheckRunShowsTheSelectionThatRanAfterARefusal(t *testing.T) {
+	t.Parallel()
+	_, cfg := conversationFixture(t, "fur-")
+	repo, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	defer func() { repo.Close() }()
+	started, finished := demoStart, demoStart.Add(time.Minute)
+	selected := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a"}, Candidates: 3}
+	full := checkrun.FullSelection(checkrun.SelectionRefused, "no checks matched pattern")
+	feedDocument(t, repo, stream, checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, started, UnitCheckSelection{Unit: "upload", Run: 1, Selection: selected, StartedAt: started})
+	feedDocument(t, repo, stream, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, finished, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, Selection: &full, StartedAt: started, FinishedAt: finished})
+	entries, err := feedEntries(repo, repo, stream)
+	must(t, err)
+	if len(entries) != 1 || !reflect.DeepEqual(entries[0].UnitChecks.Selection, feedSelection(&full)) {
+		t.Fatalf("entries: %+v", entries)
+	}
+}
+
 func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	for _, status := range []string{ChecksPassed, ChecksFailed, ChecksIncomplete, ChecksSuperseded} {

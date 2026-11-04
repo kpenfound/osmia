@@ -1908,7 +1908,8 @@
     const reasons = {
       disabled: 'the Jev boost is off', declined: 'Jev declined', too_many_checks: 'too many checks',
       change_too_large: 'the change is too large', unlisted: 'checks could not be listed',
-      no_checks: 'no check links were listed', diff_unreadable: 'the change could not be read'
+      no_checks: 'no check links were listed', diff_unreadable: 'the change could not be read',
+      refused: 'Dagger refused the selected links'
     };
     const reason = reasons[selection.reason] || (selection.reason || '').replaceAll('_', ' ');
     return el('p', { 'data-field': 'selection' }, running ? 'checking every check' : 'every check ran',

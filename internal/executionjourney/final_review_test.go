@@ -838,6 +838,51 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 	}
 }
 
+func TestFinalReviewRunsEveryCheckWhenDaggerRefusesTheSelection(t *testing.T) {
+	t.Parallel()
+	f, stream, repo, a := newFinalFixture(t, "final-refused")
+	_, op := assembleBoth(t, f, repo, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	links := []string{"dag+check://go/test", "dag+check://release/version"}
+	const message = "no checks matched pattern"
+	checks := &fakeChecks{Links: links, Outcomes: []checkOutcome{
+		{Result: CheckResult{ExitCode: 1, Output: "Error: " + message + "\n", Refusal: message}},
+		{Result: CheckResult{Output: "CHECKS  ✔ 2 passed\n"}},
+	}}
+	f.s.options.reviewChecks = checks
+	boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
+		"check-0": jevtest.Noul(0.9), "check-1": jevtest.Noul(0.1),
+	}}}}})
+	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checked branch.", "findings": []any{}})
+		return err
+	})
+	_, err := a.Apply(context.Background(), op)
+	must(t, err)
+	docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
+	if len(docs) != 1 {
+		t.Fatalf("check records: %+v", docs)
+	}
+	var run FinalCheckRun
+	must(t, json.Unmarshal([]byte(docs[0].Content), &run))
+	if run.Status != ChecksPassed || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != checkrun.SelectionRefused || run.Selection.Detail != message || !slices.Equal(run.Command, checkrun.Command(nil)) {
+		t.Fatalf("final check run: %+v, selection %+v", run, run.Selection)
+	}
+	if runs := checks.Runs(); len(runs) != 2 || len(runs[0]) != 1 || runs[1] != nil {
+		t.Fatalf("runner links %q", runs)
+	}
+	if starts := finalCheckStarts(t, repo, stream); len(starts) != 1 || starts[0].Selection.Mode != checkrun.SelectionSelected {
+		t.Fatalf("start evidence: %+v", starts)
+	}
+	entries, err := feedChecks(repo, stream)
+	must(t, err)
+	i := slices.IndexFunc(entries, func(e api.FeedEntry) bool { return e.FinalChecks != nil })
+	if i < 0 || entries[i].FinalChecks.Selection.Reason != checkrun.SelectionRefused || entries[i].FinalChecks.Selection.Mode != checkrun.SelectionFull {
+		t.Fatalf("feed selection: %+v", entries)
+	}
+}
+
 func TestLegacyFinalChecksKeepRetryCountingAndDelay(t *testing.T) {
 	t.Parallel()
 	f, stream, repo, a := newFinalFixture(t, "legacy-final-checks")

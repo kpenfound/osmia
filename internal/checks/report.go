@@ -13,6 +13,14 @@ const ReportLimit = 16 * 1024
 var reportColor = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 var reportHeading = regexp.MustCompile(`^(?:CHECKS|== CHECKS ==)(?:[ \t]|$)`)
 var reportCheck = regexp.MustCompile(`^([ \t]*)([✘✔⊘◌])[ \t]+(dag(?:\+check)?://\S+)(.*)$`)
+var reportError = regexp.MustCompile(`(?m)^Error: (.+)$`)
+
+// reportNotRefused matches what a run shows when checks had started or its
+// engine session was lost, so a missing report says nothing about its links.
+var reportNotRefused = regexp.MustCompile(`checks: [0-9]+/[0-9]+ done|http://dagger/|engine closed session`)
+
+// errorLimit bounds the Dagger error a reason or selection detail repeats.
+const errorLimit = 1024
 
 type checkFailure struct {
 	link       string
@@ -21,7 +29,8 @@ type checkFailure struct {
 	lines      []string
 }
 
-// parseCheckReport reads check results only inside Dagger's CHECKS section.
+// parseCheckReport reads check results only inside Dagger's CHECKS sections.
+// Output with several reports yields every report's heading, one per line.
 // Check links can exceed 64 KiB; splitting on newlines has no scanner limit.
 func parseCheckReport(output string) (heading string, failures []checkFailure) {
 	lines := strings.Split(reportColor.ReplaceAllString(output, ""), "\n")
@@ -30,7 +39,10 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 	checkIndent := 0
 	for i, line := range lines {
 		if reportHeading.MatchString(line) {
-			heading, inChecks, active = line, true, -1
+			if heading != "" {
+				heading += "\n"
+			}
+			heading, inChecks, active = heading+line, true, -1
 			checkIndent = 0
 			continue
 		}
@@ -162,9 +174,36 @@ func OutputEvidence(output, path string, revision int, truncated bool) string {
 	return out
 }
 
+// daggerError returns the message of the last error Dagger printed, or empty
+// when it printed none.
+func daggerError(output string) string {
+	matches := reportError.FindAllStringSubmatch(reportColor.ReplaceAllString(output, ""), -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return CheckExcerpt(matches[len(matches)-1][1], errorLimit)
+}
+
+// refusal returns Dagger's error when the output of one dagger check run shows
+// it refused to run: it exited with an error, without a report, without
+// starting a check and with its engine session intact.
+func refusal(output string, exit int) string {
+	if exit <= 0 {
+		return ""
+	}
+	if heading, _ := parseCheckReport(output); heading != "" {
+		return ""
+	}
+	if reportNotRefused.MatchString(reportColor.ReplaceAllString(output, "")) {
+		return ""
+	}
+	return daggerError(output)
+}
+
 // ClassifyChecks classifies a finished dagger check from its result and the
 // error it ran with: passed on exit 0, failed with the links Dagger's report
-// shows failed, and otherwise incomplete with the reason.
+// shows failed, and otherwise incomplete with the reason, which repeats the
+// last error Dagger printed.
 func ClassifyChecks(result CheckResult, err error) (status string, failed []string, reason error) {
 	failed = FailedChecks(result.Output)
 	switch {
@@ -175,6 +214,9 @@ func ClassifyChecks(result CheckResult, err error) (status string, failed []stri
 	case len(failed) > 0:
 		return ChecksFailed, failed, nil
 	default:
+		if message := daggerError(result.Output); message != "" {
+			return ChecksIncomplete, failed, fmt.Errorf("dagger check exited %d without reporting a failed check: %s", result.ExitCode, message)
+		}
 		return ChecksIncomplete, failed, fmt.Errorf("dagger check exited %d without reporting a failed check", result.ExitCode)
 	}
 }

@@ -75,7 +75,9 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if i, ok := indexes[key]; ok {
 				entry.At = out[i].At
 				entry.UnitChecks.StartedAt = out[i].UnitChecks.StartedAt
-				entry.UnitChecks.Selection = out[i].UnitChecks.Selection
+				if entry.UnitChecks.Selection == nil {
+					entry.UnitChecks.Selection = out[i].UnitChecks.Selection
+				}
 			}
 			put(key, entry)
 		case finalCheckPathPattern.MatchString(d.Path):
@@ -91,8 +93,8 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 				entry.At = out[i].At
 				entry.FinalChecks.Attempt = run.Attempt
 				entry.FinalChecks.StartedAt = out[i].FinalChecks.StartedAt
-				if selection := out[i].FinalChecks.Selection; selection != nil {
-					entry.FinalChecks.Selection = selection
+				if entry.FinalChecks.Selection == nil {
+					entry.FinalChecks.Selection = out[i].FinalChecks.Selection
 				}
 			} else {
 				key = fmt.Sprintf("%s-result-%d", d.ID, d.Revision)

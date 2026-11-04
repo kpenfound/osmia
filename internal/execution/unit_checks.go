@@ -586,7 +586,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Command = checkrun.Command(selection.Links)
 	timeout := c.s.About(c.repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, err := checks.Check(bounded, dir, c.checkIdentity(in), selection.Links)
+	result, ran, err := checkrun.RunSelection(bounded, checks, dir, c.checkIdentity(in), selection)
 	cancel()
 	if ctx.Err() != nil {
 		return coreadapter.OperationResult{}, ctx.Err()
@@ -594,6 +594,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
+	run.Selection, run.Command = &ran, checkrun.Command(ran.Links)
 	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
 	captured, run.ExitCode = result.Output, result.ExitCode
@@ -761,7 +762,7 @@ func checkEvidence(run UnitCheckRun) string {
 func quoteLinks(args []string) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
-		if strings.ContainsAny(a, "?&") {
+		if a != "&&" && strings.ContainsAny(a, "?&") {
 			a = strconv.Quote(a)
 		}
 		out[i] = a

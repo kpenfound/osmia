@@ -159,3 +159,44 @@ func TestCheckReportKeepsUnrecognizedAndInfrastructureOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyChecksRepeatsDaggersLastError(t *testing.T) {
+	t.Parallel()
+	_, _, reason := ClassifyChecks(CheckResult{ExitCode: 1, Output: "Error: first\n\x1b[31mError: second problem\x1b[0m\ncleanup failed\n"}, nil)
+	if want := "dagger check exited 1 without reporting a failed check: second problem"; reason == nil || reason.Error() != want {
+		t.Fatalf("reason %v, want %q", reason, want)
+	}
+	_, _, reason = ClassifyChecks(CheckResult{ExitCode: 1, Output: "Error: " + strings.Repeat("x", 4*errorLimit) + "\n"}, nil)
+	if reason == nil || len(reason.Error()) > errorLimit+128 {
+		t.Fatalf("reason is unbounded: %d bytes", len(reason.Error()))
+	}
+}
+
+func TestRefusalRecognisesARunRefusedBeforeAnyCheckStarted(t *testing.T) {
+	t.Parallel()
+	const differentFilters = "addresses with different filters require a union of workspace views; use shared filter flags"
+	for name, test := range map[string]struct {
+		output string
+		exit   int
+		want   string
+	}{
+		"different filters":    {"TRACE  ✘ FAILED\n! " + differentFilters + "\n\n✔ connect 0.1s\n✘ prepare artifacts 0.3s ERROR\n! " + differentFilters + "\nError: " + differentFilters + "\n", 1, differentFilters},
+		"no matching check":    {"== TRACE ==  ✘ FAILED\n! no checks matched pattern \"dag+check://x\"\n\nError: no checks matched pattern \"dag+check://x\"\n", 1, "no checks matched pattern \"dag+check://x\""},
+		"after modules loaded": {"[dagger] 30.0s elapsed · 15 steps running\nError: no checks matched pattern \"dag+check://x\"\n", 1, "no checks matched pattern \"dag+check://x\""},
+		"failed check":         {fixturekit.LifecycleFailureOutput() + "Error: exit code 1\n", 1, ""},
+		"passed then lost":     {fixturekit.PassedReport + "Error: session shutdown: connection reset\n", 1, ""},
+		"checks started":       {"[dagger] 7m0s elapsed · checks: 1/5 done · running: dag://?check=a (10s)\nError: something broke\n", 1, ""},
+		"engine lost":          {"[dagger] 6m0s elapsed · 732 steps running\nError: Post \"http://dagger/query\": unexpected EOF\n", 1, ""},
+		"session closed":       {"Error: engine closed session \"x\": it closed this client's connection\n", 1, ""},
+		"no error":             {"killed\n", 137, ""},
+		"did not exit":         {"Error: no checks matched\n", -1, ""},
+		"passed":               {"Error: no checks matched\n", 0, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := refusal(test.output, test.exit); got != test.want {
+				t.Fatalf("refusal %q, want %q", got, test.want)
+			}
+		})
+	}
+}
