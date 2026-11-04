@@ -206,6 +206,12 @@ func (d DeltaRunner) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	ctx, release := d.S.Stoppable(ctx, wt.Project(), c.Host)
 	defer release()
 	if err := d.S.RunChangeTurn(ctx, wt, c, in.Role, in.Agent, in.Tool); err != nil {
+		if retired && in.Tool == DeltaDraftTool && errors.Is(err, trace.ErrMemberRetired) {
+			// The shared response is captured, but its draft needs unavailable
+			// member history. The live controller owns that hold; this retired
+			// dispatch must not keep its member's archive cleanup pending.
+			return coreadapter.OperationResult{Outcome: "completed", Evidence: "shared delta response retained; " + err.Error()}, nil
+		}
 		return coreadapter.OperationResult{}, err
 	}
 	changes, err := ReadChanges(wt, c.Host)
