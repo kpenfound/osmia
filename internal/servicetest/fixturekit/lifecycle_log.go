@@ -26,7 +26,14 @@ func LogUnsettledLifecycleOperations(t *testing.T, repo *trace.Repository, strea
 			t.Log("additional unsettled operations omitted")
 			break
 		}
-		t.Logf("unsettled operation id=%s action=%s claim=%+v retry=%v history=%+v", op.Operation.ID, op.Operation.Action, op.Claim, op.RetryAt, op.History[max(0, len(op.History)-3):])
+		var failure string
+		for i := len(op.History) - 1; i >= 0; i-- {
+			if op.History[i].Failure != "" {
+				failure = op.History[i].Failure
+				break
+			}
+		}
+		t.Logf("unsettled operation member=%s id=%s action=%s claim=%+v retry=%v last-failure=%q history=%+v", stream, op.Operation.ID, op.Operation.Action, op.Claim, op.RetryAt, failure, op.History[max(0, len(op.History)-3):])
 		in, err := thread.DecodeTurn(op.Operation)
 		var th trace.Thread
 		agent, turn := in.Agent, in.Turn

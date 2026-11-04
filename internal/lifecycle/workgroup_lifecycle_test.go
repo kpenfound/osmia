@@ -29,6 +29,7 @@ type lifecycleCleanupGate struct {
 	reached                chan struct{}
 	released               chan struct{}
 	reachOnce, releaseOnce sync.Once
+	diagnose               func()
 }
 
 func (g *lifecycleCleanupGate) checkpoint(ctx context.Context, step string) error {
@@ -43,6 +44,9 @@ func (g *lifecycleCleanupGate) await(t *testing.T, fixtures ...*productionDesign
 		select {
 		case <-g.reached:
 		case <-time.After(demoTimeout):
+			if g.diagnose != nil {
+				g.diagnose()
+			}
 			t.Fatal("live controller did not reach eligible archive cleanup")
 		}
 		return
@@ -58,6 +62,9 @@ func (g *lifecycleCleanupGate) await(t *testing.T, fixtures ...*productionDesign
 		default:
 		}
 		if time.Now().After(deadline) {
+			if g.diagnose != nil {
+				g.diagnose()
+			}
 			t.Fatal("live controller did not reach eligible archive cleanup")
 		}
 		lifecycleAdvanceScheduled(t, f)

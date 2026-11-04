@@ -203,6 +203,12 @@ The project set stays fixed from hand-in or design start until ratification. No 
 
 The original conversation continues as the single shared chief thread. For design intake it stays at the session's project even if that project is absent from the brief's list. The original address and every member's conversation and feed reach that thread. After a resolved member is owner-archived, surviving members retain the same authority and active workgroup spec across cleanup and restart. Archive records preserve verified resolution and group identity; missing history alone proves neither resolution nor merge. Consolidated inbox entries retain their original question and ruling links. An effect needing unavailable retired history stays pending with a recoverable diagnostic.
 
+Retirement cancels an unclaimed member delta dispatch while preserving the
+shared decision. A running shared turn retains its claim and captured response.
+After capture, the retired dispatch settles even when the surviving member's
+shared decision remains held for unavailable validation history, allowing the
+retired member's archive cleanup to finish.
+
 For several selected projects, one ratification approves the workgroup spec, graph and every slice. A durable group decision pins every revision; seal preparation resumes after interruption without another approval. Until all pinned seals complete, the whole group stays pending and no member builds or releases a contract edge. Each member retains its own final-review acceptance, delivery approval and owner signing.
 
 An in-flight design start encountered at upgrade keeps any recorded selection. Without a recorded selection it waits with an inbox entry asking the owner to choose projects. The answer uses the same validation as hand-in, then start continues. New starts record their selection durably with the handed input and cannot be mistaken for an unselected legacy start.
