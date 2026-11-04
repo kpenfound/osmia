@@ -57,7 +57,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 					}
 					var logs bytes.Buffer
 					ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&logs, nil)))
-					for _, operation := range []string{"check", "list"} {
+					for _, operation := range []string{"check", "list", "call", "core"} {
 						var output bytes.Buffer
 						exit, prep, err := d.dagger(ctx, t.TempDir(), id, operation == "check" && token != "", &output, operation)
 						if engine == "cloud" && token == "" {
@@ -95,7 +95,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 								want["_EXPERIMENTAL_DAGGER_RUNNER_HOST"] = engine
 							}
 						}
-						if token != "" && (operation == "check" || engine == "cloud") {
+						if token != "" && (operation == "check" || operation == "call" || operation == "core" || engine == "cloud") {
 							want["DAGGER_CLOUD_TOKEN"] = token
 						}
 						if token != "" && operation == "check" && !fallback {
@@ -147,6 +147,25 @@ printf 'CHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 	_, err = (DaggerChecks{Engine: "cloud", CloudToken: token}).List(ctx, t.TempDir(), Identity{})
 	if err == nil || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "[redacted]") {
 		t.Fatalf("listing error %v", err)
+	}
+}
+
+// serial: installs a fake CLI that returns a Service ID and diagnostics.
+func TestDaggerClientSeparatesServiceIDFromDiagnostics(t *testing.T) {
+	installLoggingDagger(t, `printf 'service-id\n'
+printf 'service diagnostic\n' >&2
+exit "$2"
+`)
+	for _, want := range []struct {
+		arg  string
+		exit int
+	}{{"0", 0}, {"7", 7}} {
+		var stdout, stderr bytes.Buffer
+		exit, _, err := (DaggerChecks{}).daggerOutput(context.Background(), t.TempDir(), Identity{}, false, &stdout, &stderr, "call", want.arg)
+		must(t, err)
+		if exit != want.exit || stdout.String() != "service-id\n" || stderr.String() != "service diagnostic\n" {
+			t.Fatalf("exit %d, stdout %q, stderr %q", exit, stdout.String(), stderr.String())
+		}
 	}
 }
 

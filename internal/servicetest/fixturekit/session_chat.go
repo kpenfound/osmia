@@ -10,15 +10,16 @@ import (
 )
 
 // SessionEngine is a fake execution engine for a session's turns. Unlike
-// DemoEngine it needs no MCP tool session, because a session turn is never
-// given a custom or MCP tool; it answers CheckResume from a test-supplied
+// DemoEngine it does not call MCP tools unless its callback requests them.
+// It answers CheckResume from a test-supplied
 // function, defaulting to unavailable so a test that never sets it gets a
 // fresh model session every turn.
 type SessionEngine struct {
-	Mu     sync.Mutex
-	Runs   []agent.Request
-	Turn   func(ctx context.Context, req agent.Request) (*agent.Result, error)
-	Resume func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error
+	Sessions *DemoSessions
+	Mu       sync.Mutex
+	Runs     []agent.Request
+	Turn     func(ctx context.Context, req agent.Request) (*agent.Result, error)
+	Resume   func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error
 }
 
 func (e *SessionEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {

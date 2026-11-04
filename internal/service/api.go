@@ -278,6 +278,10 @@ type ShedResponse = api.ShedResponse
 
 type ProjectAddRequest = api.ProjectAddRequest
 
+type ProjectPreviewRequest = api.ProjectPreviewRequest
+
+type ProjectPreviewResponse = api.ProjectPreviewResponse
+
 type ProjectRemoveRequest = api.ProjectRemoveRequest
 
 type ProjectResponse = api.ProjectResponse
@@ -416,6 +420,8 @@ type ConversationEntry = api.ConversationEntry
 
 type FeedResponse = api.FeedResponse
 
+type FeedImage = api.FeedImage
+
 type FeedEntry = api.FeedEntry
 
 type FeedSession = api.FeedSession
@@ -439,6 +445,8 @@ const EventWorkstream = api.EventWorkstream
 const EventInbox = api.EventInbox
 
 const EventConversation = api.EventConversation
+
+const EventImage = api.EventImage
 
 const EventRuntime = api.EventRuntime
 

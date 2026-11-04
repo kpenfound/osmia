@@ -147,6 +147,16 @@ loads the latest text.
 
 Project management shows the project's name, upstream, optional fork, clone, base branch and knowledge extraction state. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
+The **Preview** section shows the current call, port, path and timeout, or that
+previews are off. Enter the `dagger call` arguments as a JSON array (for example,
+`["serve", "--port", "8080"]`) and the Service port, then choose **Enable preview**
+or **Save preview**. Empty path and timeout fields use `/` and `5m`; timeout must
+be from `1m` to `30m`. **Disable preview** removes the project's `[preview]` table.
+Changes apply immediately through the project preview API. Validation refusals
+and configuration file drift conflicts keep your input and show the reason in
+the section. If the file has changed on disk, reload the configuration before
+retrying. Other project configuration fields remain read-only.
+
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,
 unmerged PR shows **PR open**; ready, draft and closed-without-merge PRs remain
@@ -220,6 +230,32 @@ The member view is laid out like a chat client:
   the loaded configuration with any [disk drift](#disk-drift) and settings
   that need a restart. The settings button is marked while a reload has
   something to apply.
+
+Images appear as inline thumbnails in workstream, shared workgroup and
+exploratory session feeds. Select a thumbnail to open the full-size image in a
+new tab, served by `GET /v1/images/{workstream}/{image}`. Workgroup images are
+attributed to the member's repository. After that member is archived, its
+shared image entry shows “image removed when <member> was archived” without
+requesting the deleted image. New images appear over the event stream without
+a reload. Opening a feed or receiving a new entry snaps to its end; refreshing
+an existing entry keeps the scroll position.
+
+After enabling a project's Preview settings, ask its chief to show a built page.
+The chief's `preview` tool asks the service to capture the feature-branch head,
+or a named unit's recorded candidate, at one URL path. It supports `desktop`
+and `phone` viewports and full-page captures. The service runs both the configured
+Dagger Service and pinned Chromium through Dagger, without a browser on the host
+or a published host port. Previews share the check-slot pool; a waiting run is
+labelled `preview` in the capacity view, and its timeout starts after admission.
+An unavailable or failed preview gives the chief a limitation to explain.
+
+Exploratory session agents can attach a PNG or JPEG from their current worktree
+with `show_image(path)`, including a screenshot just written in the same turn.
+Images must match their declared type and be at most 5 MiB. They are stored in
+the shown workstream's or session's trace; shared conversations keep references.
+Archiving a member deletes its images with its trace, and destroying a session
+deletes its images. Pinned archives retain no image bytes. Images are never sent
+to Hearsay, notification webhooks or the knowledge base.
 
 Which workstream is selected and what you have seen are kept in the browser,
 so another browser has its own. The list's order comes from the service and
