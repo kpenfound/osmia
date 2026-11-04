@@ -811,3 +811,22 @@ func TestListenTailnetHTTPS(t *testing.T) {
 		t.Fatal("accepted non-boolean HTTPS setting")
 	}
 }
+
+func TestJevCheckFallbackPicks(t *testing.T) {
+	for _, enabled := range []string{"true", "false"} {
+		for _, value := range []string{"", "check_fallback_picks = 0\n", "check_fallback_picks = 2\n"} {
+			cfg, err := Load(fixture(t, topConfig+"[jev]\nenabled = "+enabled+"\n"+value, projectConfig))
+			want := 0
+			if strings.Contains(value, "= 2") {
+				want = 2
+			}
+			if err != nil || cfg.Jev.CheckFallbackPicks != want {
+				t.Fatalf("%s %s: %+v %v", enabled, value, cfg, err)
+			}
+		}
+		_, err := Load(fixture(t, topConfig+"[jev]\nenabled = "+enabled+"\ncheck_fallback_picks = -1\n", projectConfig))
+		if err == nil || !strings.Contains(err.Error(), "jev.check_fallback_picks") {
+			t.Fatalf("negative (%s): %v", enabled, err)
+		}
+	}
+}

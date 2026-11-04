@@ -46,6 +46,7 @@ func Invocations(links []string) [][]string {
 // of each filter in the order they first appear. An opaque address has a form
 // this package does not read, and only combines with an identical link.
 type address struct {
+	raw     string
 	base    string
 	filters []filter
 	opaque  bool
@@ -58,16 +59,16 @@ type filter struct {
 
 func parseAddress(link string) *address {
 	base, query, _ := strings.Cut(link, "?")
-	if !strings.Contains(base, "://") {
+	if !(strings.HasPrefix(link, "dag://") || strings.HasPrefix(link, "dag+check://")) || strings.Contains(link, "#") {
 		return &address{base: link, opaque: true}
 	}
-	a := &address{base: base}
+	a := &address{raw: link, base: base}
 	if query == "" {
 		return a
 	}
 	for pair := range strings.SplitSeq(query, "&") {
 		key, value, keyed := strings.Cut(pair, "=")
-		if !keyed {
+		if !keyed || key == "" || value == "" {
 			// A filter without a value selects the whole dimension.
 			return &address{base: link, opaque: true}
 		}
@@ -98,6 +99,9 @@ func (a *address) values(key string) ([]string, bool) {
 }
 
 func (a *address) String() string {
+	if a.raw != "" {
+		return a.raw
+	}
 	if len(a.filters) == 0 {
 		return a.base
 	}

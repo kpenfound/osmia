@@ -28,8 +28,11 @@ import (
 const usage = `usage: smartcheck [flags] [-- dagger check flags]
 
 Runs the Dagger checks Jev selects for the change between the working tree
-and the merge base of --base, falling back to every check when Jev selects
-none or does not answer. Arguments after the flags go to dagger check.
+and the merge base of --base. When no check reaches the threshold,
+--fallback-picks can run the highest-scored checks; by default every check
+runs. When Jev cannot answer, every check runs. Every run uses --parallel 4.
+Arguments after the flags go to dagger check; caller --parallel and -j
+arguments are refused.
 
 `
 
@@ -54,6 +57,7 @@ type harness struct {
 type options struct {
 	dir, base, url, model, keyEnv string
 	threshold                     float64
+	fallbackPicks                 int
 	verbose, dryRun               bool
 	checkArgs                     []string
 }
@@ -71,6 +75,7 @@ func (h harness) parse(args []string) (options, error) {
 	fs.BoolVar(&o.verbose, "v", false, "show the changed files, Jev's answers and the selection")
 	fs.BoolVar(&o.verbose, "verbose", false, "same as -v")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "print the selected check links instead of running them")
+	fs.IntVar(&o.fallbackPicks, "fallback-picks", 0, "run this many highest-scored checks when none reaches the threshold (0 runs every check)")
 	fs.Float64Var(&o.threshold, "threshold", config.DefaultJevCheckThreshold, "select checks at or above this `probability`")
 	fs.StringVar(&o.url, "url", config.DefaultJevURL, "base `URL` of the TypeSafe-compatible API")
 	fs.StringVar(&o.model, "model", config.DefaultJevModel, "Jev `model` to ask")
@@ -79,6 +84,14 @@ func (h harness) parse(args []string) (options, error) {
 		return o, err
 	}
 	o.checkArgs = fs.Args()
+	if o.fallbackPicks < 0 {
+		return o, fmt.Errorf("--fallback-picks must be a non-negative integer")
+	}
+	for _, arg := range o.checkArgs {
+		if (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(strings.SplitN(arg, "=", 2)[0], "j")) || arg == "--parallel" || strings.HasPrefix(arg, "--parallel=") || arg == "-parallel" || strings.HasPrefix(arg, "-parallel=") {
+			return o, fmt.Errorf("--parallel is fixed at 4 by smartcheck")
+		}
+	}
 	if o.threshold < 0 || o.threshold > 1 {
 		return o, fmt.Errorf("--threshold %v is not a probability", o.threshold)
 	}
@@ -118,7 +131,7 @@ func (h harness) run(ctx context.Context, args []string) int {
 		return 0
 	}
 	for _, addresses := range checkselect.Invocations(links) {
-		exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--fail-fast"}, o.checkArgs, addresses)...)
+		exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--fail-fast", "--parallel", "4"}, o.checkArgs, addresses)...)
 		if err != nil {
 			fmt.Fprintln(h.stderr, "smartcheck: dagger check:", err)
 			return 1
@@ -191,8 +204,13 @@ func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 		return h.fallback("Jev did not answer: " + err.Error()), nil
 	}
 	selected := checkselect.Selected(response, candidates, o.threshold)
+	picks := false
+	if len(selected) == 0 {
+		selected = checkselect.FallbackPicks(response, candidates, o.fallbackPicks)
+		picks = len(selected) > 0
+	}
 	if o.verbose {
-		h.explain(response, candidates, selected, o.threshold, time.Since(start))
+		h.explain(response, candidates, selected, o.threshold, picks, time.Since(start))
 	}
 	if len(selected) == 0 {
 		return h.fallback(fmt.Sprintf("no check reached probability %.2f", o.threshold)), nil
@@ -201,7 +219,7 @@ func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 }
 
 // explain prints Jev's answer for every candidate, most likely first.
-func (h harness) explain(r systemone.Response, candidates, selected []string, threshold float64, took time.Duration) {
+func (h harness) explain(r systemone.Response, candidates, selected []string, threshold float64, picks bool, took time.Duration) {
 	cost := ""
 	if r.Usage.CostKnown {
 		cost = fmt.Sprintf(", $%.4f", r.Usage.CostUSD)
@@ -219,6 +237,10 @@ func (h harness) explain(r systemone.Response, candidates, selected []string, th
 			mark = "✓"
 		}
 		fmt.Fprintf(h.stderr, "  %s %.2f %s\n", mark, noul(i), candidates[i])
+	}
+	if picks {
+		fmt.Fprintf(h.stderr, "no check reached probability %.2f; running the %d highest-scored checks as fallback picks out of %d candidates\n", threshold, len(selected), len(candidates))
+		return
 	}
 	fmt.Fprintf(h.stderr, "selected %d of %d at probability %.2f or more\n", len(selected), len(candidates), threshold)
 }

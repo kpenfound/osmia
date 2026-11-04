@@ -538,10 +538,19 @@ Core logs cleanup failures; a failed rule removal still attempts sandbox removal
 Unit and final reviewers receive read-only files from the exact candidate commit
 and writable scratch space.
 
-Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast` on
+Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast --parallel 4` on
 a separate, fresh export of its candidate, made a Git root of its own so Dagger
 finds the project's workspace. The copy and temporary home are removed
-afterward. The run is bounded by the project's `checks_timeout` and is
+afterward. Selected links with different filters need separate Dagger views:
+links combine only when a single address selects exactly their checks, and
+otherwise run in sequential commands. Every command uses `--parallel 4`, so
+at most four checks run at once. One run holds one capacity slot, one result
+and the combined output for all commands. A failed or incomplete part stops
+later parts after the service's one rerun resolves any failed check. A refusal
+is judged on one command: even after earlier commands passed, refused links
+trigger a full run under the same timeout. The finished selection describes
+that full run with reason `refused`; its output retains the earlier reports.
+The run is bounded by the project's `checks_timeout` and is
 recorded in the trace as `units/<unit>/checks-<n>.json`, with the candidate,
 its base and diff, the checks it ran and why, the command, its exit status and
 a diagnostic excerpt of at most 16 KiB. The complete combined stdout/stderr is
@@ -1065,6 +1074,9 @@ timeout = "10s"
 # The probability at or above which smart checks run a check, above 0 and at
 # most 1. Tune it against a versioned model.
 check_threshold = 0.5
+# When no check reaches the threshold, run this many highest-scored links.
+# Non-negative integer; 0 (default) runs every check instead.
+check_fallback_picks = 0
 ```
 
 The settings are validated whether or not the boost is on, and apply through
@@ -1096,8 +1108,18 @@ candidate's changed files can affect, then runs the links at or above
 `check_threshold`. A lower value runs more checks and is less likely to miss
 an affected one. A project
 with more than 128 check links is asked about its collections' items, such as
-a Go package's tests rather than each test. When Jev selects no check, or any
-judgment fallback applies, the run checks everything, and the run records why.
+a Go package's tests rather than each test. When no check reaches the
+threshold, `check_fallback_picks` above 0 runs up to
+that many highest-scored candidates from the same answers, however low the
+scores. Equal scores follow sorted candidate order. Fewer scored candidates
+run all scored links; no usable score, 0 (the default), or any judgment
+fallback runs every check. A pick may cover a whole collection item. Picks
+can miss an affected check that a full run would catch. Unit, final-review
+and smart session runs share this setting, while an explicit full session
+run stays full. The selection, summary and feed distinguish fallback picks.
+The setting is validated with the boost on or off, reported in effective
+configuration and applied through reload. The judgment records its threshold
+and picks setting; a changed value creates a new judgment.
 
 [Smart checks](smart-checks.md) describes the selection end to end: what Jev
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the

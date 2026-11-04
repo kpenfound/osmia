@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
 )
 
 const (
@@ -24,24 +25,25 @@ const (
 
 // fakeDagger stands in for the Dagger CLI, which is costly to invoke for
 // real (it builds and runs the project's checks) and may not be installed.
-// It lists links and records each dagger check it is asked to run, but does
-// not exercise whether the real Dagger CLI accepts the arguments smartcheck
-// passes it or actually runs the selected checks.
+// It lists links, refuses addresses with different filters or types and
+// records each dagger check. Executable-path tests also verify which checks
+// those commands select.
 type fakeDagger struct {
-	links []string
-	exit  int
+	links    []string
+	exit     int
+	listExit int
 
 	mu     sync.Mutex
 	checks [][]string
 }
 
-func (d *fakeDagger) run(_ context.Context, _ string, stdout, _ io.Writer, args ...string) (int, error) {
+func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, args ...string) (int, error) {
 	if slices.Equal(args, []string{"list", "checks", "--all", "--format=link"}) {
 		fmt.Fprintln(stdout, "Loading modules")
 		for _, l := range d.links {
 			fmt.Fprintln(stdout, l)
 		}
-		return 0, nil
+		return d.listExit, nil
 	}
 	if len(args) == 0 || args[0] != "check" {
 		return -1, fmt.Errorf("unexpected dagger %q", args)
@@ -49,6 +51,16 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, _ io.Writer, args 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.checks = append(d.checks, args[1:])
+	var links []string
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "dag") {
+			links = append(links, arg)
+		}
+	}
+	if err := daggerfixture.Validate(links); err != nil {
+		fmt.Fprintln(stderr, "Error:", err)
+		return 1, nil
+	}
 	return d.exit, nil
 }
 
@@ -134,11 +146,14 @@ func write(t *testing.T, dir, name, content string) {
 func TestRunsSelectionsWithDifferentFiltersSeparately(t *testing.T) {
 	t.Parallel()
 	for name, c := range map[string]struct {
-		exit int
-		want [][]string
+		exit  int
+		picks int
+		want  [][]string
 	}{
-		"both pass":             {0, [][]string{{"--fail-fast", traceTests}, {"--fail-fast", release}}},
-		"a failure stops later": {3, [][]string{{"--fail-fast", traceTests}}},
+		"both pass":                      {0, 0, [][]string{{"--fail-fast", "--parallel", "4", traceTests}, {"--fail-fast", "--parallel", "4", release}}},
+		"a failure stops later":          {3, 0, [][]string{{"--fail-fast", "--parallel", "4", traceTests}}},
+		"fallback picks":                 {0, 2, [][]string{{"--fail-fast", "--parallel", "4", traceTests}, {"--fail-fast", "--parallel", "4", release}}},
+		"fallback picks stop on failure": {3, 2, [][]string{{"--fail-fast", "--parallel", "4", traceTests}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -146,7 +161,10 @@ func TestRunsSelectionsWithDifferentFiltersSeparately(t *testing.T) {
 			write(t, dir, "internal/trace/trace.go", "package trace\n\nconst Version = 2\n")
 			d := &fakeDagger{links: []string{release, traceTests}, exit: c.exit}
 			j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95, release: 0.95}}
-			r := runHarness(t, d, j, withKey, "-C", dir)
+			if c.picks > 0 {
+				j.probabilities = map[string]float64{traceTests: 0.4, release: 0.2}
+			}
+			r := runHarness(t, d, j, withKey, "-C", dir, fmt.Sprintf("--fallback-picks=%d", c.picks))
 			if r.code != c.exit {
 				t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 			}
@@ -167,7 +185,7 @@ func TestRunsTheSelectedChecks(t *testing.T) {
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 	}
-	if want := [][]string{{"--fail-fast", "--progress=report", serviceTests + "&go-package=internal/trace"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
+	if want := [][]string{{"--fail-fast", "--parallel", "4", "--progress=report", serviceTests + "&go-package=internal/trace"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
 		t.Fatalf("ran %q, want %q", d.checks, want)
 	}
 	c := j.clients[0]
@@ -231,7 +249,7 @@ func TestFallsBackToEveryCheck(t *testing.T) {
 			if r.code != 3 || !strings.Contains(r.stderr, "running every check: "+c.reason) {
 				t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 			}
-			if want := [][]string{{"--fail-fast"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
+			if want := [][]string{{"--fail-fast", "--parallel", "4"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
 				t.Fatalf("ran %q, want every check", d.checks)
 			}
 			if files := c.jev.requests[0].State.(map[string]any)["changed_files"]; files != "- README.md (+2 -0)\n" {
@@ -272,7 +290,7 @@ func TestHonoursAPIKeyEnvAndBaseFlags(t *testing.T) {
 	d := &fakeDagger{links: []string{traceTests}}
 	j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95}}
 	r := runHarness(t, d, j, map[string]string{"JEV_KEY": "set"}, "-C", dir, "--api-key-env=JEV_KEY", "--base=HEAD")
-	if r.code != 0 || r.stderr != "" || j.clients[0].APIKey != "set" || !slices.EqualFunc(d.checks, [][]string{{"--fail-fast", traceTests}}, slices.Equal) {
+	if r.code != 0 || r.stderr != "" || j.clients[0].APIKey != "set" || !slices.EqualFunc(d.checks, [][]string{{"--fail-fast", "--parallel", "4", traceTests}}, slices.Equal) {
 		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
 	}
 }
@@ -295,5 +313,59 @@ func TestInvalidThresholdIsRejected(t *testing.T) {
 	r := runHarness(t, d, j, withKey, "--threshold=2")
 	if r.code != 2 || len(d.checks) != 0 || len(j.requests) != 0 {
 		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
+	}
+}
+
+func TestFallbackPicks(t *testing.T) {
+	t.Parallel()
+	for _, dry := range []bool{false, true} {
+		t.Run(fmt.Sprint(dry), func(t *testing.T) {
+			t.Parallel()
+			dir := newRepository(t)
+			write(t, dir, "README.md", "changed\n")
+			d := &fakeDagger{links: []string{release, serviceTests, traceTests}}
+			j := &fakeJev{probabilities: map[string]float64{release: .1, serviceTests: .2, traceTests: .4}}
+			args := []string{"-C", dir, "--fallback-picks=2", "-v"}
+			if dry {
+				args = append(args, "--dry-run")
+			}
+			r := runHarness(t, d, j, withKey, args...)
+			if r.code != 0 || !strings.Contains(r.stderr, "no check reached probability 0.50; running the 2 highest-scored checks as fallback picks") || len(j.requests) != 1 {
+				t.Fatalf("result %+v", r)
+			}
+			if dry {
+				if r.stdout != traceTests+"\n"+serviceTests+"\n" || len(d.checks) != 0 {
+					t.Fatalf("dry run %+v, checks %v", r, d.checks)
+				}
+			} else if !slices.EqualFunc(d.checks, [][]string{{"--fail-fast", "--parallel", "4", traceTests + "&go-package=internal/service"}}, slices.Equal) {
+				t.Fatalf("checks %v", d.checks)
+			}
+		})
+	}
+}
+
+func TestRefusesInvalidPicksAndParallelOverrides(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"--fallback-picks=-1"}, {"--", "--parallel", "9"}, {"--", "--parallel=9"}, {"--", "-j", "9"}, {"--", "-j=9"}, {"--", "-j9"}, {"--", "-vj9"}} {
+		d, j := &fakeDagger{}, &fakeJev{}
+		r := runHarness(t, d, j, withKey, args...)
+		if r.code != 2 || len(d.checks) != 0 || len(j.requests) != 0 {
+			t.Fatalf("args %v: %+v", args, r)
+		}
+	}
+}
+
+func TestPicksPreserveListingFailureAndUnchangedTree(t *testing.T) {
+	t.Parallel()
+	dir := newRepository(t)
+	d, j := &fakeDagger{listExit: 7}, &fakeJev{}
+	r := runHarness(t, d, j, withKey, "-C", dir, "--fallback-picks=2")
+	if r.code != 0 || !strings.Contains(r.stderr, "nothing changed") || len(d.checks) != 0 || len(j.requests) != 0 {
+		t.Fatalf("unchanged: %+v", r)
+	}
+	write(t, dir, "README.md", "changed\n")
+	r = runHarness(t, d, j, withKey, "-C", dir, "--fallback-picks=2")
+	if r.code != 1 || !strings.Contains(r.stderr, "dagger list checks exited 7") || len(d.checks) != 0 || len(j.requests) != 0 {
+		t.Fatalf("listing: %+v", r)
 	}
 }

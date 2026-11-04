@@ -2,10 +2,10 @@
 
 Before a unit or assembled feature is reviewed, the service runs the project's
 Dagger checks on the commit to be read. With the [Jev boost](configuration.md#optional-jev-boost)
-on, smart checks run only the checks the change can affect: Jev judges, for
-each check, how likely the change is to alter its result, and `dagger check`
-runs the likely ones. Whenever that judgment cannot be used, every check runs,
-exactly as with the boost off. The [design](design.md#96-jev-judgments) calls
+on, Jev judges how likely the change is to alter each check's result, and
+`dagger check` runs the likely ones. Configured fallback picks run the
+highest-scored checks when none reaches the threshold. Whenever that judgment
+cannot be used, every check runs, exactly as with the boost off. The [design](design.md#96-jev-judgments) calls
 this the check selection and defines what it may decide.
 
 Smart checks pay off in a project whose Dagger checks are fine-grained, such
@@ -55,7 +55,14 @@ requested tests exist and exercise the behaviour.
    judgment shares.
 7. **Accept.** The links whose probability is at least
    [`jev.check_threshold`](configuration.md#optional-jev-boost), 0.5 by
-   default, are selected. A response that selects none is declined, and the run checks everything.
+   default, are selected, regardless of the picks setting. When none reaches
+   it, `jev.check_fallback_picks` (non-negative integer, default 0) above 0
+   accepts a response with a usable Noul score and runs up to that many
+   highest-scored candidates from the same answers. There is no minimum
+   score and no second request. Ties follow sorted candidate order. Fewer
+   scored candidates run all scored links; no usable score runs every check.
+   With 0 or unset, a response that selects none is declined and runs every
+   check, keeping the threshold-only judgment identity.
 8. **Group.** Dagger evaluates one `dagger check` under a single filtered view
    of the workspace, so it refuses links whose filters differ, and the filters
    of one link AND together. Links combine into one only where that selects
@@ -68,11 +75,14 @@ requested tests exist and exercise the behaviour.
    The first run that does not pass stops the rest and decides the result. All
    the runs share one export and the project's `checks_timeout`, and at most
    four checks run concurrently.
-10. **Run everything if refused.** When Dagger exits with an error before any
-    check starts, without its engine session being lost, it has refused the
-    links, for example because one no longer matches a check. The same run then
-    checks everything, under the same `checks_timeout`, rather than retrying
-    links Dagger will refuse again.
+10. **Run everything if refused.** Refusal is judged on one command: it exits
+    with an error before starting any check, without losing its engine
+    session. A later command can be refused even after earlier commands
+    passed. The same run then checks everything under the same
+    `checks_timeout`; the finished selection is full with reason `refused`,
+    while its output keeps the earlier reports and its start evidence keeps
+    the chosen links. Refused or non-reporting reruns leave a failed check
+    standing. A lost engine session is incomplete.
 
 Unit, final-review and session check runs all use this selection. Before a
 final review, the service judges the rebased feature branch commit against
@@ -98,8 +108,14 @@ This immutable start evidence holds the unit, run, operation, candidate, base,
 report revision, diff digest, start time and selection. It has no result, so
 an interrupted run remains started and unfinished. The finished run's record,
 `units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
-exit status and output. The command lists every `dagger check` in the order it
-ran, joined by `&&`, and the output holds each run's report under its command.
+exit status and output. The command lists each `dagger check` actually
+started, including any failure reruns, in order and joined by `&&`; commands
+stopped by an earlier failure are absent. The output holds the combined
+reports and labels separate commands. There is one result document, one
+captured output document and one check-capacity slot for the entire run.
+Passing summaries keep every report heading. The trace link belongs to the
+last command, including the failing part when it prints one; a part that
+prints no trace leaves the link empty.
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
 the links Jev selected.
@@ -127,6 +143,7 @@ The selection has this shape:
 | --- | --- |
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
 | `links` | The links Jev selected, for a selected run; the command shows how they were grouped |
+| `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections, full runs and older records |
 | `candidates` | How many links Jev was asked about, after narrowing |
 | `listed` | Total links the project listed, before narrowing; absent when listing was skipped or failed, and in older records |
 | `judgment` | The judgment record the selection rests on, also set on a full run whose judgment fell back |
@@ -142,24 +159,32 @@ asked:
 | `no_checks` | The project lists no check links |
 | `too_many_checks` | The links do not narrow to 128 |
 | `change_too_large` | The changed files alone do not fit the state |
-| `refused` | Dagger refused the selected links before any check started; `detail` holds its error |
+| `refused` | Dagger refused one command's selected links before that command started any check; `detail` holds its error |
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
-when no check reached the threshold, `unconfigured`, `cooling_down`, `timeout`,
+when no check reached the threshold and picks are disabled or have no usable
+score, `unconfigured`, `cooling_down`, `timeout`,
 `rate_limited`, `unavailable`, `rejected`, `unusable`, `interrupted`,
 `unrecorded` or `cancelled`.
 
 The judgment itself is recorded under the workstream as
-`judgments/<id>.json`, with the threshold it applied, the request (or its
-digest above 64 KiB), the configured and resolved model, every answer with its probability, the outcome
+`judgments/<id>.json`, with the threshold and positive configured picks value
+it applied, the request (or its digest above 64 KiB), the configured and
+resolved model, every answer with its probability, the outcome
 and usage. Its cost enters the ledger under the `jev` role. A declined
 judgment keeps its answers for evaluation; they never select checks.
+
+A picks run uses mode `selected` and keeps its links, candidate count, listed
+count and judgment, with `fallback_picks` marking the configured count.
 
 The selection is also summarized in one sentence, such as "Jev selected 2 of
 37 check links for the changed files in judgment judgment_4f1c...", or "every
 check ran: Jev did not select them (declined: no check reached probability
-0.50)". That sentence appears in the unit's transition to reviewing and its
-notice, in the reviewer's prompt with the check evidence, and in the verdict a
+0.50)". A picks summary says "no check reached the threshold; the 2 highest-scored
+checks ran out of 37 candidate links in judgment judgment_4f1c...". The web
+feed says that no check reached the threshold and the highest-scored checks
+ran, retaining selected, judged and listed counts. That sentence appears in
+the unit's transition to reviewing and its notice, in the reviewer's prompt with the check evidence, and in the verdict a
 mason receives when checks fail. The final reader's prompt and the feed's
 final-review check entry also describe the selection and its reason. Running
 final attempts show their selection as soon as start evidence is recorded.
@@ -214,7 +239,8 @@ failure and stays failed.
 ## Restarts and new runs
 
 A unit judgment is identified by the check run that asked, the task, its
-version, the threshold and the exact request. A unit run retried after a restart reads back
+version, the threshold, the configured picks value when above 0, and the exact
+request. A unit run retried after a restart reads back
 its selection record, including a full run's fallback, instead of listing or
 asking again. Recording the same run again keeps one selection record. A new run, for a revised or rebased
 candidate, asks afresh. A judgment interrupted twice falls back as
@@ -223,8 +249,8 @@ candidate, asks afresh. A judgment interrupted twice falls back as
 Final-review judgments are keyed by the review number and rebased commit,
 not the attempt number. An incomplete run's retry or an attempt resumed after
 a service restart lists the checks again and reuses the recorded judgment
-for the same request and threshold. A new review, commit or changed judgment
-input asks afresh. Each attempt keeps its own start and result evidence.
+for the same request, threshold and picks value. A new review, commit or
+changed judgment input asks afresh. Each attempt keeps its own start and result evidence.
 
 ## What Jev sees
 
@@ -238,7 +264,9 @@ control and no delivery credential.
 A selection can miss a check whose result depends on something the diff does
 not show, such as an environment variable, a remote module or a file read at
 run time. The threshold trades running unaffected checks against missing an
-affected one; passing checks are evidence for the review, never an approval.
+affected one. Fallback picks can miss an affected check that a full run
+would catch, since even very low scores are ranked and only the top links
+run. One pick may cover a whole collection item; passing checks are evidence for the review, never an approval.
 Collapsed links run their whole item, so a project with many small
 collections runs more than it would with each link judged.
 
@@ -270,11 +298,11 @@ go run ./cmd/smartcheck --base origin/main -- --progress=report
 It diffs the working tree, including uncommitted changes to tracked files but
 not untracked files, against the merge base of `--base` (`main` by default),
 lists the checks of the Dagger workspace at the repository root, and runs
-`dagger check --fail-fast` with the selected links, stopping at the first
-failure. When the factory would fall back before running a check, it says why
-and runs every check; when nothing changed, it runs nothing. Links Dagger
-refuses stop the command with Dagger's error. It exits with `dagger check`'s
-status.
+`dagger check --fail-fast --parallel 4` for each group of selected links,
+stopping at the first failure. When the factory would fall back before
+running a check, it says why and runs every check; when nothing changed, it
+runs nothing. Links Dagger refuses stop the command with Dagger's error. It
+exits with `dagger check`'s status.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -282,11 +310,15 @@ status.
 | `--dry-run` | off | Print the selected links, or `every check`, instead of running them |
 | `--base` | `main` | Compare against the merge base of this revision |
 | `--threshold` | the `[jev]` default, `0.5` | The probability a check needs to be selected |
+| `--fallback-picks` | `0` | When none reaches the threshold, run up to this many highest-scored candidates; 0 runs every check, negatives exit 2 |
 | `-C` | `.` | Run in another working tree |
 | `--model`, `--url` | the `[jev]` defaults | Which Jev model to ask, and where |
 | `--api-key-env` | `OPENROUTER_API_KEY` | The variable holding the API key; the command stops when it is unset |
 
-Arguments after `--` go to `dagger check`. With `-v`, the output looks like:
+Arguments after `--` go to `dagger check`, except `--parallel` (both separate
+and `=` forms) and `-j`, which are refused: every run uses `--parallel 4`.
+Listing failure exits with an error even with picks enabled, and an unchanged
+working tree runs no checks. With `-v`, the output looks like:
 
 ```text
 base: main (merge base 1a2b3c4d5e6f)
@@ -300,6 +332,11 @@ jev: <model> answered in 1.84s (10234 input, 74 output tokens)
 selected 2 of 37 at probability 0.50 or more
 ```
 
+With `--fallback-picks=2`, when all scores are below 0.50, the verbose
+summary instead says `no check reached probability 0.50; running the 2
+highest-scored checks as fallback picks out of 37 candidates`. `--dry-run`
+prints those links without running them.
+
 Unlike a factory run, the command records nothing, makes one request without
 retry or cool-down, does not rerun failed checks, and runs Dagger in your
 checkout with your environment rather than in a fresh export with a scrubbed
@@ -312,8 +349,11 @@ one.
    a versioned model, since thresholds are tuned against one.
 2. Try other thresholds with `--threshold` until misses and over-selection
    are acceptable.
-3. Set `check_threshold` in `[jev]` and run `osmia reload`. Each judgment
-   records the threshold it applied and a changed value is a new judgment, so
+3. Optionally try `--fallback-picks=2` to bound runs where none reaches the
+   threshold. Compare the risk of missing an affected check with running
+   every check. Set `check_threshold` and `check_fallback_picks` in `[jev]`
+   and run `osmia reload`. Each judgment records both configured values
+   (the picks value when above 0), and a changed value is a new judgment, so
    earlier decisions stay as they were made.
 4. A change to the questions or state in `checkselect` also bumps
    `checkselect.Version` and updates the selection tests in

@@ -142,3 +142,21 @@ func TestInvocationsSelectExactlyWhatTheLinksSelect(t *testing.T) {
 		}
 	}
 }
+
+// One-link commands preserve the exact address; unfamiliar forms remain
+// independent rather than acquiring query semantics from their spelling.
+func TestInvocationsPreserveUnparsedLinks(t *testing.T) {
+	t.Parallel()
+	for _, link := range []string{
+		"dag+check://?", "dag://?go-test=T&go-package=a&go-test=T",
+		"dag+check://?go-package=a%2Fb&go-test=T+One",
+		"future://?go-package=a", "dag+check://?go-package=a#fragment",
+	} {
+		if got := Invocations([]string{link}); len(got) != 1 || !slices.Equal(got[0], []string{link}) {
+			t.Fatalf("link %q became %q", link, got)
+		}
+	}
+	if got := Invocations([]string{"future://?go-package=a", "future://?go-package=b"}); len(got) != 2 {
+		t.Fatalf("unknown forms combined: %q", got)
+	}
+}

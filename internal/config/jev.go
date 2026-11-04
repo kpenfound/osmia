@@ -39,6 +39,9 @@ type Jev struct {
 	// CheckThreshold is the probability at or above which the check selection
 	// runs a check, above 0 and at most 1.
 	CheckThreshold float64 `toml:"check_threshold" json:"check_threshold"`
+	// CheckFallbackPicks runs this many highest-scored candidates when none
+	// reaches the threshold. Zero runs every check instead.
+	CheckFallbackPicks int `toml:"check_fallback_picks" json:"check_fallback_picks"`
 }
 
 func defaultJev() Jev {
@@ -69,6 +72,9 @@ func (j Jev) validate(path string) error {
 	}
 	if !(j.CheckThreshold > 0 && j.CheckThreshold <= 1) {
 		return fieldError(path, "jev.check_threshold", "must be a probability above 0 and at most 1")
+	}
+	if j.CheckFallbackPicks < 0 {
+		return fieldError(path, "jev.check_fallback_picks", "must be a non-negative integer")
 	}
 	return nil
 }

@@ -8,6 +8,9 @@ package api
 // before any check started. Flaky lists the links of checks that failed and then
 // passed on their rerun.
 type CheckResult struct {
+	// Command records each command actually started, separated by &&.
+	// Callers persist it in the run record alongside the result.
+	Command            []string `json:"-"`
 	ExitCode           int      `json:"exit_code"`
 	Output             string   `json:"output"`
 	TraceURL           string   `json:"trace_url,omitempty"`

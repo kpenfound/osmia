@@ -42,7 +42,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 			must(t, err)
 			defer func() { repo.Close() }()
 			listed := 115
-			selection := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a", "dag://b", "dag://c"}, Candidates: 113, Listed: &listed}
+			selection := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a", "dag://b", "dag://c"}, Candidates: 113, Listed: &listed, FallbackPicks: 3}
 			if status == ChecksSuperseded {
 				selection = checkrun.FullSelection("disabled", "the boost is off")
 			}
@@ -55,6 +55,9 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 				return entries
 			}
 			before := read()
+			if status != ChecksSuperseded && (before[0].UnitChecks.Selection.FallbackPicks != 3 || !strings.Contains(before[0].UnitChecks.Selection.Description, "highest-scored checks ran")) {
+				t.Fatalf("picks feed: %+v", before[0].UnitChecks.Selection)
+			}
 			if len(before) != 1 || before[0].At != chosen || before[0].UnitChecks.State != "running" || before[0].UnitChecks.FinishedAt != nil || !reflect.DeepEqual(before[0].UnitChecks.Selection, feedSelection(&selection)) {
 				t.Fatalf("running: %+v", before)
 			}

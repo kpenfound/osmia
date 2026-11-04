@@ -602,7 +602,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
-	run.Selection, run.Command = &ran, checkrun.Command(ran.Links)
+	run.Selection, run.Command = &ran, checkrun.ResultCommand(result, ran.Links)
 	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
 	run.Flaky = result.Flaky

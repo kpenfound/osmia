@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -115,5 +118,37 @@ func TestFinalChecksRecordsLifecycleReportFailure(t *testing.T) {
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(cached, run) || len(checks.Runs()) != 1 {
 		t.Fatal("completed failure was rerun")
+	}
+}
+
+func TestFinalChecksRunFallbackPicks(t *testing.T) {
+	t.Parallel()
+	cfg, repository := deliveryTrace(t)
+	home := filepath.Dir(cfg.Project.Clone)
+	git := func(args ...string) string {
+		t.Helper()
+		return strings.TrimSpace(fixturekit.DemoGit(t, home, append([]string{"-C", cfg.Project.Clone}, args...)...))
+	}
+	git("config", "user.name", "Fixture")
+	git("config", "user.email", "fixture@example.test")
+	git("commit", "--allow-empty", "-qm", "base")
+	base := git("rev-parse", "HEAD")
+	fixturekit.Must(t, os.WriteFile(filepath.Join(cfg.Project.Clone, "changed.txt"), []byte("change"), 0600))
+	git("add", ".")
+	git("commit", "-qm", "candidate")
+	commit := git("rev-parse", "HEAD")
+	checks := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b", "dag+check://c"}, Outcomes: fixturekit.Passing()}
+	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: 2}
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}}}}
+	controller := New(Dependencies{Now: func() time.Time { return fixturekit.DemoStart }, Step: func(string) error { return nil }, Checks: checks, Jev: &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }}, AcquireReviewCheckSlot: func(context.Context, config.ProjectID, config.WorkstreamID, int, string) (func(), error) {
+		return func() {}, nil
+	}})
+	reviewer := &FinalReviewer{S: controller, Repository: repository}
+	report := FinalReport{Review: 1, Operation: "review", Commit: commit, Upstream: &seal.Base{Commit: base}}
+	run, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
+	fixturekit.Must(t, err)
+	want := []string{"dag+check://b", "dag+check://c"}
+	if ran := checks.Runs(); len(ran) != 1 || !slices.Equal(ran[0], want) || run.Selection.FallbackPicks != 2 || !slices.Equal(run.Selection.Links, want) {
+		t.Fatalf("ran %v, selection %+v", ran, run.Selection)
 	}
 }

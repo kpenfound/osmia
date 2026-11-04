@@ -1900,7 +1900,8 @@
   function checkSelection(selection, running) {
     if (!selection) return null;
     if (selection.mode === 'selected') {
-      return el('p', { 'data-field': 'selection' }, 'checking ',
+      return el('p', { 'data-field': 'selection' },
+        selection.fallback_picks ? (running ? 'no check reached the threshold; checking the highest-scored checks · ' : 'no check reached the threshold; the highest-scored checks ran · ') : '', 'checking ',
         el('span', { 'data-field': 'selected' }, String(selection.selected)), ' of ',
         el('span', { 'data-field': 'judged' }, String(selection.judged)),
         selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ' · narrowed from ' + selection.listed + ' listed') : null);
