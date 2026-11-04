@@ -240,6 +240,23 @@ requesting the deleted image. New images appear over the event stream without
 a reload. Opening a feed or receiving a new entry snaps to its end; refreshing
 an existing entry keeps the scroll position.
 
+After enabling a project's Preview settings, ask its chief to show a built page.
+The chief's `preview` tool asks the service to capture the feature-branch head,
+or a named unit's recorded candidate, at one URL path. It supports `desktop`
+and `phone` viewports and full-page captures. The service runs both the configured
+Dagger Service and pinned Chromium through Dagger, without a browser on the host
+or a published host port. Previews share the check-slot pool; a waiting run is
+labelled `preview` in the capacity view, and its timeout starts after admission.
+An unavailable or failed preview gives the chief a limitation to explain.
+
+Exploratory session agents can attach a PNG or JPEG from their current worktree
+with `show_image(path)`, including a screenshot just written in the same turn.
+Images must match their declared type and be at most 5 MiB. They are stored in
+the shown workstream's or session's trace; shared conversations keep references.
+Archiving a member deletes its images with its trace, and destroying a session
+deletes its images. Pinned archives retain no image bytes. Images are never sent
+to Hearsay, notification webhooks or the knowledge base.
+
 Which workstream is selected and what you have seen are kept in the browser,
 so another browser has its own. The list's order comes from the service and
 is the same in every browser.

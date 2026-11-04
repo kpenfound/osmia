@@ -51,6 +51,17 @@ The [service](../internal/service) tests cover composition, startup, shutdown,
 project runtime bindings and HTTP dispatch. Workflow journeys use the same
 composition root, with fake execution boundaries and local repositories.
 
+The [preview journey](../internal/servicetest/preview_test.go),
+`TestChiefPreviewFromConfigurationThroughMemberArchive`, configures a project's
+preview through the API and sends an owner message to a production chief turn.
+Offline Dagger and Chromium commands capture the built member's exact source;
+the journey checks both feeds, image bytes and headers, archive placeholders
+and deletion of the member trace without bytes in retained presentations.
+`TestBrowserChiefPreviewThroughMemberArchive` in
+[browsertest](../internal/browsertest/browser_preview_journey_test.go) uses the
+same running-service fixture to check a live thumbnail, its full-size link and
+the archived placeholder, including a fresh page that requests no deleted image.
+
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
 
