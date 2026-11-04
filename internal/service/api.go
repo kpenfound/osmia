@@ -278,6 +278,10 @@ type ShedResponse = api.ShedResponse
 
 type ProjectAddRequest = api.ProjectAddRequest
 
+type ProjectPreviewRequest = api.ProjectPreviewRequest
+
+type ProjectPreviewResponse = api.ProjectPreviewResponse
+
 type ProjectRemoveRequest = api.ProjectRemoveRequest
 
 type ProjectResponse = api.ProjectResponse

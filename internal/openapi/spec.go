@@ -25,6 +25,16 @@ Content-Type: application/json.
 Request bodies are one JSON object with known, unique fields. Every failure
 returns an error object with a code and a message.`
 
+const previewDescription = `Sets or removes only the project's preview statements in config.toml.
+The change takes effect immediately. Every save, including an idempotent one,
+is refused with conflict if any byte differs from the file last loaded or saved.
+Reload to apply hand edits before saving.
+
+PUT requires call (a non-empty argv list) and port (1–65535). Path defaults to /
+and must start with /. Timeout defaults to 5m and must be a Go duration from
+1m to 30m. Unknown or nested keys and wrong types are refused with the field name.
+DELETE disables previews.`
+
 const streamDescription = `A text/event-stream of frames "event: <kind>" with a JSON data line
 holding the event. The first event is resync, which asks the client to read
 every view again; it also replaces events a slow subscriber missed. A comment
@@ -95,6 +105,9 @@ func Spec() ([]byte, error) {
 		}
 		oc.SetID(operationID(route))
 		oc.SetSummary(route.Summary)
+		if route.Path == wire.Prefix+"/projects/preview/{project}" {
+			oc.SetDescription(previewDescription)
+		}
 		if route.Path == wire.Prefix+"/feed/{workstream}" {
 			oc.SetDescription(feedDescription)
 		}

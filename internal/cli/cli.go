@@ -35,6 +35,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
+  project preview <project-id> --call ARG [--call ARG]... --port PORT [--path PATH] [--timeout DURATION] [--json]
+  project preview <project-id> --clear [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -90,6 +92,10 @@ serve runs in the foreground unless --detach is set. Detached logs are in root/s
 `
 
 type options struct {
+	previewCall                                     []string
+	previewPort                                     int
+	previewPath, previewTimeout                     *string
+	previewClear, previewFlags                      bool
 	root, socket, reason, project, base             string
 	messageFile, messagesFile                       string
 	upstream, fork, clone, baseBranch               string
@@ -110,12 +116,12 @@ func parse(args []string) (o options, err error) {
 			continue
 		}
 		key, value, has := strings.Cut(a, "=")
-		if seen[key] && key != "--with" {
+		if seen[key] && key != "--with" && key != "--call" {
 			return o, errors.New("duplicate flag")
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--call", "--port", "--path", "--timeout", "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -123,10 +129,26 @@ func parse(args []string) (o options, err error) {
 				}
 				value = args[i]
 			}
-			if value == "" && key != "--reason" && key != "--title" {
+			if value == "" && key != "--reason" && key != "--title" && key != "--call" && key != "--path" && key != "--timeout" {
 				return o, errors.New("empty value")
 			}
 			switch key {
+			case "--call":
+				o.previewCall = append(o.previewCall, value)
+				o.previewFlags = true
+			case "--port":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					return o, errors.New("preview.port must be an integer")
+				}
+				o.previewPort = n
+				o.previewFlags = true
+			case "--path":
+				o.previewPath = &value
+				o.previewFlags = true
+			case "--timeout":
+				o.previewTimeout = &value
+				o.previewFlags = true
 			case "--message-file":
 				o.messageFile = value
 			case "--messages-file":
@@ -176,11 +198,13 @@ func parse(args []string) (o options, err error) {
 					o.planRevision = n
 				}
 			}
-		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
+		case "--clear", "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
 			switch key {
+			case "--clear":
+				o.previewClear = true
 			case "--detach":
 				o.detach = true
 			case "--json":
@@ -294,7 +318,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "preview" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -308,6 +332,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	explicitRatify := o.projectSpecRevision > 0 || o.specRevision > 0 || o.planRevision > 0
 	if explicitRatify && (cmd != "ratify" || o.projectSpecRevision == 0 || o.specRevision == 0 || o.planRevision == 0) {
 		return invalid()
+	}
+	previewProject := cmd == "project" && len(a) > 0 && a[0] == "preview"
+	if (o.previewFlags || o.previewClear) && !previewProject || previewProject && o.previewClear && o.previewFlags {
+		valid = false
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
@@ -403,6 +431,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 4
 		}
 		return fail(err)
+	}
+	if cmd == "project" && a[0] == "preview" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return refuse(err)
+		}
+		var result wire.ProjectPreviewResponse
+		if o.previewClear {
+			result, err = c.ClearProjectPreview(ctx, id)
+		} else {
+			result, err = c.SetProjectPreview(ctx, id, wire.ProjectPreviewRequest{Call: o.previewCall, Port: o.previewPort, Path: o.previewPath, Timeout: o.previewTimeout})
+		}
+		if err != nil {
+			return refuse(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		if result.Preview == nil {
+			fmt.Fprintf(stdout, "Previews disabled for project %s\n", id)
+		} else {
+			fmt.Fprintf(stdout, "Preview for project %s: call %q, port %d, path %s, timeout %s\n", id, result.Preview.Call, result.Preview.Port, result.Preview.Path, result.Preview.Timeout)
+		}
+		return 0
 	}
 	if cmd == "project" && a[0] == "extract" {
 		id, err := config.ParseProjectID(a[1])

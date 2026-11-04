@@ -682,3 +682,17 @@ func (c *Client) EngineAction(ctx context.Context, action string) (api.MutationR
 	err := c.do(ctx, "POST", api.Prefix+"/engine/"+action, nil, &out, engineActionTimeout)
 	return out, err
 }
+
+// SetProjectPreview sets the Dagger Service to capture for a project.
+func (c *Client) SetProjectPreview(ctx context.Context, id config.ProjectID, req api.ProjectPreviewRequest) (api.ProjectPreviewResponse, error) {
+	var out api.ProjectPreviewResponse
+	err := c.Do(ctx, http.MethodPut, api.Prefix+"/projects/preview/"+string(id), req, &out)
+	return out, err
+}
+
+// ClearProjectPreview disables previews for a project.
+func (c *Client) ClearProjectPreview(ctx context.Context, id config.ProjectID) (api.ProjectPreviewResponse, error) {
+	var out api.ProjectPreviewResponse
+	err := c.Do(ctx, http.MethodDelete, api.Prefix+"/projects/preview/"+string(id), nil, &out)
+	return out, err
+}

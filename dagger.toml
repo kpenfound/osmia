@@ -11,7 +11,8 @@ base = "dag://osmia-dev/test-runtime"
 # -count=1 keeps go test from recording every file the tests touch for its
 # result cache and reading that log back after each package: the service
 # tests' log outgrows the engine's memory.
-# Bound concurrent service fixtures within each package as well as checks.
+# Each parallel service test starts its own controllers and local processes.
+# Bound those too: the check runner's --parallel limits package checks only.
 goflags = "-count=1 -timeout=30m -parallel=4"
 # Keep factory state out of module discovery, including any go.mod files left
 # in session directories.
