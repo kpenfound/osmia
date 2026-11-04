@@ -68,7 +68,7 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 	checks := s.CheckSlots()
 	role := RoleCapacity{Role: checksRole, Limit: checks.Limit, Used: checks.Used, Waiting: []SlotWait{}}
 	for _, w := range checks.Waiting {
-		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Reason: DeferCapacity})
+		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Preview: w.Preview, Reason: DeferCapacity})
 	}
 	out.Roles = append(out.Roles, role)
 	return out

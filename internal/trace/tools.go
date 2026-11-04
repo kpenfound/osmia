@@ -39,6 +39,17 @@ func toolPayload(raw []byte) ToolPayload {
 	return out
 }
 
+// ToolCallID gives an idempotent operation a stable identity across retries of
+// the same turn and JSON call. Object property ordering does not affect it.
+func ToolCallID(scope coreadapter.Scope, name string, raw json.RawMessage) string {
+	var value any
+	if json.Unmarshal(raw, &value) == nil {
+		raw, _ = json.Marshal(value)
+	}
+	data, _ := json.Marshal([]string{scope.Project, scope.Workstream, scope.Thread, scope.Turn, name, string(raw)})
+	return fmt.Sprintf("tool-%x", sha256.Sum256(data))
+}
+
 // BeginTool records the call before its handler runs. A missing completion
 // after restart means the effect is uncertain, never that it did not happen.
 func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, tool coreadapter.Tool, raw json.RawMessage, now func() time.Time) (func(context.Context, json.RawMessage, error) error, error) {
@@ -80,6 +91,9 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		}
 	}
 	id := fmt.Sprintf("%s%d", prefix, sequence)
+	if tool.Name == "preview" {
+		id = ToolCallID(scope, tool.Name, raw)
+	}
 	call := ToolCall{Scope: scope, Name: tool.Name, Effect: tool.Effect, Input: toolPayload(raw), State: "started"}
 	if strings.HasPrefix(tool.Name, "notes_") {
 		call.Input.Content = ""
@@ -89,14 +103,40 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		return nil, err
 	}
 	doc := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: scope.Unit, At: now(), Actor: Actor{Kind: "agent", ID: actor}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}, Path: "tools/" + id + ".json", Content: string(data)}
-	files, err := r.documentFiles(ctx, []Document{doc})
-	if err != nil {
-		return nil, err
+	existing := false
+	if tool.Name == "preview" {
+		for _, record := range records {
+			if d, ok := record.(Document); ok && d.ID == id {
+				if d.Revision == 2 {
+					return func(context.Context, json.RawMessage, error) error { return nil }, nil
+				}
+				doc, existing = d, true
+			}
+		}
 	}
-	if err := r.publish(ctx, files); err != nil {
-		return nil, err
+	if !existing {
+		files, err := r.documentFiles(ctx, []Document{doc})
+		if err != nil {
+			return nil, err
+		}
+		if err := r.publish(ctx, files); err != nil {
+			return nil, err
+		}
 	}
 	return func(ctx context.Context, output json.RawMessage, callErr error) error {
+		if tool.Name == "preview" {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			records, _, err := r.scan()
+			if err != nil {
+				return err
+			}
+			for _, record := range records {
+				if d, ok := record.(Document); ok && d.ID == id && d.Revision == 2 {
+					return nil
+				}
+			}
+		}
 		call.State, call.Failed = "completed", callErr != nil
 		value := toolPayload(output)
 		if strings.HasPrefix(tool.Name, "notes_") {
@@ -108,6 +148,13 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 			return err
 		}
 		doc.Revision, doc.At, doc.Content = 2, now(), string(data)
+		if tool.Name == "preview" {
+			files, err := r.documentFiles(ctx, []Document{doc})
+			if err != nil {
+				return err
+			}
+			return r.publish(ctx, files)
+		}
 		return r.RecordDocuments(ctx, []Document{doc})
 	}, nil
 }

@@ -683,3 +683,18 @@ func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 		t.Fatal("missing engine authorized resume")
 	}
 }
+
+func TestPreviewIsChiefServiceTool(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "librarian", "classifier", "session"} {
+		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"preview"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(grant.Tools, "preview") != (role == "chief_of_staff") {
+			t.Fatalf("preview grant for %s: %+v", role, grant)
+		}
+		if role == "chief_of_staff" && (grant.Execute || grant.WriteFiles || grant.Network || !a.ToolPermitted(grant, a.Tool{Name: "preview", Effect: a.ToolMemory})) {
+			t.Fatalf("chief service capability %+v", grant)
+		}
+	}
+}

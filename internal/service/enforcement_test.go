@@ -103,6 +103,7 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
 	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
 	must(t, err)
+	tools = append(tools, (&runtimeControls{}).preview(f.s.cfg, repository, scope, previewView(t), time.Now))
 	var names []string
 	for _, tool := range tools {
 		names = append(names, tool.Name)
@@ -127,6 +128,9 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
 	wrapped, err := turns.Scoped(context.Background(), scope)
 	must(t, err)
+	viewTools, err := turns.ViewTools(context.Background(), scope, previewView(t))
+	must(t, err)
+	wrapped = append(wrapped, viewTools...)
 	var wrappedNames []string
 	for _, tool := range wrapped {
 		wrappedNames = append(wrappedNames, tool.Name)
@@ -169,6 +173,7 @@ func TestNoGrantOrToolsetNamesTheRemovedBeekeeper(t *testing.T) {
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
 	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
 	must(t, err)
+	tools = append(tools, (&runtimeControls{}).preview(f.s.cfg, repository, scope, previewView(t), time.Now))
 	for _, tool := range tools {
 		if tool.Name == "list_factory" || tool.Name == "message_chief_of_staff" {
 			t.Fatalf("a chief-of-staff turn is given the removed Beekeeper tool %s", tool.Name)

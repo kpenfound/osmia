@@ -55,7 +55,7 @@ func CoreEnforcement(root config.Root) Enforcement {
 // chief-of-staff turn's grant down to chiefOrdinaryTools, which excludes
 // them, and a design session's turn down to designOnlyTools, which excludes
 // everything else, so the ceiling here is never itself the enforced set.
-var chiefGrant = coreadapter.Capabilities{Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
 
 // chiefOrdinaryTools is chiefGrant's tool list without the two design-only
 // tools, so an ordinary chief-of-staff turn never reaches them.
@@ -264,6 +264,13 @@ func Enforce(opts Options, e Enforcement) Options {
 			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
 				if scope.Role == sessionRole && scope.Project == project {
 					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
+				}
+				if scope.Role == trace.ChiefOfStaff {
+					tool := controls.preview(cfg, r, scope, view, now)
+					if err := restorePreviewImages(ctx, cfg, controls, r, scope, view, now); err != nil {
+						return nil, err
+					}
+					return []coreadapter.Tool{tool}, nil
 				}
 				return nil, nil
 			},

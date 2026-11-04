@@ -1014,7 +1014,7 @@
           ? el('div', { class: 'meta' }, 'Nothing waits.')
           : el('ul', { class: 'waiting' }, ...r.waiting.map((w) => el('li', { 'data-field': 'waiting' },
             el('span', { class: 'id' }, w.workstream),
-            ' ', w.unit ? 'unit ' + w.unit : w.review ? 'final review ' + w.review : w.session ? 'session' : 'agent ' + w.agent,
+            ' ', w.unit ? 'unit ' + w.unit : w.review ? 'final review ' + w.review : w.preview ? 'preview' : w.session ? 'session' : 'agent ' + w.agent,
             ': ', waitReasons[w.reason] || w.reason))))),
       el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' worker slots. Check slots are shared separately across the factory.'));
   }

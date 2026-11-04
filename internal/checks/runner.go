@@ -240,12 +240,16 @@ func (r *checkRun) endLine() {
 // dagger runs the Dagger CLI once in dir with args and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
 func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (int, Preparation, error) {
+	return d.daggerOutput(ctx, dir, identity, withIdentity, output, output, args...)
+}
+
+func (d DaggerChecks) daggerOutput(ctx context.Context, dir string, identity Identity, withIdentity bool, stdout, stderr io.Writer, args ...string) (int, Preparation, error) {
 	env, preparation, cleanup, err := d.prepare(ctx, dir, identity, withIdentity)
 	if err != nil {
 		return -1, preparation, redactError(err)
 	}
 	defer cleanup()
-	exit, err := d.run(ctx, dir, env, preparation, output, args...)
+	exit, err := d.runOutput(ctx, dir, env, preparation, stdout, stderr, args...)
 	return exit, preparation, redactError(err)
 }
 
@@ -305,6 +309,10 @@ func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity
 // run executes the Dagger CLI in a prepared dir and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
 func (d DaggerChecks) run(ctx context.Context, dir string, env []string, preparation Preparation, output io.Writer, args ...string) (int, error) {
+	return d.runOutput(ctx, dir, env, preparation, output, output, args...)
+}
+
+func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, preparation Preparation, stdout, stderr io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
@@ -336,13 +344,14 @@ func (d DaggerChecks) run(ctx context.Context, dir string, env []string, prepara
 		}
 	}
 	isCheck := len(args) > 0 && args[0] == "check"
-	if d.CloudToken != "" && (isCheck || d.Engine == "cloud") {
+	isPreview := len(args) > 0 && (args[0] == "call" || args[0] == "core")
+	if d.CloudToken != "" && (isCheck || isPreview || d.Engine == "cloud") {
 		cmd.Env = append(cmd.Env, "DAGGER_CLOUD_TOKEN="+d.CloudToken)
 	}
 	if isCheck && d.CloudToken != "" && preparation.CIIdentity {
 		cmd.Env = append(cmd.Env, "CI=true")
 	}
-	cmd.Stdout, cmd.Stderr = output, output
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()
 	exit := -1
 	if cmd.ProcessState != nil {
