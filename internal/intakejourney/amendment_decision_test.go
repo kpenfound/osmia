@@ -14,6 +14,7 @@ import (
 	amendment "github.com/kpenfound/osmia/internal/amendment"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intake "github.com/kpenfound/osmia/internal/intake"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -307,7 +308,13 @@ func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
 		f, stream := builtForAmendment(t, 1)
 		defer f.stop(t)
 		presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+		beforeCard := f.inboxEntries(t, stream, InboxAmendment)
 		recordAmendmentSealRevision(t, f, f.repository(), stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
+		afterCard := f.inboxEntries(t, stream, InboxAmendment)
+		if len(beforeCard) != 1 || len(afterCard) != 1 || !slices.Equal(beforeCard[0].Options, afterCard[0].Options) || beforeCard[0].Recommendation != afterCard[0].Recommendation {
+			t.Fatalf("base move changed card: before %+v after %+v", beforeCard, afterCard)
+		}
+
 		out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1})
 		must(t, err)
 		if out.State != amendmentApproved || out.Decision == nil || out.Decision.SealRevision != 2 {
@@ -323,11 +330,14 @@ func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
 			defer f.stop(t)
 			presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
 			recordAmendmentSealRevision(t, f, f.repository(), stream, change)
-			if _, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1}); !failed(err, Conflict) || !strings.Contains(err.Error(), "sealed spec or plan changed") {
+			if _, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1}); !failed(err, Conflict) {
 				t.Fatalf("decision with changed %s: %v", name, err)
 			}
-			if got := f.revisions(t, stream, amendmentDecisionID("1")); len(got) != 0 {
-				t.Fatalf("refused decision recorded: %v", got)
+			f.awaitAmendment(t, stream, amendmentRuled)
+			decisions, err := intake.AmendmentDecisions(f.repository(), stream, "1")
+			must(t, err)
+			if len(decisions) != 1 || decisions[0].Actor != amendmentActor.ID || decisions[0].Decision != AmendmentReject {
+				t.Fatalf("retirement decisions %+v", decisions)
 			}
 		})
 	}

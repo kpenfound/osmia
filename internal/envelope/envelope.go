@@ -14,14 +14,15 @@ type Section struct {
 }
 
 var attribution = map[string]string{
-	"project_notice":  "chief of staff information",
-	"hearsay_context": "external evidence from Hearsay",
-	"question":        "asker (copied by Osmia)",
-	"answer":          "chief of staff",
-	"owner_response":  "owner (copied by Osmia)",
-	"returned_answer": "chief of staff relay",
-	"citations":       "chief of staff",
-	"charter_rule":    "chief of staff proposal, ratified by the owner",
+	"project_notice":   "chief of staff information",
+	"hearsay_context":  "external evidence from Hearsay",
+	"question":         "asker (copied by Osmia)",
+	"answer":           "chief of staff",
+	"service_response": "service",
+	"owner_response":   "owner (copied by Osmia)",
+	"returned_answer":  "chief of staff relay",
+	"citations":        "chief of staff",
+	"charter_rule":     "chief of staff proposal, ratified by the owner",
 }
 
 // Render validates structural names and renders content with a data prefix on

@@ -232,13 +232,13 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	link.Cut()
 	p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
 	link.Restore()
-	must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "reject: the budget holds")}))
+	must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "ratify: no objection stands")}))
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 1")
 	p.Choose(amendment+"select", AmendmentReject)
 	p.Click(amendment + "button[type=submit]")
 	p.AwaitText("#inbox-result", "packet revision 1 of amendment 1 is not the latest; revision 2 is presented")
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 2")
-	p.AwaitText(amendment+"[data-field=recommendation]", "reject: the budget holds")
+	p.AwaitText(amendment+"[data-field=recommendation]", "approve: no objection stands")
 	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.State != amendmentPresented || out.Decision != nil {
 		t.Fatalf("the refused decision: %+v %v", out, err)
 	}

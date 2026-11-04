@@ -162,6 +162,12 @@ func (a AmendmentDebate) Pass(ctx context.Context) error {
 
 // one moves one amendment on from the state it is in.
 func (a AmendmentDebate) One(ctx context.Context, stream config.WorkstreamID, req trace.Amendment) error {
+	if handled, err := a.S.RetireAmendment(ctx, a.Repository, stream, req.ID); err != nil || handled {
+		return err
+	}
+	if err := a.RetiredTurns(ctx, stream, req.ID); err != nil {
+		return err
+	}
 	state, err := a.Repository.Workflow(stream, AmendmentSubject(req.ID))
 	if err != nil {
 		return err
@@ -250,6 +256,9 @@ func (a AmendmentDebate) Locate(op coreadapter.Operation, action string) (config
 }
 
 func (a AmendmentDebate) Outcome(stream config.WorkstreamID, id, operation string) (*coreadapter.OperationResult, error) {
+	if result, err := AmendmentRetirementOutcome(a.Repository, stream, id); err != nil || result != nil {
+		return result, err
+	}
 	transitions, err := trace.Read[trace.Transition](a.Repository, stream)
 	if err != nil {
 		return nil, err
@@ -304,9 +313,13 @@ func (a AmendmentDebate) Inspect(ctx context.Context, op coreadapter.Operation) 
 	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("round %d of amendment %s has not moved on and no turn of it is running", round, id)}, nil
 }
 
-func (a AmendmentDebate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+func (a AmendmentDebate) Apply(ctx context.Context, op coreadapter.Operation) (result coreadapter.OperationResult, err error) {
 	stream, id, round, err := a.Locate(op, op.Action)
 	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	defer settleRetiredAmendment(a.Repository, stream, id, &result, &err)
+	if _, err := a.S.RetireAmendment(ctx, a.Repository, stream, id); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if result, err := a.Outcome(stream, id, op.ID); err != nil || result != nil {
@@ -316,8 +329,10 @@ func (a AmendmentDebate) Apply(ctx context.Context, op coreadapter.Operation) (c
 		return *result, nil
 	}
 	if op.Action == AmendmentReplyAction {
+		ctx = trace.WithTurnAdmission(ctx, stream, AmendmentSubject(id), "answering")
 		return a.Reply(ctx, op, stream, id, round)
 	}
+	ctx = trace.WithTurnAdmission(ctx, stream, AmendmentSubject(id), "debating")
 	return a.RoundNumber(ctx, op, stream, id, round)
 }
 
@@ -349,6 +364,12 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 			}()
 		}
 		wg.Wait()
+		if result, err := a.Outcome(stream, id, op.ID); err != nil || result != nil {
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			return *result, nil
+		}
 		if err := errors.Join(failures...); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -381,6 +402,12 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 // heard moves the amendment to heard once round n has a record of every
 // member.
 func (a AmendmentDebate) Heard(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string, n int, members []string, records, all []shed.Record) (coreadapter.OperationResult, error) {
+	if result, err := a.Outcome(stream, id, op.ID); err != nil || result != nil {
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return *result, nil
+	}
 	if len(records) != len(members) {
 		return coreadapter.OperationResult{}, fmt.Errorf("amendment %s round %d has %d of %d member records", id, n, len(records), len(members))
 	}
@@ -534,6 +561,12 @@ func (a AmendmentDebate) Reply(ctx context.Context, op coreadapter.Operation, st
 			return coreadapter.OperationResult{}, err
 		}
 	}
+	if result, err := a.Outcome(stream, id, op.ID); err != nil || result != nil {
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return *result, nil
+	}
 	reply := shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
 	if answered != nil {
 		reply = *answered
@@ -670,13 +703,7 @@ func (a AmendmentDebate) Present(ctx context.Context, stream config.WorkstreamID
 		return err
 	}
 	dissent := AmendmentDissent(records)
-	recommendation := shed.Recommend(dissent)
-	for _, record := range records {
-		if record.Failure != "" {
-			recommendation = "do not approve yet: a committee member failed to complete its review"
-			break
-		}
-	}
+	recommendation := AmendmentRecommendation(dissent, records, round < a.S.Current().Shed.MaxRounds)
 	packet := struct {
 		Round          int             `json:"round"`
 		Request        trace.Amendment `json:"request"`
@@ -704,4 +731,24 @@ func (a AmendmentDebate) Present(ctx context.Context, stream config.WorkstreamID
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.Header(id, stream, AmendmentStep(req.ID, round, "answered"), a.S.Now()), Subject: AmendmentSubject(req.ID), From: "answered", To: "presented", Reason: "the amendment and dissent are ready for a decision"}, Events: []trace.Event{trace.Notice(id, "amendment", body)}}
 	_, err = a.Repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
 	return err
+}
+
+// AmendmentRecommendation uses the decisions available on an amendment.
+func AmendmentRecommendation(entries []shed.Entry, records []shed.Record, anotherRound bool) string {
+	for _, record := range records {
+		if record.Failure != "" {
+			return "do not approve yet: a committee member failed to complete its review"
+		}
+	}
+	if blocked := shed.Blocked(entries); len(blocked) > 0 {
+		steps := "overrule or reject the amendment"
+		if anotherRound {
+			steps += ", or ask for another debate round"
+		}
+		return fmt.Sprintf("do not approve yet: approval is blocked by %s (%s); %s", shed.Objections(len(blocked)), EntryIDs(blocked), steps)
+	}
+	if len(entries) > 0 {
+		return fmt.Sprintf("approve: nothing blocks; advice remains on the record from %s", shed.Objections(len(entries)))
+	}
+	return "approve: no objection stands"
 }

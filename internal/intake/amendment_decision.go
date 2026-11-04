@@ -265,7 +265,7 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 			return AmendmentResponse{}, failed
 		}
 		if !matching {
-			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed against seal.json revision %d; revision %d is in force, so reject it and file a new request", id, c.Request.SealRevision, sealDoc.Revision)}
+			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed against seal.json revision %d; revision %d is in force; the service retires this amendment, so file a new request against the current seal if the change is still needed", id, c.Request.SealRevision, sealDoc.Revision)}
 		}
 		if decision == AmendmentApprove {
 			if blocked := shed.Blocked(entries); len(blocked) > 0 {
@@ -688,6 +688,8 @@ func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 		section := "owner_response"
 		if d.Actor == trace.ChiefOfStaff {
 			section = "answer"
+		} else if d.Actor == AmendmentActor.ID {
+			section = "service_response"
 		}
 		sections = append(sections, envelope.Section{Name: section, Text: d.Note})
 	}
@@ -733,6 +735,8 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 	reason := fmt.Sprintf("unit %s resumes %s: the owner %s amendment %s, and the ruling is the %s's next turn", req.Unit, stage, verb, req.ID, wait.Actor.ID)
 	if actor == trace.ChiefOfStaff {
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
+	} else if actor == AmendmentActor.ID {
+		reason = strings.ReplaceAll(reason, "the owner", "the service")
 	}
 	h := a.AmendmentHeader(resumed, stream, req.Unit, cause)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitWaiting, To: stage, Reason: reason}, Events: []trace.Event{trace.Notice(resumed, "unit", reason)}}

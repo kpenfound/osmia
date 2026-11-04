@@ -479,7 +479,7 @@ func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTu
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	log, _, err := r.loadWorkflow(req.Workstream)
+	log, view, err := r.loadWorkflow(req.Workstream)
 	if err != nil {
 		return QueuedTurn{}, err
 	}
@@ -494,6 +494,9 @@ func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTu
 			}
 			return QueuedTurn{}, ErrConflict
 		}
+	}
+	if err := admitTurn(ctx, req.Workstream, view); err != nil {
+		return QueuedTurn{}, err
 	}
 	q := QueuedTurn{Sequence: uint64(len(t.Turns) + 1), Request: req}
 	t.Turns = append(t.Turns, q)
@@ -513,7 +516,7 @@ func (r *Repository) ClaimTurn(ctx context.Context, stream config.WorkstreamID, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	log, _, err := r.loadWorkflow(stream)
+	log, view, err := r.loadWorkflow(stream)
 	if err != nil {
 		return QueuedTurn{}, err
 	}
@@ -534,6 +537,9 @@ func (r *Repository) ClaimTurn(ctx context.Context, stream config.WorkstreamID, 
 	}
 	if t.Active != "" {
 		return QueuedTurn{}, ErrClaimed
+	}
+	if err := admitTurn(ctx, stream, view); err != nil {
+		return QueuedTurn{}, err
 	}
 	for i, q := range t.Turns {
 		if q.Claim != nil {
@@ -743,6 +749,14 @@ func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID
 func (r *Repository) CancelUnitTurns(ctx context.Context, stream config.WorkstreamID, units []string, at time.Time, actor Actor, reason string) (int, error) {
 	return r.cancelTurns(ctx, stream, at, actor, reason, func(_ Thread, q QueuedTurn) bool {
 		return slices.Contains(units, q.Request.Unit)
+	}, nil)
+}
+
+// CancelThreadTurns completes the selected turns that no runner of this
+// repository session holds, preserving captured results and live claims.
+func (r *Repository) CancelThreadTurns(ctx context.Context, stream config.WorkstreamID, agent string, turns []string, at time.Time, actor Actor, reason string) (int, error) {
+	return r.cancelTurns(ctx, stream, at, actor, reason, func(t Thread, q QueuedTurn) bool {
+		return t.Identity.ID == agent && (t.Active == "" || slices.Contains(turns, t.Active)) && slices.Contains(turns, q.Request.TurnID)
 	}, nil)
 }
 

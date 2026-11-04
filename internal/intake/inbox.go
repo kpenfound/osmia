@@ -2,7 +2,6 @@ package intake
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -443,12 +442,6 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 	if err != nil || !found || c.State.Value != AmendmentPresented || c.Packet.Revision == 0 {
 		return InboxEntry{}, false, err
 	}
-	var packet struct {
-		Recommendation string `json:"recommendation"`
-	}
-	if err := json.Unmarshal([]byte(c.Packet.Content), &packet); err != nil {
-		return InboxEntry{}, false, fmt.Errorf("%s revision %d: %w", c.Packet.Path, c.Packet.Revision, err)
-	}
 	records, err := AmendmentRecords(repository, stream, id)
 	if err != nil {
 		return InboxEntry{}, false, err
@@ -462,6 +455,9 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 		if matching, err = AmendmentSealMatches(repository, stream, c.Request.SealRevision, current); err != nil {
 			return InboxEntry{}, false, err
 		}
+	}
+	if !matching {
+		return InboxEntry{}, false, nil
 	}
 	entries := AmendmentDissent(records)
 	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil {
@@ -486,7 +482,7 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 		e.Blocked = fmt.Sprintf("Unit %s waits for the decision.", c.Request.Unit)
 	}
 	e.Options = options
-	e.Recommendation = packet.Recommendation
+	e.Recommendation = AmendmentRecommendation(entries, records, c.Round < s.Current().Shed.MaxRounds)
 	return e, true, nil
 }
 

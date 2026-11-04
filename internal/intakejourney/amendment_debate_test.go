@@ -42,7 +42,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 		name string
 		kind shed.Kind
 		want string
-	}{{"consensus", "", "ratify: no objection"}, {"charter-veto", shed.Charter, "do not ratify"}} {
+	}{{"consensus", "", "approve: no objection"}, {"charter-veto", shed.Charter, "do not approve"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newSketchedDebateFixture(t, 2, 3)

@@ -971,6 +971,11 @@ func (d *Debate) Hear(ctx context.Context, op coreadapter.Operation, stream conf
 func (d *Debate) Member(ctx, running context.Context, cfg *config.Config, stream config.WorkstreamID, operation string, in RoundInput, member string) (shed.Record, string, error) {
 	empty := shed.Record{Version: shed.Version, Round: in.Round, Member: member, Revision: in.Pin()}
 	for {
+		if in.Amendment != "" {
+			if result, err := AmendmentRetirementOutcome(d.Repository, stream, in.Amendment); err != nil || result != nil {
+				return empty, "", err
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return empty, "", err
 		}
