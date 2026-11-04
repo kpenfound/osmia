@@ -106,6 +106,11 @@ func (a *AmendmentDrafter) Pass(ctx context.Context) error {
 			return err
 		}
 		for _, request := range requests {
+			if handled, err := a.S.RetireAmendment(ctx, a.Repository, stream, request.ID); err != nil {
+				return err
+			} else if handled {
+				continue
+			}
 			state, err := a.Repository.Workflow(stream, AmendmentSubject(request.ID))
 			if err != nil {
 				return err
@@ -210,6 +215,9 @@ func (a *AmendmentDrafter) Locate(op coreadapter.Operation) (config.WorkstreamID
 // recorded the draft invalid, waiting once it parked the draft on the
 // architect's question, nil before any of them.
 func (a *AmendmentDrafter) Outcome(stream config.WorkstreamID, id, operation string) (*coreadapter.OperationResult, error) {
+	if result, err := AmendmentRetirementOutcome(a.Repository, stream, id); err != nil || result != nil {
+		return result, err
+	}
 	transitions, err := trace.Read[trace.Transition](a.Repository, stream)
 	if err != nil {
 		return nil, err
@@ -269,9 +277,13 @@ func ResultEvidence(result *coreadapter.OperationResult) string {
 // operation ends waiting, and Pass drafts it again once the answer is queued.
 // The turn that delivers the answer continues the attempt that asked, so the
 // wait spends no attempt and the answer adds to what the attempt delivered.
-func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) (result coreadapter.OperationResult, err error) {
 	stream, request, in, err := a.Locate(op)
 	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	defer settleRetiredAmendment(a.Repository, stream, request.ID, &result, &err)
+	if _, err := a.S.RetireAmendment(ctx, a.Repository, stream, request.ID); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if result, err := a.Outcome(stream, request.ID, op.ID); err != nil || result != nil {
@@ -284,7 +296,14 @@ func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return coreadapter.OperationResult{}, ErrNoArchitect
 	}
 	cfg := a.S.About(a.Repository)
+	ctx = trace.WithTurnAdmission(ctx, stream, AmendmentSubject(request.ID), "drafting")
 	for {
+		if result, err := a.Outcome(stream, request.ID, op.ID); err != nil || result != nil {
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			return *result, nil
+		}
 		if err := ctx.Err(); err != nil {
 			return coreadapter.OperationResult{}, err
 		}

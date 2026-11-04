@@ -6,10 +6,12 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// AmendmentDecision is one attributed decision on a presented amendment, recorded
-// as one revision of amendments/<n>/decision.json. Round is the debate round
-// the decided packet followed, Packet the revision of packet.json considered, Spec and Plan the revisions of the proposed amendments/<n>/spec.md
-// and plan.json, and SealRevision the revision of seal.json in force.
+// AmendmentDecision is one attributed decision on an amendment, recorded
+// as one revision of amendments/<n>/decision.json. Round is the debate round,
+// Packet the packet.json revision considered, Spec and Plan the proposed
+// amendments/<n>/spec.md and plan.json revisions, and SealRevision the
+// seal.json revision in force. Packet, Spec and Plan are zero when the
+// service retires a request before those documents exist.
 // Overruled names the objections an overrule set aside.
 type AmendmentDecision struct {
 	Decision     string   `json:"decision"`

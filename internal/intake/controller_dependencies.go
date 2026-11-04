@@ -19,6 +19,7 @@ import (
 
 // DebateDependencies contains the boundaries used by the debate controller.
 type DebateDependencies struct {
+	RetireAmendment   func(context.Context, *trace.Repository, config.WorkstreamID, string) (bool, error)
 	About             func(repository *trace.Repository) *config.Config
 	AgentProfile      func(cfg *config.Config, role string, agent string) (coreadapter.Profile, error)
 	BlockMason        func(context.Context, *trace.Repository, config.WorkstreamID, string, string, string) error
@@ -44,6 +45,7 @@ type DebateDependencies struct {
 
 func (c *Controller) DebateDependencies() *DebateDependencies {
 	return &DebateDependencies{
+		RetireAmendment:   c.RetireStaleAmendment,
 		About:             c.About,
 		AgentProfile:      c.AgentProfile,
 		BlockMason:        c.BlockMason,
@@ -146,6 +148,7 @@ func (c *Controller) HandInDependencies() *HandInDependencies {
 
 // DrafterDependencies contains the boundaries used by the drafter controller.
 type DrafterDependencies struct {
+	RetireAmendment    func(context.Context, *trace.Repository, config.WorkstreamID, string) (bool, error)
 	About              func(repository *trace.Repository) *config.Config
 	ChangeHeld         func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 	ContextFor         func(repo *trace.Repository) bundle.Provider
@@ -168,6 +171,7 @@ type DrafterDependencies struct {
 
 func (c *Controller) DrafterDependencies() *DrafterDependencies {
 	return &DrafterDependencies{
+		RetireAmendment:    c.RetireStaleAmendment,
 		About:              c.About,
 		ChangeHeld:         c.ChangeHeld,
 		ContextFor:         c.ContextFor,

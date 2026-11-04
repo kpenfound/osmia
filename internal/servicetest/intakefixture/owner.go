@@ -59,7 +59,17 @@ func DocumentRevisions(t *testing.T, repository *trace.Repository, id string) []
 
 func PresentAmendment(t *testing.T, repository *trace.Repository, project config.ProjectID, at time.Time, stream config.WorkstreamID, role, spec, graph string, records ...shed.Record) string {
 	t.Helper()
+	return PresentAmendmentForUnit(t, repository, project, at, stream, "1", "resume", role, spec, graph, records...)
+}
+
+// PresentAmendmentForUnit presents a numbered amendment and parks its unit.
+func PresentAmendmentForUnit(t *testing.T, repository *trace.Repository, project config.ProjectID, at time.Time, stream config.WorkstreamID, id, unit, role, spec, graph string, records ...shed.Record) string {
+	t.Helper()
 	ctx := context.Background()
+	filingTurn := "filing"
+	if id != "1" {
+		filingTurn += "_amendment_" + id
+	}
 	repo := repository
 
 	sealed, sealDoc, found, err := seal.Latest(repo, stream)
@@ -67,26 +77,26 @@ func PresentAmendment(t *testing.T, repository *trace.Repository, project config
 	if !found {
 		t.Fatal("the workstream has no seal")
 	}
-	requester, actor, stage := intake.MasonAgent("resume"), intake.MasonActor, intake.UnitImplementing
+	requester, actor, stage := intake.MasonAgent(unit), intake.MasonActor, intake.UnitImplementing
 	if role == intake.ReviewerRole {
-		requester, actor, stage = intake.ReviewerAgent("resume"), trace.Actor{Kind: "service", ID: intake.ReviewerRole}, intake.UnitReviewing
+		requester, actor, stage = intake.ReviewerAgent(unit), trace.Actor{Kind: "service", ID: intake.ReviewerRole}, intake.UnitReviewing
 	}
 	header := func(schema, id string, by trace.Actor, cause string) trace.Header {
-		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, Unit: "resume", At: at, Actor: by, Cause: cause}
+		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, Unit: unit, At: at, Actor: by, Cause: cause}
 	}
 	Must(t, repo.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", requester, actor, "fixture"), Role: role, ThreadID: requester}))
-	filing := header("osmia.trace.turn-request", "request_filing", actor, "fixture")
+	filing := header("osmia.trace.turn-request", "request_"+filingTurn, actor, "fixture")
 	filing.Depth = 1
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: filing, AgentID: requester, ThreadID: requester, TurnID: "filing", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "requester system", Prompt: "Work on the unit."})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: filing, AgentID: requester, ThreadID: requester, TurnID: filingTurn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "requester system", Prompt: "Work on the unit."})
 	Must(t, err)
-	subject := trace.UnitSubject("resume")
-	unit, err := repo.Workflow(stream, subject)
+	subject := trace.UnitSubject(unit)
+	unitState, err := repo.Workflow(stream, subject)
 	Must(t, err)
-	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unit.Version, Transition: trace.Transition{Header: header("osmia.trace.transition", "fixture-"+stage, intake.OwnerActor, "fixture"), Subject: subject, From: unit.Value, To: stage, Reason: "fixture"}})
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unitState.Version, Transition: trace.Transition{Header: header("osmia.trace.transition", "fixture-"+stage+"-amendment-"+id, intake.OwnerActor, "fixture"), Subject: subject, From: unitState.Value, To: stage, Reason: "fixture"}})
 	Must(t, err)
-	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unit.Version + 1, Transition: trace.Transition{Header: header("osmia.trace.transition", subject+"_waiting_amendment_1", trace.Actor{Kind: "service", ID: role}, "amendment_1_filed"), Subject: subject, From: stage, To: intake.UnitWaiting, Reason: "unit resume waits for amendment 1"}})
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unitState.Version + 1, Transition: trace.Transition{Header: header("osmia.trace.transition", subject+"_waiting_amendment_"+id, trace.Actor{Kind: "service", ID: role}, "amendment_"+id+"_filed"), Subject: subject, From: stage, To: intake.UnitWaiting, Reason: "unit " + unit + " waits for amendment " + id}})
 	Must(t, err)
-	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", trace.Actor{Kind: "agent", ID: requester}, "request_filing"), Requester: trace.Actor{Kind: "agent", ID: requester}, Role: role, Thread: requester, Turn: "filing",
+	request := trace.Amendment{Header: header("osmia.trace.amendment", id, trace.Actor{Kind: "agent", ID: requester}, "request_"+filingTurn), Requester: trace.Actor{Kind: "agent", ID: requester}, Role: role, Thread: requester, Turn: filingTurn,
 		Citations: []string{"spec#1"}, Change: "Resume from a durable checkpoint", Reason: "Acknowledgements are not durable", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}
 	Must(t, repo.Append(ctx, request))
 	document := func(id, path, content string) trace.Document {
@@ -98,17 +108,17 @@ func PresentAmendment(t *testing.T, repository *trace.Repository, project config
 	Must(t, err)
 	affected, err := json.Marshal(intake.AffectedRevision(ValidSpec, spec, sealedPlan, proposedPlan))
 	Must(t, err)
-	docs := []trace.Document{document("amendment_1_spec", "amendments/1/spec.md", spec), document("amendment_1_plan", "amendments/1/plan.json", graph),
-		document("amendment_1_affected", "amendments/1/affected.json", string(affected)),
-		document("amendment-1-presented-packet", intake.AmendmentPacketPath("1"), `{"round":1}`+"\n")}
+	docs := []trace.Document{document("amendment_"+id+"_spec", "amendments/"+id+"/spec.md", spec), document("amendment_"+id+"_plan", "amendments/"+id+"/plan.json", graph),
+		document("amendment_"+id+"_affected", "amendments/"+id+"/affected.json", string(affected)),
+		document("amendment-"+id+"-presented-packet", intake.AmendmentPacketPath(id), `{"round":1}`+"\n")}
 	for _, r := range records {
 		data, err := shed.Encode(r)
 		Must(t, err)
-		docs = append(docs, document(fmt.Sprintf("amendment_1_round_%d_%s", r.Round, r.Member), intake.AmendmentRoundPath("1", r.Round, r.Member), string(data)))
+		docs = append(docs, document(fmt.Sprintf("amendment_%s_round_%d_%s", id, r.Round, r.Member), intake.AmendmentRoundPath(id, r.Round, r.Member), string(data)))
 	}
-	presented := header("osmia.trace.transition", "amendment-1-presented", intake.ShedActor, "fixture")
+	presented := header("osmia.trace.transition", "amendment-"+id+"-presented", intake.ShedActor, "fixture")
 	presented.Unit = ""
-	_, err = repo.RecordDocumentsWith(ctx, docs, trace.Transaction{Transition: trace.Transition{Header: presented, Subject: intake.AmendmentSubject("1"), To: intake.AmendmentPresented, Reason: "presented"}})
+	_, err = repo.RecordDocumentsWith(ctx, docs, trace.Transaction{Transition: trace.Transition{Header: presented, Subject: intake.AmendmentSubject(id), To: intake.AmendmentPresented, Reason: "presented"}})
 	Must(t, err)
 	return requester
 }

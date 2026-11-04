@@ -288,9 +288,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   indented. It fails like `send`.
 - `inbox` lists every owner decision waiting for you across the workstreams
   across active projects, oldest first: escalated questions, ratification
-  packets, contested units, presented amendments, held drift rebases,
+  packets, contested units, amendments presented on the current seal, held drift rebases,
   delivery approvals, failing publications, parked bases, notices held from
-  the chief of staff and loop guard pauses.
+  the chief of staff and loop guard pauses. The service retires undecided
+  amendments when the sealed spec or plan moves past their filing seal; the
+  owner receives no card for them, even before the retirement pass runs.
   Questions escalated together are one entry, headed by its inbox number, when
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
@@ -556,9 +558,12 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   (exit 4).
 - `amendment <workstream-id> <n>` shows amendment `n` of a building or
   assembled workstream: its state, the debate round it reached, the packet the
-  chief of staff presented with its revision, and your latest decision.
+  chief of staff presented (when available) with its revision, and the latest
+  decision with its actor.
   `amendment <workstream-id> <n> <approve|reject|round|overrule> [note]`
-  decides it. The command reads the packet first and decides exactly that
+  decides it. Cards recommend `approve` or `do not approve yet` using these
+  amendment decisions; ratification packets still recommend `ratify`.
+  The command reads the packet first and decides exactly that
   revision, so a packet presented again since is refused. `approve` versions
   the proposed spec and/or plan and reseals; it is refused while a charter
   veto, size or acceptance objection stands. `overrule` approves over the
@@ -572,6 +577,16 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   not presented, and a refused approval fail with `conflict` (exit 5). An
   unknown amendment fails with `not_found` (exit 4). You can also tell the
   workstream's chief of staff your decision with `send`.
+  While building or assembled, the service retires every undecided amendment
+  whose sealed spec or plan no longer matches its filing seal, including one
+  still being drafted or debated. The owner receives no card and makes no
+  decision. The recorded rejection names the service, its reason and the
+  replacing seal. The requester receives one ruling and its waiting unit
+  resumes; the chief of staff is notified that the change can be filed again
+  against the current seal if still needed. Retirement changes no sealed
+  documents and survives restarts without another decision or ruling.
+  Approval and overrule of a stale request are refused. An upstream base
+  move alone retires nothing; current-seal options and gates stay in force.
 - `delivery <workstream-id>` shows an assembled workstream's final report,
   its summary, blocking then advisory findings, and every criterion with the
   merged units that serve it, unserved first, and the drafted pull request
