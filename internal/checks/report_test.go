@@ -64,6 +64,45 @@ func TestClassifyChecksRequiresFailedCheckForNonzeroExit(t *testing.T) {
 	}
 }
 
+func TestFailedChecksReadEachChecksLatestResult(t *testing.T) {
+	t.Parallel()
+	const (
+		failedThenPassed = "CHECKS  ✘ 1 failed\n✘ dag://a 1s ERROR\n    first\nCHECKS  ✔ 1 passed\n✔ dag://a 1s OK\n"
+		failedAgain      = "CHECKS  ✘ 1 failed\n✘ dag://a 1s ERROR\n    first\nCHECKS  ✘ 1 failed\n✘ dag://a 1s ERROR\n    second\n"
+		passedThenFailed = failedThenPassed + "CHECKS  ✘ 1 failed\n✘ dag://a 1s ERROR\n    third\n"
+	)
+	if got := FailedChecks(failedThenPassed); got != nil {
+		t.Fatalf("failed then passed: %q", got)
+	}
+	if got := FailedChecks(failedAgain); !slices.Equal(got, []string{"dag://a"}) {
+		t.Fatalf("failed again: %q", got)
+	}
+	if got := FailedChecks(passedThenFailed); !slices.Equal(got, []string{"dag://a"}) {
+		t.Fatalf("passed then failed: %q", got)
+	}
+	summary, _ := SummarizeCheckOutput(failedAgain, 1)
+	if strings.Contains(summary, "first") || !strings.Contains(summary, "second") || strings.Contains(summary, "passed on rerun") {
+		t.Fatalf("a repeated failure keeps its latest diagnostics: %q", summary)
+	}
+	summary, _ = SummarizeCheckOutput(failedThenPassed, 0)
+	if !strings.Contains(summary, "first") || !strings.Contains(summary, "✘ dag://a 1s ERROR [passed on rerun]") {
+		t.Fatalf("a flake keeps its evidence, marked: %q", summary)
+	}
+	if got := FailedChecks("CHECKS  ✘ 1 failed\n✘ dag://a 1s ERROR\n              ✔ dag://a 1s OK\n"); !slices.Equal(got, []string{"dag://a"}) {
+		t.Fatalf("a passing line in a failure's output is not a result: %q", got)
+	}
+}
+
+func TestDescribeFlakyNamesTheChecks(t *testing.T) {
+	t.Parallel()
+	if got := DescribeFlaky(nil); got != "" {
+		t.Fatalf("no flakes: %q", got)
+	}
+	if got := DescribeFlaky([]string{"dag://a", "dag://b"}); !strings.Contains(got, "dag://a, dag://b") || !strings.Contains(got, "rerun") {
+		t.Fatalf("flakes: %q", got)
+	}
+}
+
 func TestCheckReportReadsDecoratedHeading(t *testing.T) {
 	t.Parallel()
 	raw := "== CHECKS ==  ✘ 1 failed\n✘ dag://check 1s ERROR\n    assertion failed\n== RUN LOCALLY ==\nrerun\n"

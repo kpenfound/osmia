@@ -65,6 +65,9 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 				t.Fatalf("restart changed running entry: %+v", after)
 			}
 			run := UnitCheckRun{Unit: "upload", Run: 1, Status: status, Selection: &selection, StartedAt: started, FinishedAt: finished, Output: "captured output is private to trace"}
+			if status == ChecksPassed {
+				run.Flaky = []string{"dag://c"}
+			}
 			if status == ChecksFailed {
 				run.Failed = []string{"dag://b"}
 			}
@@ -75,7 +78,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 				run.Error = "candidate replaced"
 			}
 			feedDocument(t, repo, stream, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, finished, run)
-			want := FeedEntry{Kind: "unit_checks", At: chosen, UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: status, Selection: feedSelection(&selection), Failed: run.Failed, Error: run.Error, StartedAt: started, FinishedAt: &finished}}
+			want := FeedEntry{Kind: "unit_checks", At: chosen, UnitChecks: &FeedUnitChecks{Unit: "upload", Run: 1, State: status, Selection: feedSelection(&selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, StartedAt: started, FinishedAt: &finished}}
 			if after := read(); !reflect.DeepEqual(after, []FeedEntry{want}) {
 				t.Fatalf("finished: %s; want %+v", describeFeed(after), want.UnitChecks)
 			}
@@ -142,6 +145,7 @@ func TestFeedFinalChecksShowEachStartedAttemptAndLegacyResult(t *testing.T) {
 		run := FinalCheckRun{Review: review, Attempt: attempt, Status: state, Error: reason, StartedAt: at(minute - 1), FinishedAt: at(minute), Output: "output stays in trace"}
 		if state == ChecksFailed {
 			run.Failed = []string{"dag://failed"}
+			run.Flaky = []string{"dag://flaky"}
 		}
 		feedDocument(t, repo, stream, finalChecksDocument(review), finalChecksPath(review), revision, at(minute), run)
 	}
@@ -188,8 +192,8 @@ func TestFeedFinalChecksShowEachStartedAttemptAndLegacyResult(t *testing.T) {
 			t.Fatalf("invented start: %+v", got[i].FinalChecks)
 		}
 	}
-	if !reflect.DeepEqual(got[3].FinalChecks.Failed, []string{"dag://failed"}) {
-		t.Fatalf("failed links: %+v", got[3])
+	if !reflect.DeepEqual(got[3].FinalChecks.Failed, []string{"dag://failed"}) || !reflect.DeepEqual(got[3].FinalChecks.Flaky, []string{"dag://flaky"}) {
+		t.Fatalf("failed and flaky links: %+v", got[3])
 	}
 	data, err := json.Marshal(got)
 	must(t, err)

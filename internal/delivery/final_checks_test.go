@@ -18,8 +18,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestFinalChecksRecordsLifecycleReportFailure(t *testing.T) {
-	t.Parallel()
+// finalChecksFixture returns a final reviewer whose checks are checks and the
+// report of a commit for it to check.
+func finalChecksFixture(t *testing.T, checks *fixturekit.FakeChecks) (*FinalReviewer, *config.Config, FinalReport) {
+	t.Helper()
 	cfg, repository := deliveryTrace(t)
 	home := filepath.Dir(cfg.Project.Clone)
 	git := func(args ...string) string {
@@ -37,8 +39,6 @@ func TestFinalChecksRecordsLifecycleReportFailure(t *testing.T) {
 	git("commit", "-qm", "candidate")
 	commit := git("rev-parse", "HEAD")
 
-	raw := fixturekit.LifecycleFailureOutput()
-	checks := &fixturekit.FakeChecks{Outcomes: []fixturekit.CheckOutcome{{Result: CheckResult{ExitCode: 1, Output: raw}}}}
 	controller := New(Dependencies{
 		Now:    func() time.Time { return fixturekit.DemoStart },
 		Step:   func(string) error { return nil },
@@ -49,6 +49,30 @@ func TestFinalChecksRecordsLifecycleReportFailure(t *testing.T) {
 	})
 	reviewer := &FinalReviewer{S: controller, Repository: repository}
 	report := FinalReport{Review: 1, Operation: "review", Commit: commit, Upstream: &seal.Base{Commit: base}}
+	return reviewer, cfg, report
+}
+
+func TestFinalChecksNoteFlakyChecksOnAPassingRun(t *testing.T) {
+	t.Parallel()
+	const link = "dag://?check=test&go-test=TestFlaky"
+	checks := &fixturekit.FakeChecks{Outcomes: []fixturekit.CheckOutcome{{Result: CheckResult{Output: fixturekit.FailedReport(link) + "CHECKS  ✔ 1 passed\n✔ " + link + " 1s OK\n", Flaky: []string{link}}}}}
+	reviewer, cfg, report := finalChecksFixture(t, checks)
+	run, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
+	fixturekit.Must(t, err)
+	if run.Status != checkrun.ChecksPassed || len(run.Failed) != 0 || !slices.Equal(run.Flaky, []string{link}) {
+		t.Fatalf("final checks: %+v", run)
+	}
+	if evidence := FinalCheckEvidence(run); !strings.Contains(evidence, checkrun.DescribeFlaky([]string{link})) || !strings.Contains(evidence, "[passed on rerun]") {
+		t.Fatalf("evidence lacks the flake:\n%s", evidence)
+	}
+}
+
+func TestFinalChecksRecordsLifecycleReportFailure(t *testing.T) {
+	t.Parallel()
+	raw := fixturekit.LifecycleFailureOutput()
+	checks := &fixturekit.FakeChecks{Outcomes: []fixturekit.CheckOutcome{{Result: CheckResult{ExitCode: 1, Output: raw}}}}
+	reviewer, cfg, report := finalChecksFixture(t, checks)
+	commit, repository := report.Commit, reviewer.Repository
 	run, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
 	fixturekit.Must(t, err)
 	if run.Status != checkrun.ChecksFailed || run.Error != "" || run.ExitCode != 1 ||

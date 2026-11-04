@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
@@ -55,7 +56,8 @@ func FullSelection(reason, detail string) api.CheckSelection {
 // RunSelection runs selection's checks in the export at dir and returns the
 // result with the selection that produced it. Selected links Dagger refuses
 // before any check starts run every check instead, under the same ctx, and the
-// returned selection says why. Output holds the refused run above the full one.
+// returned selection says why. Output holds the refused run above the full one,
+// and Flaky lists the flaky checks of both.
 func RunSelection(ctx context.Context, checks ReviewChecks, dir string, identity Identity, selection api.CheckSelection) (CheckResult, api.CheckSelection, error) {
 	refused, err := checks.Check(ctx, dir, identity, selection.Links)
 	if err != nil || refused.Refusal == "" || len(selection.Links) == 0 {
@@ -66,6 +68,11 @@ func RunSelection(ctx context.Context, checks ReviewChecks, dir string, identity
 	result, err := checks.Check(ctx, dir, identity, nil)
 	result.Output = fmt.Sprintf("%s\nDagger refused the selected links, so every check runs.\n$ %s\n%s", refused.Output, strings.Join(Command(nil), " "), result.Output)
 	result.Truncated = result.Truncated || refused.Truncated
+	for _, link := range refused.Flaky {
+		if !slices.Contains(result.Flaky, link) {
+			result.Flaky = append(result.Flaky, link)
+		}
+	}
 	if result.TraceURL == "" {
 		result.TraceURL = refused.TraceURL
 	}

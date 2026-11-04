@@ -556,6 +556,9 @@ in the captured output. Unrecognized or infrastructure output keeps a bounded
 excerpt of both ends. Failure classification reads the complete output.
 Agents can read the captured text through `factory_context` with `start` and
 `lines`, continuing oversized lines with `offset` and `next_offset`.
+A check that fails is rerun once by its own link. One that passes is
+[flaky](smart-checks.md#flaky-checks): it counts as passing, and the run's
+`flaky` list, the feed and the reviewer's evidence name it.
 Passing checks send the unit to review, and its reviewer receives the
 result instead of running checks. Failing checks, which Dagger's report names,
 send it back to its mason with the failures and output; the send-back counts

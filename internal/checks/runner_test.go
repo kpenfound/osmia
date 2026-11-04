@@ -109,13 +109,13 @@ func TestDaggerChecksRunEachFilteredViewSeparately(t *testing.T) {
 	})
 	t.Run("a failed check stops later runs", func(t *testing.T) {
 		log := installLoggingDagger(t, `case "$*" in
- *go-test=T) printf 'Full trace at https://dagger.cloud/o/traces/failed\nCHECKS  ✘ 1 failed\n✘ dag://failed 1s ERROR\n    wrong answer\n'; exit 3 ;;
+ *go-test=T|*dag://failed) printf 'Full trace at https://dagger.cloud/o/traces/failed\nCHECKS  ✘ 1 failed\n✘ dag://failed 1s ERROR\n    wrong answer\n'; exit 3 ;;
 esac
 printf 'CHECKS  ✔ 2 passed\nFull trace at https://dagger.cloud/o/traces/passed\n'
 `)
 		result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, links)
 		must(t, err)
-		if got, want := checkInvocations(t, log), []string{flags + packages, flags + item}; !slices.Equal(got, want) {
+		if got, want := checkInvocations(t, log), []string{flags + packages, flags + item, flags + "dag://failed"}; !slices.Equal(got, want) {
 			t.Fatalf("invocations %q, want %q", got, want)
 		}
 		status, failed, reason := ClassifyChecks(result, nil)
@@ -156,6 +156,210 @@ printf 'CHECKS  ✔ 2 passed\n'
 		if raw, readErr := os.ReadFile(log); readErr == nil && strings.Count(string(raw), "\n") > 1 {
 			t.Fatalf("runs after the timeout: %s", raw)
 		}
+	})
+}
+
+// serial: installs a fake dagger executable through PATH.
+func TestDaggerChecksRerunFailedChecksOnce(t *testing.T) {
+	const (
+		flags = "check --progress=report --fail-fast --parallel 4 "
+		view  = "dag+check://?check=test&go-package=p"
+		a     = "dag://?check=test&go-package=p&go-test=A"
+		b     = "dag://?check=test&go-package=p&go-test=B"
+		other = "dag://?check=test&go-package=q&go-test=C"
+		skipA = flags + "--skip " + a + " " + view
+	)
+	// fails prints a report of the links failing and exits 1.
+	const fails = `fails() { printf 'CHECKS  ✘ %s failed\n' "$#"; for l in "$@"; do printf '✘ %s 1s ERROR\n    %s went wrong\n' "$l" "$l"; done; printf 'RUN LOCALLY\n'; for l in "$@"; do printf 'dagger check "%s"\n' "$l"; done; exit 1; }
+passes() { printf 'CHECKS  ✔ %s passed\n' "$#"; for l in "$@"; do printf '✔ %s 1s OK\n' "$l"; done; exit 0; }
+`
+	// script answers each exact command with a shell statement. Any other
+	// command means the runner asked for something unexpected.
+	script := func(commands [][2]string) string {
+		body := fails + "case \"$*\" in\n"
+		for _, c := range commands {
+			body += "'" + c[0] + "') " + c[1] + " ;;\n"
+		}
+		return body + "*) printf 'unexpected %s\\n' \"$*\"; exit 99 ;;\nesac\n"
+	}
+	run := func(t *testing.T, commands [][2]string) (CheckResult, []string) {
+		t.Helper()
+		log := installLoggingDagger(t, script(commands))
+		result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, []string{view})
+		must(t, err)
+		return result, checkInvocations(t, log)
+	}
+	expect := func(t *testing.T, result CheckResult, invocations, ran []string, status string, failed, flaky []string) {
+		t.Helper()
+		if !slices.Equal(invocations, ran) {
+			t.Fatalf("invocations %q, want %q", invocations, ran)
+		}
+		got, gotFailed, reason := ClassifyChecks(result, nil)
+		if got != status || !slices.Equal(gotFailed, failed) || !slices.Equal(result.Flaky, flaky) {
+			t.Fatalf("classified %s, failed %q, flaky %q, reason %v:\n%s", got, gotFailed, result.Flaky, reason, result.Output)
+		}
+	}
+
+	t.Run("a check that passes its rerun is a flake and its view still finishes", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "passes '" + b + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, skipA}, ChecksPassed, nil, []string{a})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d", result.ExitCode)
+		}
+		summary, _ := SummarizeCheckOutput(result.Output, result.ExitCode)
+		if !strings.Contains(summary, a+" 1s ERROR [passed on rerun]") || !strings.Contains(summary, a+" went wrong") {
+			t.Fatalf("summary keeps the flake's evidence: %q", summary)
+		}
+		for _, want := range []string{"\n$ dagger " + flags + a + "\n", "\n$ dagger " + skipA + "\n"} {
+			if !strings.Contains(result.Output, want) {
+				t.Fatalf("output lacks %q:\n%s", want, result.Output)
+			}
+		}
+	})
+	t.Run("a check that fails its rerun fails, and its view does not finish", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "fails '" + a + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a}, ChecksFailed, []string{a}, nil)
+		if summary, _ := SummarizeCheckOutput(result.Output, result.ExitCode); strings.Count(summary, a+" went wrong") != 1 {
+			t.Fatalf("summary repeats the failure: %q", summary)
+		}
+	})
+	t.Run("checks that differ in their rerun are told apart", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "' '" + other + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{flags + other, "fails '" + other + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, flags + other}, ChecksFailed, []string{other}, []string{a})
+	})
+	t.Run("a check its rerun cancelled keeps its failure", func(t *testing.T) {
+		both := "dag://?check=test&go-package=p&go-test=A&go-test=B"
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "' '" + b + "'"},
+			{flags + both, "fails '" + b + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + both}, ChecksFailed, []string{a, b}, nil)
+	})
+	t.Run("a check its rerun reports passing is a flake beside one that fails", func(t *testing.T) {
+		both := "dag://?check=test&go-package=p&go-test=A&go-test=B"
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "' '" + b + "'"},
+			{flags + both, "printf 'CHECKS  ✘ 1 failed  ✔ 1 passed\\n✘ " + b + " 1s ERROR\\n✔ " + a + " 1s OK\\n'; exit 1"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + both}, ChecksFailed, []string{b}, []string{a})
+	})
+	t.Run("a check the failed run cancelled gets its own rerun", func(t *testing.T) {
+		skipBoth := flags + "--skip " + a + " --skip " + b + " " + view
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "fails '" + b + "'"},
+			{flags + b, "passes '" + b + "'"},
+			{skipBoth, "passes '" + other + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, skipA, flags + b, skipBoth}, ChecksPassed, nil, []string{a, b})
+	})
+	t.Run("a real failure the finishing run finds still fails", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "fails '" + b + "'"},
+			{flags + b, "fails '" + b + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, skipA, flags + b}, ChecksFailed, []string{b}, []string{a})
+	})
+	t.Run("a skipped check reported failing stops instead of looping", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "fails '" + a + "'"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, skipA}, ChecksFailed, []string{a}, []string{a})
+	})
+	for _, message := range []string{`no checks matched pattern "view"`, "no checks selected; use 'dagger check -l' to list available checks"} {
+		t.Run("nothing left to finish passes: "+message, func(t *testing.T) {
+			result, invocations := run(t, [][2]string{
+				{flags + view, "fails '" + a + "'"},
+				{flags + a, "passes '" + a + "'"},
+				{skipA, "printf 'Error: " + strings.ReplaceAll(message, "'", "") + "\\n'; exit 1"},
+			})
+			expect(t, result, invocations, []string{flags + view, flags + a, skipA}, ChecksPassed, nil, []string{a})
+			if result.ExitCode != 0 || result.Refusal != "" {
+				t.Fatalf("result %+v", result)
+			}
+		})
+	}
+	t.Run("a finishing run with no result leaves the run incomplete", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "printf 'Error: engine unavailable\\n'; exit 1"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a, skipA}, ChecksIncomplete, nil, []string{a})
+	})
+	t.Run("a rerun with no result leaves the failure standing", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "printf 'Error: no checks matched pattern\\n'; exit 2"},
+		})
+		expect(t, result, invocations, []string{flags + view, flags + a}, ChecksFailed, []string{a}, nil)
+		if result.ExitCode != 1 || result.Refusal != "" {
+			t.Fatalf("the failed run decides the result: %+v", result)
+		}
+	})
+	t.Run("a run with no report is not rerun", func(t *testing.T) {
+		result, invocations := run(t, [][2]string{{flags + view, "printf 'Error: engine unavailable\\n'; exit 1"}})
+		expect(t, result, invocations, []string{flags + view}, ChecksIncomplete, nil, nil)
+	})
+	t.Run("a rerun that outlasts the deadline leaves the failure standing", func(t *testing.T) {
+		log := installLoggingDagger(t, script([][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "exec sleep 30"},
+		}))
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		result, err := (DaggerChecks{}).Check(ctx, t.TempDir(), Identity{}, []string{view})
+		must(t, err)
+		expect(t, result, checkInvocations(t, log), []string{flags + view, flags + a}, ChecksFailed, []string{a}, nil)
+	})
+	t.Run("cancelling a rerun stops the run", func(t *testing.T) {
+		started := filepath.Join(t.TempDir(), "started")
+		installLoggingDagger(t, script([][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, ": > '" + started + "'; exec sleep 30"},
+		}))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			for ctx.Err() == nil {
+				if _, err := os.Stat(started); err == nil {
+					cancel()
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		if _, err := (DaggerChecks{}).Check(ctx, t.TempDir(), Identity{}, []string{view}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("a flake does not stop later views", func(t *testing.T) {
+		later := "dag+check://release/version"
+		log := installLoggingDagger(t, script([][2]string{
+			{flags + view, "fails '" + a + "'"},
+			{flags + a, "passes '" + a + "'"},
+			{skipA, "passes '" + b + "'"},
+			{flags + later, "passes '" + later + "'"},
+		}))
+		result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, []string{view, later})
+		must(t, err)
+		expect(t, result, checkInvocations(t, log), []string{flags + view, flags + a, skipA, flags + later}, ChecksPassed, nil, []string{a})
 	})
 }
 

@@ -19,8 +19,9 @@ import (
 
 // FinalCheckRun is the document final/checks-<k>.json: the check run
 // on the commit final review k reads, with the selection, command, its
-// exit status, diagnostic excerpt, captured output path and the check links
-// Dagger's report shows failed. An incomplete run reported no result, and
+// exit status, diagnostic excerpt, captured output path, the check links
+// Dagger's report shows failed and those that failed and then passed on their
+// rerun. An incomplete run reported no result, and
 // Error says why. Attempt links the result to its start evidence, and is zero
 // for older records and failures before the checks started.
 type FinalCheckRun struct {
@@ -37,6 +38,7 @@ type FinalCheckRun struct {
 	OutputPath         string          `json:"output_path,omitempty"`
 	Truncated          bool            `json:"truncated,omitempty"`
 	Failed             []string        `json:"failed,omitempty"`
+	Flaky              []string        `json:"flaky,omitempty"`
 	TraceURL           string          `json:"trace_url,omitempty"`
 	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
 	Error              string          `json:"error,omitempty"`
@@ -135,6 +137,7 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 	}
 	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
+	run.Flaky = result.Flaky
 	run.ExitCode = result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
@@ -285,6 +288,9 @@ func FinalCheckEvidence(run FinalCheckRun) string {
 	}
 	if len(run.Failed) > 0 {
 		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
+	}
+	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
+		out += "\n" + flaky
 	}
 	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }

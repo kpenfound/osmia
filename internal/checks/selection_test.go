@@ -62,6 +62,16 @@ func TestRunSelection(t *testing.T) {
 			t.Fatalf("description %q", DescribeSelection(ran))
 		}
 	})
+	t.Run("a refused selection keeps the flaky checks of both runs", func(t *testing.T) {
+		t.Parallel()
+		before, after := refused, passed
+		before.Flaky, after.Flaky = []string{"dag://a", "dag://b"}, []string{"dag://b", "dag://c"}
+		checks := &scriptedChecks{results: []CheckResult{before, after}}
+		result, _, err := RunSelection(context.Background(), checks, t.TempDir(), Identity{}, selected)
+		if err != nil || !slices.Equal(result.Flaky, []string{"dag://b", "dag://c", "dag://a"}) {
+			t.Fatalf("flaky %q, err %v", result.Flaky, err)
+		}
+	})
 	t.Run("a refused full run is not repeated", func(t *testing.T) {
 		t.Parallel()
 		full := FullSelection(SelectionUnlisted, "listing failed")

@@ -428,6 +428,31 @@ func TestSessionCheckRunsFullWhenDaggerRefusesTheSelection(t *testing.T) {
 	}
 }
 
+func TestSessionCheckNotesFlakyChecks(t *testing.T) {
+	t.Parallel()
+	s, c, _, _, stream, _, _ := newSessionControlsFixture(t)
+	const link = "dag://go/packages/tests/test?go-test=TestFlaky"
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Result: CheckResult{Output: failedReport(link) + "CHECKS  ✔ 1 passed\n✔ " + link + " 1s OK\n", Flaky: []string{link}}}}}
+	service.InspectForTest(s.core()).SetReviewChecks(checks)
+	run, err := c.SessionCheck(context.Background(), stream)
+	must(t, err)
+	if run.Status != ChecksPassed || run.ExitCode != 0 || len(run.Failed) != 0 || !slices.Equal(run.Flaky, []string{link}) {
+		t.Fatalf("check run: %+v", run)
+	}
+	entries, err := sessionEntriesSince(s.sole().repository, stream, time.Time{})
+	must(t, err)
+	if !strings.Contains(entries[0].Text, checkrun.DescribeFlaky([]string{link})) {
+		t.Fatalf("the check's thread entry does not note the flake: %q", entries[0].Text)
+	}
+	feed, err := feedEntries(s.sole().repository, s.sole().repository, stream)
+	must(t, err)
+	if !slices.ContainsFunc(feed, func(e FeedEntry) bool {
+		return e.SessionChecks != nil && slices.Equal(e.SessionChecks.Flaky, []string{link})
+	}) {
+		t.Fatalf("the feed does not note the flake: %s", describeFeed(feed))
+	}
+}
+
 // refusingChecks refuses any run with links and passes a run of every check.
 type refusingChecks struct {
 	links   []string

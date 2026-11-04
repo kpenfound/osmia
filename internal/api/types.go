@@ -865,6 +865,7 @@ type SessionCheckRun struct {
 	OutputPath         string          `json:"output_path,omitempty"`
 	Truncated          bool            `json:"truncated,omitempty"`
 	Failed             []string        `json:"failed,omitempty"`
+	Flaky              []string        `json:"flaky,omitempty"`
 	TraceURL           string          `json:"trace_url,omitempty"`
 	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
 	Error              string          `json:"error,omitempty"`
@@ -1154,6 +1155,7 @@ type FeedUnitChecks struct {
 	State      string              `json:"state" enum:"running,passed,failed,incomplete,superseded"`
 	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs that did not record a selection."`
 	Failed     []string            `json:"failed,omitempty" description:"Links of failed checks; captured output stays in the trace."`
+	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
 	Error      string              `json:"error,omitempty"`
 	StartedAt  time.Time           `json:"started_at"`
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
@@ -1169,6 +1171,7 @@ type FeedFinalChecks struct {
 	Attempt    int                 `json:"attempt,omitempty"`
 	State      string              `json:"state" enum:"running,passed,failed,incomplete"`
 	Failed     []string            `json:"failed,omitempty"`
+	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
 	Error      string              `json:"error,omitempty"`
 	StartedAt  *time.Time          `json:"started_at,omitempty"`
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
@@ -1182,6 +1185,7 @@ type FeedSessionChecks struct {
 	State      string              `json:"state" enum:"passed,failed,incomplete"`
 	Selection  *FeedCheckSelection `json:"selection,omitempty"`
 	Failed     []string            `json:"failed,omitempty"`
+	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
 	Error      string              `json:"error,omitempty"`
 	TraceURL   string              `json:"trace_url,omitempty"`
 	StartedAt  time.Time           `json:"started_at"`

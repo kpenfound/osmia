@@ -1932,6 +1932,8 @@
       checkSelection(run.selection, run.state === 'running'),
       !unit && !session && run.selection ? el('p', { 'data-field': 'selection-description' }, run.selection.description) : null,
       run.failed && run.failed.length ? el('ul', { class: 'notes', 'data-field': 'failed' }, ...run.failed.map(link => el('li', {}, link))) : null,
+      run.flaky && run.flaky.length ? el('p', { 'data-field': 'flaky-note' }, 'Flaky: failed, then passed on rerun') : null,
+      run.flaky && run.flaky.length ? el('ul', { class: 'notes', 'data-field': 'flaky' }, ...run.flaky.map(link => el('li', {}, link))) : null,
       run.error ? el('p', { 'data-field': 'error' }, run.error) : null);
   }
 

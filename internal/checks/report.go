@@ -15,6 +15,11 @@ var reportHeading = regexp.MustCompile(`^(?:CHECKS|== CHECKS ==)(?:[ \t]|$)`)
 var reportCheck = regexp.MustCompile(`^([ \t]*)([✘✔⊘◌])[ \t]+(dag(?:\+check)?://\S+)(.*)$`)
 var reportError = regexp.MustCompile(`(?m)^Error: (.+)$`)
 
+// reportNothingSelected matches Dagger's refusal of a run whose filters leave no
+// check: "no checks matched pattern" when it names addresses, and "no checks
+// selected" when it does not.
+var reportNothingSelected = regexp.MustCompile(`^no checks (?:matched|selected)`)
+
 // reportNotRefused matches what a run shows when checks had started or its
 // engine session was lost, so a missing report says nothing about its links.
 var reportNotRefused = regexp.MustCompile(`checks: [0-9]+/[0-9]+ done|http://dagger/|engine closed session`)
@@ -27,6 +32,9 @@ type checkFailure struct {
 	heading    string
 	start, end int
 	lines      []string
+	// passedLater records that a later report in the output shows the check
+	// passing.
+	passedLater bool
 }
 
 // parseCheckReport reads check results only inside Dagger's CHECKS sections.
@@ -63,9 +71,16 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 		if m := reportCheck.FindStringSubmatch(line); m != nil && len(m[1]) <= checkIndent {
 			checkIndent = len(m[1])
 			active = -1
-			if m[2] == "✘" {
+			switch m[2] {
+			case "✘":
 				failures = append(failures, checkFailure{link: m[3], heading: "✘ " + CheckLinkLabel(m[3]) + m[4], start: i + 1, end: i + 1})
 				active = len(failures) - 1
+			case "✔":
+				for f := range failures {
+					if failures[f].link == m[3] {
+						failures[f].passedLater = true
+					}
+				}
 			}
 			continue
 		}
@@ -77,23 +92,52 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 	return heading, failures
 }
 
-// failedChecks retains full check links independently of the prompt budget.
+// latestFailures keeps one failure for each link: its most recent, in the order
+// the links first failed.
+func latestFailures(failures []checkFailure) []checkFailure {
+	var latest []checkFailure
+	for _, failure := range failures {
+		if i := slices.IndexFunc(latest, func(f checkFailure) bool { return f.link == failure.link }); i >= 0 {
+			latest[i] = failure
+		} else {
+			latest = append(latest, failure)
+		}
+	}
+	return latest
+}
+
+// FailedChecks returns the links whose latest result in output is a failure,
+// independently of the prompt budget. A check that failed and then passed in a
+// later report is not among them.
 func FailedChecks(output string) []string {
 	_, failures := parseCheckReport(output)
 	var links []string
-	for _, failure := range failures {
-		if !slices.Contains(links, failure.link) {
+	for _, failure := range latestFailures(failures) {
+		if !failure.passedLater {
 			links = append(links, failure.link)
 		}
 	}
 	return links
 }
 
+// DescribeFlaky names the checks that failed and then passed on their rerun,
+// for a record's reason or a prompt. It is empty when none did.
+func DescribeFlaky(links []string) string {
+	if len(links) == 0 {
+		return ""
+	}
+	return "Flaky, failed and then passed on rerun: " + CheckExcerpt(strings.Join(links, ", "), 2048)
+}
+
 // SummarizeCheckOutput omits passing check blocks and rerun commands. Each
 // failed check gets an equal diagnostic budget, so a noisy first failure
-// cannot consume the entire report. Unrecognized output keeps both ends.
+// cannot consume the entire report, and a check that failed more than once
+// keeps only its latest diagnostics. A check that passed on its rerun keeps its
+// failure's diagnostics, marked as such, because they are the evidence of the
+// flake. Unrecognized output keeps both ends.
 func SummarizeCheckOutput(output string, exit int) (string, bool) {
 	heading, failures := parseCheckReport(output)
+	failures = latestFailures(failures)
 	if len(failures) == 0 {
 		if exit == 0 && heading != "" {
 			return CheckExcerpt(heading+"\n", ReportLimit), len(heading)+1 > ReportLimit
@@ -110,7 +154,11 @@ func SummarizeCheckOutput(output string, exit int) (string, bool) {
 	}
 	budget := (ReportLimit - out.Len()) / len(failures)
 	for _, failure := range failures {
-		block := fmt.Sprintf("%s [output lines %d-%d]\n%s\n", failure.heading, failure.start, failure.end, strings.TrimSpace(strings.Join(failure.lines, "\n")))
+		label := failure.heading
+		if failure.passedLater {
+			label += " [passed on rerun]"
+		}
+		block := fmt.Sprintf("%s [output lines %d-%d]\n%s\n", label, failure.start, failure.end, strings.TrimSpace(strings.Join(failure.lines, "\n")))
 		out.WriteString(CheckExcerpt(block, budget))
 		truncated = truncated || len(block) > budget
 	}

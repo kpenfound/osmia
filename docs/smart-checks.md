@@ -181,6 +181,36 @@ A non-zero exit without a failed check remains incomplete, including a session
 shutdown error after all checks passed, and its reason repeats the last error
 Dagger printed.
 
+## Flaky checks
+
+Dagger's report lists the checks that failed, under `RUN LOCALLY`. The factory
+reruns each of them once by its own link, in the same export and within the
+same `checks_timeout`, and records every report in the captured output:
+
+- **It passes.** The check is flaky and counts as a pass. Its link is in the
+  record's `flaky` list and the feed, and the transition, the thread entry and
+  the reviewer's evidence name it. The excerpt keeps its failure's diagnostics,
+  marked `[passed on rerun]`, so the flake can be found and fixed.
+- **It fails.** The check failed. Its link is in `failed`, with the diagnostics
+  of its latest failure. Other checks that passed their rerun are still flaky.
+- **The rerun reports no result**, because it timed out or lost its engine.
+  Nothing contradicts the failure, so the check stays failed.
+
+`--fail-fast` can cancel checks that the report then leaves out, so a passed
+rerun does not show that the whole run passed. The factory runs the same
+selection again with `--skip` for each flaky link, which reuses cached passes,
+runs what was cancelled and gives any new failure its own rerun. A flaky check
+is skipped there because Dagger would otherwise replay its cached failure. If
+it was the only check selected, Dagger reports that no checks matched and there
+is nothing left to run.
+
+Dagger caches a failed result under the address that ran it, and no
+`dagger check` option bypasses that. A rerun is a fresh attempt only when the
+check's link selects less than the run that failed, as a test's link does within
+its package or the whole project. A check whose link is the address that failed,
+such as a selected test run alone or a check with no filters, replays its
+failure and stays failed.
+
 ## Restarts and new runs
 
 A unit judgment is identified by the check run that asked, the task, its
@@ -271,8 +301,9 @@ selected 2 of 37 at probability 0.50 or more
 ```
 
 Unlike a factory run, the command records nothing, makes one request without
-retry or cool-down, and runs Dagger in your checkout with your environment
-rather than in a fresh export with a scrubbed one.
+retry or cool-down, does not rerun failed checks, and runs Dagger in your
+checkout with your environment rather than in a fresh export with a scrubbed
+one.
 
 ## Tune the selection
 

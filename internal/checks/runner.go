@@ -94,9 +94,20 @@ func checkArgs(addresses []string) []string {
 	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", "4"}, addresses...)
 }
 
+// skipArgs are checkArgs that leave out the checks skip selects.
+func skipArgs(addresses, skip []string) []string {
+	args := checkArgs(nil)
+	for _, link := range skip {
+		args = append(args, "--skip", link)
+	}
+	return append(args, addresses...)
+}
+
 // Check runs links as the separate dagger check runs they need, in one export
-// and one after another so no more than four checks run at once. The first run
-// that does not pass stops the rest and supplies the exit code and any refusal.
+// and one after another so no more than four checks run at once. A run whose
+// report shows failed checks reruns them once (see checkRun.view). A check that
+// passes its rerun counts as passed and is listed in Flaky. The first run that
+// does not pass stops the rest and supplies the exit code and any refusal.
 // Output holds every run's report, and TraceURL is the trace of the latest run
 // that has one.
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
@@ -105,30 +116,114 @@ func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, 
 		return CheckResult{ExitCode: -1, CIIdentityFallback: preparation.FallbackReason}, redactError(err)
 	}
 	defer cleanup()
-	result := CheckResult{CIIdentityFallback: preparation.FallbackReason}
 	invocations := checkselect.Invocations(links)
-	var all strings.Builder
+	run := checkRun{checks: d, dir: dir, env: env, preparation: preparation, labelled: len(invocations) > 1}
+	run.result.CIIdentityFallback = preparation.FallbackReason
 	for _, addresses := range invocations {
-		args := checkArgs(addresses)
-		output := &bytes.Buffer{}
-		exit, err := d.run(ctx, dir, env, preparation, output, args...)
-		clean := redact.Secrets(output.String(), redact.KnownSecrets()...)
-		if len(invocations) > 1 {
-			fmt.Fprintf(&all, "$ dagger %s\n", strings.Join(args, " "))
-		}
-		all.WriteString(clean)
-		if len(invocations) > 1 && !strings.HasSuffix(clean, "\n") {
-			all.WriteString("\n")
-		}
-		result.ExitCode, result.Output, result.Refusal = exit, all.String(), refusal(clean, exit)
-		if url := cloudTraceURL(clean); url != "" {
-			result.TraceURL = url
-		}
-		if err != nil || exit != 0 {
-			return result, redactError(err)
+		if err := run.view(ctx, addresses); err != nil || run.result.ExitCode != 0 {
+			return run.result, redactError(err)
 		}
 	}
-	return result, nil
+	return run.result, nil
+}
+
+// checkRun accumulates the dagger check runs of one Check into its result.
+type checkRun struct {
+	checks      DaggerChecks
+	dir         string
+	env         []string
+	preparation Preparation
+	result      CheckResult
+	output      strings.Builder
+	// labelled heads each report with its command, once there is more than one.
+	labelled bool
+}
+
+// view runs one set of addresses to a result, giving each failed check one
+// rerun by its own link.
+//
+// Dagger caches a failed result under the address that ran it, so the rerun is
+// a fresh attempt only when its link selects less than the run that failed; the
+// same address replays the failure, which then stands. That cache also means
+// the failed run cannot simply be repeated once the check passes. With
+// --fail-fast, that run may have cancelled checks its report does not mention,
+// so a passed rerun does not yet show the addresses pass: the addresses run
+// again skipping what passed, and any new failure gets its own rerun.
+func (r *checkRun) view(ctx context.Context, addresses []string) error {
+	var flaky []string
+	for {
+		args := checkArgs(addresses)
+		if len(flaky) > 0 {
+			args = skipArgs(addresses, flaky)
+		}
+		exit, report, err := r.attempt(ctx, args)
+		r.result.ExitCode, r.result.Refusal = exit, refusal(report, exit)
+		if len(flaky) > 0 && reportNothingSelected.MatchString(r.result.Refusal) {
+			r.result.ExitCode, r.result.Refusal = 0, ""
+			return nil
+		}
+		if err != nil || exit == 0 {
+			return err
+		}
+		failed := FailedChecks(report)
+		if len(failed) == 0 || slices.ContainsFunc(failed, func(link string) bool { return slices.Contains(flaky, link) }) {
+			return nil
+		}
+		passed, err := r.rerun(ctx, failed)
+		r.result.Flaky = append(r.result.Flaky, passed...)
+		if err != nil || len(passed) < len(failed) {
+			return err
+		}
+		flaky = append(flaky, passed...)
+	}
+}
+
+// rerun runs failed once more and returns those that passed, leaving the failed
+// run's exit code. A rerun that reports no result, including one that outlasts
+// the run's deadline, shows nothing against the failure, which stands. Only
+// cancellation returns an error.
+func (r *checkRun) rerun(ctx context.Context, failed []string) ([]string, error) {
+	r.labelled = true
+	allPassed := true
+	for _, addresses := range checkselect.Invocations(failed) {
+		exit, _, err := r.attempt(ctx, checkArgs(addresses))
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, err
+		}
+		allPassed = allPassed && err == nil && exit == 0
+	}
+	if allPassed {
+		return failed, nil
+	}
+	latest := FailedChecks(r.output.String())
+	return slices.DeleteFunc(slices.Clone(failed), func(link string) bool { return slices.Contains(latest, link) }), nil
+}
+
+// attempt runs dagger check once, adding its report to the result's output, and
+// returns its exit status and its report alone.
+func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, error) {
+	var output bytes.Buffer
+	exit, err := r.checks.run(ctx, r.dir, r.env, r.preparation, &output, args...)
+	report := redact.Secrets(output.String(), redact.KnownSecrets()...)
+	if r.labelled {
+		r.endLine()
+		fmt.Fprintf(&r.output, "$ dagger %s\n", strings.Join(args, " "))
+	}
+	r.output.WriteString(report)
+	if r.labelled {
+		r.endLine()
+	}
+	r.result.Output = r.output.String()
+	if url := cloudTraceURL(report); url != "" {
+		r.result.TraceURL = url
+	}
+	return exit, report, err
+}
+
+func (r *checkRun) endLine() {
+	if text := r.output.String(); text != "" && !strings.HasSuffix(text, "\n") {
+		r.output.WriteString("\n")
+	}
 }
 
 // dagger runs the Dagger CLI once in dir with args and returns its exit status,

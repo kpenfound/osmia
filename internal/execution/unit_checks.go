@@ -54,7 +54,8 @@ type checkInput struct {
 // unit candidate's checks, bound to the candidate, its base and its diff, with
 // the checks it selected, the command, its exit status, diagnostic excerpt
 // and the path of its captured output. Failed lists the check links Dagger's
-// report shows failed.
+// report shows failed, and Flaky those that failed and then passed on their
+// rerun.
 type UnitCheckRun struct {
 	Unit               string          `json:"unit"`
 	Run                int             `json:"run"`
@@ -72,6 +73,7 @@ type UnitCheckRun struct {
 	OutputPath         string          `json:"output_path,omitempty"`
 	Truncated          bool            `json:"truncated,omitempty"`
 	Failed             []string        `json:"failed,omitempty"`
+	Flaky              []string        `json:"flaky,omitempty"`
 	TraceURL           string          `json:"trace_url,omitempty"`
 	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
 	Error              string          `json:"error,omitempty"`
@@ -298,6 +300,9 @@ func (c *checkers) request(ctx context.Context, stream config.WorkstreamID, in c
 func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), UnitReviewing, run.Run, state.Version)
 	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.DescribeSelection(*run.Selection))
+	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
+		reason += "; " + flaky
+	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(unit, run.Run)}
 	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitReviewing, Reason: reason},
@@ -352,6 +357,9 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 	}
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), to, run.Run, state.Version)
 	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelection(*run.Selection))
+	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
+		reason += "; " + flaky
+	}
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
@@ -597,6 +605,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Selection, run.Command = &ran, checkrun.Command(ran.Links)
 	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
+	run.Flaky = result.Flaky
 	captured, run.ExitCode = result.Output, result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
@@ -754,6 +763,9 @@ func checkEvidence(run UnitCheckRun) string {
 	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelection(*run.Selection), checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
 	if len(run.Failed) > 0 {
 		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
+	}
+	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
+		out += "\n" + flaky
 	}
 	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }

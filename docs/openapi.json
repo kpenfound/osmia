@@ -5434,6 +5434,13 @@
               "string"
             ]
           },
+          "flaky": {
+            "description": "Links of checks that failed and then passed on their rerun.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "review": {
             "type": "integer"
           },
@@ -5568,6 +5575,13 @@
             "format": "date-time",
             "type": "string"
           },
+          "flaky": {
+            "description": "Links of checks that failed and then passed on their rerun.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "kind": {
             "type": "string"
           },
@@ -5637,6 +5651,13 @@
               "null",
               "string"
             ]
+          },
+          "flaky": {
+            "description": "Links of checks that failed and then passed on their rerun.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "run": {
             "type": "integer"
@@ -6895,6 +6916,12 @@
           "finished_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "flaky": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "kind": {
             "type": "string"

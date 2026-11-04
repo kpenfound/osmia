@@ -426,6 +426,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 		Status:    status,
 		ExitCode:  result.ExitCode,
 		Failed:    failed,
+		Flaky:     result.Flaky,
 		StartedAt: startedAt,
 	}
 	if classifyErr != nil {
@@ -440,6 +441,9 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check run of session %s; check the trace repository: %v", stream, err)}
 	}
 	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, checkrun.DescribeSelection(selection))
+	if flaky := checkrun.DescribeFlaky(sr.Flaky); flaky != "" {
+		summary += " " + flaky + "."
+	}
 	if err := recordSessionEntry(ctx, repository, project, stream, cause+"-entry", sr.FinishedAt, summary); err != nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check entry of session %s; check the trace repository", stream)}
 	}

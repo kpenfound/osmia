@@ -66,13 +66,15 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			outcome := checkOutcome{Result: CheckResult{ExitCode: 1, Output: failedReport(failed)}}
 			if mode == "full" {
 				state = ChecksPassed
-				outcome = checkOutcome{Result: CheckResult{Output: passedReport}}
+				outcome = checkOutcome{Result: CheckResult{Output: passedReport, Flaky: []string{checks.links[0]}}}
 			}
 			checks.release <- outcome
 			awaitFeedEvent(p, stream)
 			p.Await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
 			if mode == "full" {
 				selection = "every check ran: the Jev boost is off"
+				p.AwaitText(entry+` [data-field=flaky-note]`, "Flaky")
+				p.AwaitText(entry+` [data-field=flaky]`, checks.links[0])
 			} else {
 				p.AwaitText(entry+` [data-field=failed]`, failed)
 			}

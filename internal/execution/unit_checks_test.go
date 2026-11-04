@@ -108,6 +108,55 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 }
 
+func TestFlakyChecksCountAsPassingAndAreNoted(t *testing.T) {
+	t.Parallel()
+	const link = "dag://go/packages/tests/test?go-test=TestFlaky"
+	output := failedReport(link) + "CHECKS  ✔ 1 passed\n✔ " + link + " 1.0s OK\n"
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Result: checkrun.CheckResult{Output: output, Flaky: []string{link}}}}}
+	f, stream, repository := newChecksFixture(t, "checks-flaky", checks)
+	runChecks(t, f.s, repository, stream)
+	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
+		t.Fatalf("unit is %s, want reviewing", got)
+	}
+	run := onlyRun(t, repository, stream)
+	if run.Status != ChecksPassed || len(run.Failed) != 0 || !slices.Equal(run.Flaky, []string{link}) || !strings.Contains(run.Output, "[passed on rerun]") || !strings.Contains(run.Output, "wrong chunk") {
+		t.Fatalf("check run %+v", run)
+	}
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	must(t, err)
+	if !slices.ContainsFunc(transitions, func(tr trace.Transition) bool {
+		return tr.To == UnitReviewing && strings.Contains(tr.Reason, checkrun.DescribeFlaky([]string{link}))
+	}) {
+		t.Fatalf("the move to review does not note the flake: %+v", transitions)
+	}
+	if req := reviewTurn(t, f, repository, stream); !strings.Contains(req.Prompt, checkrun.DescribeFlaky([]string{link})) {
+		t.Fatalf("review prompt lacks the flake:\n%s", req.Prompt)
+	}
+}
+
+func TestFailedChecksNoteTheFlakyChecksBesideThem(t *testing.T) {
+	t.Parallel()
+	const flaky, failed = "dag://flaky", "dag://failed"
+	output := "CHECKS  ✘ 2 failed\n✘ " + flaky + " 1s ERROR\n✘ " + failed + " 1s ERROR\nCHECKS  ✘ 1 failed  ✔ 1 passed\n✘ " + failed + " 1s ERROR\n✔ " + flaky + " 1s OK\n"
+	checks := &fakeChecks{Outcomes: []checkOutcome{{Result: checkrun.CheckResult{ExitCode: 1, Output: output, Flaky: []string{flaky}}}}}
+	f, stream, repository := newChecksFixture(t, "checks-flaky-failed", checks)
+	runChecks(t, f.s, repository, stream)
+	run := onlyRun(t, repository, stream)
+	if run.Status != ChecksFailed || !slices.Equal(run.Failed, []string{failed}) || !slices.Equal(run.Flaky, []string{flaky}) {
+		t.Fatalf("check run %+v", run)
+	}
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	must(t, err)
+	if !slices.ContainsFunc(transitions, func(tr trace.Transition) bool {
+		return tr.To == UnitImplementing && strings.Contains(tr.Reason, checkrun.DescribeFlaky([]string{flaky}))
+	}) {
+		t.Fatalf("the send-back does not note the flake: %+v", transitions)
+	}
+	if verdict := checkVerdict(run); len(verdict.Findings) != 1 || !strings.Contains(verdict.Findings[0].Action, failed) {
+		t.Fatalf("the send-back asks for the failed check alone: %+v", verdict)
+	}
+}
+
 func TestChecksRunEveryCheckWhenDaggerRefusesTheLinksJevSelects(t *testing.T) {
 	t.Parallel()
 	links := []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web"}
