@@ -3,11 +3,22 @@ package checks
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // scriptedChecks returns one scripted result for each Check and records its links.
@@ -36,32 +47,36 @@ func TestRunSelection(t *testing.T) {
 	refused := CheckResult{ExitCode: 1, Output: "Error: no checks matched\n", Refusal: "no checks matched", TraceURL: "https://dagger.cloud/refused"}
 	passed := CheckResult{Output: "CHECKS  ✔ 2 passed\n"}
 
-	t.Run("a refused selection runs every check and says why", func(t *testing.T) {
-		t.Parallel()
-		checks := &scriptedChecks{results: []CheckResult{refused, {ExitCode: 3, Output: "CHECKS  ✘ 1 failed\n✘ dag://failed 1s ERROR\n    wrong\n", TraceURL: "https://dagger.cloud/full"}}}
-		result, ran, err := RunSelection(context.Background(), checks, t.TempDir(), Identity{}, selected)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(checks.ran) != 2 || !slices.Equal(checks.ran[0], selected.Links) || checks.ran[1] != nil {
-			t.Fatalf("ran %q", checks.ran)
-		}
-		if ran.Mode != SelectionFull || ran.Reason != SelectionRefused || ran.Detail != "no checks matched" || len(ran.Links) != 0 || ran.Judgment != "judgment_1" || ran.Candidates != 3 || ran.Listed != &listed {
-			t.Fatalf("selection %+v", ran)
-		}
-		if result.ExitCode != 3 || result.TraceURL != "https://dagger.cloud/full" || result.Refusal != "" {
-			t.Fatalf("result %+v", result)
-		}
-		if !strings.Contains(result.Output, "Error: no checks matched\n") || !strings.Contains(result.Output, "$ dagger check --progress=report --fail-fast --parallel 4\n") {
-			t.Fatalf("output lacks the refused run or the full command:\n%s", result.Output)
-		}
-		if status, failed, _ := ClassifyChecks(result, nil); status != ChecksFailed || !slices.Equal(failed, []string{"dag://failed"}) {
-			t.Fatalf("classified %s, %q", status, failed)
-		}
-		if want := "every check ran: Dagger refused the links Jev selected (no checks matched)"; DescribeSelection(ran) != want {
-			t.Fatalf("description %q", DescribeSelection(ran))
-		}
-	})
+	for _, picks := range []int{0, 2} {
+		t.Run(fmt.Sprintf("a refused selection with %d fallback picks runs every check and says why", picks), func(t *testing.T) {
+			t.Parallel()
+			selected := selected
+			selected.FallbackPicks = picks
+			checks := &scriptedChecks{results: []CheckResult{refused, {ExitCode: 3, Output: "CHECKS  ✘ 1 failed\n✘ dag://failed 1s ERROR\n    wrong\n", TraceURL: "https://dagger.cloud/full"}}}
+			result, ran, err := RunSelection(context.Background(), checks, t.TempDir(), Identity{}, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(checks.ran) != 2 || !slices.Equal(checks.ran[0], selected.Links) || checks.ran[1] != nil {
+				t.Fatalf("ran %q", checks.ran)
+			}
+			if ran.Mode != SelectionFull || ran.FallbackPicks != 0 || ran.Reason != SelectionRefused || ran.Detail != "no checks matched" || len(ran.Links) != 0 || ran.Judgment != "judgment_1" || ran.Candidates != 3 || ran.Listed != &listed {
+				t.Fatalf("selection %+v", ran)
+			}
+			if result.ExitCode != 3 || result.TraceURL != "https://dagger.cloud/full" || result.Refusal != "" {
+				t.Fatalf("result %+v", result)
+			}
+			if !strings.Contains(result.Output, "Error: no checks matched\n") || !strings.Contains(result.Output, "$ dagger check --progress=report --fail-fast --parallel 4\n") {
+				t.Fatalf("output lacks the refused run or the full command:\n%s", result.Output)
+			}
+			if status, failed, _ := ClassifyChecks(result, nil); status != ChecksFailed || !slices.Equal(failed, []string{"dag://failed"}) {
+				t.Fatalf("classified %s, %q", status, failed)
+			}
+			if want := "every check ran: Dagger refused the links Jev selected (no checks matched)"; DescribeSelection(ran) != want {
+				t.Fatalf("description %q", DescribeSelection(ran))
+			}
+		})
+	}
 	t.Run("a refused selection keeps the flaky checks of both runs", func(t *testing.T) {
 		t.Parallel()
 		before, after := refused, passed
@@ -111,4 +126,72 @@ func TestRunSelection(t *testing.T) {
 			t.Fatalf("classified %s, %v", status, reason)
 		}
 	})
+}
+
+func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
+	t.Parallel()
+	var large strings.Builder
+	for i := range checkselect.MaxState / 10 {
+		fmt.Fprintf(&large, "diff --git a/f%05d.go b/f%05d.go\n--- a/f%05d.go\n+++ b/f%05d.go\n@@ -1 +1 @@\n-a\n+b\n", i, i, i, i)
+	}
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		diff    string
+		result  jevtest.Result
+		reason  string
+	}{
+		{name: "threshold", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "threshold zero picks", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "threshold oversized picks", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "disabled", reason: string(jev.ReasonDisabled)},
+		{name: "large change", enabled: true, diff: large.String(), reason: SelectionTooLarge},
+		{name: "no usable scores", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test"}}, reason: string(jev.ReasonDeclined)},
+		{name: "timeout", enabled: true, result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}, reason: string(jev.ReasonTimeout)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Keep the trace socket and clone paths short on every platform.
+			home, err := os.MkdirTemp("", "picks-")
+			must(t, err)
+			t.Cleanup(func() { os.RemoveAll(home) })
+			cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+			must(t, err)
+			repository, err := trace.Create(t.Context(), cfg.Root, cfg.Project, fixturekit.DemoStart, trace.Actor{Kind: "service", ID: "fixture"})
+			must(t, err)
+			t.Cleanup(func() { repository.Close() })
+			stream := fixturekit.Stream
+			must(t, repository.CreateWorkstream(t.Context(), stream, fixturekit.DemoStart, trace.Actor{Kind: "service", ID: "fixture"}))
+			settings := cfg.Jev
+			settings.Enabled = tc.enabled
+			settings.CheckFallbackPicks = 2
+			if tc.name == "threshold zero picks" {
+				settings.CheckFallbackPicks = 0
+			}
+			if tc.name == "threshold oversized picks" {
+				settings.CheckFallbackPicks = 9
+			}
+			settings.Timeout = "1s"
+			p := &jevtest.Provider{Results: []jevtest.Result{tc.result}}
+			j := &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: func() time.Time { return fixturekit.DemoStart }}
+			checks := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b"}, Outcomes: fixturekit.Passing()}
+			scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(stream), Thread: "checks", Turn: "check-1", Role: "checks"}
+			selection := Select(t.Context(), j, repository, scope, "check-1", nil, t.TempDir(), tc.diff, Identity{}, checks)
+			_, err = checks.Check(t.Context(), t.TempDir(), Identity{}, selection.Links)
+			must(t, err)
+			if tc.reason == "" {
+				if selection.Mode != SelectionSelected || selection.FallbackPicks != 0 || !slices.Equal(selection.Links, checks.Links[:1]) {
+					t.Fatalf("threshold selection %+v", selection)
+				}
+			} else if selection.Mode != SelectionFull || selection.Reason != tc.reason || len(selection.Links) != 0 || selection.FallbackPicks != 0 {
+				t.Fatalf("full selection %+v, want %s", selection, tc.reason)
+			}
+			if !slices.Equal(checks.Runs()[0], selection.Links) {
+				t.Fatalf("runner %v, selection %+v", checks.Runs(), selection)
+			}
+			if (tc.name == "disabled" || tc.name == "large change") && len(p.Requests()) != 0 {
+				t.Fatal("full run asked Jev")
+			}
+		})
+	}
 }

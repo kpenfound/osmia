@@ -5,6 +5,7 @@
 package checkselect
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -15,8 +16,8 @@ import (
 )
 
 // Task names the judgment. Bump Version whenever its questions or their
-// interpretation change. The threshold is configured, and each judgment's
-// identity includes the one it applied.
+// interpretation change. The threshold and fallback picks are configured;
+// each judgment's identity includes the acceptance values it applied.
 const (
 	Task    = "check-selection"
 	Version = 2
@@ -91,6 +92,29 @@ func Selected(r systemone.Response, candidates []string, threshold float64) []st
 		}
 	}
 	return selected
+}
+
+// FallbackPicks returns up to count scored candidates in descending probability
+// order. Equal scores retain candidate order; missing and non-Noul answers do
+// not participate. There is no minimum probability for a pick.
+func FallbackPicks(r systemone.Response, candidates []string, count int) []string {
+	if count <= 0 {
+		return nil
+	}
+	var order []int
+	for i := range candidates {
+		if a, ok := r.Answers[Question(i)]; ok && a.Kind == systemone.KindNoul {
+			order = append(order, i)
+		}
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(r.Answers[Question(b)].Noul, r.Answers[Question(a)].Noul)
+	})
+	var picks []string
+	for _, i := range order[:min(count, len(order))] {
+		picks = append(picks, candidates[i])
+	}
+	return picks
 }
 
 // Candidates returns the distinct links, narrowed to at most limit by

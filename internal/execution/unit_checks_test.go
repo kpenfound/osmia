@@ -2,6 +2,7 @@ package execution
 
 import (
 	context "context"
+	"crypto/sha256"
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
@@ -319,6 +320,9 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 	}{
 		{"rate limited", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, string(jev.ReasonRateLimited), true},
 		{"no check likely", &fakeChecks{Links: []string{link, "dag+check://release/version"}}, jevtest.Result{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1), "check-1": jevtest.Noul(0.05)}}}, string(jev.ReasonDeclined), true},
+		{"timeout", &fakeChecks{Links: []string{link}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}, string(jev.ReasonTimeout), true},
+		{"unusable", &fakeChecks{Links: []string{link}}, jevtest.Result{Err: &systemone.Error{Kind: systemone.KindMalformed, Message: "invalid answers"}}, string(jev.ReasonUnusable), true},
+		{"no scored candidates", &fakeChecks{Links: []string{link}}, jevtest.Result{Response: systemone.Response{Model: "jev-test"}}, string(jev.ReasonDeclined), true},
 		{"no checks", &fakeChecks{}, jevtest.Result{}, checkrun.SelectionNoChecks, false},
 		{"unlisted", &fakeChecks{ListErr: errors.New("engine unreachable")}, jevtest.Result{}, checkrun.SelectionUnlisted, false},
 		{"too many checks", &fakeChecks{Links: many}, jevtest.Result{}, checkrun.SelectionTooMany, false},
@@ -329,6 +333,11 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 			f, stream, repository := newChecksFixture(t, "fallback", c.checks)
 			p := &jevtest.Provider{Results: []jevtest.Result{c.result}}
 			boostJev(f.s, p)
+			if c.name != "no check likely" {
+				configured := f.s.Jev.Config()
+				configured.CheckFallbackPicks = 2
+				f.s.Jev.Config = func() config.Jev { return configured }
+			}
 			runChecks(t, f.s, repository, stream)
 			if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
 				t.Fatalf("unit is %s, want reviewing", got)
@@ -582,5 +591,91 @@ func TestQuoteLinksKeepsRunSeparatorsReadableAsACommand(t *testing.T) {
 	want := `dagger check "dag://?check=test&go-package=a" && dagger check dag+check://release/version`
 	if got != want {
 		t.Fatalf("command %s, want %s", got, want)
+	}
+}
+
+// A loaded setting reaches the real selector and the runner boundary, and
+// retries reuse both the recorded answers and the configured acceptance.
+func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "check_fallback_picks = 0", "check_fallback_picks = 2", "check_fallback_picks = 9"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+			links := []string{"dag+check://a", "dag+check://b", "dag+check://c"}
+			checks := &fakeChecks{Links: links, Outcomes: passing()}
+			f, stream, repository := newChecksFixture(t, "loaded-picks", checks)
+			path := filepath.Join(f.cfg.Root.String(), "config.toml")
+			top, err := os.ReadFile(path)
+			must(t, err)
+			must(t, os.WriteFile(path, append(top, []byte("\n[jev]\nenabled = true\n"+value+"\n")...), 0600))
+			loaded, err := config.Load(config.Options{Root: f.cfg.Root.String()})
+			must(t, err)
+			settings := loaded.Jev
+			response := systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}
+			p := &jevtest.Provider{Results: []jevtest.Result{{Response: response}}}
+			newJudge := func() *jev.Judge {
+				return &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
+			}
+			f.s.Jev = newJudge()
+			runChecks(t, f.s, repository, stream)
+			run := onlyRun(t, repository, stream)
+			selection := *run.Selection
+			want := []string(nil)
+			if settings.CheckFallbackPicks > 0 {
+				want = []string{links[1], links[2]}
+				if settings.CheckFallbackPicks > 2 {
+					want = append(want, links[0])
+				}
+			}
+			if ran := checks.Runs(); len(ran) != 1 || !slices.Equal(ran[0], want) || !slices.Equal(selection.Links, want) || selection.FallbackPicks != settings.CheckFallbackPicks || selection.Candidates != 3 || selection.Listed == nil || *selection.Listed != 3 {
+				t.Fatalf("ran %v, selection %+v, want %v", ran, selection, want)
+			}
+			if len(want) == 0 && (selection.Mode != checkrun.SelectionFull || selection.Reason != string(jev.ReasonDeclined)) {
+				t.Fatalf("zero picks: %+v", selection)
+			}
+			if len(want) > 0 && (selection.Mode != checkrun.SelectionSelected || !strings.Contains(checkrun.DescribeSelection(selection), "no check reached the threshold") || !strings.Contains(checkrun.DescribeSelection(selection), "highest-scored checks ran")) {
+				t.Fatalf("picks: %+v", selection)
+			}
+			docs := streamDocuments(t, repository, stream, selection.Judgment)
+			var record jev.Record
+			must(t, json.Unmarshal([]byte(docs[len(docs)-1].Content), &record))
+			acceptance := "threshold=0.5"
+			if settings.CheckFallbackPicks > 0 {
+				acceptance += fmt.Sprintf(" fallback_picks=%d", settings.CheckFallbackPicks)
+			}
+			if record.Acceptance != acceptance || len(record.Answers) != 3 {
+				t.Fatalf("record %+v", record)
+			}
+			// This is the identity used by threshold-only selections.
+			if settings.CheckFallbackPicks == 0 {
+				parts, _ := json.Marshal([]any{checkRequestID("resume", 1), checkselect.Task, checkselect.Version, record.Digest, "threshold=0.5"})
+				if wantID := fmt.Sprintf("judgment_%x", sha256.Sum256(parts)); selection.Judgment != wantID {
+					t.Fatalf("identity %s, want %s", selection.Judgment, wantID)
+				}
+			}
+			c := &checkers{masons: f.controller()}
+			ops, err := checkOperations(repository, stream)
+			must(t, err)
+			g, err := newUnitWorkspaces(f.cfg, repository).Of(stream)
+			must(t, err)
+			diff, err := g.Diff(t.Context(), run.Base, run.Candidate)
+			must(t, err)
+			f.s.Jev = newJudge()
+			again := c.selectChecks(t.Context(), ops[0].input, t.TempDir(), diff, checks)
+			if again.Judgment != selection.Judgment || again.FallbackPicks != selection.FallbackPicks || !slices.Equal(again.Links, want) || len(p.Requests()) != 1 {
+				t.Fatalf("reused %+v after %d requests", again, len(p.Requests()))
+			}
+			settings.CheckFallbackPicks++
+			restored := UnitCheckRun{Operation: run.Operation}
+			found, err := c.restoreSelection(ops[0].input, &restored)
+			must(t, err)
+			if !found || restored.Selection.Judgment != selection.Judgment || restored.Selection.FallbackPicks != selection.FallbackPicks || !slices.Equal(restored.Selection.Links, want) || len(p.Requests()) != 1 {
+				t.Fatalf("restored %+v", restored.Selection)
+			}
+			changed := c.selectChecks(t.Context(), ops[0].input, t.TempDir(), diff, checks)
+			if changed.Judgment == selection.Judgment || len(p.Requests()) != 2 {
+				t.Fatalf("changed %+v after %d requests", changed, len(p.Requests()))
+			}
+		})
 	}
 }

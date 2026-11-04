@@ -3965,6 +3965,9 @@
           "detail": {
             "type": "string"
           },
+          "fallback_picks": {
+            "type": "integer"
+          },
           "judgment": {
             "type": "string"
           },
@@ -4372,6 +4375,9 @@
         "properties": {
           "api_key_env": {
             "type": "string"
+          },
+          "check_fallback_picks": {
+            "type": "integer"
           },
           "check_threshold": {
             "format": "double",
@@ -5336,6 +5342,9 @@
           },
           "detail": {
             "type": "string"
+          },
+          "fallback_picks": {
+            "type": "integer"
           },
           "judged": {
             "type": "integer"

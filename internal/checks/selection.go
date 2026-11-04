@@ -33,6 +33,9 @@ const (
 // DescribeSelection says in a sentence which checks ran.
 func DescribeSelection(s api.CheckSelection) string {
 	if s.Mode == SelectionSelected {
+		if s.FallbackPicks > 0 {
+			return fmt.Sprintf("no check reached the threshold; the %d highest-scored checks ran out of %d candidate links in judgment %s", len(s.Links), s.Candidates, s.Judgment)
+		}
 		return fmt.Sprintf("Jev selected %d of %d check links for the changed files in judgment %s", len(s.Links), s.Candidates, s.Judgment)
 	}
 	if s.Reason == string(jev.ReasonDisabled) {
@@ -107,18 +110,23 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 	if !ok {
 		return FullSelection(SelectionTooLarge, "the changed files do not fit a judgment")
 	}
-	threshold := j.Config().CheckThreshold
+	settings := j.Config()
+	threshold, picks := settings.CheckThreshold, settings.CheckFallbackPicks
+	acceptance := fmt.Sprintf("threshold=%g", threshold)
+	if picks > 0 {
+		acceptance += fmt.Sprintf(" fallback_picks=%d", picks)
+	}
 	decision := j.Evaluate(ctx, repository, jev.Judgment{
 		Scope:      scope,
 		Cause:      cause,
 		Depth:      1,
 		Task:       checkselect.Task,
 		Version:    checkselect.Version,
-		Acceptance: fmt.Sprintf("threshold=%g", threshold),
+		Acceptance: acceptance,
 		Sources:    sources,
 		Request:    checkselect.Request(state, candidates),
 		Accept: func(r systemone.Response) string {
-			if len(checkselect.Selected(r, candidates, threshold)) == 0 {
+			if len(checkselect.Selected(r, candidates, threshold)) == 0 && len(checkselect.FallbackPicks(r, candidates, picks)) == 0 {
 				return fmt.Sprintf("no check reached probability %.2f", threshold)
 			}
 			return ""
@@ -130,5 +138,11 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 		s.Candidates = len(candidates)
 		return s
 	}
-	return api.CheckSelection{Mode: SelectionSelected, Links: checkselect.Selected(*decision.Response, candidates, threshold), Candidates: len(candidates), Judgment: decision.ID}
+	selected := checkselect.Selected(*decision.Response, candidates, threshold)
+	selection = api.CheckSelection{Mode: SelectionSelected, Links: selected, Candidates: len(candidates), Judgment: decision.ID}
+	if len(selected) == 0 {
+		selection.Links = checkselect.FallbackPicks(*decision.Response, candidates, picks)
+		selection.FallbackPicks = picks
+	}
+	return selection
 }

@@ -94,3 +94,27 @@ func TestSelectedAppliesTheThreshold(t *testing.T) {
 		t.Fatalf("selected %q above every answer", got)
 	}
 }
+
+func TestFallbackPicksRankScoredCandidatesStably(t *testing.T) {
+	t.Parallel()
+	candidates := []string{"a", "b", "c", "d", "e"}
+	r := systemone.Response{Answers: map[string]systemone.Answer{
+		Question(0): {Kind: systemone.KindNoul, Noul: .1},
+		Question(1): {Kind: systemone.KindNoul, Noul: .4},
+		Question(2): {Kind: systemone.KindNoul, Noul: .4},
+		Question(3): {Kind: systemone.KindChoice},
+	}}
+	for range 20 {
+		for _, tc := range []struct {
+			count int
+			want  []string
+		}{{0, nil}, {1, []string{"b"}}, {2, []string{"b", "c"}}, {9, []string{"b", "c", "a"}}} {
+			if got := FallbackPicks(r, candidates, tc.count); !slices.Equal(got, tc.want) {
+				t.Fatalf("%d: %v, want %v", tc.count, got, tc.want)
+			}
+		}
+	}
+	if got := FallbackPicks(systemone.Response{}, candidates, 2); len(got) != 0 {
+		t.Fatalf("unscored picks: %v", got)
+	}
+}

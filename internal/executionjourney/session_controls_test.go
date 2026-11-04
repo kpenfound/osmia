@@ -9,6 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -353,11 +354,21 @@ func (c *checkCapture) Check(_ context.Context, dir string, _ api.CheckIdentity,
 // and that the record and thread entry name the checked commit.
 func TestSessionCheckRunsFullUnderJEVDisabled(t *testing.T) {
 	t.Parallel()
-	s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
+	s, c, _, project, stream, _, clone := newSessionControlsFixture(t, func(opts *Options) {
+		path := filepath.Join(opts.Config.Root, "config.toml")
+		data, err := os.ReadFile(path)
+		must(t, err)
+		must(t, os.WriteFile(path, append(data, []byte("\n[jev]\ncheck_fallback_picks = 2\n")...), 0600))
+	})
+	checks := &fakeChecks{Links: []string{"dag+check://a"}, Outcomes: passing()}
+	service.InspectForTest(s.core()).SetReviewChecks(checks)
 	home := filepath.Dir(clone)
 	head := headOf(t, home, sessionWorktreePath(s.cfg.Root.String(), project, stream))
 	run, err := c.SessionCheck(context.Background(), stream)
 	must(t, err)
+	if ran := checks.Runs(); len(ran) != 1 || len(ran[0]) != 0 {
+		t.Fatalf("full session ran %v", ran)
+	}
 	if run.Kind != "full" || run.Status != ChecksPassed || run.ExitCode != 0 || run.Commit != head || run.Run != 1 {
 		t.Fatalf("check run: %+v, want full/passed on %s", run, head)
 	}
@@ -816,5 +827,32 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	must(t, err)
 	if len(runs) != 0 {
 		t.Fatalf("unreadable change recorded a check run: %+v", runs)
+	}
+}
+
+func TestSessionCheckRunsFallbackPicksAndReportsReloadedConfiguration(t *testing.T) {
+	t.Parallel()
+	s, c, opts, _, stream, _, _ := newSessionControlsFixture(t)
+	path := filepath.Join(opts.Config.Root, "config.toml")
+	top, readErr := os.ReadFile(path)
+	must(t, readErr)
+	must(t, os.WriteFile(path, append(top, []byte("\n[jev]\nenabled = true\ncheck_fallback_picks = 2\n")...), 0600))
+	_, err := c.Reload(t.Context())
+	must(t, err)
+	reported, err := c.Configuration(t.Context())
+	must(t, err)
+	if reported.Effective.Jev.CheckFallbackPicks != 2 {
+		t.Fatalf("reported config %+v", reported)
+	}
+	checks := &fakeChecks{Links: []string{"dag+check://a", "dag+check://b", "dag+check://c"}, Outcomes: passing()}
+	service.InspectForTest(s.core()).SetReviewChecks(checks)
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}}}}
+	j := &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: s.now}
+	service.InspectForTest(s.core()).SetJudge(j)
+	run, err := c.SessionCheck(t.Context(), stream)
+	must(t, err)
+	want := []string{"dag+check://b", "dag+check://c"}
+	if ran := checks.Runs(); len(ran) != 1 || !slices.Equal(ran[0], want) || run.Kind != "smart" || run.Selection.FallbackPicks != 2 || !slices.Equal(run.Checks, want) {
+		t.Fatalf("ran %v, run %+v", ran, run)
 	}
 }

@@ -8,11 +8,12 @@ import (
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/config"
 )
 
 func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"selected", "narrowed", "full"} {
+	for _, mode := range []string{"selected", "picks", "narrowed", "full"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			checks := newHeldChecks()
@@ -30,12 +31,17 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 				answers := map[string]systemone.Answer{}
 				for i := range judged {
 					probability := 0.1
-					if i < selected {
+					if i < selected && mode != "picks" {
 						probability = 0.9
 					}
 					answers[checkselect.Question(i)] = jevtest.Noul(probability)
 				}
 				boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
+				if mode == "picks" {
+					settings := f.s.jev.Config()
+					settings.CheckFallbackPicks = selected
+					f.s.jev.Config = func() config.Jev { return settings }
+				}
 			}
 			p := openCheckFeed(t, f, stream)
 			const entry = `[data-kind=unit_checks][data-unit=resume][data-run="1"]`
@@ -53,6 +59,9 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 				}
 			} else if len(ran) != selected {
 				t.Fatalf("runner received %v, want %d selected checks", ran, selected)
+			}
+			if mode == "picks" {
+				selection = "no check reached the threshold; checking the highest-scored checks · checking 3 of 113"
 			}
 			p.AwaitText(entry+` [data-field=selection]`, selection)
 			if mode == "narrowed" {
@@ -77,6 +86,9 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 				p.AwaitText(entry+` [data-field=flaky]`, checks.links[0])
 			} else {
 				p.AwaitText(entry+` [data-field=failed]`, failed)
+			}
+			if mode == "picks" {
+				selection = "no check reached the threshold; the highest-scored checks ran · checking 3 of 113"
 			}
 			p.AwaitText(entry+` [data-field=selection]`, selection)
 			p.Await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)

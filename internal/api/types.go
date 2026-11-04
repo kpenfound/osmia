@@ -1137,13 +1137,14 @@ type FeedTransition struct {
 // Selected is the count of chosen links; Judged is the post-narrowing count
 // Jev was asked about. Listed is omitted when the trace has no listed total.
 type FeedCheckSelection struct {
-	Description string `json:"description" description:"Sentence describing which checks ran and why."`
-	Mode        string `json:"mode" enum:"selected,full"`
-	Selected    int    `json:"selected"`
-	Judged      int    `json:"judged"`
-	Listed      *int   `json:"listed,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Detail      string `json:"detail,omitempty"`
+	FallbackPicks int    `json:"fallback_picks,omitempty"`
+	Description   string `json:"description" description:"Sentence describing which checks ran and why."`
+	Mode          string `json:"mode" enum:"selected,full"`
+	Selected      int    `json:"selected"`
+	Judged        int    `json:"judged"`
+	Listed        *int   `json:"listed,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	Detail        string `json:"detail,omitempty"`
 }
 
 // FeedUnitChecks is one run, observable once its selection is recorded.
