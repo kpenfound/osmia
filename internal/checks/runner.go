@@ -90,6 +90,15 @@ func Command(links []string) []string {
 	return command
 }
 
+// ResultCommand returns the commands actually started by the runner, or the
+// selection's command for runners that do not supply execution details.
+func ResultCommand(result CheckResult, links []string) []string {
+	if result.Command != nil {
+		return result.Command
+	}
+	return Command(links)
+}
+
 func checkArgs(addresses []string) []string {
 	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", "4"}, addresses...)
 }
@@ -202,6 +211,10 @@ func (r *checkRun) rerun(ctx context.Context, failed []string) ([]string, error)
 // attempt runs dagger check once, adding its report to the result's output, and
 // returns its exit status and its report alone.
 func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, error) {
+	if len(r.result.Command) > 0 {
+		r.result.Command = append(r.result.Command, "&&")
+	}
+	r.result.Command = append(append(r.result.Command, "dagger"), args...)
 	var output bytes.Buffer
 	exit, err := r.checks.run(ctx, r.dir, r.env, r.preparation, &output, args...)
 	report := redact.Secrets(output.String(), redact.KnownSecrets()...)
@@ -214,9 +227,7 @@ func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, err
 		r.endLine()
 	}
 	r.result.Output = r.output.String()
-	if url := cloudTraceURL(report); url != "" {
-		r.result.TraceURL = url
-	}
+	r.result.TraceURL = cloudTraceURL(report)
 	return exit, report, err
 }
 

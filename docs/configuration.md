@@ -538,10 +538,19 @@ Core logs cleanup failures; a failed rule removal still attempts sandbox removal
 Unit and final reviewers receive read-only files from the exact candidate commit
 and writable scratch space.
 
-Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast` on
+Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast --parallel 4` on
 a separate, fresh export of its candidate, made a Git root of its own so Dagger
 finds the project's workspace. The copy and temporary home are removed
-afterward. The run is bounded by the project's `checks_timeout` and is
+afterward. Selected links with different filters need separate Dagger views:
+links combine only when a single address selects exactly their checks, and
+otherwise run in sequential commands. Every command uses `--parallel 4`, so
+at most four checks run at once. One run holds one capacity slot, one result
+and the combined output for all commands. A failed or incomplete part stops
+later parts after the service's one rerun resolves any failed check. A refusal
+is judged on one command: even after earlier commands passed, refused links
+trigger a full run under the same timeout. The finished selection describes
+that full run with reason `refused`; its output retains the earlier reports.
+The run is bounded by the project's `checks_timeout` and is
 recorded in the trace as `units/<unit>/checks-<n>.json`, with the candidate,
 its base and diff, the checks it ran and why, the command, its exit status and
 a diagnostic excerpt of at most 16 KiB. The complete combined stdout/stderr is

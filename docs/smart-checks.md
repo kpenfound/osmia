@@ -75,11 +75,14 @@ requested tests exist and exercise the behaviour.
    The first run that does not pass stops the rest and decides the result. All
    the runs share one export and the project's `checks_timeout`, and at most
    four checks run concurrently.
-10. **Run everything if refused.** When Dagger exits with an error before any
-    check starts, without its engine session being lost, it has refused the
-    links, for example because one no longer matches a check. The same run then
-    checks everything, under the same `checks_timeout`, rather than retrying
-    links Dagger will refuse again.
+10. **Run everything if refused.** Refusal is judged on one command: it exits
+    with an error before starting any check, without losing its engine
+    session. A later command can be refused even after earlier commands
+    passed. The same run then checks everything under the same
+    `checks_timeout`; the finished selection is full with reason `refused`,
+    while its output keeps the earlier reports and its start evidence keeps
+    the chosen links. Refused or non-reporting reruns leave a failed check
+    standing. A lost engine session is incomplete.
 
 Unit, final-review and session check runs all use this selection. Before a
 final review, the service judges the rebased feature branch commit against
@@ -105,8 +108,14 @@ This immutable start evidence holds the unit, run, operation, candidate, base,
 report revision, diff digest, start time and selection. It has no result, so
 an interrupted run remains started and unfinished. The finished run's record,
 `units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
-exit status and output. The command lists every `dagger check` in the order it
-ran, joined by `&&`, and the output holds each run's report under its command.
+exit status and output. The command lists each `dagger check` actually
+started, including any failure reruns, in order and joined by `&&`; commands
+stopped by an earlier failure are absent. The output holds the combined
+reports and labels separate commands. There is one result document, one
+captured output document and one check-capacity slot for the entire run.
+Passing summaries keep every report heading. The trace link belongs to the
+last command, including the failing part when it prints one; a part that
+prints no trace leaves the link empty.
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
 the links Jev selected.
@@ -150,7 +159,7 @@ asked:
 | `no_checks` | The project lists no check links |
 | `too_many_checks` | The links do not narrow to 128 |
 | `change_too_large` | The changed files alone do not fit the state |
-| `refused` | Dagger refused the selected links before any check started; `detail` holds its error |
+| `refused` | Dagger refused one command's selected links before that command started any check; `detail` holds its error |
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
 when no check reached the threshold and picks are disabled or have no usable

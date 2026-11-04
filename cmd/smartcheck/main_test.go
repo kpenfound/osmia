@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
 )
 
 const (
@@ -24,9 +25,9 @@ const (
 
 // fakeDagger stands in for the Dagger CLI, which is costly to invoke for
 // real (it builds and runs the project's checks) and may not be installed.
-// It lists links and records each dagger check it is asked to run, but does
-// not exercise whether the real Dagger CLI accepts the arguments smartcheck
-// passes it or actually runs the selected checks.
+// It lists links, refuses addresses with different filters or types and
+// records each dagger check. Executable-path tests also verify which checks
+// those commands select.
 type fakeDagger struct {
 	links    []string
 	exit     int
@@ -36,7 +37,7 @@ type fakeDagger struct {
 	checks [][]string
 }
 
-func (d *fakeDagger) run(_ context.Context, _ string, stdout, _ io.Writer, args ...string) (int, error) {
+func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, args ...string) (int, error) {
 	if slices.Equal(args, []string{"list", "checks", "--all", "--format=link"}) {
 		fmt.Fprintln(stdout, "Loading modules")
 		for _, l := range d.links {
@@ -50,6 +51,16 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, _ io.Writer, args 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.checks = append(d.checks, args[1:])
+	var links []string
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "dag") {
+			links = append(links, arg)
+		}
+	}
+	if err := daggerfixture.Validate(links); err != nil {
+		fmt.Fprintln(stderr, "Error:", err)
+		return 1, nil
+	}
 	return d.exit, nil
 }
 

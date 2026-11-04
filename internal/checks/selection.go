@@ -58,8 +58,8 @@ func FullSelection(reason, detail string) api.CheckSelection {
 
 // RunSelection runs selection's checks in the export at dir and returns the
 // result with the selection that produced it. Selected links Dagger refuses
-// before any check starts run every check instead, under the same ctx, and the
-// returned selection says why. Output holds the refused run above the full one,
+// before that command starts any check run every check instead, under the same
+// ctx, and the returned selection says why. Output holds the refused run above the full one,
 // and Flaky lists the flaky checks of both.
 func RunSelection(ctx context.Context, checks ReviewChecks, dir string, identity Identity, selection api.CheckSelection) (CheckResult, api.CheckSelection, error) {
 	refused, err := checks.Check(ctx, dir, identity, selection.Links)
