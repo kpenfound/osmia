@@ -25,6 +25,9 @@ import (
 )
 
 type previewInput struct {
+	Call       []string            `json:"call"`
+	Port       int                 `json:"port"`
+	Timeout    string              `json:"timeout,omitempty"`
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 	Unit       string              `json:"unit,omitempty"`
 	Path       string              `json:"path,omitempty"`
@@ -40,24 +43,37 @@ type previewResult struct {
 	Limitation string              `json:"limitation,omitempty"`
 }
 
-// previewOperation pins the exact target and configuration before any capture.
-// The member image is the receipt for the external effect; Result follows the
-// shared reference and view copy, which are independently reconciled.
+// previewService preserves the durable JSON representation of service pins.
+type previewService struct {
+	Call    []string `json:"call"`
+	Port    int      `json:"port"`
+	Path    string   `json:"path"`
+	Timeout string   `json:"timeout"`
+}
+
+// previewOperation pins the exact target and service arguments before capture.
+// The member image is the receipt; shared references, view copies and results
+// are independently reconciled.
 type previewOperation struct {
-	Scope      coreadapter.Scope     `json:"scope"`
-	Call       json.RawMessage       `json:"call"`
-	Workstream config.WorkstreamID   `json:"workstream"`
-	Commit     string                `json:"commit"`
-	Preview    config.Preview        `json:"preview"`
-	Capture    checks.PreviewCapture `json:"capture"`
-	Result     *previewResult        `json:"result,omitempty"`
+	AgentChosen bool                  `json:"agent_chosen,omitempty"`
+	Scope       coreadapter.Scope     `json:"scope"`
+	Call        json.RawMessage       `json:"call"`
+	Workstream  config.WorkstreamID   `json:"workstream"`
+	Commit      string                `json:"commit"`
+	Preview     previewService        `json:"preview"`
+	Capture     checks.PreviewCapture `json:"capture"`
+	Result      *previewResult        `json:"result,omitempty"`
 }
 
 func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) coreadapter.Tool {
 	var mu sync.Mutex
 	tool := coreadapter.Tool{Name: "preview", Effect: coreadapter.ToolMemory,
-		Description: "Ask the service to capture a static screenshot of built code. Set workstream to the member to show (required for a shared chief). Defaults to its feature-branch head, or set unit for its recorded candidate. path defaults to the project's preview path; viewport is desktop (default) or phone, full_page defaults to false. Returns an image_id to refer to in your reply and a copy under images/ in this read-only view. Limitations do not fail your turn. Recovered results from an interrupted turn are in previews/results.json; read them before requesting another capture.",
-		InputSchema: memberSchema(scope, `"unit":{"type":"string"},"path":{"type":"string"},"viewport":{"type":"string","enum":["desktop","phone"]},"full_page":{"type":"boolean"}`)}
+		Description: "Ask the service to capture a static screenshot of built code. Set workstream to the member to show (required for a shared chief). Defaults to its feature-branch head, or set unit for its recorded candidate. Use inspect_code at the member's committed feature head or unit candidate to find the Service call and port in its Dagger configuration and module source. Supply call as the dagger call argument list returning that Service, and port as its exposed HTTP port. Only module arguments and paths within the exported source are allowed; CLI options, providers, environment names and host-writing or interactive steps are refused. path defaults to /; timeout defaults to 5m and must be from 1m to 30m; viewport is desktop (default) or phone, full_page defaults to false. Returns an image_id to refer to in your reply and a copy under images/ in this read-only view. Limitations do not fail your turn. Recovered results from an interrupted turn are in previews/results.json; read them before requesting another capture.",
+		InputSchema: memberSchema(scope, `"call":{"type":"array","items":{"type":"string"},"minItems":1},"port":{"type":"integer","minimum":1,"maximum":65535},"timeout":{"type":"string"},"unit":{"type":"string"},"path":{"type":"string"},"viewport":{"type":"string","enum":["desktop","phone"]},"full_page":{"type":"boolean"}`)}
+	var schema map[string]any
+	_ = json.Unmarshal(tool.InputSchema, &schema)
+	schema["required"] = []string{"call", "port"}
+	tool.InputSchema, _ = json.Marshal(schema)
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -88,6 +104,19 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 		}
 		var op previewOperation
 		if doc.ID == "" {
+			if err := checks.ValidatePreviewCall(in.Call); err != nil {
+				return limitation(err.Error())
+			}
+			if in.Port < 1 || in.Port > 65535 {
+				return limitation("preview port must be from 1 to 65535")
+			}
+			if in.Timeout == "" {
+				in.Timeout = "5m"
+			}
+			duration, err := time.ParseDuration(in.Timeout)
+			if err != nil || duration < time.Minute || duration > 30*time.Minute {
+				return limitation("preview timeout must be from 1m to 30m")
+			}
 			if err := repo.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
@@ -109,9 +138,6 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 				return limitation(refusal)
 			}
 			project := cfg.For(target.Project())
-			if project.Project.Preview == nil {
-				return limitation("the project has no [preview] configured")
-			}
 			g, err := featureWorkspaces(project, target).Of(stream)
 			if err != nil {
 				return limitation("nothing is built yet: " + err.Error())
@@ -141,14 +167,15 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 			if !exists || commit == "" {
 				return limitation("nothing is built yet on the feature branch")
 			}
-			preview := *project.Project.Preview
+			preview := previewService{Call: in.Call, Port: in.Port, Path: in.Path, Timeout: in.Timeout}
 			if in.Path == "" {
-				in.Path = preview.Path
+				in.Path = "/"
+				preview.Path = in.Path
 			}
 			if in.Viewport == "" {
 				in.Viewport = "desktop"
 			}
-			op = previewOperation{Scope: scope, Call: bytes.Clone(raw), Workstream: stream, Commit: commit, Preview: preview,
+			op = previewOperation{AgentChosen: true, Scope: scope, Call: bytes.Clone(raw), Workstream: stream, Commit: commit, Preview: preview,
 				Capture: checks.PreviewCapture{Call: preview.Call, Port: preview.Port, Path: in.Path, Viewport: in.Viewport, FullPage: in.FullPage}}
 			doc = trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: own, At: now(), Actor: serviceActor, Cause: scope.Turn}, Path: "tools/" + id + ".json"}
 			if err := writePreviewOperation(ctx, repo, &doc, op, now); err != nil {
@@ -256,7 +283,11 @@ func (s *Service) capturePreview(ctx context.Context, cfg *config.Config, repo *
 		if err != nil {
 			return nil, err
 		}
-		if err := g.Export(ctx, op.Commit, dir); err != nil {
+		var validate func(string) error
+		if op.AgentChosen {
+			validate = func(dir string) error { return checks.ValidatePreviewSource(dir, op.Capture.Call) }
+		}
+		if err := g.ExportValidated(ctx, op.Commit, dir, validate); err != nil {
 			return nil, fmt.Errorf("preview source export: %w", err)
 		}
 		resolved := cfg.Dagger.Resolve()

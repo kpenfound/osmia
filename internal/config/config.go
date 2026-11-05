@@ -3,7 +3,6 @@
 package config
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -198,7 +197,6 @@ func (d *Dagger) Settings() *agent.Dagger {
 }
 
 type Project struct {
-	configIdentity  string
 	ID              ProjectID         `toml:"-" json:"id"`
 	Version         int               `toml:"version" json:"version"`
 	Name            string            `toml:"name" json:"name"`
@@ -219,7 +217,6 @@ type Project struct {
 	// take.
 	ChecksTimeout string          `toml:"checks_timeout" json:"checks_timeout"`
 	Capacity      ProjectCapacity `toml:"capacity" json:"capacity"`
-	Preview       *Preview        `toml:"preview" json:"preview,omitempty"`
 }
 
 // DefaultChecksTimeout and MaxChecksTimeout bound one run of a candidate's
@@ -604,21 +601,9 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if err != nil {
 		return Project{}, &FieldError{Path: projectPath, Reason: "cannot be read", Err: err}
 	}
-	md, err := decodeBytes(projectPath, data, &p, true)
+	_, err = decodeBytes(projectPath, data, &p, true)
 	if err != nil {
 		return Project{}, err
-	}
-	p.configIdentity = fmt.Sprintf("%x", sha256.Sum256(data))
-	if p.Preview != nil {
-		if !md.IsDefined("preview", "path") {
-			p.Preview.Path = DefaultPreviewPath
-		}
-		if !md.IsDefined("preview", "timeout") {
-			p.Preview.Timeout = DefaultPreviewTimeout
-		}
-		if err := p.Preview.validate(projectPath); err != nil {
-			return Project{}, err
-		}
 	}
 	p.ID = id
 	if err := p.validateHearsay(projectPath); err != nil {

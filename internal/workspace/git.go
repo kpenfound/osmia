@@ -1118,6 +1118,13 @@ func (g *Git) dropReplay(ctx context.Context, dir string) error {
 // executable bits, into the directory dir, which must not hold them yet.
 // Symbolic links and submodules are left out.
 func (g *Git) Export(ctx context.Context, commit, dir string) error {
+	return g.ExportValidated(ctx, commit, dir, nil)
+}
+
+// ExportValidated checks the staged commit tree, including its symbolic links,
+// before removing non-regular files as Export does. A failed check aborts the
+// export; the caller owns cleanup of dir.
+func (g *Git) ExportValidated(ctx context.Context, commit, dir string, validate func(string) error) error {
 	index, err := os.CreateTemp("", "osmia-export-*.index")
 	if err != nil {
 		return err
@@ -1134,8 +1141,19 @@ func (g *Git) Export(ctx context.Context, commit, dir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	if _, err := g.runEnv(ctx, append(env, "GIT_WORK_TREE="+dir), "checkout-index", "--all", "--force"); err != nil {
+	checkout := []string{"checkout-index", "--all", "--force"}
+	if validate != nil {
+		// Validation must see recorded links even when the owner's Git config
+		// would check them out as regular files.
+		checkout = append([]string{"-c", "core.symlinks=true"}, checkout...)
+	}
+	if _, err := g.runEnv(ctx, append(env, "GIT_WORK_TREE="+dir), checkout...); err != nil {
 		return err
+	}
+	if validate != nil {
+		if err := validate(dir); err != nil {
+			return err
+		}
 	}
 	return filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || entry.Type().IsRegular() {

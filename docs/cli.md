@@ -69,26 +69,25 @@ osmia status --json
 
 ## Project previews
 
-Configure a project's preview Service through the API:
+Ask the chief in the workstream conversation to show the built work. The chief
+uses `inspect_code` at the member's committed feature head or unit candidate to
+choose a Dagger Service and HTTP port, then supplies `call` and `port` to its
+`preview` tool. The service captures one path and places an image in the feed.
+`path` defaults to `/`; `timeout` defaults to `5m` and accepts `1m` to `30m`.
+The port must be from 1 to 65535 and the path must start with `/`.
 
-```sh
-osmia project preview <project-id> --call dev --call=--port --call 8080 --port 8080
-osmia project preview <project-id> --call dev --port 8080 --path /settings --timeout 2m
-osmia project preview <project-id> --clear
-```
+The argument list passes through unchanged without shell parsing. CLI options,
+provider schemes, client environment names, escaping paths and symlinks, and
+host-writing or interactive chain steps return limitations. Assignment values,
+quote removal, comma-separated elements and whitespace are checked as Dagger
+reads them. The checks fail closed; the chief can use module defaults or
+explain a refused value. The capture accepts only a verified engine Service ID.
 
-Repeat `--call` once per argument to `dagger call`, in order; use `--call=--flag`
-for arguments beginning with `-`. There is no shell parsing. The call must return
-a Dagger Service. `--call` and `--port` are required when enabling previews;
-`--path` defaults to `/` and `--timeout` to `5m`. The port must be 1–65535,
-the path must start with `/`, and the timeout must be from `1m` to `30m`.
-`--clear` disables previews and cannot be combined with setting flags.
-`--json` prints the saved preview, or `null` in the `preview` field after clearing.
-
-Settings take effect immediately. The command prints the API's field validation
-or drift conflict message when refused. Saves preserve all other project file
-bytes. If the file has hand edits, including comments or formatting, run
-`osmia reload` before saving; a refusal leaves those edits untouched.
+The CLI has no project preview settings command. A `[preview]` project table
+with `call`, `port`, `path` and `timeout` is ignored without rewriting the file
+on load or reload; other unknown keys are refused. No per-project setup is
+needed. `osmia feed` renders an image as `[image: URL]`, or an archived member's
+placeholder after its image bytes have been removed.
 
 ## Design Sessions
 

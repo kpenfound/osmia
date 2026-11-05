@@ -5,6 +5,7 @@ package checks
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -259,4 +260,26 @@ func TestRealDaggerCLI(t *testing.T) {
 			t.Fatalf("classified %s:\n%s", status, result.Output)
 		}
 	})
+}
+
+func TestRealDaggerCLIServiceID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "dagger", "query")
+	cmd.Stdin = strings.NewReader(`{container{withDefaultArgs(args:["sleep","60"]){asService{id}}}}`)
+	var diagnostic bytes.Buffer
+	cmd.Stderr = &diagnostic
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Service ID query: %v: %s", err, diagnostic.String())
+	}
+	var response struct {
+		Container struct {
+			WithDefaultArgs struct{ AsService struct{ ID string } }
+		}
+	}
+	must(t, json.Unmarshal(output, &response))
+	if !previewServiceID(response.Container.WithDefaultArgs.AsService.ID) {
+		t.Fatalf("real CLI Service ID refused: %s", output)
+	}
 }

@@ -36,6 +36,7 @@ type Provider interface {
 	Markers(ctx context.Context, commit string, paths []string) ([]string, error)
 	StoredConflicts(ctx context.Context, commit string) ([]string, error)
 	Export(ctx context.Context, commit, dir string) error
+	ExportValidated(ctx context.Context, commit, dir string, validate func(string) error) error
 
 	// Making commits.
 	Snapshot(ctx context.Context, w Worktree, base string) (string, error)
