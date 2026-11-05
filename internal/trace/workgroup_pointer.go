@@ -175,23 +175,43 @@ func (r *Repository) CrossRepoWorkgroupOf(stream config.WorkstreamID) (config.Wo
 // r is used only to resolve where the service root is; the read never
 // touches r's own trace. found is false when no trace exists yet for id.
 func (r *Repository) CrossRepoProjectSpec(id config.WorkgroupID) (ProjectSpec, Workgroup, bool, error) {
+	wt, spec, g, found, err := r.OpenCrossRepoProjectSpec(id)
+	if wt != nil {
+		wt.Close()
+	}
+	return spec, g, found, err
+}
+
+// OpenCrossRepoProjectSpec reads the same authority as CrossRepoProjectSpec
+// and retains its handle for related journal reads. The caller must Close a
+// non-nil handle exactly once. A missing trace returns a nil handle and no error.
+func (r *Repository) OpenCrossRepoProjectSpec(id config.WorkgroupID) (*Repository, ProjectSpec, Workgroup, bool, error) {
+	sharedWorkgroupTraceFor(id).projectSpecReads.Add(1)
 	directory, err := r.root.WorkgroupTrace(id)
 	if err != nil {
-		return ProjectSpec{}, Workgroup{}, false, err
+		return nil, ProjectSpec{}, Workgroup{}, false, err
 	}
 	if _, err := os.Lstat(directory); os.IsNotExist(err) {
-		return ProjectSpec{}, Workgroup{}, false, nil
+		return nil, ProjectSpec{}, Workgroup{}, false, nil
 	} else if err != nil {
-		return ProjectSpec{}, Workgroup{}, false, err
+		return nil, ProjectSpec{}, Workgroup{}, false, err
 	}
 	wt, err := openSharedWorkgroupTrace(r.root, id, nil)
 	if wt != nil && err != nil {
 		wt.Close()
 	}
 	if err != nil {
-		return ProjectSpec{}, Workgroup{}, false, err
+		return nil, ProjectSpec{}, Workgroup{}, false, err
 	}
-	defer wt.Close()
+	spec, g, found, err := wt.workgroupProjectSpec(id)
+	if err != nil {
+		wt.Close()
+		return nil, ProjectSpec{}, Workgroup{}, false, err
+	}
+	return wt, spec, g, found, nil
+}
+
+func (wt *Repository) workgroupProjectSpec(id config.WorkgroupID) (ProjectSpec, Workgroup, bool, error) {
 	groups, _, err := Workgroups(wt)
 	if err != nil {
 		return ProjectSpec{}, Workgroup{}, false, err

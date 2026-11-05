@@ -231,6 +231,10 @@ func (s *Controller) WorkgroupFullyRetired(ctx context.Context, g trace.Workgrou
 		return false, err
 	}
 	defer authority.Close()
+	return s.validateRetiredWorkgroup(ctx, authority, g)
+}
+
+func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *trace.Repository, g trace.Workgroup) (bool, error) {
 	approval, _, approved, err := trace.ReadGroupApproval(authority, g.Members[0])
 	if err != nil {
 		return false, err

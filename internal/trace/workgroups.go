@@ -37,6 +37,7 @@ type workgroupsFile struct {
 // Workgroups returns every recorded workgroup of the project, in recorded
 // order, with the document revision read, 0 when none is recorded.
 func Workgroups(r *Repository) ([]Workgroup, int, error) {
+	r.workgroupReads.Add(1)
 	content, revision, err := latestWorkgroups(r)
 	if err != nil {
 		return nil, 0, err
