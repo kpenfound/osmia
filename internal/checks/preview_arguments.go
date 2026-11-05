@@ -101,7 +101,7 @@ func ValidatePreviewCall(call []string) error {
 			}
 			for _, part := range strings.Split(path, "/") {
 				if part == ".." {
-					return errors.New("preview call paths cannot contain ..")
+					return errors.New("preview call paths cannot contain parent-directory components")
 				}
 			}
 			// Secret addresses can remove a cacheKey query before reading

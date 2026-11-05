@@ -138,3 +138,27 @@ func assertNoPreviewBytes(t *testing.T, png []byte, value any) {
 		t.Fatal("image bytes in retained metadata")
 	}
 }
+
+func TestChiefPreviewIgnoresProjectTable(t *testing.T) {
+	f := NewPreviewJourney(t)
+	path, err := service.InspectForTest(f.S).Config().Root.ProjectConfig(f.ID)
+	fixturekit.Must(t, err)
+	original, err := os.ReadFile(path)
+	fixturekit.Must(t, err)
+	text := string(original) + "\n# ignored preview values\n[preview]\ncall = ['unused', '--source=/outside']\nport = 1\npath = '/unused'\ntimeout = 'invalid'\n"
+	fixturekit.Must(t, os.WriteFile(path, []byte(text), 0600))
+	for i := 0; i < 2; i++ {
+		_, err := f.C.Reload(context.Background())
+		fixturekit.Must(t, err)
+	}
+	// The fixture requires the chief's chosen web call, port 8080 and default /.
+	image := f.Capture(t)
+	if image.ID == "" {
+		t.Fatal("ignored table prevented preview capture")
+	}
+	data, err := os.ReadFile(path)
+	fixturekit.Must(t, err)
+	if string(data) != text {
+		t.Fatal("reload or capture rewrote project configuration")
+	}
+}

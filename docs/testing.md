@@ -63,6 +63,24 @@ and deletion of the member trace without bytes in retained presentations.
 same running-service fixture to check a live thumbnail, its full-size link and
 the archived placeholder, including a fresh page that requests no deleted image.
 
+The config compatibility tests load and reload ignored `[preview]` tables
+(`call`, `port`, `path`, `timeout`), compare effective projects with a file
+without the table, and check unchanged file bytes and refusal of unknown keys.
+Service and CLI tests check unavailable settings routes and commands, the
+route inventory, effective configuration and usage. The browser checks Project
+management has no Preview form and sends no preview settings request; capacity
+checks still show waiting captures as `preview`.
+
+Preview argument tests cover the required non-empty `call` and `port` from 1
+to 65535, the `/` path default and the `5m` timeout default with a `1m` to `30m`
+range. They refuse CLI options, provider schemes, client environment names,
+escaping paths and symlinks, and host-writing or interactive steps before a
+Service command starts. Assignment values, quote removal, comma-separated
+values and whitespace use Dagger's reading for checks while accepted argv is
+preserved. The boundary fails closed, including scheme-like values containing
+`:`. Capture tests verify only an engine Service ID reaches the image command;
+recovery tests retain owner-pinned arguments and reuse recorded images.
+
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
 

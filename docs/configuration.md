@@ -942,30 +942,26 @@ response first, and the classifier runs only when that judgment falls back.
 
 ### Previews
 
-The optional `[preview]` table configures the Dagger Service captured by the
-chief's preview tool. Without the table, previews are off.
+Previews need no project configuration. The chief uses `inspect_code` on the
+member's committed Dagger configuration and module source to choose a Service
+call and HTTP port for each `preview` request. The tool requires a non-empty
+`call` argument list and a `port` from 1 to 65535. `path` defaults to `/` and
+must start with `/`; `timeout` defaults to `5m` and must be from `1m` to `30m`.
 
-```toml
-[preview]
-call = ["dev", "--port", "8080"] # required: dagger call arguments returning a Service
-port = 8080                     # required: Service port, 1–65535
-path = "/"                      # optional, defaults to /
-timeout = "5m"                   # optional, defaults to 5m
-```
+The service passes accepted arguments unchanged to `dagger call`, without a
+shell. It refuses CLI options, provider schemes, client environment variable
+names, paths outside the exported source (including symlinks), and host-writing
+or interactive chain steps. It checks assignment values, quote removal,
+comma-separated elements and surrounding whitespace as Dagger reads them.
+Checks fail closed, so even a legitimate value containing `:` can be refused;
+the chief can use a module default or explain the limitation. Only a verified
+engine Service ID reaches the capture command.
 
-`call` is a non-empty argv list. Each element is passed directly to
-`dagger call`; there is no shell parsing. `path` must start with `/`. `timeout` is a Go duration from `1m` to `30m`. Unknown or nested
-keys, wrong types and missing required fields are refused with the field name.
-The loader, API and CLI apply the same defaults when `path` or `timeout` is omitted.
-
-`PUT /v1/projects/preview/{project}` takes a JSON object with these four fields;
-`DELETE` at the same route disables previews. Saves change only preview statements
-in the project file and take effect immediately, without `osmia reload`.
-The API refuses every set or clear with a drift conflict if any file byte has
-changed since its last load or save, including comments or formatting and even
-when the requested setting is already in effect. Reload to apply hand edits
-before saving. Successful saves and reloads refresh that baseline.
-`GET /v1/config` includes each project's preview in its effective configuration.
+A project file may contain an ignored `[preview]` table with `call`, `port`,
+`path` and `timeout` keys. These values have no effect, are absent from the
+effective configuration and are not validated. Loading and reloading leave
+the file's bytes untouched. Unknown keys elsewhere, and unknown keys within
+the table, are refused. The owner configures no per-project preview service.
 
 ## Configuration and restart behavior
 
