@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,5 +94,50 @@ model = "opus"
 				t.Fatalf("engine warnings caused failure: %+v", checks)
 			}
 		})
+	}
+}
+
+func TestDoctorDockerHostAndConflict(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"managed", "docker-container://explicit"} {
+		for _, conflict := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/conflict=%t", mode, conflict), func(t *testing.T) {
+				calls := 0
+				r := &run{Options: Options{
+					Getenv: func(name string) string {
+						switch name {
+						case "DOCKER_HOST":
+							return "ssh://user:private@engine.example.ts.net"
+						case "DOCKER_CONTEXT":
+							if conflict {
+								return "named"
+							}
+							return "default"
+						}
+						return ""
+					},
+					LookPath: func(name string) (string, error) { return name, nil },
+					EngineCommand: func(_ context.Context, name string, _ []string, args ...string) (string, error) {
+						calls++
+						if name == "docker" {
+							return `[{"State":{"Running":true},"Config":{"Image":"registry.dagger.io/engine:v0.20.5"}}]`, nil
+						}
+						if strings.Contains(strings.Join(args, " "), "disk-space-bytes") {
+							return "4096", nil
+						}
+						return "v0.20.5", nil
+					},
+				}}
+				r.engine(t.Context(), &config.Config{Dagger: config.DaggerConfig{Engine: mode}})
+				reach := find(t, r.checks, "dagger engine")
+				if conflict {
+					if calls != 0 || !strings.Contains(reach.Detail, "DOCKER_HOST") || !strings.Contains(reach.Detail, "DOCKER_CONTEXT") || strings.Contains(reach.Detail, "engine.example") {
+						t.Fatalf("%+v; %d commands", reach, calls)
+					}
+				} else if !strings.Contains(reach.Detail, "Docker host: ssh://engine.example.ts.net") || strings.Contains(reach.Detail, "user") || strings.Contains(reach.Detail, "private") {
+					t.Fatalf("%+v", reach)
+				}
+			})
+		}
 	}
 }

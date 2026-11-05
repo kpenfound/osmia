@@ -2133,6 +2133,9 @@ func reportEngine(w io.Writer, err error) int {
 
 func showEngine(w io.Writer, s wire.EngineStatus) {
 	fmt.Fprintf(w, "Engine: mode=%s address=%s reachable=%t\n", s.Mode, s.Address, s.Reachable)
+	if s.DockerHost != "" {
+		fmt.Fprintf(w, "Docker host: %s\n", s.DockerHost)
+	}
 	fmt.Fprintf(w, "Version: %s configured=%s cli=%s mismatch=%t configured_mismatch=%t\n", s.Version, s.ExpectedVersion, s.CLIVersion, s.VersionMismatch, s.ConfiguredVersionMismatch)
 	if s.CacheSizeBytes != nil {
 		fmt.Fprintf(w, "Cache: %d bytes\n", *s.CacheSizeBytes)

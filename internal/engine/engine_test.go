@@ -29,6 +29,7 @@ func fakeHost(t *testing.T) (Options, string) {
 set -eu
 cd "$(dirname "$0")"
 printf 'docker %s\n' "$*" >> commands
+printf 'docker|%s|%s|%s\n' "$*" "${DOCKER_HOST-}" "${DOCKER_CONTEXT-}" >> environments
 case "$*" in
  'container inspect osmia-dagger-engine')
   if [ -f docker-error ]; then echo 'daemon unavailable' >&2; exit 1; fi
@@ -42,6 +43,8 @@ case "$*" in
  'stop osmia-dagger-engine') echo false > state ;;
  'rm osmia-dagger-engine') rm state image ;;
  run\ *)
+  if [ -f slow-run ]; then sleep 1.5; fi
+  if [ -f stuck-run ]; then exec sleep 10; fi
   test ! -f state
   printf '%s\n' "$*" > run-args
   for arg do
@@ -59,6 +62,7 @@ esac
 set -eu
 cd "$(dirname "$0")"
 printf 'dagger %s\n' "$*" >> commands
+printf 'dagger|%s|%s|%s\n' "$*" "${DOCKER_HOST-}" "${DOCKER_CONTEXT-}" >> environments
 case "$*" in
  version) echo "version: ${DAGGER_X_RELEASE:-v1.0.0-beta.17}"; exit 0 ;;
 esac

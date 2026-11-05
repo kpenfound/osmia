@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -327,4 +329,85 @@ func TestEngineGateCancellationAndFailedMaintenanceReleaseWaiters(t *testing.T) 
 			})
 		})
 	}
+}
+
+func TestCreatingEngineActionReleasesMaintenance(t *testing.T) {
+	t.Parallel()
+	for _, ending := range []string{"deadline", "failure", "cancellation"} {
+		t.Run(ending, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				if engine.ActionTimeout+time.Second >= engineActionTimeout {
+					t.Fatal("engine action leaves no API response margin")
+				}
+				p := &checkSlotPool{limit: 1}
+				s := &Service{checkSlots: p}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				creating := make(chan struct{})
+				control := engine.New(config.DaggerConfig{Engine: "managed", Version: "v0.20.5"}.Resolve(), engine.Options{
+					Timeout: time.Second, CreateTimeout: 10 * time.Second, ActionTimeout: 3 * time.Second,
+					LookPath: func(name string) (string, error) { return name, nil }, Getenv: func(string) string { return "" },
+					Command: func(ctx context.Context, _ string, _ []string, args ...string) (string, error) {
+						if args[0] == "container" {
+							return "", errors.New("No such container: osmia-dagger-engine")
+						}
+						if args[0] != "run" {
+							t.Fatalf("unexpected command %v", args)
+						}
+						close(creating)
+						if ending == "failure" {
+							time.Sleep(time.Second)
+							return "", errors.New("image pull failed")
+						}
+						<-ctx.Done()
+						return "", ctx.Err()
+					},
+				})
+				done := make(chan error, 1)
+				go func() { done <- s.RestartEngine(ctx, control) }()
+				<-creating
+				check := queuedSlot(t.Context(), p, CheckSlotRun{Unit: "waiting"})
+				synctest.Wait()
+				if st := s.CheckSlots(); st.Used != 0 || len(st.Waiting) != 1 {
+					t.Fatalf("%+v", st)
+				}
+				if ending == "cancellation" {
+					cancel()
+				}
+				err := <-done
+				if err == nil {
+					t.Fatal("creating action succeeded")
+				}
+				if ending == "deadline" && !strings.Contains(err.Error(), "deadline exceeded") {
+					t.Fatal(err)
+				}
+				release := <-check
+				if release == nil {
+					t.Fatal("maintenance retained waiting check")
+				}
+				release()
+				must(t, s.RestartEngine(t.Context(), gateEngine{run: func(context.Context) error { return nil }}))
+			})
+		})
+	}
+}
+
+func TestEngineActionResponseWhileConfigurationIsLocked(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &Service{}
+		s.projectMu.Lock()
+		defer s.projectMu.Unlock()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		request := httptest.NewRequest("POST", Prefix+"/engine/restart", nil).WithContext(ctx)
+		response := httptest.NewRecorder()
+		started := time.Now()
+		if !s.engineHTTP(response, request) {
+			t.Fatal("engine route unhandled")
+		}
+		if time.Since(started) != time.Second || response.Code != 500 || !strings.Contains(response.Body.String(), "deadline exceeded") {
+			t.Fatalf("response after %s: %d %s", time.Since(started), response.Code, response.Body.String())
+		}
+	})
 }

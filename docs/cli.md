@@ -982,7 +982,10 @@ warning and failure prints its fix on the next line. Configuration errors name
 the file and field, never a value read from the file. Engine reachability and
 release mismatches are warnings. An unset `[dagger].version` expects the host
 CLI release. Cache size is reported as unknown when the engine or CLI cannot
-expose it. Doctor probes engines without restarting or pruning them.
+expose it. Doctor names the Docker host for managed and explicit container
+engines, omitting URL user information, or reports a conflict between
+`DOCKER_HOST` and a named `DOCKER_CONTEXT`. Doctor probes engines without
+restarting or pruning them.
 
 Checks that need something an earlier check found missing are left out: with
 no root only the toolchain and GitHub checks run, and with a configuration
@@ -1036,7 +1039,8 @@ check failed and 0 when only warnings are present.
 
 `osmia engine status|restart|prune [--json]` uses the running service's loaded
 `[dagger]` configuration. Status reports the mode, address, reachability, running
-and configured versions, any mismatch with the host CLI, and cache size when
+and configured versions, any mismatch with the host CLI, the Docker host for
+managed and explicit container engines (without URL user information), and cache size when
 available. Status works in every engine mode. The web cog menu shows the same
 status and offers restart and prune, with the service’s refusal reason when an
 action cannot run. Each unit, final and session check entry in the owner’s feed

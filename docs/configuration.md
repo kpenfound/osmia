@@ -594,8 +594,11 @@ unit reviewer runs checks. A final run that reports no result is recorded as
 incomplete, and the read waits for checks to complete. Retries wait longer
 after each incomplete run, up to an hour, and reuse the recorded judgment for
 the same review, commit and selection inputs, including after a restart. A
-completed run is read back instead of running the checks again. The check client inherits only
-PATH and service engine selection, not provider, GitHub or SSH credentials.
+completed run is read back instead of running the checks again. The check client
+receives PATH, the service's engine selection and CLI release,
+and DOCKER_HOST when the engine uses Docker (or under auto host selection).
+It uses a temporary HOME and receives the configured Dagger Cloud token when
+applicable, without provider, GitHub or SSH credentials.
 There is no command fallback.
 
 Reviewers read diffs through the `workstream_diff` tool rather than their
@@ -651,6 +654,58 @@ service's check client receives the token; mason execution settings and
 sandboxes never receive it. Code under check can probably read the check
 client's environment, for example through `env://`, and with it the Cloud
 token. Use a dedicated, narrowly scoped token.
+
+#### Another Docker host
+
+Set `DOCKER_HOST` in the environment of the process running `osmia serve` to
+place the managed engine on another Docker daemon. For example, with
+`dagger.engine = "managed"`:
+
+```sh
+DOCKER_HOST=tcp://engine-host.example.ts.net:2375 osmia serve
+# Or, when SSH works without an agent:
+DOCKER_HOST=ssh://user@engine-host.example.ts.net osmia serve
+```
+
+For a service manager, set the variable in its service environment and restart
+Osmia. Changing `DOCKER_HOST` requires a service restart; `osmia reload` does not
+change the process environment. Osmia ensures the container on the selected
+host only. The old host's container and cache are left alone, and the new host
+has its own cache. First creation allows time for an image pull, within a
+finite action deadline. An unreachable daemon fails startup or reload;
+Osmia does not create a replacement engine after a connection failure.
+
+Lifecycle commands, engine probes, check listings and runs, and mason engine
+connections use the same host. This also applies to an explicit
+`docker-container://<container>` engine. `osmia engine status` and `osmia doctor`
+name the Docker host, omitting URL user information. Explicit `tcp://` and
+`unix://` Dagger engines and Cloud check clients receive no `DOCKER_HOST`.
+`auto` retains host CLI selection and its local Docker Desktop socket fallback.
+
+A named `DOCKER_CONTEXT` alongside `DOCKER_HOST` is refused for managed and
+explicit container engines, before connecting. Unset either variable, or use
+`DOCKER_CONTEXT=default`, then restart the service. A `DOCKER_CONTEXT` set on its
+own continues to select the daemon for lifecycle commands.
+
+The check client receives only the Docker host address from Docker's and SSH's
+environment: no `SSH_AUTH_SOCK`, `DOCKER_CONFIG`, `DOCKER_CONTEXT`,
+`DOCKER_TLS_VERIFY` or `DOCKER_CERT_PATH`. Its HOME remains temporary, so host
+Docker configuration, SSH key files and TLS client certificates are not made
+available there. An `ssh://` host must work without an SSH agent, for example
+through Tailscale SSH. Code under check can probably read `DOCKER_HOST`, such as
+through `env://`; avoid putting credentials in it. Mason sandboxes receive the
+forwarded engine endpoint, without `DOCKER_HOST` or a Docker socket.
+
+The machine running Osmia must already be able to reach the daemon. Osmia does
+no tailnet login, dialing or name resolution of its own for this setting and
+does not use `listen.tailnet` to reach it. A plain `tcp://` Docker daemon has no
+authentication of its own and grants control of its host: restrict access with
+tailnet access rules and do not expose it publicly.
+
+`DOCKER_HOST` applies to every Docker command the service runs. Roles using
+`sandbox = "container"` would also run on the remote daemon, where the service
+host's bind-mount paths do not exist. Use `sbx` for mason sandboxes with the
+service forwarding the engine connection.
 
 ### Dagger for masons
 
