@@ -121,12 +121,10 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 
 	// The contested unit's ruling clears once it is recorded, and the same
 	// card, reused when the unit is contested again, still shows none of it.
-	decisionField, noteField := contested+"select", contested+`input[name=note]`
-	p.Choose(decisionField, "review")
+	noteField := contested + `input[name=note]`
 	p.TypeInto(noteField, "The reviewer's sandbox failed; review it again.")
-	p.Click(contested + "button[type=submit]")
+	p.Click(contested + `[data-decision-choice="review"]`)
 	p.AwaitText("#inbox-result", "Ruled review on unit index.")
-	p.AwaitCleared(decisionField)
 	p.AwaitCleared(noteField)
 	p.AwaitGone("the ruled unit", contested)
 	// Optimistic removal alone does not clear the dismissal. The server
@@ -144,25 +142,22 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	move(trace.UnitSubject("index"), "index-contested-2", UnitContested, reviewerActor)
 	raiseFixtureContest(t, live, stream, "index")
 	p.AwaitText(contested+"[data-field=kind]", "Contested unit")
-	var decision, note string
-	p.Eval(`document.querySelector(`+quote(decisionField)+`).value`, &decision)
+	var note string
 	p.Eval(`document.querySelector(`+quote(noteField)+`).value`, &note)
-	if decision != "" || note != "" {
-		t.Fatalf("the reused contested card: decision %q, note %q", decision, note)
+	if note != "" {
+		t.Fatalf("the reused contested card note: %q", note)
 	}
 
 	// The amendment's decision clears once it is recorded.
-	amendmentDecision, amendmentNote := amendment+"select", amendment+`input[name=note]`
-	p.Choose(amendmentDecision, AmendmentReject)
+	amendmentNote := amendment + `input[name=note]`
 	p.TypeInto(amendmentNote, "Keep the acknowledged-chunk contract.")
-	p.Click(amendment + "button[type=submit]")
+	p.Click(amendment + `[data-decision-choice="reject"]`)
 	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
-	p.AwaitCleared(amendmentDecision)
 	p.AwaitCleared(amendmentNote)
 }
 
 // The ratification card may be decided more than once as objections are
-// disposed of; it clears its decision and note back to their defaults as
+// disposed of; it clears its note back to its default as
 // soon as each decision succeeds, so deciding the next objection on the same
 // card never shows a value from the decision before it.
 func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *testing.T) {
@@ -186,33 +181,22 @@ func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *test
 		return len(entries) > 0
 	})
 	card := decisionCard(entries[0])
-	decisionField, noteField := card+"select", card+`input[name=note]`
-	fields := func() (decision, note string) {
-		p.Eval(`document.querySelector(`+quote(decisionField)+`).value`, &decision)
-		p.Eval(`document.querySelector(`+quote(noteField)+`).value`, &note)
-		return
-	}
+	noteField := card + `input[name=note]`
 
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Ratification")
 
-	p.Choose(decisionField, "overrule "+veto)
 	p.TypeInto(noteField, "I accept the risk.")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="overrule ` + veto + `"]`)
 	p.AwaitText("#inbox-result", "I accept the risk.")
-	if decision, note := fields(); decision != "" || note != "" {
-		t.Fatalf("the ratification card after the first decision: decision %q, note %q", decision, note)
-	}
+	p.AwaitCleared(noteField)
 
 	// The same card, reused for the next objection, still shows no value
 	// from the decision before it.
-	p.Choose(decisionField, "sustain "+size)
 	p.TypeInto(noteField, "Split the resume unit.")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="sustain ` + size + `"]`)
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")
-	if decision, note := fields(); decision != "" || note != "" {
-		t.Fatalf("the ratification card after the second decision: decision %q, note %q", decision, note)
-	}
+	p.AwaitCleared(noteField)
 }

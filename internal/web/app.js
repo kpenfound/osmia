@@ -2820,7 +2820,7 @@
   }
 
   // decisions keeps each inbox entry's card between renders, so an answer
-  // being written and a decision being chosen survive the events that
+  // being written survives the events that
   // arrive meanwhile. A card answers the entry as it last rendered it.
   const decisions = new Map();
 
@@ -2896,7 +2896,7 @@
       dismiss(dismissKey);
       render();
     }
-    act(inboxResult, button, () => request(method, path, body), (out) => {
+    return act(inboxResult, button, () => request(method, path, body), (out) => {
       if (dismissKey) {
         acknowledge(dismissKey);
       }
@@ -2925,7 +2925,8 @@
       (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.', undefined, decisionKey(entry));
   }
 
-  function decide(d) {
+  function decide(d, choice, button) {
+    if (d.pending) return;
     const entry = d.entry;
     const result = inboxResult;
     const body = { ...entry.answer.body };
@@ -2955,30 +2956,37 @@
         () => { d.draft = ''; d.messages = []; }, decisionKey(entry));
       return;
     }
-    const [decision, objection] = d.decision.value.split(' ');
+    // A form submit from the note field makes no choice.
+    if (!choice) return;
+    const [decision, objection] = choice.split(' ');
     const note = d.note.value.trim();
-    if (!decision) {
-      show(result, 'error', 'Choose a decision.');
-      return;
-    }
+    const send = (method, path, body, done, dismissKey) => {
+      d.pending = true;
+      for (const action of d.actions.children) block(action, true);
+      return submit(d.form, button, method, path, body, done, undefined, dismissKey).finally(() => {
+        d.pending = false;
+        for (const action of d.actions.children) block(action, false);
+      });
+    };
     switch (entry.kind) {
       case 'contested':
         if (note === '') {
           show(result, 'error', 'Give a note for the ruling.');
           return;
         }
-        submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision, note },
-          () => 'Ruled ' + decision + ' on unit ' + entry.unit + '.', undefined, decisionKey(entry));
+        send(entry.answer.method, endpoint(entry), { ...body, decision, note },
+          () => 'Ruled ' + decision + ' on unit ' + entry.unit + '.', decisionKey(entry));
         return;
       case 'amendment':
         if (note !== '') {
           body.note = note;
         }
-        submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision },
-          () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.', undefined, decisionKey(entry));
+        send(entry.answer.method, endpoint(entry), { ...body, decision },
+          () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.', decisionKey(entry));
         return;
       case 'base':
-        submit(d.submit, entry.answer.method, endpoint(entry), body, decided((out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.'));
+        send(entry.answer.method, endpoint(entry), body,
+          (out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.', decisionKey(entry));
         return;
     }
     // A ratification is decided with ratify, which dismisses its card like
@@ -2990,16 +2998,16 @@
       if (packet && packet.project_spec_revision) {
         body.project_spec_revision = packet.project_spec_revision;
       }
-      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail, undefined, decisionKey(entry));
+      send(entry.answer.method, endpoint(entry), body, (out) => out.detail, decisionKey(entry));
       mark([detailOf(entry)]);
       return;
     }
     if (decision === 'sustain') {
-      submit(d.form, d.submit, 'POST', '/shed/rule/' + entry.workstream, { objection, disposition: 'sustain', note }, (out) => out.detail);
+      send('POST', '/shed/rule/' + entry.workstream, { objection, disposition: 'sustain', note }, (out) => out.detail);
       return;
     }
     if (decision === 'overrule') {
-      submit(d.form, d.submit, 'POST', '/shed/overrule/' + entry.workstream, { objection, reason: note }, (out) => out.detail);
+      send('POST', '/shed/overrule/' + entry.workstream, { objection, reason: note }, (out) => out.detail);
       return;
     }
     if (decision === 'redraft') {
@@ -3007,7 +3015,7 @@
         show(result, 'error', 'Say what the redraft should change.');
         return;
       }
-      submit(d.form, d.submit, 'POST', '/shed/redraft/' + entry.workstream, { note }, (out) => out.detail);
+      send('POST', '/shed/redraft/' + entry.workstream, { note }, (out) => out.detail);
       return;
     }
   }
@@ -3044,9 +3052,8 @@
       fields.push(el('label', {}, 'Pull request description', d.text));
       fields.push(el('p', { class: 'meta' }, 'Approving authorizes publication with your Git identity, signature and sign-off. Agent co-author trailers are removed.'));
     } else {
-      d.decision = el('select', { name: 'decision' });
       d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
-      fields.push(el('label', {}, 'Decision', d.decision), el('label', {}, 'Note', d.note));
+      fields.push(el('label', {}, 'Note', d.note));
     }
     const form = el('form', { class: 'send', 'data-field': 'answer' }, ...fields, d.actions);
     d.form = form;
@@ -3147,6 +3154,18 @@
     }
   }
 
+  function decisionButtons(d, options) {
+    const key = JSON.stringify(options);
+    if (d.actions.dataset.options === key) return;
+    d.actions.dataset.options = key;
+    place(d.actions, options.map(([choice, label]) => {
+      const button = el('button', { type: 'button', 'data-decision-choice': choice }, label);
+      block(button, !!d.pending);
+      button.addEventListener('click', () => decide(d, choice, button));
+      return button;
+    }));
+  }
+
   function renderDecision(entry) {
     const d = decisionCard(entry);
     d.entry = entry;
@@ -3202,22 +3221,20 @@
         break;
       case 'ratification': {
         const dissent = renderDissent(d, name);
-        setOptions(d.decision, [['', 'Choose a decision'],
+        decisionButtons(d, [
           ...(entry.options.includes('ratify') ? [['ratify', 'Ratify']] : []),
           ...dissent.flatMap((o) => [['sustain ' + o.id, 'Sustain ' + o.id], ['overrule ' + o.id, 'Overrule ' + o.id]]),
-          ['redraft', 'Ask for a redraft']]);
-        place(d.actions, [d.submit]);
+          ['redraft', 'Ask for a Redraft']]);
         break;
       }
       default:
-        setOptions(d.decision, [['', 'Choose a decision'], ...entry.options.map((o) => [o, decisionNames[o] || o])]);
+        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o]));
         // A parked base takes no note, and no decision here unless its own
         // base was abandoned.
         if (entry.kind === 'base') {
           d.form.hidden = entry.options.length === 0;
           d.note.parentElement.hidden = true;
         }
-        place(d.actions, [d.submit]);
     }
     return d.node;
   }

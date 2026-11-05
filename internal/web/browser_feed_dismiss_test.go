@@ -133,12 +133,6 @@ func (p *page) typeInto(selector, text string) {
 	p.run(chromedp.SendKeys(selector, text, chromedp.ByQuery))
 }
 
-// choose selects value in the first select selector matches.
-func (p *page) choose(selector, value string) {
-	p.t.Helper()
-	p.run(chromedp.SetValue(selector, value, chromedp.ByQuery))
-}
-
 // awaitGone waits until the page shows no element for selector.
 func (p *page) awaitGone(what, selector string) {
 	p.t.Helper()
@@ -174,9 +168,8 @@ func TestBrowserFeedDismissesAContestedRulingBeforeTheServerResponds(t *testing.
 	p.awaitVisible("the contested unit", card)
 	release := api.contested.holdResponse()
 
-	p.choose(card+"select", "review")
 	p.typeInto(card+`input[name=note]`, "Review it again.")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="review"]`)
 
 	// The card is gone before the held response is released.
 	p.awaitGone("the contested unit", card)
@@ -192,8 +185,7 @@ func TestBrowserFeedDismissesARatificationBeforeTheServerResponds(t *testing.T) 
 	p.awaitVisible("the ratification packet", card)
 	release := api.ratify.holdResponse()
 
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="ratify"]`)
 
 	p.awaitGone("the ratification packet", card)
 	release()
@@ -209,9 +201,8 @@ func TestBrowserFeedDismissedItemStaysHiddenUntilARefreshDropsItThenShowsAgain(t
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
 
-	p.choose(card+"select", "review")
 	p.typeInto(card+`input[name=note]`, "Review it again.")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="review"]`)
 	p.awaitGone("the contested unit", card)
 	p.awaitText("#inbox-result", "Ruled review on unit index.")
 
@@ -249,9 +240,8 @@ func TestBrowserFeedDismissalExpiresAfter120SecondsIfStillListed(t *testing.T) {
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
 
-	p.choose(card+"select", "review")
 	p.typeInto(card+`input[name=note]`, "Review it again.")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="review"]`)
 	p.awaitGone("the contested unit", card)
 	p.awaitText("#inbox-result", "Ruled review on unit index.")
 
@@ -276,19 +266,17 @@ func TestBrowserFeedFailedSubmissionRestoresTheItemAtOnceWithErrorAndInput(t *te
 	release := api.contested.holdResponse()
 	api.contested.failNext("the reviewer's turn is still running")
 
-	p.choose(card+"select", "review")
 	p.typeInto(card+`input[name=note]`, "Review it again.")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="review"]`)
 	p.awaitGone("the contested unit", card)
 
 	release()
 	p.awaitText("#inbox-result", "the reviewer's turn is still running")
 	p.awaitVisible("the contested unit, restored", card)
-	var decision, note string
-	p.eval(`document.querySelector(`+quote(card+"select")+`).value`, &decision)
+	var note string
 	p.eval(`document.querySelector(`+quote(card+`input[name=note]`)+`).value`, &note)
-	if decision != "review" || note != "Review it again." {
-		t.Fatalf("the restored contested card: decision %q, note %q", decision, note)
+	if note != "Review it again." {
+		t.Fatalf("the restored contested card note: %q", note)
 	}
 }
 
@@ -302,9 +290,8 @@ func TestBrowserFeedDismissingOneItemLeavesOthersUnaffected(t *testing.T) {
 	p.awaitVisible("the ratification packet", ratification)
 	release := api.contested.holdResponse()
 
-	p.choose(contested+"select", "review")
 	p.typeInto(contested+`input[name=note]`, "Review it again.")
-	p.click(contested + "button[type=submit]")
+	p.click(contested + `[data-decision-choice="review"]`)
 
 	p.awaitGone("the contested unit", contested)
 	// The ratification card is untouched: still visible, with its options

@@ -19,8 +19,8 @@ func (p *page) outcomeOf(selector string) string {
 // Deciding a ratification shows the three outcomes the owner's command can
 // have: accepted and durably recorded ('ok'), temporarily unavailable with
 // the blocking operation named ('unavailable'), and rejected with a reason
-// ('error'). All three leave the card actionable again with the owner's
-// choice kept, since none of them is the card's own terminal decision.
+// ('error'). Refusals restore the actionable card; an accepted ratification
+// keeps it dismissed.
 func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testing.T) {
 	api := newFakeAPI(1)
 	api.setInbox(ratificationEntry("w_000"))
@@ -44,8 +44,7 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 	release := sync.OnceFunc(api.ratify.holdResponse())
 	t.Cleanup(release)
 	api.ratify.failNextUnavailable("sealing workstream w_000 is already in progress")
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="ratify"]`)
 	p.awaitGone("the ratification packet", card)
 	release()
 	p.awaitText("#inbox-result", "sealing workstream w_000 is already in progress")
@@ -60,8 +59,7 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 	release = sync.OnceFunc(api.ratify.holdResponse())
 	t.Cleanup(release)
 	api.ratify.failNext("spec.md revision 2 is ratified already, read it with osmia status")
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="ratify"]`)
 	p.awaitGone("the ratification packet", card)
 	release()
 	p.awaitText("#inbox-result", "spec.md revision 2 is ratified already")
@@ -79,8 +77,7 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 	release = sync.OnceFunc(api.ratify.holdResponse())
 	t.Cleanup(release)
 	api.ratify.failNext("")
-	p.choose(card+"select", "ratify")
-	p.click(card + "button[type=submit]")
+	p.click(card + `[data-decision-choice="ratify"]`)
 	p.awaitGone("the ratification packet", card)
 	release()
 	p.awaitText("#inbox-result", "the owner ratified the packet.")
