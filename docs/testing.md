@@ -52,8 +52,9 @@ project runtime bindings and HTTP dispatch. Workflow journeys use the same
 composition root, with fake execution boundaries and local repositories.
 
 The [preview journey](../internal/servicetest/preview_test.go),
-`TestChiefPreviewFromConfigurationThroughMemberArchive`, configures a project's
-preview through the API and sends an owner message to a production chief turn.
+`TestChiefPreviewThroughMemberArchive`, sends an owner message to a production
+chief turn without saving preview settings. The chief inspects the member's
+committed Service code and names its call and port in the preview tool request.
 Offline Dagger and Chromium commands capture the built member's exact source;
 the journey checks both feeds, image bytes and headers, archive placeholders
 and deletion of the member trace without bytes in retained presentations.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,16 @@ type PreviewJourney struct {
 
 const previewPrompt = "Show me the new settings page."
 const previewSource = "built settings page\n"
+const previewModule = `package main
+
+import "dagger/preview/internal/dagger"
+
+type Preview struct{}
+
+func (m *Preview) Web() *dagger.Service {
+ return dag.Container().From("nginx:alpine").WithExposedPort(8080).AsService()
+}
+`
 
 func NewPreviewJourney(t *testing.T) *PreviewJourney {
 	t.Helper()
@@ -59,7 +70,18 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 		if tools == nil {
 			return nil, fmt.Errorf("chief has no scoped tool host")
 		}
-		raw, err := fixturekit.CallTool(ctx, tools, "preview", map[string]any{"workstream": f.Member})
+		inspected, err := fixturekit.CallTool(ctx, tools, "inspect_code", map[string]any{"workstream": f.Member, "path": ".dagger/main.go"})
+		if err != nil {
+			return nil, err
+		}
+		var code trace.CodeInspection
+		if err := json.Unmarshal([]byte(inspected), &code); err != nil {
+			return nil, err
+		}
+		if code.Commit != f.Commit || !strings.Contains(code.Content, "Web()") || !strings.Contains(code.Content, "WithExposedPort(8080)") {
+			return nil, fmt.Errorf("chief could not inspect committed Service: %s", inspected)
+		}
+		raw, err := fixturekit.CallTool(ctx, tools, "preview", map[string]any{"workstream": f.Member, "call": []string{"web"}, "port": 8080})
 		if err != nil {
 			return nil, err
 		}
@@ -73,8 +95,13 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 		if result.ImageID == "" || result.Limitation != "" || result.Workstream != string(f.Member) || result.Commit != f.Commit {
 			return nil, fmt.Errorf("preview result: %s", raw)
 		}
-		if req.Grants == nil || req.Grants.VCS {
+		if req.Grants == nil || req.Grants.VCS || req.Grants.DaggerEngine != "" {
 			return nil, fmt.Errorf("chief has no confined read-only grants")
+		}
+		for _, tool := range []string{"*", "Bash", "Write", "Edit", "shell", "apply_patch", "bash", "edit", "write"} {
+			if slices.Contains(req.Grants.Tools, tool) {
+				return nil, fmt.Errorf("chief received execution or write tool %s", tool)
+			}
 		}
 		copies := 0
 		for _, mount := range req.Grants.Mounts {
@@ -106,7 +133,10 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 		t.Fatal("member has no sealed workspace")
 	}
 	fixturekit.Must(t, os.WriteFile(filepath.Join(sealed.Workspace, "preview-source.txt"), []byte(previewSource), 0600))
-	fixturekit.DemoGit(t, f.Clone, "-C", sealed.Workspace, "add", "preview-source.txt")
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(sealed.Workspace, ".dagger"), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(sealed.Workspace, ".dagger/main.go"), []byte(previewModule), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(sealed.Workspace, "dagger.json"), []byte(`{"name":"preview","sdk":"go","source":".dagger"}`), 0600))
+	fixturekit.DemoGit(t, f.Clone, "-C", sealed.Workspace, "add", "preview-source.txt", ".dagger/main.go", "dagger.json")
 	fixturekit.DemoGit(t, f.Clone, "-C", sealed.Workspace, "-c", "user.name=Factory", "-c", "user.email=factory@example.invalid", "commit", "-qm", "Build settings page")
 	f.Commit = strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", sealed.Workspace, "rev-parse", "HEAD"))
 	f.Group, err = trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{f.Sibling, f.Member}, time.Now().UTC(), fixturekit.OwnerActor, "preview-fixture")
@@ -116,16 +146,11 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 	return f
 }
 
-// Capture configures previews through the public API, then sends an owner message
-// whose chief turn calls the production preview tool through MCP.
+// Capture sends an owner message whose chief turn inspects the committed
+// Service and calls the production preview tool through MCP.
 func (f *PreviewJourney) Capture(t *testing.T) api.FeedImage {
 	t.Helper()
 	ctx := context.Background()
-	var saved api.ProjectPreviewResponse
-	fixturekit.Must(t, f.C.Do(ctx, http.MethodPut, api.Prefix+"/projects/preview/"+string(f.ID), map[string]any{"call": []string{"web"}, "port": 8080}, &saved))
-	if saved.Preview == nil || saved.Preview.Path != "/" || saved.Preview.Timeout != "5m" {
-		t.Fatalf("preview defaults: %+v", saved)
-	}
 	wait, release := ServiceChanges(t, f.S)
 	defer release()
 	message, err := f.C.Send(ctx, f.Sibling, previewPrompt)

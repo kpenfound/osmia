@@ -70,7 +70,7 @@ func (d DaggerChecks) Preview(ctx context.Context, dir string, in PreviewCapture
 		return fail(fmt.Errorf("dagger Service call exited %d", exit))
 	}
 	service := strings.TrimSpace(id.String())
-	if service == "" || id.truncated || strings.ContainsAny(service, "\r\n\x00") {
+	if id.truncated || strings.ContainsAny(service, "\r\n\x00") || !previewServiceID(service) {
 		return fail(fmt.Errorf("dagger did not return one Service ID"))
 	}
 	width, height := 1440, 900

@@ -18,7 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestChiefPreviewFromConfigurationThroughMemberArchive(t *testing.T) {
+func TestChiefPreviewThroughMemberArchive(t *testing.T) {
 	f := NewPreviewJourney(t)
 	attachment := f.Capture(t)
 	ctx := context.Background()

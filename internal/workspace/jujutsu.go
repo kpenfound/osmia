@@ -925,6 +925,12 @@ func (j *Jujutsu) Export(ctx context.Context, commit, dir string) error {
 	return j.git().Export(ctx, commit, dir)
 }
 
+// ExportValidated checks the staged commit tree before removing symbolic links,
+// as Git's ExportValidated does.
+func (j *Jujutsu) ExportValidated(ctx context.Context, commit, dir string, validate func(string) error) error {
+	return j.git().ExportValidated(ctx, commit, dir, validate)
+}
+
 // Squash makes the commit Git's Squash makes from the same arguments.
 func (j *Jujutsu) Squash(ctx context.Context, base, candidate, message string, at time.Time) (string, error) {
 	return j.git().Squash(ctx, base, candidate, message, at)
