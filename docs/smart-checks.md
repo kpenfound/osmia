@@ -34,14 +34,29 @@ requested tests exist and exercise the behaviour.
    checks, with collections expanded to their items, as links such as
    `dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestBuilt`.
    Listing is bounded by five minutes and 4 MiB of output.
+   Options exclude broad links: a no-filter or check-name-only root that
+   covers other listed links, and any link holding the same checks as such a
+   root. This includes a module link in a one-module project or the package
+   link of a collection's only package when narrower tests are listed. Both
+   `dag+check://?check=test&...` and `dag+check://<path>?...` use coverage among
+   listed links, independent of check names. Standalone checks, including
+   no-filter and name-only links with nothing narrower listed, stay options.
+   Links covering each other count as one check. A leaf covers no strictly
+   narrower listed link. The remaining options together cover every leaf
+   in the original listing.
 4. **Narrow to candidates.** One judgment asks about at most 128 links. A
-   project with more is asked about its collections' items instead: removing
-   a link's last filter gives the link that covers it and its siblings, so
+   project with more remaining options is asked about its collections' items
+   instead: removing a link's last filter gives the link that covers it and
+   its siblings, so
    `...?go-package=internal/trace&go-test=TestBuilt` and
    `...?go-package=internal/trace&go-test=TestChunks` become
    `...?go-package=internal/trace`. Each step collapses the item that removes
    the most links, so the largest collections are judged by package and small
-   ones keep their own links. Links that cannot narrow to 128 run every check.
+   ones keep their own links. Every step skips broad parents, whether listed
+   or created by narrowing, using the original listing's leaves to compare
+   coverage. Narrowing never produces a collection root or bare
+   `dag+check://`. Links that cannot narrow to 128 without a broad link run
+   every check with reason `too_many_checks`, without asking Jev.
 5. **Build the state.** The judgment's state holds a guide to reading check
    links, the changed files with their added and removed line counts, and the
    diff. The state is bounded to 72 KiB: a diff that does not fit is replaced
@@ -144,8 +159,8 @@ The selection has this shape:
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
 | `links` | The links Jev selected, for a selected run; the command shows how they were grouped |
 | `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections, full runs and older records |
-| `candidates` | How many links Jev was asked about, after narrowing |
-| `listed` | Total links the project listed, before narrowing; absent when listing was skipped or failed, and in older records |
+| `candidates` | How many links Jev was asked about, after removing broad links and narrowing |
+| `listed` | Total links the project listed, before removing broad links or narrowing; absent when listing was skipped or failed, and in older records |
 | `judgment` | The judgment record the selection rests on, also set on a full run whose judgment fell back |
 | `reason`, `detail` | Why a full run ran every check |
 
@@ -157,7 +172,7 @@ asked:
 | `disabled` | The boost is off |
 | `unlisted` | `dagger list checks` failed or timed out |
 | `no_checks` | The project lists no check links |
-| `too_many_checks` | The links do not narrow to 128 |
+| `too_many_checks` | The remaining links cannot narrow to 128 without a broad link |
 | `change_too_large` | The changed files alone do not fit the state |
 | `refused` | Dagger refused one command's selected links before that command started any check; `detail` holds its error |
 
@@ -190,9 +205,9 @@ final-review check entry also describe the selection and its reason. Running
 final attempts show their selection as soon as start evidence is recorded.
 
 The selected and candidate counts describe the saving as "checking 2 of 37".
-When narrowing reduced the list, `listed` also explains that those 37 were
-narrowed from 214 listed links. An absent total stays unknown; no total is
-inferred for older runs.
+When removing broad links or narrowing reduces the list, `listed` also explains
+that those 37 are narrowed from 214 listed links. An absent total stays
+unknown; no total is inferred for older runs.
 
 The factory runs checks with `--progress=report --fail-fast --parallel 4`. It records the
 complete combined output beside the check record in `checks-<n>-output.txt`
@@ -266,9 +281,15 @@ not show, such as an environment variable, a remote module or a file read at
 run time. The threshold trades running unaffected checks against missing an
 affected one. Fallback picks can miss an affected check that a full run
 would catch, since even very low scores are ranked and only the top links
-run. One pick may cover a whole collection item; passing checks are evidence for the review, never an approval.
+run. One pick may cover part of a collection, such as a package's tests in a
+multi-package collection; it never names a whole collection or an equivalent
+module root. Passing checks are evidence for the review, never an approval.
 Collapsed links run their whole item, so a project with many small
 collections runs more than it would with each link judged.
+A collection with one package and more than 128 tests falls back to a full
+run with `too_many_checks`, since its package link holds the whole collection.
+Coverage compares exact paths and filter values: a path prefix does not
+cover longer paths.
 
 ## Code map
 

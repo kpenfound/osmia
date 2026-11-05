@@ -2,6 +2,7 @@ package execution
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
@@ -112,6 +114,85 @@ func TestUnitPicksLateRefusalRecordsFullRun(t *testing.T) {
 	prompt := reviewTurn(t, f, repo, stream).Prompt
 	if !strings.Contains(prompt, "Dagger refused") || !strings.Contains(prompt, run.OutputPath) {
 		t.Fatalf("review evidence %s", prompt)
+	}
+	cli.AssertRun(t, nil)
+}
+
+// serial: the real unit runner records only offered links, including when
+// package selections share a command address that is not itself an option.
+func TestUnitCollectionOptionsReachDagger(t *testing.T) {
+	for _, picks := range []int{0, 4} {
+		t.Run(fmt.Sprint(picks), func(t *testing.T) {
+			listing, offered := daggerfixture.CollectionOptions()
+			cli := daggerfixture.Install(t, listing)
+			f, stream, repo := newChecksFixture(t, "collection-options", checkrun.DaggerChecks{})
+			selected := []string{daggerfixture.PackageA, daggerfixture.PackageB, daggerfixture.PathA, daggerfixture.Version}
+			answers := map[string]systemone.Answer{}
+			for i, link := range offered {
+				score := .01
+				if slices.Contains(selected, link) {
+					score = .9
+					if picks > 0 {
+						score = .4
+					}
+				}
+				answers[checkselect.Question(i)] = jevtest.Noul(score)
+			}
+			p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "stub", Answers: answers}}}}
+			boostJev(f.s, p)
+			settings := f.s.Jev.Config()
+			settings.CheckFallbackPicks = picks
+			f.s.Jev.Config = func() config.Jev { return settings }
+			runChecks(t, f.s, repo, stream)
+			run := onlyRun(t, repo, stream)
+			slices.Sort(selected)
+			if run.Status != ChecksPassed || run.Selection.Mode != checkrun.SelectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.FallbackPicks != picks || run.Selection.Judgment == "" {
+				t.Fatalf("run %+v selection %+v", run, run.Selection)
+			}
+			requests := p.Requests()
+			if len(requests) != 1 || len(requests[0].Questions) != len(offered) || run.Selection.Candidates != len(offered) || run.Selection.Listed == nil || *run.Selection.Listed != len(listing.Links) {
+				t.Fatalf("requests %+v selection %+v", requests, run.Selection)
+			}
+			for i, link := range offered {
+				if q := requests[0].Questions[checkselect.Question(i)]; fmt.Sprint(q.Instructions) != fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link) {
+					t.Fatalf("question %+v, want only offered link %s", q, link)
+				}
+			}
+			cli.AssertRun(t, selected)
+			grouped := daggerfixture.PackageA + "&go-package=b"
+			if slices.Contains(offered, grouped) || !slices.Contains(run.Command, grouped) {
+				t.Fatalf("package grouping changed: %q", run.Command)
+			}
+			standalone := false
+			for _, event := range cli.Events(t) {
+				if event.Kind == "start" && slices.Contains(event.Args, daggerfixture.Version) {
+					standalone = slices.Equal(event.Links, []string{daggerfixture.Version})
+				}
+			}
+			if !standalone {
+				t.Fatal("standalone check did not run by its own link")
+			}
+		})
+	}
+}
+
+// serial: a single-package collection cannot become one broad option.
+func TestUnitCollectionTooManyChecksRunsFull(t *testing.T) {
+	var links []string
+	for i := range checkselect.MaxQuestions + 1 {
+		links = append(links, fmt.Sprintf("%s&go-test=T%d", daggerfixture.PackageA, i))
+	}
+	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links})
+	f, stream, repo := newChecksFixture(t, "too-many-options", checkrun.DaggerChecks{})
+	p := &jevtest.Provider{}
+	boostJev(f.s, p)
+	settings := f.s.Jev.Config()
+	settings.CheckFallbackPicks = 2
+	f.s.Jev.Config = func() config.Jev { return settings }
+	runChecks(t, f.s, repo, stream)
+	run := onlyRun(t, repo, stream)
+	if run.Status != ChecksPassed || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != checkrun.SelectionTooMany || run.Selection.FallbackPicks != 0 || len(run.Selection.Links) != 0 || run.Selection.Judgment != "" || len(p.Requests()) != 0 || run.Selection.Listed == nil || *run.Selection.Listed != len(links) {
+		t.Fatalf("run %+v selection %+v", run, run.Selection)
 	}
 	cli.AssertRun(t, nil)
 }

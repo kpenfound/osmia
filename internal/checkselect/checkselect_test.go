@@ -24,16 +24,17 @@ func TestCandidatesCollapseTheLargestCollections(t *testing.T) {
 	}{
 		{10, slices.Sorted(slices.Values(links))},
 		{7, []string{stale + "?go-package=a", stale + "?go-package=b", tests + "?go-package=a", tests + "?go-package=b&go-test=TestX", tests + "?go-package=b&go-test=TestY", release}},
-		{4, []string{stale, tests + "?go-package=a", tests + "?go-package=b", release}},
-		{3, []string{stale, tests, release}},
+		{5, []string{stale + "?go-package=a", stale + "?go-package=b", tests + "?go-package=a", tests + "?go-package=b", release}},
 	} {
 		got, ok := Candidates(links, c.limit)
 		if !ok || !slices.Equal(got, c.want) {
 			t.Fatalf("limit %d: %q %t, want %q", c.limit, got, ok, c.want)
 		}
 	}
-	if got, ok := Candidates(links, 2); ok {
-		t.Fatalf("links narrowed below their collections: %q", got)
+	for _, limit := range []int{4, 3, 2} {
+		if got, ok := Candidates(links, limit); ok {
+			t.Fatalf("limit %d: links narrowed to roots: %q", limit, got)
+		}
 	}
 	for link, want := range map[string]string{tests + "?go-package=a&go-test=T": tests + "?go-package=a", tests + "?go-package=a": tests, tests: ""} {
 		if got, _ := parentLink(link); got != want {

@@ -85,7 +85,7 @@ func (j *fakeJev) evaluate(c systemone.Client, _ context.Context, r systemone.Re
 	answers := map[string]systemone.Answer{}
 	for id, q := range r.Questions {
 		for link, p := range j.probabilities {
-			if strings.Contains(fmt.Sprint(q.Instructions), link+"?") {
+			if strings.HasSuffix(fmt.Sprint(q.Instructions), " "+link+"?") {
 				answers[id] = systemone.Answer{Kind: systemone.KindNoul, Noul: p}
 			}
 		}

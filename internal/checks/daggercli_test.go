@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/checkselect"
 )
 
 // realCLIWorkspace writes a Dagger workspace of Go packages using the project's
@@ -119,6 +120,23 @@ func TestRealDaggerCLI(t *testing.T) {
 		if !slices.Contains(links, testOne) || !slices.Contains(links, broken+"&go-test=TestBroken") {
 			t.Fatalf("listed %q", links)
 		}
+	})
+	t.Run("offers narrow checks from the real listing", func(t *testing.T) {
+		links, err := checks.List(ctx, dir, Identity{})
+		must(t, err)
+		candidates, ok := checkselect.Candidates(links, checkselect.MaxQuestions)
+		if !ok || len(candidates) == 0 {
+			t.Fatalf("no candidates from %q", links)
+		}
+		for _, broad := range []string{"dag+check://?check=test", "dag+check://?check=test&go-module=."} {
+			if slices.Contains(candidates, broad) {
+				t.Errorf("broad option %s in %q", broad, candidates)
+			}
+		}
+		if !slices.Contains(candidates, testOne) && !slices.Contains(candidates, packageA) {
+			t.Fatalf("missing workspace tests or packages from %q; listed %q", candidates, links)
+		}
+		t.Logf("real listing %q; candidates %q", links, candidates)
 	})
 	for _, picks := range []int{0, 2} {
 		t.Run(fmt.Sprintf("runs mixed selection with fallback picks %d", picks), func(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 // each judgment's identity includes the acceptance values it applied.
 const (
 	Task    = "check-selection"
-	Version = 2
+	Version = 3
 )
 
 // MaxQuestions bounds the checks asked about in one judgment; a project with
@@ -45,10 +45,10 @@ func Links(output string) []string {
 }
 
 // linkGuide tells Jev how to read a check link.
-const linkGuide = "Each question names a Dagger check by its link: dag+check://<module>/<collection path>?<filters>. " +
-	"The module and path say what the check is, such as a module's tests or a check that generated files are up to date. " +
+const linkGuide = "Each question names a Dagger check by its link: dag+check://<path>?<filters> or dag+check://?check=<name>&<filters>. " +
+	"The path or check name says what the check is, such as a module's tests or a check that generated files are up to date. " +
 	"Filters narrow a collection to some of its items; for Go, go-package names a package directory and go-test a test function. " +
-	"A link covers every item its filters leave, so a link without filters covers its whole collection. " +
+	"A link covers every item its filters leave; a link without item filters names a standalone check with nothing narrower listed. " +
 	"A change can alter a check's result when the check builds or exercises a changed file, or code that depends on one through imports, build configuration or generated files."
 
 // State is the judgment's state: how to read a check link, the changed files
@@ -117,16 +117,23 @@ func FallbackPicks(r systemone.Response, candidates []string, count int) []strin
 	return picks
 }
 
-// Candidates returns the distinct links, narrowed to at most limit by
+// Candidates excludes collection roots and links holding the same checks as
+// a root, while retaining links with nothing narrower listed. Coverage is
+// measured against the original listing's leaves, including during narrowing.
+// It returns the distinct remaining links, narrowed to at most limit by
 // standing a collection item's link in for the links within it: the link
 // with its last filter removed covers every link that differs from it only
 // in that filter. Each step collapses the item that removes the most links,
 // so the largest collections are judged by item and small ones keep their
-// own links. It reports false when the links cannot be narrowed to limit.
+// own links. No step creates a broad link. It reports false when the links
+// cannot be narrowed to limit without one.
 func Candidates(links []string, limit int) ([]string, bool) {
+	coverage := listedCoverage(links)
 	set := map[string]bool{}
 	for _, l := range links {
-		set[l] = true
+		if !coverage.broad(l) {
+			set[l] = true
+		}
 	}
 	for len(set) > limit {
 		within := map[string][]string{}
@@ -137,6 +144,9 @@ func Candidates(links []string, limit int) ([]string, bool) {
 		}
 		best, saved := "", 0
 		for parent, children := range within {
+			if coverage.broad(parent) {
+				continue
+			}
 			n := len(children)
 			if !set[parent] {
 				n--
