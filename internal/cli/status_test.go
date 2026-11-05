@@ -271,8 +271,47 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	}
 	all.Reset()
 	showWorkstreams(&all, wire.StatusResponse{Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
-	if want := "Workstreams:\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
+	if want := "Workstreams:\n  none\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
+	}
+}
+
+func TestStatusOverviewOmitsArchivedWorkstreams(t *testing.T) {
+	building := "building"
+	live := wire.WorkstreamStatus{Workstream: stream, State: &building, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
+		Goal: "Ship resumable uploads.", Attention: "Review the plan."}}
+	archived := wire.WorkstreamStatus{Workstream: quiet, Archived: true, Status: &wire.StatusView{Goal: "Retired work."}}
+	for _, tc := range []struct {
+		name        string
+		workstreams []wire.WorkstreamStatus
+		diagnostics []wire.Diagnostic
+		want        string
+	}{
+		{
+			name:        "mixed",
+			workstreams: []wire.WorkstreamStatus{archived, live},
+			want: "Workstreams:\n  " + stream + " state=building open_questions=2 context_mode=file workspaces=git\n" +
+				"    Goal: Ship resumable uploads.\n    Attention: Review the plan.\n",
+		},
+		{
+			name:        "all archived",
+			workstreams: []wire.WorkstreamStatus{archived, {Workstream: stream, Archived: true}},
+			want:        "Workstreams:\n  none\n",
+		},
+		{
+			name:        "all archived with diagnostics",
+			workstreams: []wire.WorkstreamStatus{archived, {Workstream: stream, Archived: true}},
+			diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}},
+			want:        "Workstreams:\n  none\nDiagnostic: workstreams: internal: cannot read\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			showWorkstreams(&out, wire.StatusResponse{Workstreams: tc.workstreams, Diagnostics: tc.diagnostics})
+			if out.String() != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", out.String(), tc.want)
+			}
+		})
 	}
 }
 

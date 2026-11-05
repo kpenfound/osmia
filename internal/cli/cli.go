@@ -1772,24 +1772,16 @@ func showWorkspaces(w io.Writer, ws wire.WorkspacesStatus) {
 	fmt.Fprintln(w)
 }
 
-// showWorkstreams prints each workstream's gates, overlap advisories, latest
-// drift rebase, goal and attention.
+// showWorkstreams prints each non-archived workstream's gates, overlap
+// advisories, latest drift rebase, goal and attention.
 func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 	fmt.Fprintln(w, "Workstreams:")
-	if len(all.Workstreams) == 0 && len(all.Diagnostics) == 0 {
-		fmt.Fprintln(w, "  none")
-	}
-	defer diagnostics(w, all.Diagnostics)
-	var archived []string
+	listed := 0
 	for _, st := range all.Workstreams {
 		if st.Archived {
-			label := string(st.Workstream)
-			if st.Status != nil && st.Status.Goal != "" && st.Status.Goal != label {
-				label += " " + strconv.Quote(st.Status.Goal)
-			}
-			archived = append(archived, label)
 			continue
 		}
+		listed++
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
 		for _, gate := range st.Gates {
 			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
@@ -1809,9 +1801,10 @@ func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 		}
 		fmt.Fprintf(w, "    Goal: %s\n    Attention: %s\n", st.Status.Goal, attention(st.Status.Attention))
 	}
-	if len(archived) > 0 {
-		fmt.Fprintf(w, "  Archived: %s\n", strings.Join(archived, " "))
+	if listed == 0 {
+		fmt.Fprintln(w, "  none")
 	}
+	diagnostics(w, all.Diagnostics)
 }
 
 // drift describes a workstream's latest drift rebase.

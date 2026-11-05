@@ -269,9 +269,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   backend (`workspaces=git` or `workspaces=jujutsu`), its latest
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
-  you), or `no status yet`. Archived workstreams are named on one line,
-  `Archived: <workstream-id>...`, instead. Open owner gates appear under the
-  workstream even before a status is written. Write the charter with
+  you), or `no status yet`. The overview leaves archived workstreams out;
+  `osmia status <workstream-id>` still shows an archived one. Open owner gates
+  appear under the workstream even before a status is written. Write the charter with
   `osmia edit charter`; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, its latest drift rebase with its reason and one

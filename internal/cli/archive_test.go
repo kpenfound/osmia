@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	wire "github.com/kpenfound/osmia/internal/api"
 )
 
 // Only a delivered or abandoned workstream is archived. An archived one is
-// marked in its own status and named on one line of the list. Archive is permanent.
+// marked in its own status and omitted from the overview. Archive is permanent.
 func TestArchiveCommands(t *testing.T) {
 	root, project, _ := handInFixture(t)
 	id := handInStdin(t, root, project, "# Design\n")
@@ -28,8 +31,29 @@ func TestArchiveCommands(t *testing.T) {
 		t.Fatalf("status of the archived workstream:\n%s", status)
 	}
 	list := successful(t, root, "status")
-	if strings.Contains(list, "  "+id+" state=") || !strings.Contains(list, "  Archived: "+id+"\n") || !strings.Contains(list, "  "+kept+" state=") {
+	if strings.Contains(list, id) || strings.Contains(list, "Archived:") || !strings.Contains(list, "  "+kept+" state=") {
 		t.Fatalf("status list:\n%s", list)
+	}
+	var all struct {
+		Status wire.StatusResponse `json:"status"`
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
+	var archived wire.WorkstreamStatus
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", id, "--json")), &archived))
+	if string(archived.Workstream) != id || !archived.Archived {
+		t.Fatalf("archived status --json: %+v", archived)
+	}
+	found := false
+	for _, st := range all.Status.Workstreams {
+		if string(st.Workstream) == id {
+			found = true
+			if !st.Archived {
+				t.Fatalf("overview --json lost the archived flag: %+v", st)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("overview --json omits the archived workstream: %+v", all.Status)
 	}
 	if data, err := os.ReadFile(filepath.Join(root, "runtime.json")); err != nil || !strings.Contains(string(data), `"workstream": "`+id+`"`) {
 		t.Fatalf("runtime.json %s %v", data, err)
