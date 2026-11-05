@@ -38,11 +38,14 @@ func openEngineMenu(t *testing.T, s *Service) *page {
 }
 
 func TestBrowserEngineControls(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "ssh://user:private@engine.example.ts.net")
+	t.Setenv("DOCKER_CONTEXT", "default")
 	s, fake := engineWebFixture(t, "managed")
 	release, err := service.InspectForTest(s).AcquireCheckSlot(context.Background(), service.CheckSlotRun{Project: project, Workstream: stream, Unit: "upload"})
 	must(t, err)
 	defer release()
 	p := openEngineMenu(t, s)
+	p.AwaitText("#engine-status [data-field=docker-host]", "ssh://engine.example.ts.net")
 	for field, want := range map[string]string{
 		"reachable": "Reachable", "version": "v0.19.0", "expected-version": "v0.20.5", "cli-version": "v0.20.5", "mismatch": "Engine differs from host CLI", "cache-size": "4,096 bytes",
 	} {

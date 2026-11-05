@@ -21,6 +21,9 @@ func (r *run) engine(ctx context.Context, cfg *config.Config) {
 		level = Warn
 		reachability = "unreachable: " + status.ReachabilityError
 	}
+	if status.DockerHost != "" {
+		reachability += "; Docker host: " + status.DockerHost
+	}
 	r.add(GroupToolchain, "dagger engine", level, fmt.Sprintf("%s: %s", status.Mode, reachability), "check the configured Dagger engine and its connectivity; under managed, start the service to ensure its container")
 	known := func(value string) string {
 		if value == "" {

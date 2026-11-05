@@ -14,6 +14,8 @@ import (
 
 func TestEngineCommands(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
+	t.Setenv("DOCKER_HOST", "ssh://user:private@engine.example.ts.net")
+	t.Setenv("DOCKER_CONTEXT", "default")
 	o := fixture(t)
 	path := filepath.Join(o.Config.Root, "config.toml")
 	original, err := os.ReadFile(path)
@@ -24,14 +26,17 @@ func TestEngineCommands(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
 	text := successful(t, o.Config.Root, "engine", "status")
-	for _, want := range []string{"mode=managed", "reachable=true", "v0.20.5", "configured=v0.21.0", "configured_mismatch=true", "4096 bytes"} {
+	for _, want := range []string{"mode=managed", "reachable=true", "v0.20.5", "configured=v0.21.0", "configured_mismatch=true", "4096 bytes", "Docker host: ssh://engine.example.ts.net"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q: %s", want, text)
 		}
 	}
+	if strings.Contains(text, "user") || strings.Contains(text, "private") {
+		t.Fatalf("host credentials: %s", text)
+	}
 	var status api.EngineStatus
 	must(t, json.Unmarshal([]byte(successful(t, o.Config.Root, "engine", "status", "--json")), &status))
-	if !status.Reachable || status.CacheSizeBytes == nil {
+	if !status.Reachable || status.CacheSizeBytes == nil || status.DockerHost != "ssh://engine.example.ts.net" {
 		t.Fatalf("JSON status: %+v", status)
 	}
 	release, err := service.InspectForTest(s).AcquireCheckSlot(t.Context(), service.CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "busy-unit"})
@@ -50,6 +55,19 @@ func TestEngineCommands(t *testing.T) {
 	if status.Version != "v0.21.0" || status.ConfiguredVersionMismatch {
 		t.Fatalf("restarted status: %+v", status)
 	}
+	external := append(append([]byte{}, original...), []byte("\n[dagger]\nengine = 'docker-container://explicit'\n")...)
+	must(t, os.WriteFile(path, external, 0600))
+	successful(t, o.Config.Root, "reload")
+	text = successful(t, o.Config.Root, "engine", "status")
+	if !strings.Contains(text, "Docker host: ssh://engine.example.ts.net") {
+		t.Fatal(text)
+	}
+	t.Setenv("DOCKER_CONTEXT", "named")
+	text = successful(t, o.Config.Root, "engine", "status")
+	if !strings.Contains(text, "DOCKER_HOST") || !strings.Contains(text, "DOCKER_CONTEXT") || strings.Contains(text, "Docker host:") {
+		t.Fatalf("conflicting selectors: %s", text)
+	}
+	t.Setenv("DOCKER_CONTEXT", "default")
 	before := fake.Commands(t)
 	must(t, os.WriteFile(path, original, 0600))
 	successful(t, o.Config.Root, "reload")

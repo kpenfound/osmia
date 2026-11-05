@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/redact"
 )
@@ -270,6 +271,9 @@ func redactError(err error) error {
 // and a cleanup to call once they have finished.
 func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity, withIdentity bool) (env []string, preparation Preparation, cleanup func(), err error) {
 	redact.Register(d.CloudToken)
+	if err := engine.ValidateDockerSelectors(d.Engine, os.Getenv); err != nil {
+		return nil, Preparation{}, nil, err
+	}
 	if d.Engine == "cloud" && d.CloudToken == "" {
 		return nil, Preparation{}, nil, errors.New("cloud engine requires a Dagger Cloud token")
 	}
@@ -334,8 +338,14 @@ func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, p
 		}
 	} else {
 		// DAGGER_ENGINE takes precedence over the deprecated runner and Cloud
-		// variables; none of the host's engine selectors are inherited here.
+		// variables. Docker container addresses also need the service Docker
+		// host; other Docker and SSH settings remain outside this allow-list.
 		cmd.Env = append(cmd.Env, "DAGGER_ENGINE="+d.Engine)
+		if strings.HasPrefix(d.Engine, "docker-container://") {
+			if host := os.Getenv("DOCKER_HOST"); host != "" {
+				cmd.Env = append(cmd.Env, "DOCKER_HOST="+host)
+			}
+		}
 		if d.Engine != "cloud" {
 			cmd.Env = append(cmd.Env, "_EXPERIMENTAL_DAGGER_RUNNER_HOST="+d.Engine)
 		}

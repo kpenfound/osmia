@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/service"
 )
@@ -410,5 +412,48 @@ func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
 	}
 	if !sawGitHub {
 		t.Fatalf("service.log has no GitHub activity record:\n%s", data)
+	}
+}
+
+// Serial: replaces the detached child process boundary.
+func TestDetachedReadinessAllowsEngineCreation(t *testing.T) {
+	if detachedReadinessTimeout <= engine.ActionTimeout+time.Second {
+		t.Fatal("readiness cannot cover managed engine creation")
+	}
+	for _, ready := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ready=%t", ready), func(t *testing.T) {
+			root, err := config.ResolveRoot(t.TempDir(), "")
+			must(t, err)
+			original := detachedCommand
+			defer func() { detachedCommand = original }()
+			var child *exec.Cmd
+			detachedCommand = func(string) (*exec.Cmd, error) {
+				script := "exec sleep 10"
+				if ready {
+					script = "sleep 0.2; printf 'ready\\n' >&3; exec sleep 10"
+				}
+				child = exec.Command("sh", "-c", script)
+				return child, nil
+			}
+			defer func() {
+				if child != nil && child.Process != nil {
+					_ = child.Process.Kill()
+				}
+			}()
+			timeout := 2 * time.Second
+			if !ready {
+				timeout = 100 * time.Millisecond
+			}
+			var out bytes.Buffer
+			err = detachWithin(t.Context(), root, &out, timeout)
+			if ready {
+				must(t, err)
+				if !strings.Contains(out.String(), "Osmia is ready") {
+					t.Fatal(out.String())
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "readiness timed out") {
+				t.Fatalf("%v", err)
+			}
+		})
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -162,6 +163,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	}
 	projects = append(projects, removed...)
 	if err := s.ensureEngine(context.Background(), next); err != nil {
+		unchanged.Message = redact.Secrets(err.Error(), redact.KnownSecrets()...) + "; the loaded configuration is unchanged"
 		rollback()
 		return failUnchanged()
 	}

@@ -63,14 +63,26 @@ func (s *Service) engineHTTP(w http.ResponseWriter, r *http.Request) bool {
 	}
 	// Lifecycle commands may need several bounded probes and container commands.
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(engineActionTimeout))
-	s.projectMu.Lock()
+	ctx, cancel := context.WithTimeout(r.Context(), engine.ActionTimeout)
+	defer cancel()
+	// Waiting for a configuration mutation counts against the action budget.
+	retry := time.NewTicker(10 * time.Millisecond)
+	defer retry.Stop()
+	for !s.projectMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			failWith(w, engineAPIError(ctx.Err()))
+			return true
+		case <-retry.C:
+		}
+	}
 	defer s.projectMu.Unlock()
 	control := engine.New(s.current().Dagger.Resolve(), engine.Options{})
 	var err error
 	if action == "restart" {
-		err = s.RestartEngine(r.Context(), control)
+		err = s.RestartEngine(ctx, control)
 	} else {
-		err = s.PruneEngine(r.Context(), control)
+		err = s.PruneEngine(ctx, control)
 	}
 	if err != nil {
 		failWith(w, engineAPIError(err))

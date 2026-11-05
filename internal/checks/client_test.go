@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 		"GITHUB_TOKEN": "host-github-secret", "GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "123", "CI": "host-ci",
 		"ANTHROPIC_API_KEY": "host-provider-secret", "SSH_AUTH_SOCK": "/host/agent", "DAGGER_CLOUD_TOKEN": "host-cloud-secret",
 		"DAGGER_ENGINE": "cloud", "DAGGER_CLOUD_ENGINE": "1", "DOCKER_HOST": "tcp://host-docker:1234",
+		"DOCKER_CONFIG": "/host/docker", "DOCKER_CONTEXT": "default", "DOCKER_TLS_VERIFY": "1", "DOCKER_CERT_PATH": "/host/certs",
 		"_EXPERIMENTAL_DAGGER_RUNNER_HOST": "tcp://host-runner:1234", "DAGGER_X_RELEASE": "test-release",
 	} {
 		t.Setenv(name, value)
@@ -37,7 +39,7 @@ func TestDaggerClientEnvironment(t *testing.T) {
 	git("init", "--quiet")
 	git("-c", "user.name=Candidate", "-c", "user.email=candidate@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "candidate")
 	identity := Identity{Candidate: git("rev-parse", "HEAD"), Branch: "osmia-unit/example/unit", Remote: "https://github.com/example/project", Repository: clone}
-	for _, engine := range []string{"", "auto", "tcp://configured:1234", "docker-container://osmia-dagger-engine", "cloud"} {
+	for _, engine := range []string{"", "auto", "tcp://configured:1234", "unix:///run/engine.sock", "docker-container://explicit", "docker-container://osmia-dagger-engine", "cloud"} {
 		for _, token := range []string{"", "client-environment-secret"} {
 			for _, fallback := range []bool{false, true} {
 				label := engine
@@ -94,6 +96,9 @@ func TestDaggerClientEnvironment(t *testing.T) {
 							if engine != "cloud" {
 								want["_EXPERIMENTAL_DAGGER_RUNNER_HOST"] = engine
 							}
+						}
+						if strings.HasPrefix(engine, "docker-container://") {
+							want["DOCKER_HOST"] = "tcp://host-docker:1234"
 						}
 						if token != "" && (operation == "check" || operation == "call" || operation == "core" || engine == "cloud") {
 							want["DAGGER_CLOUD_TOKEN"] = token
@@ -179,6 +184,87 @@ func TestCloudTraceURL(t *testing.T) {
 	for _, link := range []string{"https://dagger.cloud/org/traces/abc-123", "https://dagger.cloud/traces/abc123"} {
 		if got := cloudTraceURL("View trace at (" + link + ").\n"); got != link {
 			t.Fatalf("got %q", got)
+		}
+	}
+}
+
+// Serial: installs a fake CLI and sets the process Docker selectors.
+func TestDockerCheckHost(t *testing.T) {
+	fake := fixturekit.InstallEngineCLIs(t)
+	for _, host := range []string{"tcp://engine-host.example.ts.net:2375", "ssh://user@engine-host.example.ts.net", ""} {
+		t.Run(host, func(t *testing.T) {
+			t.Setenv("DOCKER_HOST", host)
+			if host == "" {
+				must(t, os.Unsetenv("DOCKER_HOST"))
+			}
+			t.Setenv("DOCKER_CONTEXT", "default")
+			for _, address := range []string{"docker-container://osmia-dagger-engine", "docker-container://explicit"} {
+				d := DaggerChecks{Engine: address}
+				links, err := d.List(t.Context(), t.TempDir(), Identity{})
+				must(t, err)
+				if len(links) != 1 {
+					t.Fatalf("links %v", links)
+				}
+				result, err := d.Check(t.Context(), t.TempDir(), Identity{}, links)
+				must(t, err)
+				log, readErr := os.ReadFile(fake.Environments)
+				must(t, readErr)
+				for _, want := range []string{"dagger|list checks --all --format=link|" + address + "|" + host + "\n", "dagger|check --progress=report --fail-fast --parallel 4 dag+check://go/test|" + address + "|" + host + "\n"} {
+					if !strings.Contains(string(log), want) {
+						t.Fatalf("missing %q: %s", want, log)
+					}
+				}
+				if result.ExitCode != 0 || !strings.Contains(result.Output, "DOCKER_HOST="+redact.Secrets(host, redact.KnownSecrets()...)+"\n") {
+					t.Fatalf("%+v", result)
+				}
+			}
+		})
+	}
+	t.Setenv("DOCKER_HOST", "tcp://engine.example.ts.net:2375")
+	t.Setenv("DOCKER_CONTEXT", "named")
+	must(t, os.WriteFile(fake.Environments, nil, 0600))
+	for _, address := range []string{"docker-container://osmia-dagger-engine", "docker-container://explicit"} {
+		d := DaggerChecks{Engine: address}
+		_, err := d.List(t.Context(), t.TempDir(), Identity{})
+		conflict := func(err error) {
+			t.Helper()
+			if err == nil || !strings.Contains(err.Error(), "DOCKER_HOST") || !strings.Contains(err.Error(), "DOCKER_CONTEXT") {
+				t.Fatalf("%v", err)
+			}
+		}
+		conflict(err)
+		_, err = d.Check(t.Context(), t.TempDir(), Identity{}, nil)
+		conflict(err)
+	}
+	log, err := os.ReadFile(fake.Environments)
+	must(t, err)
+	if len(log) != 0 {
+		t.Fatalf("conflict ran check client: %s", log)
+	}
+}
+
+// Serial: supplies a host Docker Desktop socket and host CLI selectors.
+func TestAutoCheckDockerDesktopSelection(t *testing.T) {
+	bin := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\nprintf '%s\\n%s\\n' \"${DOCKER_HOST-}\" \"${_EXPERIMENTAL_DAGGER_RUNNER_HOST-}\"\n"), 0700))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-runner:1234")
+	home, err := os.MkdirTemp("", "check-desktop-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	must(t, os.MkdirAll(filepath.Join(home, ".docker", "run"), 0700))
+	socket := filepath.Join(home, ".docker", "run", "docker.sock")
+	ln, err := net.Listen("unix", socket)
+	must(t, err)
+	defer ln.Close()
+	for _, selection := range []string{"", "auto"} {
+		var out bytes.Buffer
+		exit, _, err := (DaggerChecks{Engine: selection}).dagger(t.Context(), t.TempDir(), Identity{}, false, &out, "check")
+		must(t, err)
+		if exit != 0 || out.String() != "unix://"+socket+"\ntcp://host-runner:1234\n" {
+			t.Fatalf("exit=%d: %s", exit, out.String())
 		}
 	}
 }

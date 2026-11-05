@@ -19,11 +19,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
 const readinessEnv = "OSMIA_SERVICE_READY_FD"
+
+// Startup can ensure the managed engine before it acknowledges readiness.
+const detachedReadinessTimeout = engine.ActionTimeout + 30*time.Second
 
 // detachedCommand is the process boundary; tests launch an idle fake service.
 // An empty root serves the default root.
@@ -214,6 +218,10 @@ func failureText(err error) string {
 // detach acknowledges startup only through the child's private readiness pipe.
 // Root ownership and socket recovery remain the service's responsibility.
 func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
+	return detachWithin(ctx, root, stdout, detachedReadinessTimeout)
+}
+
+func detachWithin(ctx context.Context, root config.Root, stdout io.Writer, timeout time.Duration) error {
 	logPath := filepath.Join(root.String(), "service.log")
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
@@ -260,7 +268,7 @@ func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
 		_, err := io.ReadFull(read, data[:])
 		ready <- err == nil && string(data[:]) == "ready\n"
 	}()
-	timer := time.NewTimer(30 * time.Second)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	stop := func() { cmd.Process.Kill(); <-exited }
 	select {

@@ -5415,6 +5415,9 @@
           "configured_version_mismatch": {
             "type": "boolean"
           },
+          "docker_host": {
+            "type": "string"
+          },
           "expected_version": {
             "type": "string"
           },

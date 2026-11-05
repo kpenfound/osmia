@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -22,15 +23,22 @@ const CacheVolumeName = "osmia-dagger-engine-cache"
 const cachePath = "/var/lib/dagger"
 const commandTimeout = 30 * time.Second
 
+// ActionTimeout bounds all commands in a creating action, leaving time for the
+// service's five-minute engine API write deadline and command pipe shutdown.
+const ActionTimeout = 4*time.Minute + 30*time.Second
+const createTimeout = 4 * time.Minute
+
 // Command runs an executable with exactly env and returns its standard output.
 type Command func(ctx context.Context, path string, env []string, args ...string) (string, error)
 
 // Options replaces host boundaries. Nil boundaries use the host's.
 type Options struct {
-	LookPath func(string) (string, error)
-	Command  Command
-	Getenv   func(string) string
-	Timeout  time.Duration
+	LookPath      func(string) (string, error)
+	Command       Command
+	Getenv        func(string) string
+	Timeout       time.Duration
+	CreateTimeout time.Duration
+	ActionTimeout time.Duration
 }
 
 // Controller uses a resolved, validated configuration. It never changes the
@@ -59,6 +67,12 @@ func New(resolved config.ResolvedDagger, o Options) *Controller {
 	if o.Timeout <= 0 {
 		o.Timeout = commandTimeout
 	}
+	if o.CreateTimeout <= 0 {
+		o.CreateTimeout = createTimeout
+	}
+	if o.ActionTimeout <= 0 {
+		o.ActionTimeout = ActionTimeout
+	}
 	return &Controller{config: resolved, options: o}
 }
 
@@ -67,6 +81,7 @@ func New(resolved config.ResolvedDagger, o Options) *Controller {
 type Status struct {
 	Mode                      config.DaggerEngineMode `json:"mode"`
 	Address                   string                  `json:"address,omitempty"`
+	DockerHost                string                  `json:"docker_host,omitempty"`
 	Reachable                 bool                    `json:"reachable"`
 	Version                   string                  `json:"version,omitempty"`
 	ExpectedVersion           string                  `json:"expected_version,omitempty"`
@@ -90,6 +105,9 @@ func (e *NotApplicableError) Error() string {
 // Applicable checks whether a lifecycle action applies, without probing or
 // modifying the engine. Admission gates call it before checking for busy work.
 func (c *Controller) Applicable(action string) error {
+	if err := ValidateDockerSelectors(c.config.Address, c.options.Getenv); err != nil {
+		return err
+	}
 	if c.config.Mode != config.DaggerEngineManaged {
 		return &NotApplicableError{Mode: c.config.Mode, Action: action}
 	}
@@ -124,6 +142,11 @@ func (c *Controller) cliVersion(ctx context.Context) (string, error) {
 // container is left untouched, including when its image differs from configuration.
 // Other modes require no action.
 func (c *Controller) Ensure(ctx context.Context) error {
+	if err := ValidateDockerSelectors(c.config.Address, c.options.Getenv); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.options.ActionTimeout)
+	defer cancel()
 	if c.config.Mode != config.DaggerEngineManaged {
 		return nil
 	}
@@ -151,6 +174,8 @@ func (c *Controller) Restart(ctx context.Context) error {
 	if err := c.Applicable("restart"); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.options.ActionTimeout)
+	defer cancel()
 	version, err := c.ExpectedVersion(ctx)
 	if err != nil {
 		return err
@@ -203,7 +228,7 @@ func (c *Controller) create(ctx context.Context, version, volume string) error {
 	if version == "" {
 		return errors.New("cannot determine managed engine version")
 	}
-	_, err := c.invoke(ctx, "docker", false, "run", "--detach", "--name", config.ManagedDaggerEngineName,
+	_, err := c.invokeTimeout(ctx, c.options.CreateTimeout, "docker", false, "run", "--detach", "--name", config.ManagedDaggerEngineName,
 		"--privileged", "--restart", "always", "--volume", volume+":"+cachePath, "registry.dagger.io/engine:"+version)
 	return err
 }
@@ -212,6 +237,13 @@ func (c *Controller) create(ctx context.Context, version, volume string) error {
 // commands. Failure to reach an engine is represented in the snapshot.
 func (c *Controller) Status(ctx context.Context) (Status, error) {
 	s := Status{Mode: c.config.Mode, Address: c.config.Address, ExpectedVersion: release(c.config.Version)}
+	if err := ValidateDockerSelectors(c.config.Address, c.options.Getenv); err != nil {
+		s.ReachabilityError = err.Error()
+		return s, nil
+	}
+	if strings.HasPrefix(c.config.Address, "docker-container://") {
+		s.DockerHost = displayDockerHost(c.options.Getenv("DOCKER_HOST"))
+	}
 	s.CLIVersion, _ = c.cliVersion(ctx)
 	if s.ExpectedVersion == "" {
 		s.ExpectedVersion = s.CLIVersion
@@ -301,7 +333,11 @@ func imageRelease(image string) string {
 }
 
 func (c *Controller) invoke(ctx context.Context, name string, engine bool, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.options.Timeout)
+	return c.invokeTimeout(ctx, c.options.Timeout, name, engine, args...)
+}
+
+func (c *Controller) invokeTimeout(ctx context.Context, timeout time.Duration, name string, engine bool, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	path, err := c.options.LookPath(name)
 	if err != nil {
@@ -361,4 +397,31 @@ func command(ctx context.Context, path string, env []string, args ...string) (st
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exit.Stderr)))
 	}
 	return string(out), err
+}
+
+// ValidateDockerSelectors refuses competing selectors before reaching a Docker
+// engine. Default contexts follow DOCKER_HOST; other engine transports and auto
+// selection retain the host CLI's selection behavior.
+func ValidateDockerSelectors(address string, getenv func(string) string) error {
+	if strings.HasPrefix(address, "docker-container://") && getenv("DOCKER_HOST") != "" {
+		if v := getenv("DOCKER_CONTEXT"); v != "" && v != "default" {
+			return errors.New("DOCKER_HOST conflicts with DOCKER_CONTEXT; unset one selector or use DOCKER_CONTEXT=default")
+		}
+	}
+	return nil
+}
+
+func displayDockerHost(value string) string {
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme == "" {
+		return ""
+	}
+	display := &url.URL{Scheme: u.Scheme, Host: u.Host}
+	// A local Docker socket has no host authority; its absolute path names it.
+	if u.Scheme == "unix" && strings.HasPrefix(u.Path, "/") {
+		display.Path = u.Path
+	} else if u.Host == "" {
+		return ""
+	}
+	return redact.Secrets(display.String(), redact.KnownSecrets()...)
 }

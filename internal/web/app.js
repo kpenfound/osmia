@@ -745,6 +745,7 @@
       box.replaceChildren(...[
         field('mode', 'Mode', status.mode),
         status.address ? field('address', 'Address', status.address) : null,
+        status.docker_host ? field('docker-host', 'Docker host', status.docker_host) : null,
         field('reachable', 'Reachability', status.reachable ? 'Reachable' : 'Unreachable'),
         status.reachability_error ? field('reachability-error', 'Reason', status.reachability_error) : null,
         field('version', 'Engine version', status.version || 'Unknown'),

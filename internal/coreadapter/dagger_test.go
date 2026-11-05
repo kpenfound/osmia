@@ -3,6 +3,9 @@ package coreadapter_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +141,124 @@ func TestDaggerEngineIsGrantedAndPolicyMustMatch(t *testing.T) {
 			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
 			if !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 || !engine.Released() {
 				t.Fatalf("policy accepted: %v, launches=%d", err, len(engine.Requests))
+			}
+		})
+	}
+}
+
+// Serial: the pinned runner's Docker forward inherits the process environment.
+func TestMasonDockerEngineForwardUsesServiceHost(t *testing.T) {
+	for _, host := range []string{"tcp://engine.example.ts.net:2375", "ssh://user@engine.example.ts.net", ""} {
+		t.Run(host, func(t *testing.T) {
+			t.Setenv("DOCKER_HOST", host)
+			if host == "" {
+				if err := os.Unsetenv("DOCKER_HOST"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("DOCKER_CONTEXT", "default")
+			turn := daggerTurn(t)
+			turn.Execution.Dagger.Engine = "docker-container://osmia-dagger-engine"
+			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
+			finish := filepath.Join(t.TempDir(), "finish")
+			t.Cleanup(func() { _ = os.WriteFile(finish, nil, 0600) })
+			runner := sbxRunner(t, fmt.Sprintf(`case "$*" in
+*--version*) echo '2.1.200'; exit 0 ;;
+*--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
+esac
+cat >/dev/null
+while [ ! -f %q ]; do sleep 0.01; done
+echo '{"type":"result","subtype":"success","result":"built"}'
+`, finish))
+			log := filepath.Join(t.TempDir(), "docker")
+			runner.DockerBin = agenttest.Script(t, "docker", fmt.Sprintf("printf '%%s\\n%%s\\n' \"${DOCKER_HOST-}\" \"$*\" > %q\nexec cat\n", log))
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			finished := make(chan error, 1)
+			settled := make(chan struct{})
+			defer func() { cancel(); <-settled }()
+			go func() {
+				result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(ctx, turn)
+				if err == nil && (result.IsError || result.FinalResponse != "built") {
+					err = fmt.Errorf("result %+v", result)
+				}
+				finished <- err
+				close(settled)
+			}()
+			envPath := filepath.Join(turn.SessionDirectory, "sbx-exec-env.txt")
+			var env, port string
+			for port == "" {
+				data, _ := os.ReadFile(envPath)
+				env = string(data)
+				for _, line := range strings.Split(env, "\n") {
+					if p, ok := strings.CutPrefix(line, agent.EnvDaggerRunnerHost+"=tcp://host.docker.internal:"); ok {
+						port = p
+					}
+				}
+				select {
+				case err := <-finished:
+					t.Fatalf("session ended before engine connection: %v", err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			// The fake records the sbx client's environment. Only --env grants
+			// enter a real sandbox; derive that environment from the runner's args.
+			clientEnv := map[string]string{}
+			for _, line := range strings.Split(env, "\n") {
+				if name, value, ok := strings.Cut(line, "="); ok {
+					clientEnv[name] = value
+				}
+			}
+			args := strings.Split(readSbxFile(t, filepath.Join(turn.SessionDirectory, "sbx-exec-args.txt")), "\n")
+			sandboxEnv := map[string]string{}
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "--env" {
+					name, value, explicit := strings.Cut(args[i+1], "=")
+					if !explicit {
+						value = clientEnv[name]
+					}
+					sandboxEnv[name] = value
+					i++
+				}
+			}
+			if _, ok := sandboxEnv["DOCKER_HOST"]; ok {
+				t.Fatal("Docker host granted to sandbox")
+			}
+			if sandboxEnv[agent.EnvDaggerRunnerHost] != "tcp://host.docker.internal:"+port {
+				t.Fatal("forwarded address not granted to sandbox")
+			}
+			if strings.Contains(strings.Join(args, "\n"), "docker.sock") {
+				t.Fatal("Docker socket granted to sandbox")
+			}
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.Write([]byte("ping")); err != nil {
+				t.Fatal(err)
+			}
+			response := make([]byte, 4)
+			if _, err := io.ReadFull(conn, response); err != nil || string(response) != "ping" {
+				t.Fatalf("forward response %q: %v", response, err)
+			}
+			data, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != host+"\nexec -i osmia-dagger-engine buildctl dial-stdio\n" {
+				t.Fatalf("Docker forward: %s", data)
+			}
+			if err := os.WriteFile(finish, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-finished; err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
