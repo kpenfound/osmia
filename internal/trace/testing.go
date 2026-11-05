@@ -36,3 +36,13 @@ func (r *Repository) RecordDecodeCount(stream config.WorkstreamID) (uint64, erro
 func WorkgroupTraceOpenCount(id config.WorkgroupID) uint64 {
 	return sharedWorkgroupTraceFor(id).opens.Load()
 }
+
+// CrossRepoProjectSpecReadCount reports shared project spec lookup attempts.
+func CrossRepoProjectSpecReadCount(id config.WorkgroupID) uint64 {
+	return sharedWorkgroupTraceFor(id).projectSpecReads.Load()
+}
+
+// WorkgroupReadCount reports workgroup list lookup attempts on this handle.
+func (r *Repository) WorkgroupReadCount() uint64 {
+	return r.workgroupReads.Load()
+}

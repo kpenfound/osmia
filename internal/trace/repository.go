@@ -91,7 +91,8 @@ type Repository struct {
 	// cache holds the trace's decoded records under its own lock.
 	cache recordCache
 	// decoded counts the stored records this handle decoded.
-	decoded atomic.Uint64
+	decoded        atomic.Uint64
+	workgroupReads atomic.Uint64
 	// parent is the project instance that opened this workstream instance
 	// through scoped, nil on the project's own instance. observed delegates
 	// to it so that Observe, called once on the project instance, also

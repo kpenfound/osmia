@@ -216,8 +216,9 @@ type sharedWorkgroupTrace struct {
 	repo *Repository
 	refs int
 	// resolved survives handle closure and is cleared by resolution-invalidating writes.
-	resolved atomic.Bool
-	opens    atomic.Uint64
+	resolved         atomic.Bool
+	opens            atomic.Uint64
+	projectSpecReads atomic.Uint64
 }
 
 // workgroupTraces holds one *sharedWorkgroupTrace per workgroup ID this

@@ -285,6 +285,18 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 	if err != nil {
 		return err
 	}
+	groups, _, err := trace.Workgroups(repo)
+	if err != nil {
+		return err
+	}
+	type crossRepoReads struct {
+		authority         *trace.Repository
+		group             trace.Workgroup
+		retirementChecked bool
+		retired           bool
+		pending           bool
+	}
+	crossRepo := map[config.WorkgroupID]*crossRepoReads{}
 	seen := map[config.WorkgroupID]bool{}
 	for _, stream := range streams {
 		if err := ctx.Err(); err != nil {
@@ -305,11 +317,7 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		} else if kind == trace.SessionKind || stream == librarianWorkstream(repo.Project()) {
 			continue
 		}
-		groups, _, err := trace.Workgroups(repo)
-		if err != nil {
-			return err
-		}
-		_, local := trace.WorkgroupOf(groups, stream)
+		group, local := trace.WorkgroupOf(groups, stream)
 		cross, err := repo.CrossRepoWorkgroupOf(stream)
 		if err != nil {
 			return err
@@ -317,34 +325,63 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		if !local && cross == "" {
 			continue
 		}
+		scanMembers := group.Members
 		if cross != "" {
-			_, group, _, err := repo.CrossRepoProjectSpec(cross)
-			if err != nil {
-				return err
+			cached, ok := crossRepo[cross]
+			if !ok {
+				authority, _, g, _, err := repo.OpenCrossRepoProjectSpec(cross)
+				if err != nil {
+					return err
+				}
+				if authority != nil {
+					defer authority.Close()
+				}
+				cached = &crossRepoReads{authority: authority, group: g}
+				crossRepo[cross] = cached
 			}
+			group = cached.group
 			// A retained conversation source locator can point at the group
 			// without being a member eligible to drive its change journal.
 			if group.ID == cross && len(group.Members) > 0 && !slices.Contains(group.Members, stream) {
 				continue
 			}
 			if group.ID == cross && len(group.Members) > 1 {
-				retired, err := s.WorkgroupFullyRetired(ctx, group)
-				if err != nil {
-					return err
-				}
-				if retired {
-					// The adopted source remains a locator after all real members
-					// retire. Authority is retained, but grants no member effects.
-					pending, err := s.RetiredChangesPending(cross, group)
+				if !cached.retirementChecked {
+					live, err := s.LiveWorkgroupMembers(group)
 					if err != nil {
 						return err
 					}
-					if pending {
+					if len(live) == 0 {
+						cached.retired, err = s.validateRetiredWorkgroup(ctx, cached.authority, group)
+						if err != nil {
+							return err
+						}
+					}
+					if cached.retired {
+						cached.pending, err = retiredChangesPending(cached.authority, group)
+						if err != nil {
+							return err
+						}
+					}
+					cached.retirementChecked = true
+				}
+				if cached.retired {
+					// The adopted source remains a locator after all real members
+					// retire. Authority is retained, but grants no member effects.
+					if cached.pending {
 						s.Log().Warn("workgroup changes remain held", "workgroup", cross, "member", group.Members[1], "error", "no live member remains to reconcile pending project decisions")
 					}
 					continue
 				}
+				scanMembers = group.Members[1:]
+			} else {
+				// Incomplete shared membership must still reach routing's
+				// validation rather than being hidden by the early gate.
+				scanMembers = nil
 			}
+		}
+		if len(scanMembers) > 0 && (seen[group.ID] || s.ChangeLeader(scanMembers) != stream) {
+			continue
 		}
 		wt, g, _, close, err := s.ChangeContext(ctx, string(stream))
 		if errors.Is(err, errWorkgroupJoining) {
@@ -400,6 +437,10 @@ func (s *Controller) RetiredChangesPending(id config.WorkgroupID, g trace.Workgr
 		return false, err
 	}
 	defer wt.Close()
+	return retiredChangesPending(wt, g)
+}
+
+func retiredChangesPending(wt *trace.Repository, g trace.Workgroup) (bool, error) {
 	requests, _, err := trace.ProjectAmendments(wt)
 	if err != nil {
 		return false, err
