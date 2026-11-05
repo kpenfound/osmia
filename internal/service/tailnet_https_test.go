@@ -150,21 +150,23 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 			t.Parallel()
 			opts := fixture(t)
 			withListen(t, opts, "tailnet = \"osmia\"\n")
+			opts.TailnetHTTPSRetry = time.Hour
 			joined := withTailnet(t, &opts, httpsNodeName)
 			join := opts.JoinTailnet
 			opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
 				node, err := join(host, dir)
 				if err == nil {
-					node.(*fakeTailnet).HTTPSFailure = errors.New(reason)
+					node.(*fakeTailnet).SetHTTPSFailure(errors.New(reason))
 				}
 				return node, err
 			}
 			s, c := start(t, opts)
-			eventually(t, "HTTPS failure not reported", func() bool { return s.tailnetStatus(context.Background()).HTTPSReason == reason })
+			want := reason + "; retrying in 1h0m0s"
+			eventually(t, "HTTPS failure not reported", func() bool { return s.tailnetStatus(context.Background()).HTTPSReason == want })
 			status := awaitHTTPS(t, c, api.TailnetHTTPSUnavailable)
 			st, err := c.Statuses(context.Background())
 			must(t, err)
-			if !reflect.DeepEqual(st.Tailnet, status) || status.State != TailnetUp || status.HTTPSReason != reason || status.HTTPSAddress != "" || (*joined).Left.Load() {
+			if !reflect.DeepEqual(st.Tailnet, status) || status.State != TailnetUp || status.HTTPSReason != want || status.HTTPSAddress != "" || (*joined).Left.Load() {
 				t.Fatalf("failure: %+v", status)
 			}
 			if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
@@ -174,6 +176,75 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 				t.Fatal(got)
 			}
 		})
+	}
+}
+
+// A failed certificate request is retried while the node stays joined, so
+// HTTPS comes up once issuance succeeds, without a restart.
+func TestTailnetHTTPSRetriesUntilTheCertificateIsIssued(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	withListen(t, opts, "tailnet = \"osmia\"\n")
+	opts.TailnetHTTPSRetry = 10 * time.Millisecond
+	joined := withTailnet(t, &opts, httpsNodeName)
+	join := opts.JoinTailnet
+	failure := "certificate for " + httpsNodeName + ": context deadline exceeded"
+	opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
+		node, err := join(host, dir)
+		if err == nil {
+			node.(*fakeTailnet).SetHTTPSFailure(errors.New(failure))
+		}
+		return node, err
+	}
+	s, c := start(t, opts)
+	status := awaitHTTPS(t, c, api.TailnetHTTPSUnavailable)
+	eventually(t, "failed request not reported with its retry", func() bool {
+		status = s.tailnetStatus(context.Background())
+		return strings.HasPrefix(status.HTTPSReason, failure+"; retrying in ")
+	})
+	node := *joined
+	eventually(t, "certificate request not retried", func() bool { return node.HTTPSCalls.Load() >= 3 })
+	node.SetHTTPSFailure(nil)
+	status = awaitHTTPS(t, c, api.TailnetHTTPSUp)
+	if status.HTTPSAddress != httpsNodeAddress || status.HTTPSReason != "" || node.Left.Load() {
+		t.Fatalf("HTTPS after retry: %+v", status)
+	}
+	if code, body := exchange(t, nodeHTTPSClient(t, node), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
+		t.Fatalf("TLS: %d %s", code, body)
+	}
+}
+
+// A first issuance can take minutes. The request gets that long, status says
+// it is in progress, and HTTPS comes up when it finishes.
+func TestTailnetHTTPSWaitsForASlowIssuance(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	withListen(t, opts, "tailnet = \"osmia\"\n")
+	joined := withTailnet(t, &opts, httpsNodeName)
+	join := opts.JoinTailnet
+	var release func()
+	opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
+		node, err := join(host, dir)
+		if err == nil {
+			release = node.(*fakeTailnet).HoldHTTPS()
+		}
+		return node, err
+	}
+	s, c := start(t, opts)
+	node := *joined
+	eventually(t, "certificate request not reported in progress", func() bool {
+		return node.HTTPSCalls.Load() == 1 && s.tailnetStatus(context.Background()).HTTPSReason == "requesting the HTTPS certificate"
+	})
+	if deadline := node.HTTPSDeadline(); !deadline.IsZero() && time.Until(deadline) < 5*time.Minute {
+		t.Fatalf("certificate request has only %s to finish", time.Until(deadline))
+	}
+	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+		t.Fatalf("HTTP during issuance: %d %s", code, body)
+	}
+	release()
+	status := awaitHTTPS(t, c, api.TailnetHTTPSUp)
+	if status.HTTPSAddress != httpsNodeAddress || node.HTTPSCalls.Load() != 1 {
+		t.Fatalf("HTTPS after slow issuance: %+v, %d requests", status, node.HTTPSCalls.Load())
 	}
 }
 

@@ -289,7 +289,9 @@ certificates** in the tailnet admin console before using it. Issuing a
 certificate publishes the node's `*.ts.net` name in public Certificate
 Transparency logs: the name becomes public, but access does not. HTTPS setup
 or listener failures leave HTTP on port 80 serving; status reports HTTPS as
-unavailable with a reason. HTTP does not redirect to HTTPS.
+unavailable with a reason, and a failed certificate request is retried (see
+[Tailnet listener](running.md#tailnet-listener)). HTTP does not redirect to
+HTTPS.
 
 Dictation uses the browser's speech recognition over HTTPS or localhost.
 Osmia never receives audio: Chrome sends audio to Google for processing, and

@@ -33,12 +33,12 @@ type TailnetNode struct {
 	conns               []net.Conn
 	state               api.TailnetStatus
 	certificate         *x509.Certificate
-	// HTTPSFailure simulates certificate availability or issuance failure.
-	// Set it before the node is returned by the joiner.
-	HTTPSFailure error
-	HTTPSCalls   atomic.Int32
-	tlsListener  net.Listener
-	tlsClosed    atomic.Bool
+	HTTPSCalls          atomic.Int32
+	httpsFailure        error
+	httpsHold           chan struct{}
+	httpsDeadline       time.Time
+	tlsListener         net.Listener
+	tlsClosed           atomic.Bool
 }
 
 func (f *TailnetNode) State(context.Context) api.TailnetStatus {
@@ -121,9 +121,20 @@ func WithListen(t *testing.T, root, body string) {
 // HTTPS serves real TLS with a self-signed certificate for the full node name.
 // Browsers can map that name to HTTPSAddr and trust this test certificate.
 func (f *TailnetNode) HTTPS(ctx context.Context) (net.Listener, string, error) {
+	f.mu.Lock()
+	failure, hold := f.httpsFailure, f.httpsHold
+	f.httpsDeadline, _ = ctx.Deadline()
+	f.mu.Unlock()
 	f.HTTPSCalls.Add(1)
-	if f.HTTPSFailure != nil {
-		return nil, "", f.HTTPSFailure
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+	}
+	if failure != nil {
+		return nil, "", failure
 	}
 	if len(f.NodeNames) == 0 || !strings.HasSuffix(strings.TrimSuffix(f.NodeNames[0], "."), ".ts.net") {
 		return nil, "", errors.New("the node has no full MagicDNS name")
@@ -152,6 +163,43 @@ func (f *TailnetNode) HTTPS(ctx context.Context) (net.Listener, string, error) {
 	f.certificate, _ = x509.ParseCertificate(der)
 	f.mu.Unlock()
 	return listener, name, nil
+}
+
+// SetHTTPSFailure makes every later certificate request fail with err, which
+// simulates certificates being disabled or issuance failing; nil lets them
+// succeed again.
+func (f *TailnetNode) SetHTTPSFailure(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.httpsFailure = err
+}
+
+// HoldHTTPS keeps later certificate requests waiting, as a slow issuance
+// does, until release is called or the request's context ends.
+func (f *TailnetNode) HoldHTTPS() (release func()) {
+	hold := make(chan struct{})
+	f.mu.Lock()
+	f.httpsHold = hold
+	f.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			f.mu.Lock()
+			if f.httpsHold == hold {
+				f.httpsHold = nil
+			}
+			f.mu.Unlock()
+			close(hold)
+		})
+	}
+}
+
+// HTTPSDeadline is the deadline of the latest certificate request's context,
+// or zero when it had none.
+func (f *TailnetNode) HTTPSDeadline() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.httpsDeadline
 }
 
 // HTTPSAddr is the local address standing in for the node's tailnet port 443.

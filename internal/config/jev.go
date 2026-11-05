@@ -10,9 +10,9 @@ import (
 
 // The Jev defaults reach Jev through OpenRouter's TypeSafe-compatible API.
 const (
-	DefaultJevURL       = jev.DefaultURL
-	DefaultJevModel     = jev.DefaultModel
-	DefaultJevAPIKeyEnv = jev.DefaultAPIKeyEnv
+	DefaultJevURL       = "https://openrouter.ai/api"
+	DefaultJevModel     = "~typesafe/jev-latest"
+	DefaultJevAPIKeyEnv = "OPENROUTER_API_KEY"
 	DefaultJevTimeout   = "10s"
 )
 

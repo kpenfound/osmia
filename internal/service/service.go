@@ -117,6 +117,10 @@ type Options struct {
 	// again after a failed join or a dropped listener. It defaults to 5
 	// seconds.
 	TailnetRetry time.Duration
+	// TailnetHTTPSRetry is how long the service waits before it requests the
+	// tailnet HTTPS certificate again after a failed request, doubled after
+	// each further failure up to 15 minutes. It defaults to 30 seconds.
+	TailnetHTTPSRetry time.Duration
 	// NotifyRetry is how long the service waits before it posts a
 	// notification the webhook refused again, doubled after each further
 	// failure. It defaults to 30 seconds.
@@ -408,6 +412,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	if opts.TailnetRetry <= 0 {
 		opts.TailnetRetry = 5 * time.Second
+	}
+	if opts.TailnetHTTPSRetry <= 0 {
+		opts.TailnetHTTPSRetry = 30 * time.Second
 	}
 	if opts.ReadHeaderTimeout <= 0 {
 		opts.ReadHeaderTimeout = 5 * time.Second

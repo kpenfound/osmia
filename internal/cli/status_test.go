@@ -583,17 +583,18 @@ func TestStatusCommandReportsTailnetHTTPS(t *testing.T) {
 	for _, tc := range []struct{ setting, reason, want string }{
 		{"", "", "Tailnet HTTPS: up https://osmia.tail0.ts.net/\n"},
 		{"tailnet_https = false\n", "", "Tailnet HTTPS: off (disabled by listen.tailnet_https)\n"},
-		{"", "enable HTTPS certificates in the tailnet admin console", "Tailnet HTTPS: unavailable (enable HTTPS certificates in the tailnet admin console)\n"},
-		{"", "certificate retrieval failed", "Tailnet HTTPS: unavailable (certificate retrieval failed)\n"},
+		{"", "enable HTTPS certificates in the tailnet admin console", "Tailnet HTTPS: unavailable (enable HTTPS certificates in the tailnet admin console; retrying in 1h0m0s)\n"},
+		{"", "certificate retrieval failed", "Tailnet HTTPS: unavailable (certificate retrieval failed; retrying in 1h0m0s)\n"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			opts := fixture(t)
 			fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n"+tc.setting)
+			opts.TailnetHTTPSRetry = time.Hour
 			join, _ := fixturekit.TailnetJoiner("osmia.tail0.ts.net")
 			opts.JoinTailnet = func(host, dir string) (service.TailnetListener, error) {
 				node, err := join(host, dir)
 				if node != nil && tc.reason != "" {
-					node.HTTPSFailure = errors.New(tc.reason)
+					node.SetHTTPSFailure(errors.New(tc.reason))
 				}
 				return node, err
 			}

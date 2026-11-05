@@ -65,6 +65,33 @@ func TestTailscaleLogfRecordsAStructuredLineWithTheLoginURLAsAField(t *testing.T
 	}
 }
 
+// Only the backend's certificate lines reach the service log, so issuance
+// progress is visible without the backend's other output.
+func TestCertificateLogfForwardsOnlyCertificateLines(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logf := certificateLogf(slog.New(slog.NewJSONHandler(&buf, nil)))
+	logf(`cert("osmia.tail0.ts.net"): did SetDNS for %s`, "_acme-challenge.osmia.tail0.ts.net")
+	logf("magicsock: disco: node %s now using %s", "[abc]", "192.0.2.1:41641")
+	logf(`cert("osmia.tail0.ts.net"): got cert`)
+
+	var messages []string
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		var r tailscaleLogRecord
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("line does not parse as JSON: %s: %v", line, err)
+		}
+		if r.Component != "tailnet" {
+			t.Fatalf("record %+v", r)
+		}
+		messages = append(messages, r.Message)
+	}
+	want := []string{`cert("osmia.tail0.ts.net"): did SetDNS for _acme-challenge.osmia.tail0.ts.net`, `cert("osmia.tail0.ts.net"): got cert`}
+	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("messages %q, want %q", messages, want)
+	}
+}
+
 type tailscaleLogRecord struct {
 	Level     string `json:"level"`
 	Msg       string `json:"msg"`

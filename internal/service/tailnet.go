@@ -77,6 +77,46 @@ func (s *Service) tailnetWait() bool {
 	}
 }
 
+const (
+	// tailnetHTTPSAttempt bounds one certificate request. A first issuance
+	// can take minutes while the certificate authority validates the node's
+	// name; the bound only recovers from a request that never returns.
+	tailnetHTTPSAttempt = 10 * time.Minute
+	// tailnetHTTPSMaxRetry caps the wait between certificate requests.
+	tailnetHTTPSMaxRetry = 15 * time.Minute
+)
+
+// requestTailnetHTTPS requests the node's certificate and opens its TLS
+// listener, retrying after Options.TailnetHTTPSRetry, doubled after each
+// further failure, until it succeeds or ctx ends. The result is false only
+// when ctx ended first.
+func (s *Service) requestTailnetHTTPS(ctx context.Context, node tailnet.Listener) (net.Listener, string, bool) {
+	retry := s.options.TailnetHTTPSRetry
+	for {
+		s.tailnet.SetHTTPS(node, api.TailnetHTTPSUnavailable, "requesting the HTTPS certificate", "")
+		attempt, cancel := context.WithTimeout(ctx, tailnetHTTPSAttempt)
+		listener, name, err := node.HTTPS(attempt)
+		cancel()
+		if err == nil {
+			return listener, name, true
+		}
+		if ctx.Err() != nil {
+			return nil, "", false
+		}
+		reason := redact.Secrets(err.Error(), redact.KnownSecrets()...)
+		s.tailnet.SetHTTPS(node, api.TailnetHTTPSUnavailable, fmt.Sprintf("%s; retrying in %s", reason, retry), "")
+		s.logger.Warn("tailnet HTTPS unavailable; retrying", "component", "tailnet", "error", reason, "retry", retry.String())
+		timer := time.NewTimer(retry)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, "", false
+		case <-timer.C:
+		}
+		retry = min(retry*2, tailnetHTTPSMaxRetry)
+	}
+}
+
 // serveTailnetHTTPS owns one node's TLS listener and its serving goroutine.
 // An HTTPS failure never replaces the node or interrupts its HTTP listener.
 func (s *Service) serveTailnetHTTPS(ctx context.Context, node tailnet.Listener) {
@@ -106,11 +146,8 @@ func (s *Service) serveTailnetHTTPS(ctx context.Context, node tailnet.Listener) 
 		case <-time.After(time.Second):
 		}
 	}
-	setup, cancel := context.WithTimeout(ctx, 30*time.Second)
-	listener, name, err := node.HTTPS(setup)
-	cancel()
-	if err != nil {
-		s.tailnet.SetHTTPS(node, api.TailnetHTTPSUnavailable, err.Error(), "")
+	listener, name, ok := s.requestTailnetHTTPS(ctx, node)
+	if !ok {
 		return
 	}
 	defer listener.Close()

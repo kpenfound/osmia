@@ -66,12 +66,24 @@ func tailscaleLogf(logger *slog.Logger) func(string, ...any) {
 	}
 }
 
+// certificateLogf forwards, as tailscaleLogf does, only the lines embedded
+// Tailscale's backend logs about the node's TLS certificate, so a slow or
+// failed issuance shows its progress without the backend's other output.
+func certificateLogf(logger *slog.Logger) func(string, ...any) {
+	logf := tailscaleLogf(logger)
+	return func(format string, args ...any) {
+		if strings.HasPrefix(format, "cert(") {
+			logf(format, args...)
+		}
+	}
+}
+
 // JoinTailscale joins through embedded Tailscale. The node reads its auth key
 // from TS_AUTHKEY on first login; without one it logs a login URL, as a
 // field of a structured record, until someone opens it.
 func JoinTailscale(logger *slog.Logger) Join {
 	return func(hostname, dir string) (Listener, error) {
-		server := &tsnet.Server{Dir: dir, Hostname: hostname, UserLogf: tailscaleLogf(logger)}
+		server := &tsnet.Server{Dir: dir, Hostname: hostname, UserLogf: tailscaleLogf(logger), Logf: certificateLogf(logger)}
 		listener, err := server.Listen("tcp", ":80")
 		if err != nil {
 			server.Close()

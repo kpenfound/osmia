@@ -39,10 +39,16 @@ logs: the name becomes public, but access does not. To opt out, set
 `listen.tailnet_https = false` under `[listen]`. It defaults to `true`, and
 changing it requires restarting the service, just like `listen.tailnet`.
 
-If certificates are disabled, certificate retrieval fails, or the HTTPS
-listener stops, the service stays up and HTTP keeps serving. HTTPS is reported
-as unavailable with a reason. HTTPS belongs to its node: replacing the node or
-shutting down closes that node's TLS listener.
+The first certificate can take a few minutes to issue; until then HTTPS is
+reported as unavailable while the certificate is requested. If certificates
+are disabled or issuance fails, the service requests the certificate again 30
+seconds later, doubling the wait after each further failure up to 15 minutes,
+so enabling certificates in the admin console takes effect without a restart.
+Embedded Tailscale's certificate messages appear in the
+[service log](#service-log). If the HTTPS listener stops, the service stays up
+and HTTP keeps serving. HTTPS is reported as unavailable with a reason. HTTPS
+belongs to its node: replacing the node or shutting down closes that node's
+TLS listener.
 
 The node's state, including its identity and keys, lives in `<root>/tailnet`,
 mode 0700, outside every target repository. On first run the node needs to log
@@ -506,8 +512,8 @@ details as named fields rather than only in the message text. In detached
 mode that output goes to `<root>/service.log`, so that file is JSON lines
 too. This covers the service's own messages, embedded Tailscale's (including
 the tailnet login URL, as the `login_url` field of a record whose `msg` is
-`tailnet message`) and any subprocess output that reaches the service's own
-output.
+`tailnet message`, and its progress issuing the HTTPS certificate) and any
+subprocess output that reaches the service's own output.
 
 A failure of the service process, at startup or after it started, is one
 `"level":"ERROR"` record on that same stream, with the same credential
