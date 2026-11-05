@@ -34,6 +34,7 @@ var Leaves = []string{
 
 type Config struct {
 	Links    []string
+	Leaves   []string
 	Fail     string
 	RefuseOn string
 	ExitOn   string
@@ -58,7 +59,10 @@ type Event struct {
 	Active int
 }
 
-type CLI struct{ Log string }
+type CLI struct {
+	Log    string
+	leaves []string
+}
 
 // Install launches this test binary as a fake dagger process. The importing
 // test package supplies TestDaggerFixtureProcess calling Process.
@@ -75,7 +79,11 @@ func Install(t *testing.T, config Config) CLI {
 	script := "#!/bin/sh\nexec " + quote(binary) + " -test.run=^TestDaggerFixtureProcess$ -- osmia-fake-dagger " + quote(path) + " \"$@\"\n"
 	must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(script), 0700))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return CLI{Log: path + ".log"}
+	leaves := config.Leaves
+	if leaves == nil {
+		leaves = Leaves
+	}
+	return CLI{Log: path + ".log", leaves: leaves}
 }
 
 // Process serves the fake executable only when invoked by Install's wrapper.
@@ -154,8 +162,12 @@ func run(c Config, log string, stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
-	selected := Selected(links)
-	selected = slices.DeleteFunc(selected, func(l string) bool { return slices.Contains(Selected(skip), l) && len(skip) > 0 })
+	leaves := c.Leaves
+	if leaves == nil {
+		leaves = Leaves
+	}
+	selected := selectedFrom(links, leaves)
+	selected = slices.DeleteFunc(selected, func(l string) bool { return slices.Contains(selectedFrom(skip, leaves), l) && len(skip) > 0 })
 	var attempt Attempt
 	if c.Attempts != nil {
 		index := 0
@@ -231,8 +243,12 @@ func run(c Config, log string, stdout, stderr io.Writer, args []string) int {
 // Selected interprets an OR of addresses over Leaves, using URL query values
 // as OR within each dimension and AND between dimensions.
 func Selected(links []string) []string {
+	return selectedFrom(links, Leaves)
+}
+
+func selectedFrom(links, leaves []string) []string {
 	var selected []string
-	for _, leaf := range Leaves {
+	for _, leaf := range leaves {
 		l, _ := url.Parse(leaf)
 		matches := len(links) == 0
 		for _, link := range links {
@@ -302,7 +318,7 @@ func (c CLI) AssertRun(t *testing.T, links []string) {
 	}
 	slices.Sort(ran)
 	ran = slices.Compact(ran)
-	want := Selected(links)
+	want := selectedFrom(links, c.leaves)
 	slices.Sort(want)
 	if active != 0 || peak > 4 || !slices.Equal(ran, want) {
 		t.Fatalf("ran %q, want %q; active=%d peak=%d", ran, want, active, peak)

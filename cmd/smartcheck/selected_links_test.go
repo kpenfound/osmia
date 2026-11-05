@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
 )
 
@@ -79,4 +80,92 @@ func TestSmartcheckLateRefusalStops(t *testing.T) {
 	if events := cli.Events(t); len(events) != 4 || !slices.Contains(events[2].Args, daggerfixture.TestB) {
 		t.Fatalf("reran or fell back: %+v", events)
 	}
+}
+
+// serial: command execution and dry-run selections use the same offered links.
+func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
+	for _, picks := range []int{0, 4} {
+		for _, dry := range []bool{false, true} {
+			t.Run(fmt.Sprintf("picks=%d/dry=%v", picks, dry), func(t *testing.T) {
+				listing, offered := daggerfixture.CollectionOptions()
+				cli := daggerfixture.Install(t, listing)
+				dir := newRepository(t)
+				write(t, dir, "README.md", "changed\n")
+				selected := []string{daggerfixture.PackageA, daggerfixture.PackageB, daggerfixture.PathA, daggerfixture.Version}
+				j := &fakeJev{probabilities: map[string]float64{}}
+				for _, link := range listing.Links {
+					score := .01
+					if !slices.Contains(offered, link) || slices.Contains(selected, link) {
+						score = .9
+						if picks > 0 {
+							score = .4
+						}
+						if !slices.Contains(offered, link) {
+							score = .99
+						}
+					}
+					j.probabilities[link] = score
+				}
+				var stdout, stderr strings.Builder
+				h := harness{stdout: &stdout, stderr: &stderr, getenv: func(k string) string { return withKey[k] }, dagger: runDagger, evaluate: j.evaluate}
+				args := []string{"-C", dir, fmt.Sprintf("--fallback-picks=%d", picks), "-v"}
+				if dry {
+					args = append(args, "--dry-run")
+				}
+				if code := h.run(t.Context(), args); code != 0 {
+					t.Fatalf("exit %d: %s %s", code, stdout.String(), stderr.String())
+				}
+				if len(j.requests) != 1 || len(j.requests[0].Questions) != len(offered) {
+					t.Fatalf("questions %+v", j.requests)
+				}
+				for i, link := range offered {
+					if q := j.requests[0].Questions[checkselect.Question(i)]; fmt.Sprint(q.Instructions) != fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link) {
+						t.Fatalf("question %+v, want only offered link %s", q, link)
+					}
+				}
+				slices.Sort(selected)
+				if dry {
+					if stdout.String() != strings.Join(selected, "\n")+"\n" {
+						t.Fatalf("selected %q", stdout.String())
+					}
+					return
+				}
+				cli.AssertRun(t, selected)
+				grouped, standalone := false, false
+				for _, event := range cli.Events(t) {
+					if event.Kind != "start" {
+						continue
+					}
+					if slices.Contains(event.Args, daggerfixture.PackageA+"&go-package=b") {
+						grouped = true
+					}
+					if slices.Contains(event.Args, daggerfixture.Version) {
+						standalone = slices.Equal(event.Links, []string{daggerfixture.Version})
+					}
+				}
+				if !grouped || !standalone {
+					t.Fatalf("grouped=%t standalone=%t", grouped, standalone)
+				}
+			})
+		}
+	}
+}
+
+// serial: the real command falls back without asking Jev when only a root fits.
+func TestSmartcheckCollectionTooManyChecksRunsFull(t *testing.T) {
+	var links []string
+	for i := range checkselect.MaxQuestions + 1 {
+		links = append(links, fmt.Sprintf("%s&go-test=T%d", daggerfixture.PackageA, i))
+	}
+	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links})
+	dir := newRepository(t)
+	write(t, dir, "README.md", "changed\n")
+	j := &fakeJev{}
+	var stdout, stderr strings.Builder
+	h := harness{stdout: &stdout, stderr: &stderr, getenv: func(k string) string { return withKey[k] }, dagger: runDagger, evaluate: j.evaluate}
+	code := h.run(t.Context(), []string{"-C", dir, "--fallback-picks=2"})
+	if code != 0 || len(j.requests) != 0 || !strings.Contains(stderr.String(), "running every check: 129 check links do not narrow to 128") {
+		t.Fatalf("exit %d: %s %s; requests %+v", code, stdout.String(), stderr.String(), j.requests)
+	}
+	cli.AssertRun(t, nil)
 }

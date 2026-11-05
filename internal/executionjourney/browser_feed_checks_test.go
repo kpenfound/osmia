@@ -19,10 +19,13 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			checks := newHeldChecks()
 			count, judged, selected := 113, 113, 3
 			if mode == "narrowed" {
-				count, judged, selected = checkselect.MaxQuestions+1, 1, 1
+				count, judged, selected = checkselect.MaxQuestions+1, 2, 1
 			}
 			for i := range count {
 				checks.links = append(checks.links, fmt.Sprintf("dag+check://go/packages/tests/test?go-package=internal/trace&go-test=Test%03d", i))
+			}
+			if mode == "narrowed" {
+				checks.links[count-1] = "dag+check://go/packages/tests/test?go-package=internal/zzz&go-test=TestOther"
 			}
 			f, stream, repo := newChecksFixture(t, "browser-unit-checks", checks)
 			must(t, repo.Close())

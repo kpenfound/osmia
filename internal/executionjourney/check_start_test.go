@@ -62,12 +62,13 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 			for i := range checkselect.MaxQuestions + 1 {
 				checks.links = append(checks.links, fmt.Sprintf("dag+check://go/packages/tests/test?go-package=internal/trace&go-test=Test%d", i))
 			}
+			checks.links[len(checks.links)-1] = "dag+check://go/packages/tests/test?go-package=internal/zzz&go-test=TestOther"
 			f, stream, repo := newChecksFixture(t, "selection-start", checks)
 			probability := 0.9
 			if full {
 				probability = 0.1
 			}
-			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability)}}}}}
+			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability), "check-1": jevtest.Noul(.1)}}}}}
 			boostJev(f.s, provider)
 			c := &checkers{masons: newMasonController(f.s, repo)}
 			must(t, c.Pass(context.Background()))
@@ -86,7 +87,7 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 			var start UnitCheckSelection
 			must(t, json.Unmarshal([]byte(docs[0].Content), &start))
 			selection := start.Selection
-			if selection.Listed == nil || *selection.Listed != len(checks.links) || selection.Candidates != 1 || selection.Judgment == "" || !slices.Equal(selection.Links, ran) {
+			if selection.Listed == nil || *selection.Listed != len(checks.links) || selection.Candidates != 2 || selection.Judgment == "" || !slices.Equal(selection.Links, ran) {
 				t.Fatalf("running selection %+v, runner links %v", selection, ran)
 			}
 			if full {
