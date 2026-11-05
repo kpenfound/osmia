@@ -46,13 +46,7 @@ func TestSbxMasonTurnGetsDaggerCLIAndEngine(t *testing.T) {
 			turn := daggerTurn(t)
 			turn.Execution.Dagger.Engine = c.engine
 			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
-			runner := sbxRunner(t, `case "$*" in
-*--version*) echo '2.1.200'; exit 0 ;;
-*--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
-esac
-cat >/dev/null
-echo '{"type":"result","subtype":"success","result":"built"}'
-`)
+			runner := sbxRunner(t, agenttest.Session(t, agent.AgentClaude, agenttest.Turn{ResultText: "built"}).Bin)
 			dir := filepath.Dir(runner.SbxBin)
 			runner.DockerBin = agenttest.Script(t, "docker", "exec cat\n")
 			if c.template != "" {
@@ -162,14 +156,16 @@ func TestMasonDockerEngineForwardUsesServiceHost(t *testing.T) {
 			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
 			finish := filepath.Join(t.TempDir(), "finish")
 			t.Cleanup(func() { _ = os.WriteFile(finish, nil, 0600) })
-			runner := sbxRunner(t, fmt.Sprintf(`case "$*" in
+			// agenttest.Session cannot wait for a file signal and then succeed;
+			// keep the agent alive until the Docker forward has been exercised.
+			runner := sbxRunner(t, agenttest.Script(t, "fake-agent", fmt.Sprintf(`case "$*" in
 *--version*) echo '2.1.200'; exit 0 ;;
 *--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
 esac
 cat >/dev/null
 while [ ! -f %q ]; do sleep 0.01; done
 echo '{"type":"result","subtype":"success","result":"built"}'
-`, finish))
+`, finish)))
 			log := filepath.Join(t.TempDir(), "docker")
 			runner.DockerBin = agenttest.Script(t, "docker", fmt.Sprintf("printf '%%s\\n%%s\\n' \"${DOCKER_HOST-}\" \"$*\" > %q\nexec cat\n", log))
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

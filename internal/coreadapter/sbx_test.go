@@ -21,14 +21,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// sbxRunner scripts a fake sbx CLI and agent binary in place of the real
-// costly, externally mutating sandbox daemon and model session. It leaves
+// sbxRunner uses a fake sbx CLI and the supplied agent binary in place of
+// the costly, externally mutating sandbox daemon and model session. It leaves
 // unverified whether a real sbx sandbox and backend behave this way; these
 // tests only check what core's enforcer and CoreExecutor do with the CLI's
 // output and policy.
-func sbxRunner(t *testing.T, body string) agent.Runner {
+func sbxRunner(t *testing.T, bin string) agent.Runner {
 	t.Helper()
-	bin := agenttest.Script(t, "fake-agent", body)
 	sbx := agenttest.Sbx(t, a.TokenEnvironment)
 	// The daemon refuses empty command elements before starting the agent.
 	data := readSbxFile(t, sbx)
@@ -72,62 +71,26 @@ func TestSbxRunsScopedTurnsThroughCoreWithFakeSandbox(t *testing.T) {
 					turn.Sandbox.Verified.Capabilities.Execute = true
 				}
 				turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
-				body := `case "$*" in
+				var bin string
+				switch backend {
+				case agent.AgentClaude, agent.AgentCodex:
+					bin = agenttest.Session(t, backend, agenttest.Turn{ResultText: "boxed", SessionID: "fixture"}).Bin
+				case "opencode":
+					bin = agenttest.Script(t, "fake-agent", `case "$*" in
 *--version*) echo '2.1.200'; exit 0 ;;
 *--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
 esac
-if [ "$1" = features ]; then
-case "$*" in
-*features.shell_tool=false*) echo 'shell_tool stable false' ;;
-*) echo 'shell_tool stable true' ;;
-esac
-exit 0
-fi
-if [ "$1" = mcp ]; then
-  echo '[{"name":"osmia_0","enabled":true,"transport":{"type":"streamable_http","url":"http://host.docker.internal:1/mcp","bearer_token_env_var":"OSMIA_MCP_TOKEN"}}]'
-  exit 0
-fi
-if [ "$1" = app-server ]; then
-  while IFS= read -r line; do
-    id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-    case "$line" in
-    *'"method":"initialize"'*)
-      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{}}'
-      ;;
-    *'"method":"config/read"'*)
-      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"config":{},"origins":{"approval_policy":{"name":{"type":"sessionFlags"}},"orchestrator.mcp.enabled":{"name":{"type":"sessionFlags"}},"agents.enabled":{"name":{"type":"sessionFlags"}},"tools.experimental_request_user_input.enabled":{"name":{"type":"sessionFlags"}},"tools.update_plan.enabled":{"name":{"type":"sessionFlags"}},"web_search":{"name":{"type":"sessionFlags"}}}}}'
-      ;;
-    *'"method":"thread/start"'*|*'"method":"thread/resume"'*)
-      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"thread":{"id":"fixture"}}}'
-      ;;
-    *'"method":"turn/start"'*)
-      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"turn":{"id":"turn-1"}}}'
-      echo '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","text":"boxed"}}}'
-      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}'
-      exit 0
-      ;;
-    esac
-  done
-  exit 0
-fi
 if [ "${BUN_BE_BUN:-}" = 1 ]; then
-  echo '` + agenttest.OpenCodeNoCustomTools + `'
+  echo '`+agenttest.OpenCodeNoCustomTools+`'
   exit 0
 fi
 if [ "$1" = --pure ] && [ "$2" = debug ]; then printf '%s\n' "$OPENCODE_CONFIG_CONTENT"; exit 0; fi
 cat >/dev/null
-`
-				switch backend {
-				case "claude":
-					body += "echo '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"boxed\"}'\n"
-				case "codex":
-					// codex's turn ends inside the "app-server" branch
-					// above, which drives the whole JSON-RPC conversation
-					// and exits before reaching this fallback body.
-				case "opencode":
-					body += "echo '{\"type\":\"text\",\"sessionID\":\"fixture\",\"part\":{\"type\":\"text\",\"text\":\"boxed\"}}'\necho '{\"type\":\"step_finish\",\"sessionID\":\"fixture\",\"part\":{\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0}}'\n"
+echo '{"type":"text","sessionID":"fixture","part":{"type":"text","text":"boxed"}}'
+echo '{"type":"step_finish","sessionID":"fixture","part":{"type":"step-finish","reason":"stop","cost":0}}'
+`)
 				}
-				runner := sbxRunner(t, body)
+				runner := sbxRunner(t, bin)
 				result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
 				if err != nil || result.IsError || result.FinalResponse != "boxed" {
 					t.Fatalf("result %+v: %v", result, err)
@@ -182,7 +145,7 @@ cat >/dev/null
 func TestSbxRefusesUnavailableCLI(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(fmt.Sprint("missing=", missing), func(t *testing.T) {
-			runner := sbxRunner(t, "exit 99\n")
+			runner := sbxRunner(t, agenttest.Script(t, "fake-agent", "exit 99\n"))
 			if missing {
 				runner.SbxBin = "/nonexistent/sbx"
 			} else if err := os.WriteFile(filepath.Join(filepath.Dir(runner.SbxBin), "fail-version"), nil, 0600); err != nil {
@@ -269,7 +232,7 @@ func TestSbxSharedMCPPortKeepsCallerOwnedListener(t *testing.T) {
 			turn.MCP = []a.Endpoint{endpoint, endpoint}
 			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = endpoint.Token
 			turn.Sandbox.Verified.Environment["LANG"] = turn.SessionDirectory
-			runner := sbxRunner(t, "cat >/dev/null\necho '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"boxed\"}'\n")
+			runner := sbxRunner(t, agenttest.Session(t, agent.AgentClaude, agenttest.Turn{ResultText: "boxed"}).Bin)
 			runner.SbxBin = agenttest.Sbx(t, "LANG")
 			if failCleanup {
 				if err := os.WriteFile(filepath.Join(filepath.Dir(runner.SbxBin), "fail-policy-rm"), nil, 0600); err != nil {
