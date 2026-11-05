@@ -215,12 +215,15 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 		p.AwaitText(card, e.Question)
 		holdOutcome(p, e.Answer.Path)
 		if e.Kind == api.InboxContested {
-			p.Choose(card+"select[name=decision]", "revise")
 			p.TypeInto(card+"input[name=note]", text)
 		} else {
 			p.TypeInto(card+"textarea", text)
 		}
-		p.Click(card + "[type=submit]")
+		if e.Kind == api.InboxContested {
+			p.Click(card + `[data-decision-choice="revise"]`)
+		} else {
+			p.Click(card + "[type=submit]")
+		}
 		p.AwaitGone("the optimistically dismissed shared decision", card)
 		assertOutcome(p, "#inbox-result", "pending", "Sending…")
 	}
@@ -464,4 +467,43 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 	p.Click(row + ` [data-select-workgroup]`)
 
 	p.Await("members use only project names", `[...document.querySelectorAll('#workgroup-content .member-card [data-field=repo]')].map(n => n.textContent).sort().join(',') === 'Client,Server'`)
+}
+
+func TestBrowserWorkgroupAndMemberDecisionButtonsAnswerOriginalEndpoint(t *testing.T) {
+	for _, view := range []string{"workgroup", "member"} {
+		t.Run(view, func(t *testing.T) {
+			f := newWorkgroupPageFixture(t, false)
+			entry := entriesOf(t, f.c, api.InboxContested)[0]
+			p := openOutcomePage(t, f.s)
+			prefix := "#workstreams "
+			if view == "workgroup" {
+				openWorkgroup(p, f.group.ID)
+				prefix = "#workgroup-content "
+			} else {
+				p.SelectWorkstream(stream)
+			}
+			card := prefix + decisionCard(entry)
+			p.AwaitText(card+`[data-decision-choice="review"]`, "Review the unit again")
+			p.AwaitText(card+`[data-decision-choice="revise"]`, "Revise the unit")
+			p.Await("the card has no decision select or submit", `!document.querySelector(`+quote(card+`select[name=decision]`)+`) && !document.querySelector(`+quote(card+`[type=submit]`)+`)`)
+			p.TypeInto(card+`[name=note]`, "Use the shared contract.")
+			p.Click(card + `[data-decision-choice="revise"]`)
+			p.AwaitText("#inbox-result", "Ruled revise on unit upload.")
+			p.AwaitGone("the ruled member decision", card)
+			state, err := f.repo.Workflow(stream, trace.UnitSubject("upload"))
+			must(t, err)
+			if state.Value != "implementing" {
+				t.Fatalf("ruled unit: %+v", state)
+			}
+			found := false
+			for _, path := range p.Paths() {
+				if path == entry.Answer.Path {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("answer did not reach %s", entry.Answer.Path)
+			}
+		})
+	}
 }

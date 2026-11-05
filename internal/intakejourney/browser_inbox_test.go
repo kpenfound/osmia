@@ -113,8 +113,8 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 				}
 				return response;
 			};
-			document.addEventListener('submit', event => {
-				if (!gate.closed || !event.target.closest('[data-kind="amendment"]')) return;
+			document.addEventListener('click', event => {
+				if (!gate.closed || !event.target.closest('[data-kind="amendment"] [data-decision-choice]')) return;
 				gate.closed = false;
 				gate.waiting.splice(0).forEach(resolve => resolve());
 			});
@@ -205,13 +205,10 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 
 	// A contested unit is ruled on with a decision and a note.
-	p.Click(contest + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Choose a decision.")
-	p.Choose(contest+"select", "review")
-	p.Click(contest + "button[type=submit]")
+	p.Click(contest + `[data-decision-choice="review"]`)
 	p.AwaitText("#inbox-result", "Give a note for the ruling.")
 	p.TypeInto(contest+"input[name=note]", "The reviewer's sandbox failed; review it again.")
-	p.Click(contest + "button[type=submit]")
+	p.Click(contest + `[data-decision-choice="review"]`)
 	p.AwaitText("#inbox-result", "Ruled review on unit index.")
 	p.AwaitGone("the contested unit", contest)
 	if state, err := live.Workflow(stream, trace.UnitSubject("index")); err != nil || state.Value != UnitReviewing {
@@ -234,8 +231,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	link.Restore()
 	must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "ratify: no objection stands")}))
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 1")
-	p.Choose(amendment+"select", AmendmentReject)
-	p.Click(amendment + "button[type=submit]")
+	p.Click(amendment + `[data-decision-choice="` + AmendmentReject + `"]`)
 	p.AwaitText("#inbox-result", "packet revision 1 of amendment 1 is not the latest; revision 2 is presented")
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 2")
 	p.AwaitText(amendment+"[data-field=recommendation]", "approve: no objection stands")
@@ -244,7 +240,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 	gate.Set(false)
 	p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
-	p.Click(amendment + "button[type=submit]")
+	p.Click(amendment + `[data-decision-choice="` + AmendmentReject + `"]`)
 	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
 	p.AwaitGone("the decided amendment", amendment)
 	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.Decision == nil || out.Decision.Decision != AmendmentReject || out.Decision.Packet != 2 {
@@ -299,7 +295,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	card := decisionCard(entries[0])
 	choices := func() []string {
 		var out []string
-		p.Eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &out)
+		p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &out)
 		return out
 	}
 
@@ -321,14 +317,12 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 		t.Fatalf("the decisions offered while objections block: %v", got)
 	}
 
-	p.Choose(card+"select", "overrule "+veto)
 	p.TypeInto(card+"input[name=note]", "I accept the risk.")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="overrule ` + veto + `"]`)
 	p.AwaitText("#inbox-result", "I accept the risk.")
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "advice, overruled")
-	p.Choose(card+"select", "sustain "+size)
 	p.TypeInto(card+"input[name=note]", "Split the resume unit.")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="sustain ` + size + `"]`)
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")
 	entries = f.inboxEntries(t, ws, InboxRatification)
 	dissent := f.dissent(t, ws)
@@ -342,14 +336,13 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	}
 
 	// A redraft says what to change.
-	p.Choose(card+"select", "redraft")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="redraft"]`)
 	p.AwaitText("#inbox-result", "Say what the redraft should change.")
 	if asked, err := shed.Redrafts(f.repository(), ws); err != nil || len(asked) != 0 {
 		t.Fatalf("a redraft without a note was recorded: %+v %v", asked, err)
 	}
 	p.TypeInto(card+"input[name=note]", "Split the resume unit into what it addresses.")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="redraft"]`)
 	// The redraft is debated, and the packet of the round that concludes it
 	// replaces the one the page showed.
 	p.AwaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 2")
@@ -360,8 +353,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 		t.Fatalf("the recorded redraft %+v", asked)
 	}
 
-	p.Choose(card+"select", "ratify")
-	p.Click(card + "button[type=submit]")
+	p.Click(card + `[data-decision-choice="ratify"]`)
 	p.AwaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
 	p.AwaitGone("the ratified packet", card)
 	if record := f.ratification(t, ws, 2); record.Revision != (shed.Pin{Spec: 1, Plan: 2}) || record.Round != 2 {
@@ -408,7 +400,7 @@ func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
 	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
 	var choices []string
-	p.Eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &choices)
+	p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &choices)
 	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {
 		t.Fatalf("the decisions offered with the veto dismissed: %v", choices)
 	}

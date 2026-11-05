@@ -284,6 +284,13 @@ From the page you can:
 - Abandon a workstream or permanently archive a finished one.
 - Reload the configuration.
 
+Ratification, contested-unit, amendment and parked-base cards offer a button
+for each available decision below the note field, where the card takes a note.
+Click **Ratify** to approve the displayed revisions, or **Ask for a Redraft**
+with a note saying what should change. Standing objections have **Sustain**
+and **Overrule** buttons. While a decision is sending, the card blocks further
+decisions.
+
 Submitting a feed action, such as a ruling on a contested unit or ratifying a
 proposal, removes its card from the feed right away, before the service has
 answered. The card stays off the feed through any refresh that still lists the
