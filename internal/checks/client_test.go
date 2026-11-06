@@ -103,8 +103,8 @@ func TestDaggerClientEnvironment(t *testing.T) {
 						if token != "" && (operation == "check" || operation == "call" || operation == "core" || engine == "cloud") {
 							want["DAGGER_CLOUD_TOKEN"] = token
 						}
-						if token != "" && operation == "check" && !fallback {
-							want["CI"] = "true"
+						if _, exists := got["CI"]; exists {
+							t.Fatal("check client environment contains CI")
 						}
 						if !reflect.DeepEqual(got, want) {
 							// Names and the redacted dump diagnose failures without logging a token.

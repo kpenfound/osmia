@@ -49,7 +49,8 @@ type DaggerChecks struct {
 	// Engine selects "auto" (also the empty value), "cloud", or a resolved
 	// runner address. An address overrides host engine selection.
 	Engine string
-	// CloudToken authenticates checks, requesting candidate CI identity too.
+	// CloudToken authenticates checks, which also request candidate identity
+	// in their exports.
 	// Listings receive it only when Engine is "cloud".
 	CloudToken string `json:"-"`
 	// CIIdentityExport requests real candidate metadata in check exports.
@@ -140,7 +141,7 @@ func (d DaggerChecks) CheckSkipping(ctx context.Context, dir string, identity Id
 	}
 	defer cleanup()
 	invocations := checkselect.Invocations(links)
-	run := checkRun{checks: d, dir: dir, env: env, preparation: preparation, labelled: len(invocations) > 1}
+	run := checkRun{checks: d, dir: dir, env: env, labelled: len(invocations) > 1}
 	run.result.CIIdentityFallback = preparation.FallbackReason
 	for _, addresses := range invocations {
 		if err := run.view(ctx, addresses, skip); err != nil || run.result.ExitCode != 0 {
@@ -155,7 +156,6 @@ type checkRun struct {
 	checks      DaggerChecks
 	dir         string
 	env         []string
-	preparation Preparation
 	result      CheckResult
 	output      strings.Builder
 	// labelled heads each report with its command, once there is more than one.
@@ -232,7 +232,7 @@ func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, err
 	}
 	r.result.Command = append(append(r.result.Command, "dagger"), args...)
 	var output bytes.Buffer
-	exit, err := r.checks.run(ctx, r.dir, r.env, r.preparation, &output, args...)
+	exit, err := r.checks.run(ctx, r.dir, r.env, &output, args...)
 	report := redact.Secrets(output.String(), redact.KnownSecrets()...)
 	if r.labelled {
 		r.endLine()
@@ -265,7 +265,7 @@ func (d DaggerChecks) daggerOutput(ctx context.Context, dir string, identity Ide
 		return -1, preparation, redactError(err)
 	}
 	defer cleanup()
-	exit, err := d.runOutput(ctx, dir, env, preparation, stdout, stderr, args...)
+	exit, err := d.runOutput(ctx, dir, env, stdout, stderr, args...)
 	return exit, preparation, redactError(err)
 }
 
@@ -327,11 +327,11 @@ func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity
 
 // run executes the Dagger CLI in a prepared dir and returns its exit status,
 // -1 when it did not exit. A non-zero exit is not an error.
-func (d DaggerChecks) run(ctx context.Context, dir string, env []string, preparation Preparation, output io.Writer, args ...string) (int, error) {
-	return d.runOutput(ctx, dir, env, preparation, output, output, args...)
+func (d DaggerChecks) run(ctx context.Context, dir string, env []string, output io.Writer, args ...string) (int, error) {
+	return d.runOutput(ctx, dir, env, output, output, args...)
 }
 
-func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, preparation Preparation, stdout, stderr io.Writer, args ...string) (int, error) {
+func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
@@ -372,9 +372,6 @@ func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, p
 	isPreview := len(args) > 0 && (args[0] == "call" || args[0] == "core")
 	if d.CloudToken != "" && (isCheck || isPreview || d.Engine == "cloud") {
 		cmd.Env = append(cmd.Env, "DAGGER_CLOUD_TOKEN="+d.CloudToken)
-	}
-	if isCheck && d.CloudToken != "" && preparation.CIIdentity {
-		cmd.Env = append(cmd.Env, "CI=true")
 	}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()

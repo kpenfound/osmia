@@ -134,7 +134,7 @@ func assertEngineCheckOutput(t *testing.T, output, mode, token, runner, candidat
 		}
 	}
 	if token != "" {
-		for _, want := range []string{"CI=true\n", "TOKEN_PRESENT=true\n", "HEAD=" + candidate + "\n"} {
+		for _, want := range []string{"CI=\n", "TOKEN_PRESENT=true\n", "HEAD=" + candidate + "\n"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("missing %q in %s", want, output)
 			}

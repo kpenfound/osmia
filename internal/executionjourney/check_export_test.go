@@ -104,11 +104,7 @@ func TestCheckExportsPreserveCallerCandidates(t *testing.T) {
 if [ "$1" = list ]; then
  [ -z "${DAGGER_CLOUD_TOKEN-}${CI-}" ] || exit 93
 elif [ -n "${DAGGER_CLOUD_TOKEN-}" ]; then
- if git rev-parse --verify HEAD >/dev/null 2>&1; then
-  [ "${CI-}" = true ] || exit 94
- else
-  [ -z "${CI-}" ] || exit 95
- fi
+ [ -z "${CI-}" ] || exit 94
  printf '%s\n' "$DAGGER_CLOUD_TOKEN" >&2
  echo 'View trace at https://dagger.cloud/example/traces/caller123' >&2
 fi`, 1)), 0700))
