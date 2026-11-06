@@ -46,7 +46,7 @@ func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
 	if err != nil {
 		return CharterState{}, err
 	}
-	return CharterState{Ready: !c.Empty(), Rules: len(c.Rules), Revision: doc.Revision, Diagnostics: c.Diagnostics}, nil
+	return CharterState{Rules: len(c.Rules), Revision: doc.Revision, Diagnostics: c.Diagnostics}, nil
 }
 
 // contextFor keeps the trace and configuration available to draining operations.

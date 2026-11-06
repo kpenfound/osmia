@@ -552,11 +552,6 @@ func TestHandInOwnerProjectsValidationRecordsNothing(t *testing.T) {
 			t.Fatalf("projects %v: %+v", projects, api)
 		}
 	}
-	writeCharter(t, f.c, f.project2, "# Empty charter\n")
-	text := productionBrief
-	if api := handInError(t, f.c, HandInRequest{Projects: []config.ProjectID{f.project, f.project2}, Key: "empty-charter", Stdin: &text}); api.Code != CharterEmpty {
-		t.Fatalf("empty charter: %+v", api)
-	}
 	for p, want := range before {
 		r, err := f.s.repository(p)
 		must(t, err)

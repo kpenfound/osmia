@@ -143,7 +143,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	writeCharter(t, c, added.Project.ID, chiefDemoCharter)
 	onboarded, err := c.Configuration(ctx)
 	must(t, err)
-	if cs := onboarded.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 1 {
+	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 1 {
 		t.Fatalf("charter: %+v", cs)
 	}
 	c.Close()

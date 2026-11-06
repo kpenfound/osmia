@@ -63,8 +63,10 @@ func (b Bundle) Render() string {
 	line("")
 	line("## Charter")
 	line("source: %s (record %s revision %d)", b.Charter.Source, b.Charter.Record, b.Charter.Revision)
-	if len(b.Charter.Rules) == 0 {
-		line("The charter has no rules.")
+	line("The repository's own contributor documents (AGENTS.md, CONTRIBUTING, CLAUDE.md and similar) are binding. The owner's charter adds to them.")
+	guidance(line, b.Charter.Source, b.Charter.Guidance)
+	if len(b.Charter.Rules) > 0 {
+		line("Citable rules:")
 	}
 	for _, r := range b.Charter.Rules {
 		if r.Heading != "" {
@@ -84,6 +86,7 @@ func (b Bundle) Render() string {
 		for _, m := range b.MemberCharters {
 			line("\n### Project %s (member %s)", m.Project, m.Workstream)
 			line("source: %s/charter.md (record %s revision %d)", m.Project, m.Document.ID, m.Document.Revision)
+			guidance(line, string(m.Project)+"/charter.md", charter.Guidance(m.Document.Content))
 			for _, rule := range charter.Parse(m.Document.Content).Rules {
 				line("- %s/charter#%d: %s", m.Project, rule.Number, rule.Text)
 			}
@@ -194,4 +197,16 @@ func (b Bundle) Render() string {
 
 func indent(s string) string {
 	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "\n    ")
+}
+
+// guidance renders a charter's guidance between delimiters naming its source,
+// or says the charter is empty.
+func guidance(line func(string, ...any), source, text string) {
+	if text == "" {
+		line("The charter is empty.")
+		return
+	}
+	line("### %s", source)
+	line("%s", text)
+	line("### end of %s", source)
 }

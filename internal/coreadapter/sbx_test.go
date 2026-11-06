@@ -177,7 +177,7 @@ func assertSbxHostPolicy(t *testing.T, runner agent.Runner, port string) {
 	}
 	want := "policy allow network --sandbox " + name + " localhost:" + port + "\n" +
 		"policy rm network --sandbox " + name + " --resource localhost:" + port + " --force\n"
-	calls := "create --quiet\npolicy allow\npolicy rm\nrm --force\n"
+	calls := "create --no-progress\npolicy allow\npolicy rm\nrm --force\n"
 	if got := readSbxFile(t, filepath.Join(dir, "sbx-policy.txt")); got != want {
 		t.Fatalf("host policy:\n%s\nwant:\n%s", got, want)
 	}

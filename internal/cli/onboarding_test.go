@@ -260,7 +260,7 @@ func TestProjectOnboarding(t *testing.T) {
 	}
 	db := trace.TraceDatabase(traceDir)
 
-	// 6. The service stops while the librarian's first turn runs, and the
+	// 5. The service stops while the librarian's first turn runs, and the
 	// extraction finishes after a restart.
 	select {
 	case <-librarian.entered:
@@ -317,27 +317,12 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatal("onboarding changed the clone")
 	}
 
-	// 3. Hand-in is refused while the charter is empty.
-	design := filepath.Join(home, "design.md")
-	must(t, os.WriteFile(design, []byte("# Upload API\n"), 0600))
-	code, out, diag := invoke(t, root, "handin", string(id), design)
-	if code != 4 || out != "" || !strings.Contains(diag, "charter_empty") || !strings.Contains(diag, "osmia edit charter "+string(id)) {
-		t.Fatalf("hand-in with an empty charter: %d %q %q", code, out, diag)
-	}
-	var all struct {
-		Status wire.StatusResponse
-	}
-	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
-	if len(all.Status.Workstreams) != 0 {
-		t.Fatalf("a refused hand-in created workstreams: %+v", all.Status.Workstreams)
-	}
-
-	// 4. The owner writes rules with osmia edit; status shows the charter
-	// ready and the context file-based.
+	// 3. The owner writes rules with osmia edit; status shows them and the
+	// context file-based.
 	setCharter(t, root, id, onboardingCharter)
 	status := successful(t, root, "status")
 	for _, want := range []string{
-		"Charter: ready (2 rules, revision 2)\n",
+		"Charter: 2 rules, revision 2; edit it with osmia edit charter " + string(id) + "\n",
 		"Context: " + string(id) + " context_mode=file",
 		"Knowledge base: extraction 1 succeeded",
 	} {
@@ -353,7 +338,7 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("trace history: %d commits", commits)
 	}
 
-	// 5. Resolution reads the local entity map alone.
+	// 4. Resolution reads the local entity map alone.
 	local, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content))
 	must(t, err)
 	fp := local.ResolveEntities([]string{"history", "internal"})
@@ -390,7 +375,7 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("bundle carries prose outside the footprint:\n%s", rendered)
 	}
 
-	// 7. Removing the project keeps the trace and the clone.
+	// 6. Removing the project keeps the trace and the clone.
 	traceBefore := commitCount(t, db)
 	removed := successful(t, root, "project", "remove", string(id))
 	if !strings.Contains(removed, string(id)) {

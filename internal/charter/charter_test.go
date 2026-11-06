@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestEmptyCharters(t *testing.T) {
+func TestChartersWithoutRules(t *testing.T) {
 	for name, content := range map[string]string{
 		"blank":    "",
 		"guidance": "# Charter\n\nWrite rules here.\n\n## Testing\n\nSome prose.\n- a bullet\n1) not our list form\n",
@@ -15,7 +15,7 @@ func TestEmptyCharters(t *testing.T) {
 		"no text":  "1.\n2.   \n",
 	} {
 		c := Parse(content)
-		if !c.Empty() || len(c.Rules) != 0 || c.Rules == nil || c.Diagnostics == nil {
+		if len(c.Rules) != 0 || c.Rules == nil || c.Diagnostics == nil {
 			t.Fatalf("%s: %+v", name, c)
 		}
 	}
@@ -47,7 +47,7 @@ Continued lazily.
 		{3, "No new dependencies without a reason. Continued lazily.", "Dependencies"},
 		{4, "Indented up to three spaces. 5. Four spaces is not a rule.", "Deep"},
 	}
-	if !reflect.DeepEqual(c.Rules, want) || len(c.Diagnostics) != 0 || c.Empty() {
+	if !reflect.DeepEqual(c.Rules, want) || len(c.Diagnostics) != 0 {
 		t.Fatalf("%+v", c)
 	}
 	if r, ok := c.Rule(3); !ok || r.Heading != "Dependencies" {
@@ -60,7 +60,7 @@ Continued lazily.
 
 func TestNumberingDiagnostics(t *testing.T) {
 	c := Parse("# A\n2. two\n3. three\n# B\n3. three again\n7. seven\n9. nine\n3. thrice\n")
-	if len(c.Rules) != 6 || c.Empty() {
+	if len(c.Rules) != 6 {
 		t.Fatalf("rules: %+v", c.Rules)
 	}
 	want := []Diagnostic{
@@ -121,6 +121,20 @@ func TestAppendRule(t *testing.T) {
 		got := AppendRule("## Testing\n"+hidden, 1, "Rule.", "src")
 		if !strings.HasSuffix(got, hidden+"\n## Standing rulings\n\n1. Rule. <!-- src -->\n") {
 			t.Fatalf("after %q:\n%q", hidden, got)
+		}
+	}
+}
+
+func TestGuidance(t *testing.T) {
+	for name, tc := range map[string]struct{ content, want string }{
+		"blank":         {"", ""},
+		"only comments": {"<!--\nWrite guidance here.\n-->\n\n<!-- more -->\n", ""},
+		"prose": {"<!-- owner note -->\n\n## Style\n\nPrefer small changes. <!-- why: review load -->\n\n\n<!--\nhidden\n-->\n\n1. Every fix has a test.\n",
+			"## Style\n\nPrefer small changes.\n\n1. Every fix has a test."},
+		"fenced comment": {"Run:\n\n```html\n<!-- kept -->\n\n\n```\n", "Run:\n\n```html\n<!-- kept -->\n\n\n```"},
+	} {
+		if got := Guidance(tc.content); got != tc.want {
+			t.Errorf("%s: Guidance = %q, want %q", name, got, tc.want)
 		}
 	}
 }

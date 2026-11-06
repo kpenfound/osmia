@@ -154,8 +154,6 @@ const ProjectActive = api.ProjectActive
 
 const NotFound = api.NotFound
 
-const CharterEmpty = api.CharterEmpty
-
 const Forbidden = api.Forbidden
 
 type APIError = api.APIError

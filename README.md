@@ -29,8 +29,8 @@ behavior and feature dependencies; the guides describe implemented behavior.
 
 ## How it works
 
-1. Register a project and write its contributor charter. Osmia builds a local
-   knowledge base from the clone.
+1. Register a project, optionally with a charter of guidance for its agents.
+   Osmia builds a local knowledge base from the clone.
 2. Hand in a feature. An architect drafts a numbered specification and a plan
    of units, each a task with acceptance; reviewers challenge them before you
    ratify them.

@@ -102,11 +102,13 @@ type ProjectNotice struct {
 	trace.ProjectNotice
 }
 
-// Charter is the recorded charter revision and its citable rules.
+// Charter is the recorded charter revision, its guidance as charter.Guidance
+// reads it, and its citable rules.
 type Charter struct {
 	Source      string               `json:"source"`
 	Record      string               `json:"record"`
 	Revision    int                  `json:"revision"`
+	Guidance    string               `json:"guidance"`
 	Rules       []charter.Rule       `json:"rules"`
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`
 }
@@ -222,7 +224,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		return Bundle{}, fmt.Errorf("charter: %w", err)
 	}
 	c := charter.Parse(doc.Content)
-	b.Charter = Charter{Source: doc.Path, Record: doc.ID, Revision: doc.Revision, Rules: c.Rules, Diagnostics: c.Diagnostics}
+	b.Charter = Charter{Source: doc.Path, Record: doc.ID, Revision: doc.Revision, Guidance: charter.Guidance(doc.Content), Rules: c.Rules, Diagnostics: c.Diagnostics}
 
 	if scope.Workstream != "" {
 		members, err := repo.WorkgroupCharters(ctx, scope.Workstream)

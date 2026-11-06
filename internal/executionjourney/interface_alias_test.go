@@ -72,8 +72,6 @@ type fakeIssues = fixturekit.FakeIssues
 
 var toolNames = intakefixture.ToolNames
 
-const CharterEmpty = api.CharterEmpty
-
 type AmendmentResponse = api.AmendmentResponse
 
 type AgentStatus = api.AgentStatus

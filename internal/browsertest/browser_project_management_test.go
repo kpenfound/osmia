@@ -83,7 +83,7 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	recordManagementWrites(p)
 	p.Click(manage)
 	p.Await("management opened on its project", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
-	p.AwaitText("#charter-state", "Ready for hand-in")
+	p.AwaitText("#charter-state", "rule")
 
 	p.Await("grouping controls are absent", `document.querySelector('[data-open=repo-add], #project-add-repo, #repo-add') === null`)
 	p.Click("#project-home")
@@ -177,7 +177,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	p.Await("no outdated cog entry", `![...document.querySelectorAll('#settings-menu button')].some(b => b.textContent === 'Projects and charters')`)
 	p.Choose("#project-edit [name=project]", string(project))
 	p.Eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
-	p.AwaitText("#charter-state", "Not ready for hand-in")
+	p.AwaitText("#charter-state", "0 rules · revision 1.")
 	p.Click("#project-edit [data-action=read-charter]")
 	managementOutcome(p, "#project-edit .result", "ok")
 	recordManagementWrites(p)
@@ -189,7 +189,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	must(t, err)
 	p.Await("external charter save announced on the event stream", `managementConfigEvents.some(e => e.project === `+quote(string(project))+`)`)
 	p.Await("untouched editor follows API save and its pin", `document.querySelector('#project-edit [name=content]').value === `+quote(external)+` && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(next.Revision)))
-	p.AwaitText("#charter-state", "Ready for hand-in")
+	p.AwaitText("#charter-state", "1 rule · revision "+strconv.Itoa(next.Revision)+".")
 	// Make an actual change, so the service must accept the new pin before
 	// recording another revision rather than simply return unchanged text.
 	const local = "1. Follow the latest owner rule.\n2. Preserve decisions.\n"

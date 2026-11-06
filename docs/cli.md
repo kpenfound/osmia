@@ -93,7 +93,7 @@ placeholder after its image bytes have been removed.
 
 `osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and KB are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo` and `draft_brief`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
 
-Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active with a nonempty charter for every project. Paused projects are allowed; the session's project can be removed while another remains.
+Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active. Paused projects are allowed; the session's project can be removed while another remains.
 
 `osmia design read <design-id>` prints `Brief revision: N`, then `Projects:` with the ordered project IDs and `(home)` beside the session's project when listed, followed by brief text and the conversation. With `--json` it returns `design` (including `brief_revision`, `brief` and `projects`) and the conversation fields (`workstream` and `entries`) at the top level.
 
@@ -235,8 +235,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
 - `status` shows health, loaded configuration digest/root, each configuration
   file on disk against the loaded configuration as `config` prints it, the
   active projects and repos
-  and their trace paths (or that none is configured), its charter state (ready or
-  empty, rule count, recorded revision and numbering diagnostics), its latest
+  and their trace paths (or that none is configured), its charter state (rule
+  count, recorded revision and numbering diagnostics), its latest
   knowledge-base extraction (number, `pending`, `running`, `succeeded` or
   `failed`, the time of its last activity and the reason when it failed or
   waits to retry), diagnostics, the last failed reload (`Last reload failed at
@@ -730,8 +730,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   the positional project is home for the shared chief and conversation. The API
   accepts an ordered `projects` list, with `project` as a one-element shorthand.
   The web form offers a multi-select of every active project. Go refuses empty
-  or duplicate lists, inactive projects and empty charters; paused projects are
-  allowed. A single-project hand-in keeps ordinary drafting and ratification.
+  or duplicate lists and inactive projects; paused projects are allowed. A single-project hand-in keeps ordinary drafting and ratification.
   Several projects allocate and join one member each without a model selection
   turn, and get a workgroup spec, contracts, graph, slices and plans with one
   all-member ratification. The architect escalates a judgment that a project
@@ -911,7 +910,7 @@ never raw file contents.
 | 1 | Invalid API response, local output or unexpected client failure, an `edit` editor that exited with an error, or a failed `doctor` check |
 | 2 | Invalid command, flags, arguments or root, or an unreadable `edit --from` file |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection (including an `edit` draft that does not validate), no project is configured, unknown project or workstream, empty charter on hand-in, stdin over the hand-in limit or not UTF-8, or `edit` without `--from` while neither `VISUAL` nor `EDITOR` is set |
+| 4 | API malformed-input or validation rejection (including an `edit` draft that does not validate), no project is configured, unknown project or workstream, stdin over the hand-in limit or not UTF-8, or `edit` without `--from` while neither `VISUAL` nor `EDITOR` is set |
 | 5 | API conflict (including an extraction already running, abandoning a delivered or abandoned workstream, or an `edit` of a revision that has since changed or a ratified draft), project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup failure, including ownership conflict, or a failure that stopped a running service |
 

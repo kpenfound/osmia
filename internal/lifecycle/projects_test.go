@@ -115,7 +115,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	charter, err := projectDocument(t, s.cfg.Root, id, "charter.md")
 	must(t, err)
-	if string(charter) != trace.CharterTemplate || !osmiacharter.Parse(trace.CharterTemplate).Empty() {
+	if string(charter) != trace.CharterTemplate || osmiacharter.Guidance(trace.CharterTemplate) != "" {
 		t.Fatalf("charter: %q", charter)
 	}
 	if !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {

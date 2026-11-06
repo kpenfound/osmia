@@ -144,7 +144,7 @@ project outside workgroups and retain their direct writable-worktree chat.
 The **Osmia** heading returns to the project pane. **Create project**, **Hand in a feature**, **Open a design session** and **Open an exploratory session** use shared forms from the header's **+**, sidebar and project cards. Card actions preselect that project; global actions ask for it. A cross-project workgroup appears under each member's project card and sidebar group row. Member labels are project names only.
 
 **Project management**, from the cog menu or a project card, shows the chosen
-project's own charter and whether it is ready for hand-in. **Read charter**
+project's own charter and how many citable rules it has. **Read charter**
 loads the current revision; **Save charter** saves against that revision. An
 untouched editor follows another client's save live. Unsaved edits keep their
 text and revision, with a notice that the charter changed elsewhere; a stale

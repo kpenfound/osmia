@@ -4001,9 +4001,6 @@
               "null"
             ]
           },
-          "ready": {
-            "type": "boolean"
-          },
           "revision": {
             "type": "integer"
           },

@@ -375,25 +375,12 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 		t.Fatal("a refused hand-in wrote to the trace")
 	}
 
-	fetches := f.issues.Fetches
-	writeCharter(t, f.c, f.project, "# Charter\n")
-	_, _, err := f.s.loadCharter(context.Background(), f.project)
-	must(t, err)
-	head = f.head(t)
-	api := handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/12"})
-	if api.Code != CharterEmpty || !strings.Contains(api.Message, "osmia edit charter "+string(f.project)) || f.issues.Fetches != fetches {
-		t.Fatalf("empty charter: %+v, %d fetches", api, f.issues.Fetches-fetches)
-	}
-	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {
-		t.Fatal("an empty charter hand-in wrote to the trace")
-	}
-
-	_, err = f.c.Abandon(context.Background(), f.streams(t)[0], "Owner finished checking hand-in refusals")
+	_, err := f.c.Abandon(context.Background(), f.streams(t)[0], "Owner finished checking hand-in refusals")
 	must(t, err)
 	_, err = f.c.RemoveProject(context.Background(), f.project)
 	must(t, err)
 	head = f.head(t)
-	api = handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", Path: design})
+	api := handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", Path: design})
 	if api.Code != NotFound || !strings.Contains(api.Message, "project "+string(f.project)+" is not an active project") {
 		t.Fatalf("inactive project: %+v", api)
 	}

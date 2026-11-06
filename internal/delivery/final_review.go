@@ -1568,7 +1568,7 @@ func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 Your view holds:
 - branch/: every tracked file of the reviewed commit.
 - spec.md and plan.json: the sealed spec and plan. Cite a criterion as spec#<n>.
-- charter.md: the owner's rules for contributing to this project.
+- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty.
 - context.md: local decisions, knowledge and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
 %s

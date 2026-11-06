@@ -45,7 +45,7 @@ func charterRevisionCount(t *testing.T, s *Service) int {
 	return len(documentRevisions(t, s, "charter"))
 }
 
-func TestHandInCharterGate(t *testing.T) {
+func TestHandInWithOptionalCharter(t *testing.T) {
 	t.Parallel()
 	opts, clone := projectFixture(t)
 	s, c := start(t, opts)
@@ -61,19 +61,21 @@ func TestHandInCharterGate(t *testing.T) {
 
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if want := (&CharterState{Ready: false, Rules: 0, Revision: 1, Diagnostics: []charter.Diagnostic{}}); cfg.Project == nil || !reflect.DeepEqual(cfg.Project.CharterState, want) || len(cfg.Diagnostics) != 0 {
+	if want := (&CharterState{Rules: 0, Revision: 1, Diagnostics: []charter.Diagnostic{}}); cfg.Project == nil || !reflect.DeepEqual(cfg.Project.CharterState, want) || len(cfg.Diagnostics) != 0 {
 		t.Fatalf("template status: %+v %+v", cfg.Project, cfg.Diagnostics)
 	}
 	if added.Project.CharterState != nil {
 		t.Fatal("project add reports charter state")
 	}
 
-	api := handInError(t, c, HandInRequest{Project: id, Key: "k", Path: "/tmp/design.md"})
-	if api.Code != CharterEmpty || !strings.Contains(api.Message, string(id)) || !strings.Contains(api.Message, "charter has no rules") || !strings.Contains(api.Message, "osmia edit charter "+string(id)) {
-		t.Fatalf("empty charter: %+v", api)
+	// The template charter has no guidance and no rules, and the project
+	// still takes work: the request is judged on its own fields.
+	api := handInError(t, c, HandInRequest{Project: id})
+	if api.Code != Validation || !strings.Contains(api.Message, "key") {
+		t.Fatalf("template charter: %+v", api)
 	}
-	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != http.StatusConflict {
-		t.Fatalf("empty charter status %d", code)
+	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != 422 {
+		t.Fatalf("template charter status %d", code)
 	}
 	if api := handInError(t, c, HandInRequest{Project: unknown}); api.Code != NotFound || !strings.Contains(api.Message, string(unknown)) {
 		t.Fatalf("unknown project: %+v", api)
@@ -92,17 +94,10 @@ func TestHandInCharterGate(t *testing.T) {
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
 	state := cfg.Project.CharterState
-	if state == nil || !state.Ready || state.Rules != 3 || state.Revision != 2 || len(state.Diagnostics) != 2 || !strings.Contains(state.Diagnostics[0].Message, "gap") || !strings.Contains(state.Diagnostics[1].Message, "cannot be cited") {
+	if state == nil || state.Rules != 3 || state.Revision != 2 || len(state.Diagnostics) != 2 || !strings.Contains(state.Diagnostics[0].Message, "gap") || !strings.Contains(state.Diagnostics[1].Message, "cannot be cited") {
 		t.Fatalf("edited status: %+v", state)
 	}
 
-	api = handInError(t, c, HandInRequest{Project: id})
-	if api.Code != Validation || !strings.Contains(api.Message, "key") {
-		t.Fatalf("ready charter: %+v", api)
-	}
-	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != 422 {
-		t.Fatalf("ready charter status %d", code)
-	}
 	if n := charterRevisionCount(t, s); n != 2 {
 		t.Fatalf("one edit recorded %d revisions in total", n)
 	}
@@ -112,7 +107,7 @@ func TestHandInCharterGate(t *testing.T) {
 	}
 
 	writeCharter(t, c, id, "# Charter\n")
-	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != CharterEmpty {
+	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != Validation || !strings.Contains(api.Message, "key") {
 		t.Fatalf("emptied charter: %+v", api)
 	}
 	if n := charterRevisionCount(t, s); n != 3 {

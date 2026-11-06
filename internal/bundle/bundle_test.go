@@ -243,6 +243,28 @@ func TestBundleReadsTheLatestRevisionsAtEachCall(t *testing.T) {
 	}
 }
 
+// The charter's Markdown, without the owner's HTML comments, is guidance in
+// every bundle; numbered items in it are also listed as citable rules. A
+// charter with nothing but comments, like the template, is empty.
+func TestBundleCarriesCharterGuidance(t *testing.T) {
+	f := setup(t)
+	f.charter(t, "<!-- a note to myself -->\n## Style\n\nPrefer table-driven tests.\n\n1. Keep the API stable.\n")
+	b := f.assemble(t, bundle.Scope{})
+	if b.Charter.Guidance != "## Style\n\nPrefer table-driven tests.\n\n1. Keep the API stable." {
+		t.Fatalf("guidance %q", b.Charter.Guidance)
+	}
+	text := b.Render()
+	if want := "### charter.md\n## Style\n\nPrefer table-driven tests.\n\n1. Keep the API stable.\n### end of charter.md\nCitable rules:\n- charter#1 [Style]: Keep the API stable.\n"; !strings.Contains(text, want) || strings.Contains(text, "a note to myself") {
+		t.Fatalf("render lacks %q or carries the comment:\n%s", want, text)
+	}
+
+	f.charter(t, trace.CharterTemplate)
+	text = f.assemble(t, bundle.Scope{}).Render()
+	if !strings.Contains(text, "are binding. The owner's charter adds to them.\nThe charter is empty.\n") || strings.Contains(text, "Citable rules") || strings.Contains(text, "### charter.md") {
+		t.Fatalf("template charter rendered:\n%s", text)
+	}
+}
+
 func ruling(stream config.WorkstreamID, id string, revision int, at time.Time, decision string) trace.Ruling {
 	return trace.Ruling{
 		Header:           trace.Header{Schema: "osmia.trace.ruling", Version: trace.Version, ID: id, Revision: revision, Project: project, Workstream: stream, At: at, Actor: owner, Cause: "owner-answer"},

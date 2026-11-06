@@ -9,7 +9,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -342,9 +341,6 @@ func (s *Service) decideObjection(ctx context.Context, repository *trace.Reposit
 }
 func (s *Service) answers(cfg *config.Config, repository *trace.Repository) *questions.Deliverer {
 	return s.intake().Answers(cfg, repository)
-}
-func (s *Service) loadCharter(ctx context.Context, p config.ProjectID) (trace.Document, charter.Charter, error) {
-	return s.intake().LoadCharter(ctx, p)
 }
 func (s *Service) chiefRepository(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
 	return s.intake().ChiefRepository(ctx, r, w)

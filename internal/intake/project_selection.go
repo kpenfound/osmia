@@ -27,15 +27,12 @@ func (s *Controller) ValidateProjects(ctx context.Context, projects []config.Pro
 		if !s.Current().Active(project) {
 			return &APIError{Code: Validation, Message: fmt.Sprintf("project %s is not active", project)}
 		}
-		_, c, err := s.LoadCharter(ctx, project)
+		_, _, err := s.LoadCharter(ctx, project)
 		if errors.Is(err, ErrNoTrace) {
 			return &APIError{Code: Internal, Message: fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", project)}
 		}
 		if err != nil {
 			return &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the charter of project %s; check the project trace", project)}
-		}
-		if c.Empty() {
-			return &APIError{Code: CharterEmpty, Message: fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: osmia edit charter %s", project, project)}
 		}
 	}
 	return nil

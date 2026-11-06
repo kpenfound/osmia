@@ -29,9 +29,6 @@ type Charter struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
-// Empty reports whether the charter has no rules. Guidance text alone is empty.
-func (c Charter) Empty() bool { return len(c.Rules) == 0 }
-
 // Rule returns the rule cited as charter#n. A number held by more than one
 // rule is not citable.
 func (c Charter) Rule(n int) (Rule, bool) {
@@ -147,6 +144,37 @@ func stripComments(line string, open bool) (string, bool) {
 		out.WriteString(line[:start])
 		line, open = line[start+4:], true
 	}
+}
+
+// Guidance returns the charter as agents read it: its Markdown with HTML
+// comments removed, outside fenced code, and without leading or trailing
+// blank lines. A charter holding only comments has no guidance.
+func Guidance(content string) string {
+	var (
+		out     []string
+		code    string
+		comment bool
+	)
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if code != "" {
+			if strings.HasPrefix(strings.TrimSpace(line), code) {
+				code = ""
+			}
+			out = append(out, line)
+			continue
+		}
+		line, comment = stripComments(line, comment)
+		if m := fence.FindStringSubmatch(line); m != nil {
+			code = m[1]
+		}
+		line = strings.TrimRight(line, " \t")
+		if line == "" && (len(out) == 0 || out[len(out)-1] == "") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
 }
 
 func joinInts(v []int) string {

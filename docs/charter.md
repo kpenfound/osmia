@@ -1,9 +1,17 @@
 # Charter
 
-Each project has one charter: your rules as a contributor to that project. It
-is the `charter.md` document in the project's trace, and you edit it with
-`osmia edit charter <project-id>` or in the web UI. Plans, reviews and the
-committee cite its rules, so Osmia refuses to hand in work while it has none.
+Each project has one charter: your guidance as a contributor to that project,
+written as Markdown the way you would write an AGENTS.md. It adds to the
+repository's own contributor documents (AGENTS.md, CONTRIBUTING, CLAUDE.md and
+similar), which are always binding. It is the `charter.md` document in the
+project's trace, and you edit it with `osmia edit charter <project-id>` or in
+the web UI.
+
+The charter is optional. A project takes work with an empty charter, and
+nothing about hand-in or design depends on what it holds. Every agent's
+briefing carries the charter's Markdown with HTML comments removed, and lists
+its numbered items as rules that plans, reviews and the committee can cite.
+
 Each project is one repo with its own charter, KB, entities and settings. In a
 cross-project workgroup each charter governs its member's slice, plan and units;
 the workgroup spec and contracts must satisfy all member charters. Unqualified
@@ -14,17 +22,19 @@ and decided in the project whose rule changes.
 
 ## Template
 
-`osmia project add` records a template with guidance headings for scope,
-dependencies, testing and pull-request shape. The guidance sits in HTML
-comments. The template states that the repository's own contributor documents
-(CONTRIBUTING, AGENTS.md, CLAUDE.md and similar) are binding. It contains no
-rules, so a new charter is empty.
+`osmia project add` records a template that is a single HTML comment
+explaining the charter, so a new charter gives agents no guidance and has no
+rules. Replace it or write below it.
 
 Budgets, capacity, models and other factory settings belong in
 [configuration](configuration.md), not in the charter. The template says so;
 Osmia does not check it.
 
-## Rule format
+## Guidance and rules
+
+Write the charter as ordinary Markdown: headings, prose, bullets and code
+blocks all reach every agent as guidance. HTML comments are notes for you and
+are left out of the briefing.
 
 A rule is a Markdown ordered-list item written as `N. text`, indented at most
 three spaces, under any heading or none:
@@ -53,7 +63,8 @@ reading the charter:
   cannot be cited until you renumber it; the other rules still can.
 - An item with no text is reported.
 
-A charter is **empty** when it has no rules. Guidance alone is empty.
+A charter with guidance and no rules is complete; rules are only what makes a
+line citable.
 
 ## Owner edits and revisions
 
@@ -95,12 +106,8 @@ next revision.
 Every later bundle on the project carries the ratified rule as a notice. A
 declined proposal leaves the charter as it is.
 
-## Status and hand-in
+## Status
 
-`osmia status` shows whether the charter is ready (has at least one rule), how
-many rules it has, the recorded revision and any numbering diagnostics. The
-same data is `project.charter_state` in the `/v1/config` response.
-
-`osmia handin` checks the charter first. With an empty charter it fails with
-`charter_empty`, naming the project and the command that edits its charter,
-`osmia edit charter <project-id>`, and creates nothing. See the [command line](cli.md) for the rest of hand-in.
+`osmia status` shows how many rules the charter has, the recorded revision and
+any numbering diagnostics. The same data is `project.charter_state` in the
+`/v1/config` response.

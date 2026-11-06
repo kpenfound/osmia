@@ -31,7 +31,6 @@ const (
 	NoProject       Code = "no_project"
 	ProjectActive   Code = "project_active"
 	NotFound        Code = "not_found"
-	CharterEmpty    Code = "charter_empty"
 	Forbidden       Code = "forbidden"
 )
 
@@ -261,10 +260,9 @@ type ExtractionResponse struct {
 	Extraction ExtractionState `json:"extraction"`
 }
 
-// CharterState summarizes the charter as last recorded. Ready means it has at
-// least one rule, which hand-in requires.
+// CharterState summarizes the charter as last recorded: its citable rules,
+// its revision and its numbering diagnostics.
 type CharterState struct {
-	Ready       bool                 `json:"ready"`
 	Rules       int                  `json:"rules"`
 	Revision    int                  `json:"revision"`
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`

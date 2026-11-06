@@ -92,8 +92,8 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(status, "Project: "+string(id)+" (dagger)") || !strings.Contains(status, "Trace: "+added.Project.Trace) || strings.Contains(status, "Diagnostic") {
 		t.Fatalf("status with a project:\n%s", status)
 	}
-	if !strings.Contains(status, "Charter: empty; write numbered rules with osmia edit charter "+string(id)+" before handing in work (0 rules, revision 1)\n") {
-		t.Fatalf("status without charter rules:\n%s", status)
+	if !strings.Contains(status, "Charter: 0 rules, revision 1; edit it with osmia edit charter "+string(id)+"\n") {
+		t.Fatalf("status with the template charter:\n%s", status)
 	}
 	// Registration started the librarian's extraction; this service has no
 	// runner, so it fails and status says why. A re-run is a new extraction.
@@ -122,24 +122,20 @@ func TestProjectCommands(t *testing.T) {
 	if code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+project+" is not an active project") {
 		t.Fatalf("extract unknown project: %d %s %s", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "handin", string(id), "design.md")
-	if code != 4 || out != "" || !strings.HasPrefix(diag, "charter_empty: project "+string(id)+" cannot take work: its charter has no rules") || !strings.Contains(diag, "osmia edit charter "+string(id)) {
-		t.Fatalf("empty charter hand-in: %d %s %s", code, out, diag)
-	}
 	code, out, diag = invoke(t, root, "handin", project, "design.md")
 	if code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+project+" is not an active project") {
 		t.Fatalf("unknown project hand-in: %d %s %s", code, out, diag)
 	}
 	setCharter(t, root, id, "# Charter\n1. Keep changes small.\n1. Test every fix.\n")
 	status = successful(t, root, "status")
-	if !strings.Contains(status, "Charter: ready (2 rules, revision 2)\n  charter.md:3: rule 1 is numbered 2 times") {
+	if !strings.Contains(status, "Charter: 2 rules, revision 2; edit it with osmia edit charter "+string(id)+"\n  charter.md:3: rule 1 is numbered 2 times") {
 		t.Fatalf("status with charter rules:\n%s", status)
 	}
 	var st2 struct {
 		Configuration wire.ConfigResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st2))
-	if cs := st2.Configuration.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 || cs.Revision != 2 || len(cs.Diagnostics) != 1 {
+	if cs := st2.Configuration.Project.CharterState; cs == nil || cs.Rules != 2 || cs.Revision != 2 || len(cs.Diagnostics) != 1 {
 		t.Fatalf("status JSON: %+v", cs)
 	}
 	code, out, diag = invoke(t, root, "handin", string(id), "missing.md")

@@ -253,13 +253,10 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	if x := awaitExtraction(t, f.c); x.State != "succeeded" {
 		t.Fatalf("extraction: %+v", x)
 	}
-	if _, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "refused", Stdin: ptr(exitDebated)}); !failed(err, CharterEmpty) {
-		t.Fatalf("a hand-in before the charter: %v", err)
-	}
 	writeCharter(t, f.c, added.Project.ID, exitCharter)
 	onboarded, err := f.c.Configuration(ctx)
 	must(t, err)
-	if cs := onboarded.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 {
+	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 2 {
 		t.Fatalf("charter: %+v", cs)
 	}
 	entities, err := kb.Load(f.repository())

@@ -3599,8 +3599,8 @@
     const project = byId('project-edit').elements.project.value;
     const configured = projects().find(p => p.id === project);
     const state = configured?.charter_state;
-    byId('charter-state').textContent = state ? (state.ready ? 'Ready for hand-in' : 'Not ready for hand-in') +
-      ' · ' + state.rules + ' rules · revision ' + state.revision + '.' : (project ? 'Charter readiness not reported.' : 'Choose a project to manage its charter and repos.');
+    byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ' · revision ' + state.revision + '.' :
+      (project ? 'Charter state not reported.' : 'Choose a project to manage its charter and repos.');
     block(byId('project-remove'), !configured);
     const repos = configured?.repos || [];
     const active = new Set(repos.map(r => r.id));

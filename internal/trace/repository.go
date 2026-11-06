@@ -487,46 +487,20 @@ func (r *Repository) closeFiles() error {
 func (r *Repository) Project() config.ProjectID { return r.project }
 
 // CharterTemplate is the initial charter.md content of a new project trace,
-// recorded as the charter's first revision. It holds guidance only and no
-// rules, so a new charter is empty until the owner writes one.
-const CharterTemplate = `# Charter
+// recorded as the charter's first revision. It is one HTML comment, so a new
+// charter holds no guidance and no rules until the owner writes some.
+const CharterTemplate = `<!--
+This charter is optional. Write it like an AGENTS.md: Markdown guidance for
+every agent working on this project, in addition to the repository's own
+contributor documents (AGENTS.md, CONTRIBUTING, CLAUDE.md and similar), which
+always apply.
 
-<!--
-This charter holds your rules as a contributor to this project. Plans, reviews
-and the committee cite them as charter#<n>.
-
-A rule is a numbered Markdown list item, "1. Rule text", under any heading.
-Rules are cited by the number you write, counted across the whole document, so
-keep each number unique and never reuse a retired one. Headings, plain text and
-comments like this one are guidance, not rules. Osmia refuses hand-in while the
-charter has no rules.
+A numbered list item, "1. Rule text", is a rule reviewers can cite as
+charter#1. Keep each number unique and never reuse a retired one.
 
 Budgets, capacity, models and other factory settings belong in configuration,
 not here.
 -->
-
-The repository's own contributor documents (CONTRIBUTING, AGENTS.md, CLAUDE.md
-and similar) are binding. Rules here add to them.
-
-## Scope
-
-<!-- What changes belong in this project, and what must be proposed upstream
-first or not at all. -->
-
-## Dependencies
-
-<!-- When a new dependency is acceptable, which ones are preferred or banned,
-and how versions are pinned. -->
-
-## Testing
-
-<!-- How a change must be tested: which suites run, what a new test must show,
-and which checks must pass before a pull request. -->
-
-## Pull requests
-
-<!-- The shape of a pull request: size, commit structure, description,
-changelog and sign-off. -->
 `
 
 // EntitiesPath is the project document holding the local entity map, and

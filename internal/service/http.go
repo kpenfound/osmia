@@ -57,7 +57,7 @@ func failWith(w http.ResponseWriter, api *APIError) {
 	switch api.Code {
 	case Validation:
 		status = 422
-	case NoProject, ProjectActive, CharterEmpty, Conflict:
+	case NoProject, ProjectActive, Conflict:
 		status = 409
 	case NotFound:
 		status = 404

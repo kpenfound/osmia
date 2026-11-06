@@ -122,7 +122,7 @@ restart-required or reload-required setting appears among the diagnostics; after
 editing the file, `osmia reload` applies what it can
 ([reload](running.md#reload)).
 
-## 4. Add a project and write its charter
+## 4. Add a project and, optionally, write its charter
 
 ```sh
 osmia project add myproject --upstream owner/repo --fork you/repo --clone ~/src/repo
@@ -145,26 +145,32 @@ knowledge-base extraction. `osmia status` shows the extraction
 `succeeded` when it has finished. Registration never writes to your clone; see
 [project registration](configuration.md#project-registration).
 
-Hand-in is refused until the project has a charter with at least one rule. The
-charter is your rules as a contributor to this project. Open it in your editor
-(`$VISUAL`, or else `$EDITOR`):
+The project can take work right away. Its charter is optional: guidance for
+every agent working on the project, written like an AGENTS.md, in addition to
+the repository's own contributor documents. To write one, open it in your
+editor (`$VISUAL`, or else `$EDITOR`):
 
 ```sh
 osmia edit charter p_…
 ```
 
-and write numbered rules under the template's headings:
+and write Markdown. A numbered item is a rule reviewers can cite as
+`charter#<n>`:
 
 ```markdown
+## Testing
+
+Prefer table-driven tests.
+
 1. Every bug fix comes with a test that fails without it.
 2. Run the full suite before opening a pull request.
 ```
 
 Save and quit. The command records your edit as the next charter revision and
 prints its number; there is nothing further to ratify, and `osmia status` then
-shows `Charter: ready (2 rules, revision 2)`. To write the charter from a file
+shows `Charter: 2 rules, revision 2`. To write the charter from a file
 instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the cog menu
-opens the same revision-pinned charter editor and shows readiness for hand-in. Rules later proposed by the chief of
+opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 
@@ -174,7 +180,7 @@ Register another repo as its own project:
 osmia project add other --upstream owner/other --clone ~/src/other
 ```
 
-Write that project's charter too. Projects have independent configuration and KBs. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
+Give that project its own charter if it needs one. Projects have independent configuration and KBs. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
 
 ## 5. Start a workgroup and decide
 
@@ -185,7 +191,7 @@ hand it in with the project ID:
 osmia handin p_… design.md
 ```
 
-The command creates a one-member workgroup with the document as its brief and prints its workstream ID (`w_…`). Add `--with <other-project-id>` for each additional project. The positional project is home for the shared chief and conversation. Every selected project needs a nonempty charter; paused projects are allowed. Go allocates one member per project without an architect selection turn. Several projects share one workgroup spec, graph and ratification. The web hand-in form offers the same selection through a multi-select of active projects.
+The command creates a one-member workgroup with the document as its brief and prints its workstream ID (`w_…`). Add `--with <other-project-id>` for each additional project. The positional project is home for the shared chief and conversation. Paused projects are allowed. Go allocates one member per project without an architect selection turn. Several projects share one workgroup spec, graph and ratification. The web hand-in form offers the same selection through a multi-select of active projects.
 
 The project set stays fixed until ratification; changing it requires abandoning and handing in again. Add `--skip-debate` for small work: the committee does not debate it and the draft waits for your ratification. Follow progress with `osmia status <workstream-id>`, or on the page.
 
@@ -283,5 +289,5 @@ open PRs are closed or left as drafts. Merged work is never reverted.
 - [Command line](cli.md) for every command and flag.
 - [Configuration](configuration.md) for profiles, sandboxes, capacity and budgets.
 - [Running the service](running.md) for the web page, phone access, reload and notifications.
-- [Charter](charter.md) for writing a project's rules.
+- [Charter](charter.md) for writing a project's guidance and rules.
 - [Hearsay](hearsay.md) for optional memory.

@@ -1071,7 +1071,7 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, an
 
 Your view holds:
 - %s: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
+- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
 Deliver two files with %s; only what you deliver is kept.

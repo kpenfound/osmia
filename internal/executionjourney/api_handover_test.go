@@ -2,7 +2,6 @@ package executionjourney
 
 import (
 	context "context"
-	errors "errors"
 	fmt "fmt"
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -121,17 +120,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
 
-	// An onboarded project with an empty charter takes no work.
 	design := filepath.Join(home, "design.md")
 	must(t, os.WriteFile(design, []byte(handedDesign), 0600))
-	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "refused", Path: design})
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != CharterEmpty || api.Message != fmt.Sprintf("project %s cannot take work: its charter has no rules; write numbered rules (\"1. ...\") with: osmia edit charter %s", f.project, f.project) {
-		t.Fatalf("empty charter: %v", err)
-	}
-	if list, err := f.c.Statuses(ctx); err != nil || len(list.Workstreams) != 0 {
-		t.Fatalf("the refused hand-in created a workstream: %+v %v", list, err)
-	}
 	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 
 	// Each hand-in copies its input unchanged under handed/.

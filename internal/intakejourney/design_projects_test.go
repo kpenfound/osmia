@@ -49,7 +49,6 @@ func TestDesignBriefProjectsValidationInheritanceAndContext(t *testing.T) {
 	s, c, home, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
 	other := addDesignProject(t, c, "client")
-	empty := addDesignProject(t, c, "empty")
 	inactive := addDesignProject(t, c, "inactive")
 	_, err := c.RemoveProject(ctx, inactive)
 	must(t, err)
@@ -90,7 +89,7 @@ func TestDesignBriefProjectsValidationInheritanceAndContext(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: "design-projects", ResultText: "context checked"}, nil
 		}
-		for _, projects := range []any{[]config.ProjectID{}, nil, []config.ProjectID{home, home}, []config.ProjectID{inactive}, []config.ProjectID{empty}, []string{"p_0123456789abcdef0123456789abcdef"}} {
+		for _, projects := range []any{[]config.ProjectID{}, nil, []config.ProjectID{home, home}, []config.ProjectID{inactive}, []string{"p_0123456789abcdef0123456789abcdef"}} {
 			out, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": productionBrief, "projects": projects})
 			if projects == nil && err != nil {
 				continue

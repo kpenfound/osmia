@@ -1575,11 +1575,7 @@ func showProject(w io.Writer, p *wire.ProjectView) {
 	}
 	fmt.Fprintf(w, "Project: %s (%s) upstream=%s push-repository=%s clone=%s\nTrace: %s\n", p.ID, p.Name, p.Upstream, (config.Project{Upstream: p.Upstream, Fork: p.Fork}).PushRepository(), p.Clone, p.Trace)
 	if c := p.CharterState; c != nil {
-		state := "ready"
-		if !c.Ready {
-			state = "empty; write numbered rules with osmia edit charter " + string(p.ID) + " before handing in work"
-		}
-		fmt.Fprintf(w, "Charter: %s (%d rules, revision %d)\n", state, c.Rules, c.Revision)
+		fmt.Fprintf(w, "Charter: %d rules, revision %d; edit it with osmia edit charter %s\n", c.Rules, c.Revision, p.ID)
 		for _, d := range c.Diagnostics {
 			fmt.Fprintf(w, "  charter.md:%d: %s\n", d.Line, d.Message)
 		}
@@ -2090,8 +2086,6 @@ func report(w io.Writer, err error, project bool) int {
 		msg = "a project is already active; remove it before adding another"
 	case wire.NotFound:
 		code, msg = 4, "project not found; check the project ID with status"
-	case wire.CharterEmpty:
-		code, msg = 4, "the project's charter has no rules; write it with osmia edit charter <project-id> before handing in work"
 	case wire.Malformed:
 		code, msg = 4, "request rejected; check client and service API versions"
 	case wire.Validation:

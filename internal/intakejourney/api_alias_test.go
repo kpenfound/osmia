@@ -51,8 +51,6 @@ const NoProject = api.NoProject
 
 const NotFound = api.NotFound
 
-const CharterEmpty = api.CharterEmpty
-
 type APIError = intakefixture.APIError
 
 type Diagnostic = intakefixture.Diagnostic
