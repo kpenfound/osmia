@@ -37,6 +37,9 @@ const (
 type APIError struct {
 	Code    Code   `json:"code"`
 	Message string `json:"message"`
+	// Field names the configuration setting a validation refusal is about,
+	// when there is one.
+	Field string `json:"field,omitempty"`
 }
 
 func (e *APIError) Error() string { return string(e.Code) + ": " + e.Message }

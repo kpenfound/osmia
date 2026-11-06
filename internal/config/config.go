@@ -596,28 +596,49 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{PerWorkstream: perWorkstream, GitOperations: DefaultGitOperations}}
 	data, err := os.ReadFile(projectPath)
 	if err != nil {
 		return Project{}, &FieldError{Path: projectPath, Reason: "cannot be read", Err: err}
 	}
-	_, err = decodeBytes(projectPath, data, &p, true)
+	p, _, err := loadProjectBytes(root, id, home, perWorkstream, data)
+	return p, err
+}
+
+// loadProjectBytes decodes and validates one project file's bytes. The
+// metadata says which keys the file sets.
+func loadProjectBytes(root Root, id ProjectID, home string, perWorkstream int, data []byte) (Project, toml.MetaData, error) {
+	projectPath, err := root.ProjectConfig(id)
 	if err != nil {
-		return Project{}, err
+		return Project{}, toml.MetaData{}, err
 	}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{PerWorkstream: perWorkstream, GitOperations: DefaultGitOperations}}
+	md, err := decodeBytes(projectPath, data, &p, true)
+	if err != nil {
+		return Project{}, md, err
+	}
+	if err := p.validate(root, id, home, projectPath); err != nil {
+		return Project{}, md, err
+	}
+	return p, md, nil
+}
+
+// validate completes a decoded project: resolves its identity and clone and
+// checks every setting.
+func (p *Project) validate(root Root, id ProjectID, home, projectPath string) error {
+	var err error
 	p.ID = id
 	if err := p.validateHearsay(projectPath); err != nil {
-		return Project{}, err
+		return err
 	}
 	if p.Version != 1 {
-		return Project{}, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
+		return fieldError(projectPath, "version", "must be 1 (no migrations supported)")
 	}
 	for _, value := range []struct{ field, s string }{{"upstream", p.Upstream}, {"fork", p.Fork}} {
 		if value.field == "fork" && value.s == "" {
 			continue
 		}
 		if !ValidRepository(value.s) {
-			return Project{}, fieldError(projectPath, value.field, "expected owner/repository without a URL or .git suffix")
+			return fieldError(projectPath, value.field, "expected owner/repository without a URL or .git suffix")
 		}
 	}
 	if strings.EqualFold(p.Upstream, p.Fork) {
@@ -625,36 +646,36 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	}
 	p.Clone, err = resolvePath(p.Clone, home, filepath.Dir(projectPath))
 	if err != nil {
-		return Project{}, fieldError(projectPath, "clone", err.Error())
+		return fieldError(projectPath, "clone", err.Error())
 	}
 	if root.Overlaps(p.Clone) {
-		return Project{}, fieldError(projectPath, "clone", "clone and Osmia root must be separate, non-nested directories")
+		return fieldError(projectPath, "clone", "clone and Osmia root must be separate, non-nested directories")
 	}
 	if info, err := os.Stat(p.Clone); err == nil && !info.IsDir() {
-		return Project{}, fieldError(projectPath, "clone", "must be a directory")
+		return fieldError(projectPath, "clone", "must be a directory")
 	}
 	if !ValidBranch(p.BaseBranch) {
-		return Project{}, fieldError(projectPath, "base_branch", "invalid Git branch name")
+		return fieldError(projectPath, "base_branch", "invalid Git branch name")
 	}
 	if !slices.Contains([]string{"commit-per-unit", "squash"}, p.Landing) {
-		return Project{}, fieldError(projectPath, "landing", "expected commit-per-unit or squash")
+		return fieldError(projectPath, "landing", "expected commit-per-unit or squash")
 	}
 	if d, err := time.ParseDuration(p.UpstreamRebase); err != nil || d < 0 || d > 0 && d < time.Minute {
-		return Project{}, fieldError(projectPath, "upstream_rebase", "must be a Go duration of at least 1m, or 0 to disable scheduled drift rebases")
+		return fieldError(projectPath, "upstream_rebase", "must be a Go duration of at least 1m, or 0 to disable scheduled drift rebases")
 	}
 	if d, err := time.ParseDuration(p.PullRequestPoll); err != nil || d < 5*time.Minute {
-		return Project{}, fieldError(projectPath, "pull_request_poll", "must be a Go duration of at least 5m")
+		return fieldError(projectPath, "pull_request_poll", "must be a Go duration of at least 5m")
 	}
 	if d, err := time.ParseDuration(p.ChecksTimeout); err != nil || d < time.Minute || d > MaxChecksTimeout {
-		return Project{}, fieldError(projectPath, "checks_timeout", "must be a Go duration from 1m to 24h")
+		return fieldError(projectPath, "checks_timeout", "must be a Go duration from 1m to 24h")
 	}
 	if p.Capacity.PerWorkstream <= 0 {
-		return Project{}, fieldError(projectPath, "capacity.per_workstream", "must be positive")
+		return fieldError(projectPath, "capacity.per_workstream", "must be positive")
 	}
 	if p.Capacity.GitOperations <= 0 {
-		return Project{}, fieldError(projectPath, "capacity.git_operations", "must be positive")
+		return fieldError(projectPath, "capacity.git_operations", "must be positive")
 	}
-	return p, nil
+	return nil
 }
 
 // ValidRepository accepts owner/repository references without a URL or .git suffix.

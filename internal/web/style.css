@@ -1136,6 +1136,10 @@ button:disabled {
   color: var(--lost);
 }
 
+.result[data-outcome="saved-not-applied"] {
+  color: var(--accent);
+}
+
 #reload[data-lit="true"] {
   font-weight: 600;
   color: var(--card);
@@ -1334,10 +1338,16 @@ button:disabled {
 #project-home { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
 
 .managed-repo { border-top: 1px solid var(--line); padding: 0.75rem 0; min-width: 0; }
-.managed-repo dl { margin: 0.5rem 0; }
-.managed-repo dt { font-weight: 600; }
-.managed-repo dd { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
-#charter-changed { color: var(--accent); }
+#charter-changed, #config-changed { color: var(--accent); }
+.settings { display: grid; gap: 0.75rem; min-width: 0; }
+.setting { display: grid; gap: 0.25rem; min-width: 0; }
+.setting input, .setting textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.setting [aria-invalid="true"] { border-color: var(--lost); }
+.setting .marker { font-size: 0.8rem; color: var(--muted); }
+.setting .marker:empty { display: none; }
+.setting .pending { color: var(--accent); }
+.setting .field-error { color: var(--lost); }
+.setting .field-error:empty { display: none; }
 
 #workgroup-goal { padding-top: 0.75rem; overflow-wrap: anywhere; }
 .workgroup-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.75rem; }

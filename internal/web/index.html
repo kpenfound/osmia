@@ -346,6 +346,18 @@
         </div>
         <p class="result" role="status"></p>
       </form>
+      <form id="project-config" class="control">
+        <h3>Project settings</h3>
+        <p id="config-file" class="meta"></p>
+        <p id="config-load-error" class="attention" role="status" hidden></p>
+        <p id="config-changed" role="status" hidden>Configuration changed elsewhere. Your draft and the version it was read at are kept. Read settings to load the latest file values.</p>
+        <div class="actions"><button type="button" data-action="read-config">Read settings</button></div>
+        <div id="config-fields" class="settings"></div>
+        <div class="actions">
+          <button type="submit" disabled>Save settings</button>
+        </div>
+        <p class="result" role="status"></p>
+      </form>
       <div class="control">
         <div class="actions">
           <button type="button" id="project-remove">Remove project from active work</button>

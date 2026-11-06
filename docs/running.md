@@ -151,10 +151,15 @@ text and revision, with a notice that the charter changed elsewhere; a stale
 save is refused and keeps the draft and error until **Read charter** explicitly
 loads the latest text.
 
-Project management shows the project's name, upstream, optional fork, clone, base branch and knowledge extraction state. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
+Project management shows the project's settings, its knowledge extraction state, and the actions that affect that project. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves, configuration saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
-Repository configuration is read-only in Project management. Ask the chief in
-the workstream conversation to capture built work; previews need no project setup.
+**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope` and the `hearsay_entities` mapping (one `entity = scope` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
+
+If you hand-edited the file and the service has not reloaded it, the setting shows the file's value marked **Not yet applied** beside the value in effect. Saving another setting keeps that edit in the file and puts it into effect. If the file does not load, the view shows the loader's error and offers no save until the file is fixed by hand; the loaded values stay in effect.
+
+A refused save, such as an invalid value or a failure preparing the service, keeps your draft and shows the field error or the reason; nothing is written. If the file changed elsewhere since the form read it, the save is refused as stale, writes nothing and keeps the draft with a notice that the configuration changed elsewhere. **Read settings** then loads the latest file values on purpose. An untouched form follows other clients' saves and reloads live; a form with a draft keeps its draft and version and shows the notice. A save that replaced the file but could not be applied is reported as saved, not as a refusal: the saved values show as **Not yet applied** at the file's new version, and **Reload** in Configuration, or a later save from the form, applies them.
+
+Ask the chief in the workstream conversation to capture built work; previews need no project setup.
 
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,

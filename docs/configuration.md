@@ -1015,6 +1015,89 @@ each with a 30 second maximum timeout. Invalid or unavailable answers retain
 the code classification. With the Jev boost on, a Jev judgment classifies the
 response first, and the classifier runs only when that judgment falls back.
 
+### Reading and saving a project's settings
+
+`GET /v1/projects/config/<project-id>` and `PUT /v1/projects/config/<project-id>`
+read and save one active project's `projects/<project-id>/config.toml`. An
+inactive or unknown project is refused (`not_found`). Both follow the web and
+tailnet listener rules: a save needs `Content-Type: application/json`, and every
+request needs a `Host` naming the listener.
+
+**Read.** The editable snapshot is the file on disk. The read decodes the
+current bytes once and returns, for each effective setting (`name`, `upstream`,
+`fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`,
+`pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
+`capacity.git_operations`, `hearsay_scope`, `hearsay_entities`):
+
+- `value`: what the file gives it, or would give it. A setting the file leaves
+  out shows its default; `capacity.per_workstream` shows the loaded top-level
+  `capacity.per_workstream`.
+- `default`: true when the file leaves the setting out. `hearsay_entities` is a
+  default while it has no entries.
+- `effective`: the value in the loaded configuration.
+- `pending`: true when `value` differs from `effective`, that is, the file holds
+  an edit that has not been applied. A reload or a save applies it.
+
+`pin` identifies exactly the bytes the values and markers describe, so the
+three always belong to the same snapshot. The `path` names the file.
+`clone` is shown as the loader resolves it. When the file does not load, the
+read still answers: `error` carries the loader's error for the file (its path,
+the field and the reason, never the file's text), `settings` hold only the
+values in effect, and there is no `pin`. A save is refused while the file does
+not load; fix it by hand.
+
+**Save.** The request carries the `pin`, the settings to change in `set` (an
+omitted setting is unchanged) and `clear`, the names of settings whose key is
+removed so the default or inherited value applies again.
+`set.hearsay_entities` sets entries by local entity ID and
+`clear_hearsay_entities` removes entries. An empty string for `name`, `fork`,
+`classifier` or `hearsay_scope` clears it. `upstream` and `clone` are required
+and cannot be cleared. A save runs under the same lock as a reload and a
+project add or removal:
+
+1. If the file's bytes no longer match the `pin`, the save is refused with
+   `conflict` and writes nothing. A new read returns the edited file's values
+   and pin.
+2. The candidate file is a text edit of the pinned bytes: only the changed keys
+   are set, added or removed. Every other byte stays as it was, including
+   comments, key order, an ignored `[preview]` table and a hand edit that has
+   not been applied. A new key is placed with its siblings or in a new
+   `[capacity]` or `[hearsay_entities]` table at the end of the file. A layout
+   the edit cannot change safely, such as `capacity` written as an inline table,
+   is refused and the file is edited by hand.
+3. The candidate is validated with the loader's rules, including
+   `classifier` against the loaded top-level profiles. An invalid value is
+   refused as `validation` with the offending setting in `error.field` and the
+   loader's message, for example `checks_timeout: must be a Go duration from 1m
+   to 24h`.
+4. The running service prepares to adopt the candidate as a reload does: the
+   project's stages, the Dagger engine and the runtime state. A failure is
+   refused with its reason.
+5. Only then is the file replaced atomically, keeping its mode, and the saved
+   project's settings adopted without a reload. The configuration event follows.
+
+Every refusal, up to and including a failure writing the file, leaves the file's
+bytes, its directory (no temporary file) and the loaded configuration unchanged.
+A successful save adopts only the saved project: pending edits to the top-level
+file or to other projects' files stay unapplied. The whole saved file of this
+project takes effect, so a hand edit the read showed as pending is kept and
+applied rather than reverted. `GET /v1/config` reports the new values, the
+drift entry for the file is `unchanged` and a restart reads the same values back
+from the file.
+
+The response is the snapshot of the saved bytes with its new `pin`, plus
+`outcome`:
+
+- `applied`: the file holds the saved values and the service uses them.
+- `saved_not_applied`: a failure after the file was replaced, such as the write
+  not finishing cleanly, kept the values from taking effect. This is not a
+  refusal: the file holds the saved values at the returned `pin`, the drift view
+  shows the file as `changed`, a read flags the saved values as `pending`, and
+  `reason` says what failed. A reload or a later save with the returned pin
+  applies them.
+
+The web page's **Project management** view reads and saves a project's settings through these two endpoints; see [running](running.md) for how it shows defaults, not-yet-applied hand edits, refusals, stale saves and a saved-but-not-applied outcome.
+
 ### Previews
 
 Previews need no project configuration. The chief uses `inspect_code` on the

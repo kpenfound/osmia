@@ -422,6 +422,21 @@ func (c *Client) EditCharter(ctx context.Context, project config.ProjectID, edit
 	return v, err
 }
 
+// ProjectConfig reads the editable snapshot of a project's config.toml.
+func (c *Client) ProjectConfig(ctx context.Context, project config.ProjectID) (api.ProjectConfigResponse, error) {
+	var v api.ProjectConfigResponse
+	err := c.Do(ctx, "GET", api.Prefix+"/projects/config/"+url.PathEscape(string(project)), nil, &v)
+	return v, err
+}
+
+// SaveProjectConfig saves changes to a project's config.toml, pinned to the
+// snapshot they were made against.
+func (c *Client) SaveProjectConfig(ctx context.Context, project config.ProjectID, edit api.ProjectConfigEdit) (api.ProjectConfigSaveResponse, error) {
+	var v api.ProjectConfigSaveResponse
+	err := c.Do(ctx, "PUT", api.Prefix+"/projects/config/"+url.PathEscape(string(project)), edit, &v)
+	return v, err
+}
+
 // Documents reads the latest revisions of a workstream's handed document,
 // spec and plan, by record ID.
 func (c *Client) Documents(ctx context.Context, id config.WorkstreamID) (map[string]trace.Document, error) {

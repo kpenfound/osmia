@@ -18,6 +18,10 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 		s.memorySetup(w, r, raw)
 		return true
 	}
+	if raw, ok := strings.CutPrefix(r.URL.Path, Prefix+"/projects/config/"); ok {
+		s.projectConfigRequest(w, r, raw)
+		return true
+	}
 	if raw, ok := strings.CutPrefix(r.URL.Path, Prefix+"/base/"); ok {
 		if raw, ok := strings.CutSuffix(raw, "/upstream"); ok {
 			if r.Method != http.MethodPost {

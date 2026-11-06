@@ -376,6 +376,9 @@
       if (out && out.error && out.error.code) {
         err.code = out.error.code;
       }
+      if (out && out.error && out.error.field) {
+        err.field = out.error.field;
+      }
       throw err;
     }
     return out;
@@ -436,6 +439,7 @@
         await Promise.all(names.map(async (name) => {
           try {
             const pin = charterRead;
+            const configPin = configRead;
             const out = await request('GET', '/' + name);
             const previous = views[name];
             views[name] = out;
@@ -458,9 +462,15 @@
                 receiveCharter(project, out);
               }
             }
+            if (name.startsWith('projects/config/')) {
+              const project = name.slice('projects/config/'.length);
+              if (byId('project-edit').elements.project.value === project && configRead === configPin) {
+                receiveConfig(project, out);
+              }
+            }
             delete failures[name];
           } catch (err) {
-            if (!name.startsWith('projects/charter/') || name === 'projects/charter/' + byId('project-edit').elements.project.value) {
+            if (!isManagementView(name) || name.endsWith('/' + byId('project-edit').elements.project.value)) {
               failures[name] = 'Cannot read /' + name + ': ' + err.message;
             }
           }
@@ -531,7 +541,10 @@
         render();
         if (names.some(name => ['status', 'config', 'charter'].includes(name))) {
           const project = byId('project-edit').elements.project.value;
-          if (project) dirty.add('projects/charter/' + project);
+          if (project) {
+            dirty.add('projects/charter/' + project);
+            dirty.add('projects/config/' + project);
+          }
         }
       }
     } finally {
@@ -699,7 +712,8 @@
   // durably recorded ('ok'), the API's message naming the blocking
   // operation when the command is temporarily unavailable
   // ('unavailable'), or the refusal's reason when it is rejected
-  // ('error'); refused runs after either kind of refusal, when given. Once
+  // ('error'); done may instead return {outcome, text} to name another
+  // outcome of an accepted command; refused runs after either kind of refusal, when given. Once
   // the action ends, the displayed instance's pending actions and render's
   // blocked flag determine whether the button is enabled.
   async function act(result, button, call, done, refused) {
@@ -711,7 +725,9 @@
     button.disabled = true;
     show(result, 'pending', 'Sending…');
     try {
-      show(result, 'ok', done(await call()));
+      const text = done(await call());
+      if (text !== null && typeof text === 'object') show(result, text.outcome, text.text);
+      else show(result, 'ok', text);
     } catch (err) {
       show(result, err.code === 'unavailable' ? 'unavailable' : 'error', err.message);
       if (refused) {
@@ -3556,6 +3572,7 @@
 
   let charterRead = null;
   let charterProject = '';
+  const isManagementView = name => name.startsWith('projects/charter/') || name.startsWith('projects/config/');
   const managementRepos = new Map();
   function receiveCharter(project, out, explicit = false) {
     const form = byId('project-edit');
@@ -3576,6 +3593,202 @@
     byId('project-edit').dataset.revision = charterRead ? charterRead.revision : '';
   }
 
+  // configRead is the project settings form's snapshot: the file's values
+  // and the pin of the bytes they were read from, the version a save is
+  // pinned to. base holds the text each field showed when the snapshot was
+  // taken, so a field is part of the draft once it differs from it.
+  // latestError is the loader's error of the newest read, whose file did not
+  // load; the form offers no save while it is set. conflict means the file
+  // changed since the snapshot while the draft was kept.
+  let configRead = null;
+  const configRows = new Map();
+
+  // configText is how a setting's value is written in its field. The
+  // hearsay_entities mapping is one "entity = scope" line per entry.
+  function configText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') {
+      return Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([entity, scope]) => entity + ' = ' + scope).join('\n');
+    }
+    return String(value);
+  }
+
+  // parseEntities reads the hearsay_entities field. bad is the first line
+  // that is not "entity = scope".
+  function parseEntities(text) {
+    const map = {};
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      const at = line.indexOf('=');
+      const entity = at < 0 ? '' : line.slice(0, at).trim();
+      const scope = at < 0 ? '' : line.slice(at + 1).trim();
+      if (!entity || !scope) return { map, bad: line.trim() };
+      map[entity] = scope;
+    }
+    return { map, bad: null };
+  }
+
+  function configRow(setting) {
+    let row = configRows.get(setting.name);
+    if (row) return row;
+    const sample = setting.effective ?? setting.value;
+    const kind = typeof sample === 'number' ? 'number' : typeof sample === 'object' && sample !== null ? 'entities' : 'text';
+    const input = kind === 'entities' ? el('textarea', { rows: '3', spellcheck: 'false', placeholder: 'entity = scope, one per line' }) :
+      el('input', { type: kind === 'number' ? 'number' : 'text', step: '1', min: '0' });
+    input.name = setting.name;
+    row = { name: setting.name, kind, input, marker: el('span', { class: 'marker', 'data-marker': 'default' }),
+      pending: el('span', { class: 'marker pending', 'data-marker': 'pending' }), error: el('span', { class: 'field-error', role: 'alert' }) };
+    input.addEventListener('input', () => {
+      if (configRead?.fieldErrors.delete(setting.name)) renderProjectConfig();
+    });
+    row.node = el('div', { class: 'setting', 'data-setting': setting.name },
+      el('label', {}, el('code', {}, setting.name), input), row.marker, row.pending, row.error);
+    configRows.set(setting.name, row);
+    return row;
+  }
+
+  function settingChanged(read, row) {
+    if (row.kind === 'entities') {
+      const parsed = parseEntities(row.input.value);
+      return parsed.bad !== null || configText(parsed.map) !== read.base.get(row.name);
+    }
+    return row.input.value.trim() !== read.base.get(row.name);
+  }
+
+  function configDirty() {
+    const read = configRead;
+    return !!read && [...configRows.values()].some(row => settingChanged(read, row));
+  }
+
+  // adoptConfig makes out the form's snapshot and shows its file values in
+  // the fields: the values in effect, read-only, when the file does not load.
+  function adoptConfig(project, out) {
+    const base = new Map();
+    for (const setting of out.settings) {
+      const row = configRow(setting);
+      const text = configText(out.error ? setting.effective : setting.value);
+      base.set(setting.name, text);
+      row.input.value = text;
+    }
+    configRead = { project, path: out.path, pin: out.pin || '', settings: out.settings, base, conflict: false,
+      latestError: out.error || null, fieldErrors: new Map() };
+  }
+
+  // receiveConfig takes a read of the project's settings. An untouched form
+  // follows it; a form with a draft, or one already marked stale, keeps its
+  // fields and pin and notes that the file changed, unless the explicit
+  // read asks for the latest values.
+  function receiveConfig(project, out, explicit = false) {
+    if (!explicit && configRead?.project === project && (configRead.conflict || configDirty())) {
+      if ((out.pin || '') !== configRead.pin) configRead.conflict = true;
+      else configRead.settings = out.settings;
+      configRead.latestError = out.error || null;
+    } else {
+      adoptConfig(project, out);
+    }
+    renderProjectConfig();
+  }
+
+  function renderProjectConfig() {
+    const form = byId('project-config');
+    const project = byId('project-edit').elements.project.value;
+    const read = configRead?.project === project ? configRead : null;
+    const settings = read ? read.settings : [];
+    place(byId('config-fields'), settings.map(setting => configRow(setting).node));
+    for (const setting of settings) {
+      const row = configRow(setting);
+      row.input.disabled = !read.pin;
+      const file = read.pin ? setting : null;
+      row.marker.textContent = file && file.default ? 'Default' + (setting.name === 'capacity.per_workstream' ? ' (inherited from the top-level configuration)' : '') : '';
+      row.pending.textContent = file && file.pending ? 'Not yet applied. In effect: ' + (configText(file.effective) || '(none)').replaceAll('\n', '; ') : '';
+      const message = read.fieldErrors.get(setting.name) || '';
+      row.error.textContent = message;
+      if (message) row.input.setAttribute('aria-invalid', 'true');
+      else row.input.removeAttribute('aria-invalid');
+    }
+    byId('config-file').textContent = read ? 'Settings of ' + read.path + (read.pin ? '' : ' (read-only: the file does not load)') :
+      (project ? 'Reading the project settings…' : 'Choose a project to manage its settings.');
+    const failed = read?.latestError;
+    byId('config-load-error').hidden = !failed;
+    byId('config-load-error').textContent = failed ? 'The file does not load, so settings cannot be saved until it is fixed by hand: ' + failed.message : '';
+    byId('config-changed').hidden = !read?.conflict;
+    form.dataset.pin = read ? read.pin : '';
+    block(form.querySelector('[type=submit]'), !read || !read.pin || !!read.latestError);
+    block(form.querySelector('[data-action=read-config]'), !project);
+  }
+
+  // configEdit translates the draft into a save's changes: the fields that
+  // differ from the snapshot. Clearing a field that the file sets removes its
+  // key; one the file leaves out has nothing to remove. The field error of
+  // a value the page cannot send is returned instead.
+  function configEdit(read) {
+    const edit = { set: {}, clear: [], clear_hearsay_entities: [] };
+    for (const setting of read.settings) {
+      const row = configRows.get(setting.name);
+      if (!row || !settingChanged(read, row)) continue;
+      const text = row.input.value.trim();
+      if (row.kind === 'entities') {
+        const parsed = parseEntities(row.input.value);
+        if (parsed.bad !== null) return { field: setting.name, message: setting.name + ': "' + parsed.bad + '" is not "entity = scope"' };
+        for (const [entity, scope] of Object.entries(parsed.map)) {
+          if (setting.value[entity] !== scope) (edit.set.hearsay_entities ||= {})[entity] = scope;
+        }
+        for (const entity of Object.keys(setting.value)) {
+          if (!(entity in parsed.map)) edit.clear_hearsay_entities.push(entity);
+        }
+      } else if (text === '') {
+        if (!setting.default) edit.clear.push(setting.name);
+      } else if (row.kind === 'number') {
+        if (!/^\d+$/.test(text)) return { field: setting.name, message: setting.name + ': must be a whole number' };
+        edit.set[setting.name] = Number(text);
+      } else {
+        edit.set[setting.name] = text;
+      }
+    }
+    return edit;
+  }
+
+  function saveConfig(event) {
+    event.preventDefault();
+    const form = byId('project-config');
+    const read = configRead;
+    if (!read || read.project !== byId('project-edit').elements.project.value || !read.pin || read.latestError) return;
+    const result = form.querySelector('.result');
+    read.fieldErrors.clear();
+    const edit = configEdit(read);
+    if (edit.field) {
+      read.fieldErrors.set(edit.field, edit.message);
+      renderProjectConfig();
+      show(result, 'error', edit.message);
+      return;
+    }
+    if (!Object.keys(edit.set).length && !edit.clear.length && !edit.clear_hearsay_entities.length) {
+      adoptConfig(read.project, { path: read.path, pin: read.pin, settings: read.settings });
+      configRead.conflict = read.conflict;
+      renderProjectConfig();
+      show(result, 'ok', 'No settings changed.');
+      return;
+    }
+    act(result, event.submitter, () => request('PUT', '/projects/config/' + read.project, { pin: read.pin, ...edit }), out => {
+      if (configRead === read) {
+        adoptConfig(read.project, out);
+        renderProjectConfig();
+      }
+      mark(['status', 'config']);
+      if (out.outcome === 'saved_not_applied') {
+        return { outcome: 'saved-not-applied', text: 'Saved to ' + out.path + ' but not applied: ' + out.reason +
+          ' The saved values are shown as not yet applied; Reload in Configuration applies them.' };
+      }
+      return 'Saved project settings to ' + out.path + '.';
+    }, err => {
+      if (configRead !== read) return;
+      if (err.code === 'conflict') read.conflict = true;
+      const row = err.field && (configRows.get(err.field) || [...configRows.values()].find(r => err.field.startsWith(r.name + '.')));
+      if (row) read.fieldErrors.set(row.name, err.message);
+      renderProjectConfig();
+    });
+  }
+
   function selectManagedProject() {
     const form = byId('project-edit');
     const project = form.elements.project.value;
@@ -3587,11 +3800,14 @@
     for (const [id, row] of managementRepos) {
       if (project || !row.retain) managementRepos.delete(id);
     }
+    configRead = null;
+    show(byId('project-config').querySelector('.result'), '', '');
     for (const name of Object.keys(failures)) {
-      if (name.startsWith('projects/charter/')) delete failures[name];
+      if (isManagementView(name)) delete failures[name];
     }
     renderCharterPin();
-    if (project) mark(['projects/charter/' + project]);
+    renderProjectConfig();
+    if (project) mark(['projects/charter/' + project, 'projects/config/' + project]);
   }
 
   function renderProjectManagement() {
@@ -3602,6 +3818,7 @@
     byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ' · revision ' + state.revision + '.' :
       (project ? 'Charter state not reported.' : 'Choose a project to manage its charter and repos.');
     block(byId('project-remove'), !configured);
+    renderProjectConfig();
     const repos = configured?.repos || [];
     const active = new Set(repos.map(r => r.id));
     for (const [id, row] of managementRepos) {
@@ -3610,7 +3827,7 @@
     for (const repo of repos) {
       let row = managementRepos.get(repo.id);
       if (!row) {
-        row = { title: el('h4'), details: el('dl'), extraction: el('p', {class: 'meta', 'data-field': 'extraction'}),
+        row = { title: el('h4'), extraction: el('p', {class: 'meta', 'data-field': 'extraction'}),
           result: el('p', {class: 'result', role: 'status'}), buttons: [] };
         for (const [action, label] of [['extract', 'Extract knowledge'], ['rebase', 'Rebase workstreams'], ['remove', 'Remove repo from active work']]) {
           const button = el('button', {type: 'button', 'data-action': action}, label);
@@ -3629,18 +3846,11 @@
           });
           row.buttons.push(button);
         }
-        row.node = el('article', {class: 'managed-repo', 'data-managed-repo': repo.id}, row.title, row.details,
+        row.node = el('article', {class: 'managed-repo', 'data-managed-repo': repo.id}, row.title,
           row.extraction, el('div', {class: 'actions'}, ...row.buttons), row.result);
         managementRepos.set(repo.id, row);
       }
       row.title.textContent = repoLabel(repo.id);
-      const fields = [['Name', repo.name], ['Upstream', repo.upstream], ...(repo.fork ? [['Fork', repo.fork]] : []),
-        ['Clone path', repo.clone], ['Base branch', repo.base_branch]];
-      const key = JSON.stringify(fields);
-      if (row.key !== key) {
-        row.key = key;
-        row.details.replaceChildren(...fields.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, value)]));
-      }
       const extraction = repo.extraction;
       row.extraction.hidden = !extraction;
       row.extraction.textContent = extraction ? 'Knowledge extraction ' + extraction.extraction + ': ' + extraction.state +
@@ -3813,6 +4023,20 @@
           // Keep a stale draft pinned until the owner explicitly rereads.
           if (charterRead === pin && err.code === 'conflict') { pin.conflict = true; renderCharterPin(); }
         });
+    });
+    const config = byId('project-config');
+    config.addEventListener('submit', saveConfig);
+    config.querySelector('[data-action=read-config]').addEventListener('click', event => {
+      selectManagedProject();
+      const project = charter.elements.project.value;
+      if (!project) { show(config.querySelector('.result'), 'error', 'Choose a project.'); return; }
+      act(config.querySelector('.result'), event.target, () => request('GET', '/projects/config/' + project), out => {
+        if (charter.elements.project.value === project) {
+          adoptConfig(project, out);
+          renderProjectConfig();
+        }
+        return out.error ? { outcome: 'error', text: out.error.message } : 'Read the settings of ' + out.path + '.';
+      });
     });
     byId('project-remove').addEventListener('click', event => {
       const project = charter.elements.project.value;

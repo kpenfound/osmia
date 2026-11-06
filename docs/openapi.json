@@ -1969,6 +1969,93 @@
         }
       }
     },
+    "/v1/projects/config/{project}": {
+      "get": {
+        "summary": "Read a project's config.toml as it is on disk: every setting's file value, whether it is a default, the value in effect and the pin of the file bytes",
+        "operationId": "getProjectsConfigByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save changes to a project's config.toml, pinned to the bytes that were read; refused as a conflict when the file changed, and reported as saved_not_applied when the file was replaced but could not be applied",
+        "operationId": "putProjectsConfigByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectConfigEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigSaveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/projects/extract": {
       "post": {
         "summary": "Start a knowledge-base extraction",
@@ -3588,6 +3675,9 @@
       "APIError": {
         "properties": {
           "code": {
+            "type": "string"
+          },
+          "field": {
             "type": "string"
           },
           "message": {
@@ -6321,6 +6411,225 @@
           },
           "upstream": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigEdit": {
+        "properties": {
+          "clear": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "clear_hearsay_entities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pin": {
+            "type": "string"
+          },
+          "set": {
+            "$ref": "#/components/schemas/ProjectConfigValues"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigError": {
+        "properties": {
+          "field": {
+            "description": "The setting at fault, empty when the whole file is.",
+            "type": "string"
+          },
+          "message": {
+            "description": "The loader's error for the file.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ProjectConfigError"
+          },
+          "path": {
+            "description": "The configuration file the settings come from.",
+            "type": "string"
+          },
+          "pin": {
+            "description": "Identifies the exact file bytes; send it with a save.",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectConfigSetting"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigSaveResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ProjectConfigError"
+          },
+          "outcome": {
+            "enum": [
+              "applied",
+              "saved_not_applied"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "The configuration file the settings come from.",
+            "type": "string"
+          },
+          "pin": {
+            "description": "Identifies the exact file bytes; send it with a save.",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the saved values are not applied.",
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectConfigSetting"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigSetting": {
+        "properties": {
+          "default": {
+            "description": "True when the file leaves the setting out and Value is its default or inherited value.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "effective": {
+            "description": "The value in the loaded configuration."
+          },
+          "name": {
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope or hearsay_entities.",
+            "type": "string"
+          },
+          "pending": {
+            "description": "True when Value differs from Effective: the file holds an edit that is not yet applied.",
+            "type": "boolean"
+          },
+          "value": {
+            "description": "The file's value, or the value it would take: a string, an integer, or for hearsay_entities an object of entity to scope."
+          }
+        },
+        "type": "object"
+      },
+      "ProjectConfigValues": {
+        "properties": {
+          "base_branch": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "capacity.git_operations": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "capacity.per_workstream": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "checks_timeout": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "classifier": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "clone": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fork": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hearsay_entities": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Entries to set, by local entity ID.",
+            "type": "object"
+          },
+          "hearsay_scope": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "landing": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pull_request_poll": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "upstream": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "upstream_rebase": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "type": "object"
