@@ -46,7 +46,7 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 			t.Fatalf("token in session trace %s", d.Path)
 		}
 	}
-	for _, want := range []string{"ENGINE=cloud\n", "RUNNER=\n", "TOKEN_PRESENT=true\n", "CI=true\n", "HEAD=" + run.Commit + "\n"} {
+	for _, want := range []string{"ENGINE=cloud\n", "RUNNER=\n", "TOKEN_PRESENT=true\n", "CI=\n", "HEAD=" + run.Commit + "\n"} {
 		if !strings.Contains(captured, want) {
 			t.Fatalf("missing %q in %s", want, captured)
 		}
