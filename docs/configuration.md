@@ -467,13 +467,13 @@ From the Osmia checkout, run:
 ./scripts/build-sandbox.sh
 ```
 
-The script requires a working `sbx` installation. It pulls the default Codex
-template, installs the latest Codex and Claude Code plus Dagger CLI
-`1.0.0-beta.17`, verifies the tools, and saves the local template as `osmia:latest`.
-Tags such as `:latest` are supported for templates. Each run refreshes both agents
-and replaces that local tag. The Dagger version is a constant in the script. The
-temporary build sandbox has no workspace mounts and is removed when the script
-exits.
+The script requires a working `sbx` installation and the Dagger CLI on the
+host's `PATH`. It pulls the latest Codex template, which ships Codex, installs
+the latest Claude Code with its native installer and the Dagger CLI release
+reported by the host's `dagger version`, verifies the tools, and saves the local
+template as `osmia:latest`. Tags such as `:latest` are supported for templates.
+Each run refreshes both agents and replaces that local tag. The temporary build
+sandbox has no workspace mounts and is removed when the script exits.
 
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
@@ -485,8 +485,9 @@ under the OS account running Osmia so the service can access the local template.
 Existing sandboxes keep their installed versions.
 
 The template installs the Dagger CLI; engine access still requires the role's
-[Dagger configuration](#dagger-for-masons). Keep its configured version aligned
-with the script's pin.
+[Dagger configuration](#dagger-for-masons). Set its `version` to the host's
+Dagger release so turns use the CLI baked into the template; rebuild the
+template after upgrading the host's Dagger CLI.
 
 Follow [Docker Sandboxes setup](https://docs.docker.com/ai/sandboxes/get-started/),
 including initial network policy and credential approvals, before unattended

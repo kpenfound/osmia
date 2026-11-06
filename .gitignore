@@ -1,2 +1,3 @@
 # busybees state (mail, notes, session transcripts)
 /.bees/
+.envrc

@@ -2,13 +2,20 @@
 set -euo pipefail
 
 readonly TEMPLATE='osmia:latest'
-readonly DAGGER_VERSION='1.0.0-beta.17'
 
 if [[ $# -ne 0 ]]; then
     printf 'Usage: %s\n' "$0" >&2
     exit 2
 fi
 command -v sbx >/dev/null || { printf 'sbx is required on PATH.\n' >&2; exit 1; }
+command -v dagger >/dev/null || { printf 'dagger is required on PATH; the template installs the host'"'"'s Dagger CLI release.\n' >&2; exit 1; }
+
+host_dagger_version=$(dagger version | awk '$1 == "version:" {print $2}')
+if [[ -z "$host_dagger_version" ]]; then
+    printf 'Could not read the host Dagger version from: dagger version\n' >&2
+    exit 1
+fi
+readonly DAGGER_VERSION="${host_dagger_version#v}"
 
 build_dir=$(mktemp -d "${TMPDIR:-/tmp}/osmia-build.XXXXXXXX")
 readonly sandbox="$(basename "$build_dir")"
@@ -28,7 +35,13 @@ trap 'exit 143' TERM
 
 # No paths are supplied, so the build has no mounted workspace.
 sbx create --name "$sandbox" --skills off --pull always codex
-sbx exec "$sandbox" npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest
+# The codex template ships Codex; Claude Code comes from its native installer.
+sbx exec -i "$sandbox" bash -eu <<'CLAUDE'
+installer=$(mktemp)
+trap 'rm -f "$installer"' EXIT
+curl -fsSL https://downloads.claude.ai/claude-code-releases/bootstrap.sh -o "$installer"
+bash "$installer"
+CLAUDE
 sbx exec -i -u root "$sandbox" env DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin CI=1 sh -eu <<'INSTALL'
 # The Claude kit writes settings as agent when creating a sandbox from this image.
 install -d -o agent -g agent /home/agent/.claude
