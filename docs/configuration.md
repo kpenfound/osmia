@@ -1096,6 +1096,8 @@ The response is the snapshot of the saved bytes with its new `pin`, plus
   `reason` says what failed. A reload or a later save with the returned pin
   applies them.
 
+The web page's **Project management** view reads and saves a project's settings through these two endpoints; see [running](running.md) for how it shows defaults, not-yet-applied hand edits, refusals, stale saves and a saved-but-not-applied outcome.
+
 ### Previews
 
 Previews need no project configuration. The chief uses `inspect_code` on the

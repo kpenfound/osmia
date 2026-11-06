@@ -261,7 +261,7 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	p.AwaitText(`#project-pane [data-project="`+string(repoID)+`"]`, "second")
 	p.Choose("#project-edit [name=project]", string(repoID))
 	row := `#project-repos [data-managed-repo="` + string(repoID) + `"]`
-	p.AwaitText(row, "owner/second")
+	p.Await("the chosen repo's settings", `document.querySelector('#project-config [name=upstream]')?.value === 'owner/second'`)
 	p.Await("initial API-added repo extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
 	p.Eval(`managementConfigEvents.length = 0`, nil)
 	extraction, err := c.ExtractProject(ctx, repoID)
