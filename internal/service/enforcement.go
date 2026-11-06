@@ -24,13 +24,15 @@ import (
 
 // Enforcement is what a service runs its role turns through: the engine
 // handing out each role's core enforcer and the host serving each turn's
-// scoped tools, and what it runs candidates' checks with. Skills is the
+// scoped tools, and what it runs candidates' checks with, and the cloud runner
+// those checks fall back to when check_fallback is on. Skills is the
 // engine's skill cache, refreshed as the loaded configuration says.
 type Enforcement struct {
-	Engine coreadapter.Engine
-	Hosts  coreadapter.MCPHosts
-	Checks ReviewChecks
-	Skills *skills.Manager
+	Engine      coreadapter.Engine
+	Hosts       coreadapter.MCPHosts
+	Checks      ReviewChecks
+	CloudChecks ReviewChecks
+	Skills      *skills.Manager
 }
 
 // CoreEnforcement is the production Enforcement for root: core's enforcers
@@ -135,6 +137,9 @@ func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
 func Enforce(opts Options, e Enforcement) Options {
 	if e.Checks != nil {
 		opts.reviewChecks = e.Checks
+	}
+	if e.CloudChecks != nil {
+		opts.cloudChecks = e.CloudChecks
 	}
 	opts.skills = e.Skills
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}

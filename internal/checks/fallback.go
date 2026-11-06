@@ -2,8 +2,10 @@ package checks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // Remembered is what earlier check runs of a workstream showed needs the cloud
@@ -39,6 +43,34 @@ func RememberedFrom(prior []*api.CheckAttribution) Remembered {
 		}
 	}
 	return r
+}
+
+// checkRecordPaths matches the documents of unit and final-review check runs.
+var checkRecordPaths = regexp.MustCompile(`^(units/[^/]+/checks-[0-9]+|final/checks-[0-9]+)\.json$`)
+
+// RememberedIn derives the remembered set of a workstream from the engine
+// attribution its unit and final-review check run records carry. A final
+// review's runs are revisions of one document, and every revision counts.
+// Records without an attribution add nothing. Nothing is stored for it.
+func RememberedIn(repository *trace.Repository, stream config.WorkstreamID) (Remembered, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return Remembered{}, err
+	}
+	var prior []*api.CheckAttribution
+	for _, d := range docs {
+		if !checkRecordPaths.MatchString(d.Path) {
+			continue
+		}
+		var record struct {
+			Engines *api.CheckAttribution `json:"engines"`
+		}
+		if err := json.Unmarshal([]byte(d.Content), &record); err != nil {
+			return Remembered{}, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+		}
+		prior = append(prior, record.Engines)
+	}
+	return RememberedFrom(prior), nil
 }
 
 // Has reports whether link is remembered.
@@ -75,6 +107,17 @@ func DescribeAttribution(a *api.CheckAttribution) string {
 		sentence += "; the other checks ran locally"
 	}
 	return sentence + "."
+}
+
+// DescribeSelectionRun is DescribeSelection followed, when any check ran on
+// the cloud engine, by what ran there and why. It is DescribeSelection alone
+// otherwise.
+func DescribeSelectionRun(s api.CheckSelection, a *api.CheckAttribution) string {
+	description := DescribeSelection(s)
+	if sentence := DescribeAttribution(a); sentence != "" {
+		description += "; " + strings.ToLower(sentence[:1]) + strings.TrimSuffix(sentence[1:], ".")
+	}
+	return description
 }
 
 // RunSelectionWithFallback is RunSelection with an optional cloud engine. It

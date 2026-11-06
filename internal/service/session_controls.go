@@ -376,7 +376,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if err != nil || !exists {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the branch of session %s; check the trace repository", stream)}
 	}
-	checks := s.configuredChecks(cfg)
+	checks, cloud := s.configuredChecks(cfg), s.configuredCloudChecks(cfg)
 	if checks == nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: "the candidate check runner is unavailable"}
 	}
@@ -411,9 +411,13 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	identity := checkrun.Identity{Candidate: head, Branch: sessionBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: cfg.Project.Clone}
 	selection := checkrun.Select(ctx, s.jev, repository, scope, cause, nil, dir, diff, identity, checks)
 	timeout := s.about(repository).Project.CheckTimeout()
-	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, selection, checkErr := checkrun.RunSelection(bounded, checks, dir, identity, selection)
-	cancel()
+	var remembered checkrun.Remembered
+	if cloud != nil {
+		if remembered, err = checkrun.RememberedIn(repository, stream); err != nil {
+			return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the check runs of session %s; check the trace repository", stream)}
+		}
+	}
+	result, selection, engines, checkErr := checkrun.RunSelectionWithFallback(ctx, checks, cloud, timeout, remembered, dir, identity, selection)
 	if errors.Is(checkErr, context.DeadlineExceeded) {
 		checkErr = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
@@ -440,7 +444,7 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if err := recordSessionCheckRun(ctx, repository, project, stream, sr, result.Output); err != nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the check run of session %s; check the trace repository: %v", stream, err)}
 	}
-	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, checkrun.DescribeSelection(selection))
+	summary := fmt.Sprintf("Check run %d on commit %s %s: %s.", run, head, sr.Status, checkrun.DescribeSelectionRun(selection, engines))
 	if flaky := checkrun.DescribeFlaky(sr.Flaky); flaky != "" {
 		summary += " " + flaky + "."
 	}

@@ -694,3 +694,22 @@ func TestDaggerChecksSkipPassedChecks(t *testing.T) {
 		}
 	})
 }
+
+func TestDescribeSelectionRunNamesWhatRanOnCloud(t *testing.T) {
+	t.Parallel()
+	selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{linkA, linkB}, Candidates: 3, Judgment: "judgment_1"}
+	local := &api.CheckAttribution{Runs: []api.CheckEngineRun{{Engine: api.CheckEngineLocal, EveryCheck: true}}}
+	for _, a := range []*api.CheckAttribution{nil, {}, local} {
+		if got := DescribeSelectionRun(selection, a); got != DescribeSelection(selection) {
+			t.Fatalf("a run without cloud was described as %q", got)
+		}
+	}
+	cloud := &api.CheckAttribution{Runs: []api.CheckEngineRun{
+		{Engine: api.CheckEngineLocal, Links: []string{linkA}},
+		{Engine: api.CheckEngineCloud, Links: []string{linkB}, Reason: api.CloudByMemory},
+	}}
+	got := DescribeSelectionRun(selection, cloud)
+	if !strings.HasPrefix(got, DescribeSelection(selection)+"; the Dagger Cloud engine ran ") || !strings.Contains(got, linkB) || !strings.Contains(got, "routed there because an earlier run in this workstream needed cloud") || !strings.Contains(got, "the other checks ran locally") || strings.HasSuffix(got, ".") {
+		t.Fatalf("description %q", got)
+	}
+}

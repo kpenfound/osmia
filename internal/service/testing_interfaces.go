@@ -53,6 +53,7 @@ func (a TestAccess) SetConfig(cfg *config.Config) {
 
 func (c *Client) SetSessionCheckTimeoutForTest(d time.Duration) { c.sessionCheckTimeout = d }
 func (a TestAccess) SetReviewChecks(checks ReviewChecks)        { a.s.options.reviewChecks = checks }
+func (a TestAccess) SetCloudChecks(checks ReviewChecks)         { a.s.options.cloudChecks = checks }
 
 type TestPendingProject = pendingProject
 

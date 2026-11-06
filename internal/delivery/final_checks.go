@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -23,27 +24,30 @@ import (
 // Dagger's report shows failed and those that failed and then passed on their
 // rerun. An incomplete run reported no result, and
 // Error says why. Attempt links the result to its start evidence, and is zero
-// for older records and failures before the checks started.
+// for older records and failures before the checks started. Engines says
+// which engine ran each invocation and why a cloud run did; a record without
+// it ran locally.
 type FinalCheckRun struct {
-	Review             int             `json:"review"`
-	Attempt            int             `json:"attempt,omitempty"`
-	Operation          string          `json:"operation"`
-	Commit             string          `json:"commit"`
-	Status             string          `json:"status"`
-	Command            []string        `json:"command,omitempty"`
-	Selection          *CheckSelection `json:"selection,omitempty"`
-	ExitCode           int             `json:"exit_code"`
-	Output             string          `json:"output,omitempty"`
-	OutputRevision     int             `json:"output_revision,omitempty"`
-	OutputPath         string          `json:"output_path,omitempty"`
-	Truncated          bool            `json:"truncated,omitempty"`
-	Failed             []string        `json:"failed,omitempty"`
-	Flaky              []string        `json:"flaky,omitempty"`
-	TraceURL           string          `json:"trace_url,omitempty"`
-	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
-	Error              string          `json:"error,omitempty"`
-	StartedAt          time.Time       `json:"started_at"`
-	FinishedAt         time.Time       `json:"finished_at"`
+	Review             int                   `json:"review"`
+	Attempt            int                   `json:"attempt,omitempty"`
+	Operation          string                `json:"operation"`
+	Commit             string                `json:"commit"`
+	Status             string                `json:"status"`
+	Command            []string              `json:"command,omitempty"`
+	Selection          *CheckSelection       `json:"selection,omitempty"`
+	ExitCode           int                   `json:"exit_code"`
+	Output             string                `json:"output,omitempty"`
+	OutputRevision     int                   `json:"output_revision,omitempty"`
+	OutputPath         string                `json:"output_path,omitempty"`
+	Truncated          bool                  `json:"truncated,omitempty"`
+	Failed             []string              `json:"failed,omitempty"`
+	Flaky              []string              `json:"flaky,omitempty"`
+	TraceURL           string                `json:"trace_url,omitempty"`
+	CIIdentityFallback string                `json:"ci_identity_fallback,omitempty"`
+	Engines            *api.CheckAttribution `json:"engines,omitempty"`
+	Error              string                `json:"error,omitempty"`
+	StartedAt          time.Time             `json:"started_at"`
+	FinishedAt         time.Time             `json:"finished_at"`
 }
 
 func FinalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k) }
@@ -111,7 +115,8 @@ func FinalCheckDelay(n int) time.Duration {
 
 // FinalChecks returns the completed check run of the commit report reads,
 // selecting and running checks on a fresh export of it, bounded by the
-// project's checks_timeout, when none is recorded. A run that cannot export
+// project's checks_timeout, when none is recorded. With check_fallback on, the
+// timeout is one budget for the local work and another for the cloud work. A run that cannot export
 // or run the checks, or outlasts the timeout, is recorded as incomplete and
 // returned with an error, so the review never reads a commit whose checks
 // show nothing: the review's operation retries, and the checks run again
@@ -180,13 +185,17 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 // IncompleteChecksError is the error a final review's operation retries on
 // while its checks have not completed.
 func IncompleteChecksError(latest FinalCheckRun, n int, next time.Time) error {
-	return fmt.Errorf("final review %d waits for its checks: %d runs in a row on %s did not complete, the latest because %s; they run again at %s", latest.Review, n, latest.Commit, latest.Error, next.UTC().Format(time.RFC3339))
+	because := latest.Error
+	if cloud := checkrun.DescribeAttribution(latest.Engines); cloud != "" {
+		because += "; " + strings.TrimSuffix(cloud, ".")
+	}
+	return fmt.Errorf("final review %d waits for its checks: %d runs in a row on %s did not complete, the latest because %s; they run again at %s", latest.Review, n, latest.Commit, because, next.UTC().Format(time.RFC3339))
 }
 
 // RunChecks selects checks for the rebased branch against its upstream base
 // and runs them on a fresh export, recording the selection before execution.
 func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport, run *FinalCheckRun) (CheckResult, error) {
-	checks := a.S.Checks
+	checks, cloud := a.S.Checks, a.S.CloudChecks
 	if checks == nil {
 		return CheckResult{ExitCode: -1}, errors.New("candidate check runner is unavailable")
 	}
@@ -233,10 +242,14 @@ func (a *FinalReviewer) RunChecks(ctx context.Context, cfg *config.Config, strea
 	if err := a.StartCheckAttempt(ctx, stream, run); err != nil {
 		return CheckResult{ExitCode: -1}, err
 	}
-	bounded, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	result, ran, err := checkrun.RunSelection(bounded, checks, dir, identity, selection)
-	run.Selection, run.Command = &ran, checkrun.ResultCommand(result, ran.Links)
+	var remembered checkrun.Remembered
+	if cloud != nil {
+		if remembered, err = checkrun.RememberedIn(a.Repository, stream); err != nil {
+			return CheckResult{ExitCode: -1}, err
+		}
+	}
+	result, ran, engines, err := checkrun.RunSelectionWithFallback(ctx, checks, cloud, timeout, remembered, dir, identity, selection)
+	run.Selection, run.Command, run.Engines = &ran, checkrun.ResultCommand(result, ran.Links), engines
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
@@ -281,7 +294,7 @@ func IncompleteFinalChecks(repository *trace.Repository, stream config.Workstrea
 func FinalCheckEvidence(run FinalCheckRun) string {
 	out := fmt.Sprintf("The service ran checks on this exact commit before your read, recorded in %s; you do not run them. The run %s.", FinalChecksPath(run.Review), run.Status)
 	if run.Selection != nil {
-		out += "\n" + checkrun.DescribeSelection(*run.Selection) + "."
+		out += "\n" + checkrun.DescribeSelectionRun(*run.Selection, run.Engines) + "."
 	}
 	if len(run.Command) > 0 {
 		out += "\nCommand: " + checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)

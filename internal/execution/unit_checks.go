@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -55,30 +56,32 @@ type checkInput struct {
 // the checks it selected, the command, its exit status, diagnostic excerpt
 // and the path of its captured output. Failed lists the check links Dagger's
 // report shows failed, and Flaky those that failed and then passed on their
-// rerun.
+// rerun. Engines says which engine ran each invocation and why a cloud run
+// did; a record without it ran locally.
 type UnitCheckRun struct {
-	Unit               string          `json:"unit"`
-	Run                int             `json:"run"`
-	Operation          string          `json:"operation"`
-	Candidate          string          `json:"candidate"`
-	Base               string          `json:"base"`
-	DiffSHA256         string          `json:"diff_sha256"`
-	Report             int             `json:"report"`
-	Status             string          `json:"status"`
-	Selection          *CheckSelection `json:"selection,omitempty"`
-	Command            []string        `json:"command,omitempty"`
-	ExitCode           int             `json:"exit_code"`
-	Output             string          `json:"output,omitempty"`
-	OutputRevision     int             `json:"output_revision,omitempty"`
-	OutputPath         string          `json:"output_path,omitempty"`
-	Truncated          bool            `json:"truncated,omitempty"`
-	Failed             []string        `json:"failed,omitempty"`
-	Flaky              []string        `json:"flaky,omitempty"`
-	TraceURL           string          `json:"trace_url,omitempty"`
-	CIIdentityFallback string          `json:"ci_identity_fallback,omitempty"`
-	Error              string          `json:"error,omitempty"`
-	StartedAt          time.Time       `json:"started_at"`
-	FinishedAt         time.Time       `json:"finished_at"`
+	Unit               string                `json:"unit"`
+	Run                int                   `json:"run"`
+	Operation          string                `json:"operation"`
+	Candidate          string                `json:"candidate"`
+	Base               string                `json:"base"`
+	DiffSHA256         string                `json:"diff_sha256"`
+	Report             int                   `json:"report"`
+	Status             string                `json:"status"`
+	Selection          *CheckSelection       `json:"selection,omitempty"`
+	Command            []string              `json:"command,omitempty"`
+	ExitCode           int                   `json:"exit_code"`
+	Output             string                `json:"output,omitempty"`
+	OutputRevision     int                   `json:"output_revision,omitempty"`
+	OutputPath         string                `json:"output_path,omitempty"`
+	Truncated          bool                  `json:"truncated,omitempty"`
+	Failed             []string              `json:"failed,omitempty"`
+	Flaky              []string              `json:"flaky,omitempty"`
+	TraceURL           string                `json:"trace_url,omitempty"`
+	CIIdentityFallback string                `json:"ci_identity_fallback,omitempty"`
+	Engines            *api.CheckAttribution `json:"engines,omitempty"`
+	Error              string                `json:"error,omitempty"`
+	StartedAt          time.Time             `json:"started_at"`
+	FinishedAt         time.Time             `json:"finished_at"`
 }
 
 // matches reports whether the run checked the identity's candidate, base and
@@ -299,7 +302,7 @@ func (c *checkers) request(ctx context.Context, stream config.WorkstreamID, in c
 // pass moves a unit whose candidate's checks passed to reviewing.
 func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), UnitReviewing, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.DescribeSelection(*run.Selection))
+	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		reason += "; " + flaky
 	}
@@ -356,7 +359,7 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 		to = UnitContested
 	}
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), to, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelection(*run.Selection))
+	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		reason += "; " + flaky
 	}
@@ -380,7 +383,7 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 // checkVerdict is the send-back a failed check run records: one finding for
 // each failed check.
 func checkVerdict(run UnitCheckRun) UnitVerdict {
-	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, checkrun.DescribeSelection(*run.Selection))}
+	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, checkrun.DescribeSelectionRun(*run.Selection, run.Engines))}
 	for _, link := range run.Failed {
 		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkrun.CheckLinkLabel(link), checkPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkrun.CheckLinkLabel(link))})
 	}
@@ -422,7 +425,11 @@ func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string,
 // to its mason.
 func (c *checkers) contestIncomplete(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, latest UnitCheckRun, n int) error {
 	id := checkDocumentID(unit, latest.Run) + "-contested"
-	reason := fmt.Sprintf("%d check runs in a row on candidate %s of unit %s did not complete, the latest because %s; the unit is contested instead of its checks running again", n, latest.Candidate, unit, latest.Error)
+	reason := fmt.Sprintf("%d check runs in a row on candidate %s of unit %s did not complete, the latest because %s", n, latest.Candidate, unit, latest.Error)
+	if cloud := checkrun.DescribeAttribution(latest.Engines); cloud != "" {
+		reason += "; " + strings.TrimSuffix(cloud, ".")
+	}
+	reason += "; the unit is contested instead of its checks running again"
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(unit, latest.Run)}
 	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitContested, Reason: reason},
@@ -445,7 +452,11 @@ func (c *checkers) incomplete(ctx context.Context, stream config.WorkstreamID, r
 		return nil
 	}
 	id := checkDocumentID(run.Unit, run.Run) + "-incomplete"
-	reason := fmt.Sprintf("check run %d on candidate %s of unit %s did not complete: %s; the unit stays checking and its checks run again after %s", run.Run, run.Candidate, run.Unit, run.Error, checkRetryDelay)
+	reason := fmt.Sprintf("check run %d on candidate %s of unit %s did not complete: %s", run.Run, run.Candidate, run.Unit, run.Error)
+	if cloud := checkrun.DescribeAttribution(run.Engines); cloud != "" {
+		reason += "; " + strings.TrimSuffix(cloud, ".")
+	}
+	reason += fmt.Sprintf("; the unit stays checking and its checks run again after %s", checkRetryDelay)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: run.Unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(run.Unit, run.Run)}
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: checksSubject(run.Unit), From: subject.Value, To: to, Reason: reason},
@@ -547,7 +558,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		run.Status, run.Error = ChecksSuperseded, reason
 		return c.record(ctx, in, run, captured)
 	}
-	checks := c.s.Checks
+	checks, cloud := c.s.Checks, c.s.CloudChecks
 	if checks == nil {
 		return incomplete(errors.New("candidate check runner is unavailable"))
 	}
@@ -593,16 +604,20 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Selection = &selection
 	run.Command = checkrun.Command(selection.Links)
 	timeout := c.s.About(c.repository).Project.CheckTimeout()
-	bounded, cancel := context.WithTimeout(ctx, timeout)
-	result, ran, err := checkrun.RunSelection(bounded, checks, dir, c.checkIdentity(in), selection)
-	cancel()
+	var remembered checkrun.Remembered
+	if cloud != nil {
+		if remembered, err = checkrun.RememberedIn(c.repository, in.Workstream); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
+	result, ran, engines, err := checkrun.RunSelectionWithFallback(ctx, checks, cloud, timeout, remembered, dir, c.checkIdentity(in), selection)
 	if ctx.Err() != nil {
 		return coreadapter.OperationResult{}, ctx.Err()
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
-	run.Selection, run.Command = &ran, checkrun.ResultCommand(result, ran.Links)
+	run.Selection, run.Command, run.Engines = &ran, checkrun.ResultCommand(result, ran.Links), engines
 	run.TraceURL = result.TraceURL
 	run.CIIdentityFallback = result.CIIdentityFallback
 	run.Flaky = result.Flaky
@@ -760,7 +775,7 @@ func latestRunFor(repo *trace.Repository, stream config.WorkstreamID, unit strin
 
 // checkEvidence is how a review prompt carries a check run.
 func checkEvidence(run UnitCheckRun) string {
-	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelection(*run.Selection), checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
+	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelectionRun(*run.Selection, run.Engines), checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
 	if len(run.Failed) > 0 {
 		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}

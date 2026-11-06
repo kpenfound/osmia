@@ -297,13 +297,18 @@ is derived from the check run records already in the workstream's trace, adds
 no persisted state, and is not shared between workstreams. Records written
 before the fallback lack its fields and count as local-only.
 
-**What is recorded.** Unit and final-review check run records carry optional
-fields saying which links or invocations ran locally, which ran on cloud, and
-why: escalated after a local timeout, escalated after an engine failure or an
-exit without a reported failed check, or routed by memory. The selection
-description, the evidence given to unit reviewers and the final reader, and the
-transition reasons the chief of staff reads say when cloud was used and what
-ran there.
+**What is recorded.** Unit and final-review check run records
+(`units/<unit>/checks-<run>.json` and `final/checks-<k>.json`) carry an optional
+`engines` field that lists which links or invocations ran locally, which ran on
+cloud, and why: `timeout` for an escalation after a local timeout,
+`engine_failure` for an escalation after an engine failure or an exit without a
+reported failed check, or `memory` when routed by memory. A run with the
+fallback off records only local invocations. The selection description, the
+evidence given to unit reviewers and the final reader, and the pass, fail,
+incomplete and contest transition reasons the chief of staff reads say when
+cloud was used and what ran there. A session check run's thread entry says so
+too. The output of a run that used cloud heads each engine's report with
+`== local engine ==` or `== cloud engine ==`.
 
 ## Restarts and new runs
 

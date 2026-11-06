@@ -163,20 +163,21 @@ type UnitCheckSelection = execution.UnitCheckSelection
 type building = execution.Building
 
 type masons struct {
-	checks     ReviewChecks
-	s          *Service
-	cfg        *config.Config
-	repository *trace.Repository
+	checks      ReviewChecks
+	cloudChecks ReviewChecks
+	s           *Service
+	cfg         *config.Config
+	repository  *trace.Repository
 }
 
 func (m *masons) driver() *execution.Masons {
 	var c *execution.Controller
 	if m.s != nil {
-		checks := m.checks
+		checks, cloud := m.checks, m.cloudChecks
 		if checks == nil {
-			checks = m.s.configuredChecks(m.cfg)
+			checks, cloud = m.s.configuredChecks(m.cfg), m.s.configuredCloudChecks(m.cfg)
 		}
-		c = m.s.executionWithChecks(checks)
+		c = m.s.executionWithChecks(checks, cloud)
 	}
 	return execution.NewMasons(c, m.cfg, m.repository)
 }
