@@ -251,6 +251,60 @@ its package or the whole project. A check whose link is the address that failed,
 such as a selected test run alone or a check with no filters, replays its
 failure and stays failed.
 
+## Cloud fallback
+
+With `[dagger] check_fallback = "cloud"` and an `engine` other than `cloud`
+([configuration](configuration.md#cloud-fallback-for-checks)), unit,
+final-review and session check runs retry on the Dagger Cloud engine, with the
+token named by `cloud_token_env`, the work that cannot finish locally. With the
+key off, or with `engine = "cloud"`, none of this applies.
+
+**What escalates to cloud.** A local attempt that is incomplete because it
+reached its time budget, lost its engine session, or exited non-zero without
+reporting a failed check. The same check operation retries immediately on cloud
+what did not finish. Checks that the local output reports as passed stand and
+are not rerun, even in an invocation that did not finish, including a run of
+every check; only the rest of that invocation goes to cloud. If the local
+output reports no passes for the unfinished invocation, the whole invocation
+goes to cloud.
+
+**What never goes to cloud.** A failed check, which is a ✘ in Dagger's report
+that also fails its rerun; the run is failed as it is without the fallback. A
+result that already passed or failed locally is not rerun on cloud. A
+cancelled operation or a service shutdown, a failure to export the candidate,
+and Dagger's refusal of the selected links trigger no cloud attempt. The
+every-check run that follows a refusal is an ordinary local attempt, and can
+itself escalate if it cannot finish. A flaky-check rerun stays on the engine
+of the attempt it belongs to.
+
+**Time budget.** One operation has one local budget and one cloud budget, each
+`checks_timeout`. All local work shares the local budget: every local
+invocation, local flaky reruns and the every-check run after a refusal. All
+cloud work shares the cloud budget, which is independent of the time spent
+locally: work routed by memory, escalated work and cloud flaky reruns. Neither
+budget restarts per invocation, per group of links or per rerun, so an
+operation finishes or is cut off within about twice `checks_timeout`. The cloud
+attempt runs inside the capacity slot the operation already holds. If the
+cloud attempt does not finish either, the run is incomplete and the unit retry,
+contest and final-review backoff apply as they do without the fallback.
+
+**Memory per workstream.** A link that needed cloud in a workstream, because it
+was escalated or routed there in one of that workstream's unit or final-review
+check run records, goes straight to cloud in later check runs of the same
+workstream, without a local attempt. An every-check run that escalated is
+remembered the same way. Links not remembered still run locally first. Memory
+is derived from the check run records already in the workstream's trace, adds
+no persisted state, and is not shared between workstreams. Records written
+before the fallback lack its fields and count as local-only.
+
+**What is recorded.** Unit and final-review check run records carry optional
+fields saying which links or invocations ran locally, which ran on cloud, and
+why: escalated after a local timeout, escalated after an engine failure or an
+exit without a reported failed check, or routed by memory. The selection
+description, the evidence given to unit reviewers and the final reader, and the
+transition reasons the chief of staff reads say when cloud was used and what
+ran there.
+
 ## Restarts and new runs
 
 A unit judgment is identified by the check run that asked, the task, its
