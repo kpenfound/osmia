@@ -279,17 +279,32 @@ func copyInputs(in Inputs) (Inputs, error) {
 // Resolve replaces resolver input only; it never rewrites or drops overrides.
 // Root changes require reopening the store. Callers supply validated config.
 func (s *Store) Resolve(in Inputs) error {
-	in, err := copyInputs(in)
+	commit, err := s.PrepareResolve(in)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if in.Config.Root.String() != s.input.Config.Root.String() {
-		return fmt.Errorf("root change requires reopening runtime store")
-	}
-	s.input = in
+	commit()
 	return nil
+}
+
+// PrepareResolve checks that Resolve would accept in without changing the
+// store. The returned commit applies it and cannot fail.
+func (s *Store) PrepareResolve(in Inputs) (commit func(), err error) {
+	in, err = copyInputs(in)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	same := in.Config.Root.String() == s.input.Config.Root.String()
+	s.mu.RUnlock()
+	if !same {
+		return nil, fmt.Errorf("root change requires reopening runtime store")
+	}
+	return func() {
+		s.mu.Lock()
+		s.input = in
+		s.mu.Unlock()
+	}, nil
 }
 func clone(st State) State {
 	st.Pauses = slices.Clone(st.Pauses)

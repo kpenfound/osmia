@@ -196,7 +196,7 @@ type Service struct {
 	spends    daySpends
 	pending   error
 	reloadErr *ReloadError
-	projectMu sync.Mutex // serializes project registration, removal and reload
+	projectMu sync.Mutex // serializes project registration, removal, reload and project configuration saves
 	handInMu  sync.Mutex // serializes hand-ins
 	sessionMu sync.Mutex // serializes session opens
 	turns     runningTurns
@@ -220,6 +220,9 @@ type Service struct {
 	requests    sync.WaitGroup
 	boundaryMu  sync.RWMutex
 	boundary    func(string) error
+	// configWrite replaces a project's configuration file; nil is
+	// config.ReplaceFile. Tests substitute it to fail a save's write.
+	configWrite func(path string, data []byte) error
 	// hub carries change notifications to the client event stream.
 	hub *eventstream.Hub
 	// activity is the in-process record of long-running backend operations,

@@ -259,6 +259,12 @@ func replaceFile(path string, data []byte) error {
 
 // writeAtomically publishes data through a synced temporary file and rename.
 func writeAtomically(path string, data []byte, mode os.FileMode) error {
+	return writeAtomicallyBefore(path, data, mode, nil)
+}
+
+// writeAtomicallyBefore is writeAtomically with a step that runs on the
+// synced temporary file just before it replaces path.
+func writeAtomicallyBefore(path string, data []byte, mode os.FileMode, beforeRename func(tmp string) error) error {
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
 		return fmt.Errorf("%s: expected a regular file", path)
 	}
@@ -278,6 +284,11 @@ func writeAtomically(path string, data []byte, mode os.FileMode) error {
 	}
 	if err := f.Close(); err != nil {
 		return err
+	}
+	if beforeRename != nil {
+		if err := beforeRename(tmp); err != nil {
+			return err
+		}
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return err

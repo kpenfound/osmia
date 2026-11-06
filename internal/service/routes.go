@@ -53,6 +53,8 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/extract", Summary: "Start a knowledge-base extraction", Request: api.ProjectExtractRequest{}, Response: api.ExtractionResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: api.ProjectRebaseRequest{}, Response: api.ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: api.MemorySetup{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/projects/config/{project}", Summary: "Read a project's config.toml as it is on disk: every setting's file value, whether it is a default, the value in effect and the pin of the file bytes", Response: api.ProjectConfigResponse{}},
+	{Method: http.MethodPut, Path: api.Prefix + "/projects/config/{project}", Summary: "Save changes to a project's config.toml, pinned to the bytes that were read; refused as a conflict when the file changed, and reported as saved_not_applied when the file was replaced but could not be applied", Request: api.ProjectConfigEdit{}, Response: api.ProjectConfigSaveResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/charter/{project}", Summary: "Read a project's charter", Response: trace.Document{}},
 	{Method: http.MethodPut, Path: api.Prefix + "/projects/charter/{project}", Summary: "Save a project's charter", Request: api.CharterEdit{}, Response: trace.Document{}},
 

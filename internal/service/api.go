@@ -204,6 +204,22 @@ type ReloadError = api.ReloadError
 
 type ProjectView = api.ProjectView
 
+type ProjectConfigResponse = api.ProjectConfigResponse
+
+type ProjectConfigError = api.ProjectConfigError
+
+const ProjectConfigApplied = api.ProjectConfigApplied
+
+const ProjectConfigSavedNotApplied = api.ProjectConfigSavedNotApplied
+
+type ProjectConfigSetting = api.ProjectConfigSetting
+
+type ProjectConfigEdit = api.ProjectConfigEdit
+
+type ProjectConfigEditValues = api.ProjectConfigValues
+
+type ProjectConfigSaveResponse = api.ProjectConfigSaveResponse
+
 type RepoView = api.RepoView
 
 type ExtractionState = api.ExtractionState
