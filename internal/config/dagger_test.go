@@ -24,6 +24,12 @@ func TestServiceDaggerConfiguration(t *testing.T) {
 		{"unix", "[dagger]\nengine = 'unix:///run/dagger.sock'\n", ResolvedDagger{Mode: DaggerEngineAddress, Address: "unix:///run/dagger.sock"}},
 		{"tcp", "[dagger]\nengine = 'tcp://127.0.0.1:1234'\n", ResolvedDagger{Mode: DaggerEngineAddress, Address: "tcp://127.0.0.1:1234"}},
 		{"container", "[dagger]\nengine = 'docker-container://custom-engine'\n", ResolvedDagger{Mode: DaggerEngineAddress, Address: "docker-container://custom-engine"}},
+		{"fallback on", "[dagger]\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'cloud'\n", ResolvedDagger{Mode: DaggerEngineAuto, CloudTokenEnv: "OSMIA_CHECK_TOKEN", CheckFallbackCloud: true}},
+		{"fallback on managed", "[dagger]\nengine = 'managed'\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'cloud'\n", ResolvedDagger{Mode: DaggerEngineManaged, Address: "docker-container://osmia-dagger-engine", CloudTokenEnv: "OSMIA_CHECK_TOKEN", CheckFallbackCloud: true}},
+		{"fallback absent", "[dagger]\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\n", ResolvedDagger{Mode: DaggerEngineAuto, CloudTokenEnv: "OSMIA_CHECK_TOKEN"}},
+		{"fallback empty", "[dagger]\ncheck_fallback = ''\n", ResolvedDagger{Mode: DaggerEngineAuto}},
+		{"fallback empty with token", "[dagger]\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = ''\n", ResolvedDagger{Mode: DaggerEngineAuto, CloudTokenEnv: "OSMIA_CHECK_TOKEN"}},
+		{"fallback with cloud engine", "[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'cloud'\n", ResolvedDagger{Mode: DaggerEngineCloud, CloudTokenEnv: "OSMIA_CHECK_TOKEN"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := Load(fixture(t, topConfig+tc.section, projectConfig))
@@ -65,6 +71,13 @@ func TestServiceDaggerValidation(t *testing.T) {
 		{"bad env name", "cloud_token_env = 'private-secret'", "dagger.cloud_token_env"},
 		{"cloud without env", "engine = 'cloud'", "dagger.cloud_token_env"},
 		{"cloud empty env", "engine = 'cloud'\ncloud_token_env = ''", "dagger.cloud_token_env"},
+		{"bad fallback", "check_fallback = 'private-secret'", "dagger.check_fallback"},
+		{"bad fallback with token", "cloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'private-secret'", "dagger.check_fallback"},
+		{"fallback case", "cloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'Cloud'", "dagger.check_fallback"},
+		{"fallback local", "cloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'local'", "dagger.check_fallback"},
+		{"fallback without token", "check_fallback = 'cloud'", "dagger.cloud_token_env"},
+		{"fallback empty token", "check_fallback = 'cloud'\ncloud_token_env = ''", "dagger.cloud_token_env"},
+		{"wrong fallback type", "check_fallback = ['private-secret']", "dagger.check_fallback"},
 		{"unknown key", "cloud_token = 'private-secret'", "dagger.cloud_token"},
 		{"nested key", "[dagger.extra]\nvalue = 'private-secret'", "dagger.extra"},
 		{"wrong engine type", "engine = ['private-secret']", "dagger.engine"},
@@ -84,6 +97,17 @@ func TestServiceDaggerValidation(t *testing.T) {
 	}
 }
 
+func TestDaggerCheckFallbackInactiveForCloudEngine(t *testing.T) {
+	d := DaggerConfig{Engine: "cloud", CloudTokenEnv: "OSMIA_CHECK_TOKEN", CheckFallback: "cloud"}
+	if r := d.Resolve(); r.Mode != DaggerEngineCloud || r.CheckFallbackCloud {
+		t.Fatalf("cloud engine with fallback: %+v", r)
+	}
+	d.Engine = "managed"
+	if r := d.Resolve(); r.Mode != DaggerEngineManaged || !r.CheckFallbackCloud {
+		t.Fatalf("managed engine with fallback: %+v", r)
+	}
+}
+
 func TestMasonDaggerEngineDefault(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, tc := range []struct {
@@ -100,6 +124,7 @@ func TestMasonDaggerEngineDefault(t *testing.T) {
 		{"legacy missing", "", "", ""},
 		{"cloud missing", "[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\n", "", ""},
 		{"cloud mason", "[dagger]\nengine = 'managed'\n", "engine = 'cloud'\n", ""},
+		{"cloud mason with fallback", "[dagger]\nengine = 'managed'\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\ncheck_fallback = 'cloud'\n", "engine = 'cloud'\n", ""},
 		{"empty mason", "[dagger]\nengine = 'managed'\n", "engine = ''\n", ""},
 		{"bad mason", "[dagger]\nengine = 'managed'\n", "engine = 'private-secret'\n", ""},
 	} {

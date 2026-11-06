@@ -641,7 +641,8 @@ cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
 | --- | --- | --- |
 | `engine` | `"auto"` | `auto`, `managed`, `cloud` or an explicit `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` address |
 | `version` | Host Dagger CLI release, resolved at runtime | Expected engine release, such as `v0.20.5` or `0.20.5`; a mismatch is reported rather than enforced |
-| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` |
+| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` and for `check_fallback = "cloud"` |
+| `check_fallback` | `""` (off) | `""` or `"cloud"`. With `"cloud"`, a check run that cannot finish on the service's engine is retried on the Dagger Cloud engine; see [Cloud fallback for checks](#cloud-fallback-for-checks). Any other value fails to load, naming `dagger.check_fallback` |
 
 `auto` lets the host CLI choose an engine. `managed` selects Osmia's
 `osmia-dagger-engine` container at
@@ -657,6 +658,22 @@ service's check client receives the token; mason execution settings and
 sandboxes never receive it. Code under check can probably read the check
 client's environment, for example through `env://`, and with it the Cloud
 token. Use a dedicated, narrowly scoped token.
+
+#### Cloud fallback for checks
+
+`check_fallback = "cloud"` opts in to retrying check work that cannot finish on
+the service's engine on the Dagger Cloud engine. It reuses the token named by
+`cloud_token_env`, which must be set: configuration fails to load with
+`check_fallback = "cloud"` and no `cloud_token_env`. It adds no timeout and no
+credential setting; the operation's time budget is the project's
+`checks_timeout`. The default `""` leaves check runs on the configured engine
+with a single `checks_timeout`.
+
+The key does nothing when `engine` is already `cloud`: checks keep running on
+that Cloud engine, with no separate local attempt, escalation or routing.
+Masons never use the Cloud engine or receive the token. How unit, final-review
+and session check runs use the fallback is described under
+[Cloud fallback](smart-checks.md#cloud-fallback).
 
 #### Another Docker host
 

@@ -738,7 +738,7 @@ func knownKey(key toml.Key, project bool) bool {
 		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
-		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env"}, key[1])
+		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env", "check_fallback"}, key[1])
 	}
 	// A leftover [beekeeper] section from the removed Beekeeper feature is
 	// accepted and ignored, never decoded into any field, so a top-level

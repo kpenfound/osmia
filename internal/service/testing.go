@@ -29,6 +29,7 @@ type TestHooks struct {
 	ConversationTicks <-chan time.Time
 	Enforcement       *TestEnforcementBinding
 	ReviewChecks      ReviewChecks
+	CloudChecks       ReviewChecks
 	Boundary          func(context.Context, string) error
 	SchedulePassed    func()
 	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
@@ -46,6 +47,9 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	}
 	if hooks.ReviewChecks != nil {
 		opts.reviewChecks = hooks.ReviewChecks
+	}
+	if hooks.CloudChecks != nil {
+		opts.cloudChecks = hooks.CloudChecks
 	}
 	if hooks.Boundary != nil {
 		opts.boundary = hooks.Boundary

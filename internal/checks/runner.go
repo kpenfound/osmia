@@ -34,6 +34,14 @@ type ReviewChecks interface {
 	Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error)
 }
 
+// SkippingChecks is a ReviewChecks that can leave checks it names out of a run.
+type SkippingChecks interface {
+	ReviewChecks
+	// CheckSkipping is Check without the checks the skip links select, which
+	// already passed. A run that has nothing left to run passes.
+	CheckSkipping(ctx context.Context, dir string, identity Identity, links, skip []string) (CheckResult, error)
+}
+
 // DaggerChecks runs the project's Dagger checks through the service's engine.
 // The agent receives neither the engine endpoint nor command selection.
 // Its zero value preserves anonymous checks and host engine selection.
@@ -121,6 +129,11 @@ func skipArgs(addresses, skip []string) []string {
 // Output holds every run's report, and TraceURL is the trace of the latest run
 // that has one.
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
+	return d.CheckSkipping(ctx, dir, identity, links, nil)
+}
+
+// CheckSkipping is Check without the checks the skip links select.
+func (d DaggerChecks) CheckSkipping(ctx context.Context, dir string, identity Identity, links, skip []string) (CheckResult, error) {
 	env, preparation, cleanup, err := d.prepare(ctx, dir, identity, d.CIIdentityExport || d.CloudToken != "")
 	if err != nil {
 		return CheckResult{ExitCode: -1, CIIdentityFallback: preparation.FallbackReason}, redactError(err)
@@ -130,7 +143,7 @@ func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, 
 	run := checkRun{checks: d, dir: dir, env: env, preparation: preparation, labelled: len(invocations) > 1}
 	run.result.CIIdentityFallback = preparation.FallbackReason
 	for _, addresses := range invocations {
-		if err := run.view(ctx, addresses); err != nil || run.result.ExitCode != 0 {
+		if err := run.view(ctx, addresses, skip); err != nil || run.result.ExitCode != 0 {
 			return run.result, redactError(err)
 		}
 	}
@@ -159,8 +172,10 @@ type checkRun struct {
 // --fail-fast, that run may have cancelled checks its report does not mention,
 // so a passed rerun does not yet show the addresses pass: the addresses run
 // again skipping what passed, and any new failure gets its own rerun.
-func (r *checkRun) view(ctx context.Context, addresses []string) error {
-	var flaky []string
+//
+// Checks in skip are left out of every run, as if they had passed on a rerun.
+func (r *checkRun) view(ctx context.Context, addresses, skip []string) error {
+	flaky := slices.Clone(skip)
 	for {
 		args := checkArgs(addresses)
 		if len(flaky) > 0 {

@@ -160,3 +160,30 @@ func TestInvocationsPreserveUnparsedLinks(t *testing.T) {
 		t.Fatalf("unknown forms combined: %q", got)
 	}
 }
+
+func TestInvocationGroupsNameTheLinksEachRunSelects(t *testing.T) {
+	t.Parallel()
+	const test = "dag+check://?check=test&go-module=.&go-package="
+	links := []string{test + "a", "dag+check://release/version", test + "b", test + "a&go-test=T", test + "a"}
+	groups := InvocationGroups(links)
+	want := []Invocation{
+		{Address: test + "a&go-package=b", Links: []string{test + "a", test + "b", test + "a&go-test=T"}},
+		{Address: "dag+check://release/version", Links: []string{"dag+check://release/version"}},
+	}
+	if len(groups) != len(want) {
+		t.Fatalf("groups %+v", groups)
+	}
+	for i := range want {
+		if groups[i].Address != want[i].Address || !slices.Equal(groups[i].Links, want[i].Links) {
+			t.Fatalf("group %d: %+v, want %+v", i, groups[i], want[i])
+		}
+	}
+	for i, invocation := range Invocations(links) {
+		if len(invocation) != 1 || invocation[0] != groups[i].Address {
+			t.Fatalf("invocation %d: %q, group %+v", i, invocation, groups[i])
+		}
+	}
+	if got := InvocationGroups(nil); len(got) != 0 {
+		t.Fatalf("no links: %+v", got)
+	}
+}

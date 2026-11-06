@@ -41,6 +41,13 @@ type checkFailure struct {
 // Output with several reports yields every report's heading, one per line.
 // Check links can exceed 64 KiB; splitting on newlines has no scanner limit.
 func parseCheckReport(output string) (heading string, failures []checkFailure) {
+	heading, failures, _ = parseCheckReportResults(output)
+	return heading, failures
+}
+
+// parseCheckReportResults is parseCheckReport that also returns the links the
+// report shows passing, in the order they first appear.
+func parseCheckReportResults(output string) (heading string, failures []checkFailure, passed []string) {
 	lines := strings.Split(reportColor.ReplaceAllString(output, ""), "\n")
 	active := -1
 	inChecks := false
@@ -76,6 +83,9 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 				failures = append(failures, checkFailure{link: m[3], heading: "✘ " + CheckLinkLabel(m[3]) + m[4], start: i + 1, end: i + 1})
 				active = len(failures) - 1
 			case "✔":
+				if !slices.Contains(passed, m[3]) {
+					passed = append(passed, m[3])
+				}
 				for f := range failures {
 					if failures[f].link == m[3] {
 						failures[f].passedLater = true
@@ -89,7 +99,7 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 			failures[active].end = i + 1
 		}
 	}
-	return heading, failures
+	return heading, failures, passed
 }
 
 // latestFailures keeps one failure for each link: its most recent, in the order
@@ -118,6 +128,15 @@ func FailedChecks(output string) []string {
 		}
 	}
 	return links
+}
+
+// PassedChecks returns the links output reports as passed and not failed
+// again, in the order they first appear. A run that did not finish can still
+// report the checks that passed before it ended.
+func PassedChecks(output string) []string {
+	_, _, passed := parseCheckReportResults(output)
+	failed := FailedChecks(output)
+	return slices.DeleteFunc(passed, func(link string) bool { return slices.Contains(failed, link) })
 }
 
 // DescribeFlaky names the checks that failed and then passed on their rerun,

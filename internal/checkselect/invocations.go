@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+// Invocation is one dagger check run: the address it selects, and the links
+// whose checks it selects.
+type Invocation struct {
+	Address string
+	Links   []string
+}
+
 // Invocations splits links into the addresses of separate dagger check runs,
 // one address each, that together select exactly the checks the links select.
 // No links is one run of every check.
@@ -18,15 +25,36 @@ func Invocations(links []string) [][]string {
 	if len(links) == 0 {
 		return [][]string{nil}
 	}
+	groups := InvocationGroups(links)
+	out := make([][]string, len(groups))
+	for i, group := range groups {
+		out[i] = []string{group.Address}
+	}
+	return out
+}
+
+// InvocationGroups is Invocations with the links each run selects, in the order
+// the links were given. Every link belongs to exactly one run. No links yields
+// no runs.
+func InvocationGroups(links []string) []Invocation {
 	var addresses []*address
 	for _, link := range links {
-		addresses = append(addresses, parseAddress(link))
+		a := parseAddress(link)
+		a.links = []string{link}
+		addresses = append(addresses, a)
 	}
 	for combined := true; combined; {
 		combined = false
 		for i := 0; i < len(addresses); i++ {
 			for j := i + 1; j < len(addresses); j++ {
 				if union, ok := combine(addresses[i], addresses[j]); ok {
+					members := slices.Clone(addresses[i].links)
+					for _, link := range addresses[j].links {
+						if !slices.Contains(members, link) {
+							members = append(members, link)
+						}
+					}
+					union.links = members
 					addresses[i] = union
 					addresses = slices.Delete(addresses, j, j+1)
 					combined = true
@@ -35,9 +63,9 @@ func Invocations(links []string) [][]string {
 			}
 		}
 	}
-	out := make([][]string, len(addresses))
+	out := make([]Invocation, len(addresses))
 	for i, a := range addresses {
-		out[i] = []string{a.String()}
+		out[i] = Invocation{Address: a.String(), Links: a.links}
 	}
 	return out
 }
@@ -50,6 +78,8 @@ type address struct {
 	base    string
 	filters []filter
 	opaque  bool
+	// links are the links this address stands for.
+	links []string
 }
 
 type filter struct {

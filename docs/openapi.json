@@ -4336,6 +4336,9 @@
       },
       "ConfigDaggerConfig": {
         "properties": {
+          "check_fallback": {
+            "type": "string"
+          },
           "cloud_token_env": {
             "type": "string"
           },

@@ -33,6 +33,25 @@ func (s *Service) configuredChecks(cfg *config.Config) ReviewChecks {
 	return DaggerChecks{Engine: selection, CloudToken: token}
 }
 
+// configuredCloudChecks is the cloud engine runner a check run falls back to,
+// or nil when cfg does not turn the fallback on. It carries the token the
+// primary runner uses.
+func (s *Service) configuredCloudChecks(cfg *config.Config) ReviewChecks {
+	if cfg == nil {
+		return nil
+	}
+	resolved := cfg.Dagger.Resolve()
+	if !resolved.CheckFallbackCloud {
+		return nil
+	}
+	if s.options.cloudChecks != nil {
+		return s.options.cloudChecks
+	}
+	token := os.Getenv(resolved.CloudTokenEnv)
+	redact.Register(token)
+	return DaggerChecks{Engine: string(config.DaggerEngineCloud), CloudToken: token}
+}
+
 func (s *Service) ensureEngine(ctx context.Context, cfg *config.Config) error {
 	// Read and register the token before any engine command can report an error.
 	s.configuredChecks(cfg)

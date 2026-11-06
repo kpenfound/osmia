@@ -46,6 +46,7 @@ type Dependencies struct {
 	Runtimes            func() (*config.Config, []*Project)
 	ConversationTrace   func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError)
 	Checks              ReviewChecks
+	CloudChecks         ReviewChecks
 	Jev                 *jev.Judge
 }
 type Controller struct{ Dependencies }

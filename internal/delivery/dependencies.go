@@ -46,6 +46,7 @@ type Dependencies struct {
 	Jev                         *jev.Judge
 	AcquireReviewCheckSlot      func(context.Context, config.ProjectID, config.WorkstreamID, int, string) (func(), error)
 	Checks                      checks.ReviewChecks
+	CloudChecks                 checks.ReviewChecks
 	PullRequests                pulls.Client
 	ChangeHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld        func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
