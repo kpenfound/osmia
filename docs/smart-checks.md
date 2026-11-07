@@ -4,8 +4,10 @@ Before a unit or assembled feature is reviewed, the service runs the project's
 Dagger checks on the commit to be read. With the [Jev boost](configuration.md#optional-jev-boost)
 on, Jev judges how likely the change is to alter each check's result, and
 `dagger check` runs the likely ones. Configured fallback picks run the
-highest-scored checks when none reaches the threshold. Whenever that judgment
-cannot be used, every check runs, exactly as with the boost off. The [design](design.md#96-jev-judgments) calls
+highest-scored checks when none reaches the ranking threshold. Selection runs
+in three stages: breadth, depth and ranking. A breadth or depth failure keeps
+selection going with a fallback for that stage; a ranking failure runs every
+check, exactly as with the boost off. The [design](design.md#96-jev-judgments) calls
 this the check selection and defines what it may decide.
 
 Smart checks pay off in a project whose Dagger checks are fine-grained, such
@@ -30,54 +32,81 @@ requested tests exist and exercise the behaviour.
    the project's workspace.
 2. **Boost off.** With the boost off, the run checks everything without
    listing checks or asking Jev.
-3. **List.** `dagger list checks --all --format=link` lists the export's
-   checks, with collections expanded to their items, as links such as
-   `dag+check://go/packages/tests/test?go-package=internal/trace&go-test=TestBuilt`.
-   Listing is bounded by five minutes and 4 MiB of output.
+3. **List and attribute.** `dagger list checks --all --format=link` lists the
+   export's expanded checks. `dagger list checks --format=link`, without
+   `--all`, lists its top-level checks with collections unexpanded. Dagger
+   defines those top-level checks; Osmia does not infer them from link names.
+   Each listing is bounded by five minutes and 4 MiB of output.
    Options exclude broad links: a no-filter or check-name-only root that
    covers other listed links, and any link holding the same checks as such a
    root. This includes a module link in a one-module project or the package
    link of a collection's only package when narrower tests are listed. Both
    `dag+check://?check=test&...` and `dag+check://<path>?...` use coverage among
-   listed links, independent of check names. Standalone checks, including
-   no-filter and name-only links with nothing narrower listed, stay options.
-   Links covering each other count as one check. A leaf covers no strictly
-   narrower listed link. The remaining options together cover every leaf
-   in the original listing.
-4. **Narrow to candidates.** One judgment asks about at most 128 links. A
-   project with more remaining options is asked about its collections' items
-   instead: removing a link's last filter gives the link that covers it and
-   its siblings, so
-   `...?go-package=internal/trace&go-test=TestBuilt` and
-   `...?go-package=internal/trace&go-test=TestChunks` become
-   `...?go-package=internal/trace`. Each step collapses the item that removes
-   the most links, so the largest collections are judged by package and small
-   ones keep their own links. Every step skips broad parents, whether listed
-   or created by narrowing, using the original listing's leaves to compare
-   coverage. Narrowing never produces a collection root or bare
-   `dag+check://`. Links that cannot narrow to 128 without a broad link run
-   every check with reason `too_many_checks`, without asking Jev.
-5. **Build the state.** The judgment's state holds a guide to reading check
-   links, the changed files with their added and removed line counts, and the
-   diff. The state is bounded to 72 KiB: a diff that does not fit is replaced
-   by a note to judge from the changed files, and changed files that do not
-   fit on their own run every check.
-6. **Ask.** Each candidate is one Noul question, `check-<i>`: "Could the
-   change in the state alter the result of the Dagger check `<link>`?", where
-   yes means the check exercises a changed file or code, configuration or
-   generated files the change affects. The service's `jev.Judge` sends it as
-   task `check-selection`, with the request timeout, retry and cool-down every
-   judgment shares.
-7. **Accept.** The links whose probability is at least
+   listed links, independent of check names. Standalone checks with nothing
+   narrower listed stay options. Links covering each other count as one
+   check. A leaf covers no strictly narrower listed link.
+
+   Membership comes from an additional scoped listing for each top-level
+   check: `dagger list checks --all --format=link '<top-level-link>'`, with the
+   same listing bounds. An expanded link belongs to a top-level check only
+   when exactly one scoped listing returns it. For example, Dagger's
+   `dag+check://?check=go/modules/packages/tests/test` root can contain
+   `dag+check://?check=test&go-module=.&go-package=internal/trace&go-test=TestBuilt`.
+   These links need not share a check name or path. A root whose attributed
+   links differ from its own link is a collection, even with only one item;
+   a standalone check maps to itself. Ambiguous or unmatched expanded links
+   bypass breadth and depth and go straight to ranking. Attribution never
+   drops an expanded option.
+4. **Build the state and judge breadth.** All three stages share the link
+   guide, process overview, changed files with added and removed line counts,
+   and diff. The state is bounded to 72 KiB, including the process text. A diff
+   that does not fit is replaced by a note to judge from the changed files;
+   if that state still does not fit, every check runs.
+
+   Task `check-breadth`, version 1, asks one Noul per top-level check whether
+   the change could affect it or any of its items. Roots at or above
    [`jev.check_threshold`](configuration.md#optional-jev-boost), 0.5 by
-   default, are selected, regardless of the picks setting. When none reaches
-   it, `jev.check_fallback_picks` (non-negative integer, default 0) above 0
-   accepts a response with a usable Noul score and runs up to that many
-   highest-scored candidates from the same answers. There is no minimum
-   score and no second request. Ties follow sorted candidate order. Fewer
-   scored candidates run all scored links; no usable score runs every check.
-   With 0 or unset, a response that selects none is declined and runs every
-   check, keeping the threshold-only judgment identity.
+   default, are kept. Their collections go on to depth; their standalone
+   checks go on to ranking. A root below the threshold and all its items are
+   skipped. If none reaches the threshold, all top-level checks are kept.
+5. **Judge depth.** Task `check-depth`, version 1, asks one Choice per kept
+   collection with at least two offerable levels. Levels follow the item
+   filters' order in the expanded links: level *k* retains the first *k*
+   item filters, preserving the check name. For Go this is usually
+   `go-module` (when listed), then `go-package`, then `go-test`. A level whose
+   links would be broad within the collection is not offered. The question
+   still shows the whole hierarchy and why a level is not offered. With only
+   one offerable level, that level is used without a question. Inconsistent
+   filter orders get no question and keep the finest links.
+
+   Jev's top choice is used without a probability threshold or deterministic
+   override, including when it chooses the finest level. Links are cut to
+   that level and deduplicated. This changes granularity without dropping a
+   leaf: each resulting link covers every item beneath it.
+6. **Narrow to candidates.** If the filtered list still exceeds 1024 links,
+   narrowing collapses collection items, removing the last filter to cover
+   a link and its siblings. For example, two tests in `go-package=internal/trace`
+   become one package link. Each step collapses the item that removes the
+   most links. Coverage is measured against the leaves of the original
+   `--all` listing, including leaves breadth excluded. Narrowing skips broad
+   parents, whether listed or created, and never produces a collection root
+   or bare `dag+check://`. Links that cannot narrow to 1024 without a broad
+   link run every check with reason `too_many_checks`, without asking ranking.
+   The cap bounds request time and per-judgment cost; it is not an API limit
+   and has no configuration key.
+7. **Rank and accept.** Task `check-selection`, version 4, asks one Noul per
+   remaining candidate whether the change could alter its result. Requests
+   run sequentially, since each depends on the preceding answers. Each
+   stage uses the service's `jev.Judge` with its own `jev.timeout`, retry and
+   shared cool-down. Links whose ranking probability is at least
+   `jev.check_threshold` are selected, regardless of the picks setting.
+   When none reaches it, `jev.check_fallback_picks` (non-negative integer,
+   default 0) above 0 accepts a response with a usable Noul score and runs up
+   to that many highest-scored candidates from the same answers. There is no
+   minimum score and no further request. Ties follow sorted candidate order.
+   Fewer scored candidates run all scored links; no usable score runs every
+   check. With 0 or unset, a response that selects none is declined and runs
+   every check.
 8. **Group.** Dagger evaluates one `dagger check` under a single filtered view
    of the workspace, so it refuses links whose filters differ, and the filters
    of one link AND together. Links combine into one only where that selects
@@ -102,9 +131,24 @@ requested tests exist and exercise the behaviour.
 Unit, final-review and session check runs all use this selection. Before a
 final review, the service judges the rebased feature branch commit against
 the upstream base it sits on. Accepted judgments pass only their selected
-links to Dagger; every fallback runs all checks with the same reason a unit
-run records. An owner's explicit full session run remains a full run.
+links to Dagger; a full-run fallback records the same reason as a unit run.
+An owner's explicit full session run remains a full run.
 If the run cannot read the change's diff, it stops before executing checks.
+
+Fallbacks apply at the stage that failed, including timeouts, missing
+credentials, provider failures and unusable answers:
+
+- A failed top-level or scoped listing, an unavailable listing capability, or
+  a failed or unusable breadth answer restores the full expanded candidate
+  path, removing broad links and narrowing before ranking. Depth is skipped.
+- A failed or unusable depth answer preserves breadth's result: every leaf
+  of the kept collections at its finest level, kept standalone checks and
+  uncovered expanded links go on to narrowing and ranking. Dropped roots stay
+  dropped.
+- A failed ranking judgment runs every check. Ranking's no-selection case
+  uses fallback picks when configured, otherwise it runs every check.
+- A failed `--all` listing remains a full run with reason `unlisted`.
+- During a Jev cool-down, each stage falls back immediately without a request.
 
 When the check runner requests CI identity, the export carries the exact pinned
 Git commit, its real branch name, and the configured upstream as a credential-free
@@ -159,21 +203,25 @@ The selection has this shape:
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
 | `links` | The links Jev selected, for a selected run; the command shows how they were grouped |
 | `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections, full runs and older records |
-| `candidates` | How many links Jev was asked about, after removing broad links and narrowing |
+| `candidates` | How many links ranking was asked about, after breadth, depth, broad-link removal and narrowing |
 | `listed` | Total links the project listed, before removing broad links or narrowing; absent when listing was skipped or failed, and in older records |
-| `judgment` | The judgment record the selection rests on, also set on a full run whose judgment fell back |
+| `judgment` | The ranking judgment record, also set on a full run whose ranking judgment fell back |
+| `breadth_judgment` | Optional breadth judgment record, including when that judgment fell back |
+| `depth_judgment` | Optional depth judgment record; absent when no depth question was needed or breadth failed |
+| `roots` | Optional top-level count, recorded when breadth succeeded |
+| `kept_roots` | Optional list of top-level links kept by breadth |
+| `levels` | Optional map from each kept collection's root link to its chosen level; `finest` when there is no consistent named hierarchy |
 | `reason`, `detail` | Why a full run ran every check |
 
-A full run's `reason` is one of the service's own, decided before Jev is
-asked:
+A full run's `reason` is one of the service's own:
 
 | Reason | Cause |
 | --- | --- |
 | `disabled` | The boost is off |
-| `unlisted` | `dagger list checks` failed or timed out |
+| `unlisted` | The expanded `dagger list checks --all --format=link` listing failed or timed out |
 | `no_checks` | The project lists no check links |
-| `too_many_checks` | The remaining links cannot narrow to 128 without a broad link |
-| `change_too_large` | The changed files alone do not fit the state |
+| `too_many_checks` | The remaining links cannot narrow to 1024 without a broad link |
+| `change_too_large` | The state with the changed files and shared guides does not fit even without the diff |
 | `refused` | Dagger refused one command's selected links before that command started any check; `detail` holds its error |
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
@@ -182,12 +230,14 @@ score, `unconfigured`, `cooling_down`, `timeout`,
 `rate_limited`, `unavailable`, `rejected`, `unusable`, `interrupted`,
 `unrecorded` or `cancelled`.
 
-The judgment itself is recorded under the workstream as
-`judgments/<id>.json`, with the threshold and positive configured picks value
-it applied, the request (or its digest above 64 KiB), the configured and
-resolved model, every answer with its probability, the outcome
-and usage. Its cost enters the ledger under the `jev` role. A declined
-judgment keeps its answers for evaluation; they never select checks.
+The optional stage fields can be absent; older selection records remain readable.
+Each stage's judgment is recorded separately under the workstream as
+`judgments/<id>.json`, with its task, version, exact request identity, and
+any threshold or positive configured picks value it applied, the request (or
+its digest above 64 KiB), the configured and resolved model, every answer with
+its probability, the outcome and usage. Each stage's cost enters the ledger
+separately under the `jev` role. A declined judgment keeps its answers for
+evaluation; they never select checks.
 
 A picks run uses mode `selected` and keeps its links, candidate count, listed
 count and judgment, with `fallback_picks` marking the configured count.
@@ -203,6 +253,9 @@ the unit's transition to reviewing and its notice, in the reviewer's prompt with
 mason receives when checks fail. The final reader's prompt and the feed's
 final-review check entry also describe the selection and its reason. Running
 final attempts show their selection as soon as start evidence is recorded.
+
+When breadth succeeds, the summary adds the kept and total top-level counts
+and the chosen levels, such as "within 2 of 5 top-level checks, by go-package".
 
 The selected and candidate counts describe the saving as "checking 2 of 37".
 When removing broad links or narrowing reduces the list, `listed` also explains
@@ -312,9 +365,10 @@ too. The output of a run that used cloud heads each engine's report with
 
 ## Restarts and new runs
 
-A unit judgment is identified by the check run that asked, the task, its
-version, the threshold, the configured picks value when above 0, and the exact
-request. A unit run retried after a restart reads back
+Each stage's unit judgment is identified by the check run that asked, its
+task, version and exact request, and the acceptance values it applies:
+breadth's threshold, or ranking's threshold and positive configured picks
+value. Depth has no confidence threshold. A unit run retried after a restart reads back
 its selection record, including a full run's fallback, instead of listing or
 asking again. Recording the same run again keeps one selection record. A new run, for a revised or rebased
 candidate, asks afresh. A judgment interrupted twice falls back as
@@ -323,15 +377,77 @@ candidate, asks afresh. A judgment interrupted twice falls back as
 Final-review judgments are keyed by the review number and rebased commit,
 not the attempt number. An incomplete run's retry or an attempt resumed after
 a service restart lists the checks again and reuses the recorded judgment
-for the same request, threshold and picks value. A new review, commit or
-changed judgment input asks afresh. Each attempt keeps its own start and result evidence.
+for each stage's same task, version, exact request and configured acceptance
+values. The depth request follows deterministically from breadth, and ranking
+from both, so the same change reuses all three judgments across restarts and
+retries. A new review, commit or changed judgment input asks afresh. Each
+attempt keeps its own start and result evidence.
 
 ## What Jev sees
 
-Jev receives only the judgment's state and questions: the check links, the
-changed file paths with their line counts, and the diff when it fits. With
-the default settings this goes to OpenRouter. Jev holds no tool, no version
-control and no delivery credential.
+All three requests carry the same state bundle: `checks` (the link guide),
+`process` (the overview below), `changed_files` (paths and added/removed line
+counts), and `diff` when it fits within 72 KiB. The link guide explains both
+path and query-name links, filters and dependencies, and that collection
+filters nest in order: `go-module` contains `go-package` (a directory), which
+contains `go-test` (a function).
+
+The shared `process` text is:
+
+> Osmia is choosing which of a project's Dagger checks to run on a change, in three stages. Stage 1, breadth: for each top-level check, could the change affect it or any of its items at all? A no skips the check and everything in it. Stage 2, depth: for each collection kept by stage 1, at which level of its hierarchy should stage 3 judge it? Stage 3, ranking: for each remaining link, could the change alter its result? A yes runs it. Missing an affected check can let a regression through; running an unaffected one only costs time.
+
+Each question uses structured instructions, separating the stage wording
+from the data it refers to.
+
+**Breadth (`check-breadth` v1).** Each top-level check gets a Noul,
+`breadth-<i>`, with `stage` asking: "Stage 1 of 3, breadth. Could the change
+in the state alter the result of the Dagger check `<link>`, or of any of its
+items?" Instructions include `link`; collections also carry `items` (the
+expanded count) and up to three `examples`.
+
+- Yes: "The check, or at least one of its items, builds or exercises a changed
+  file, or code, configuration or generated files the change affects. It goes
+  on to stage 2 or 3 for a finer judgment."
+- No: "Nothing the check or any of its items depends on is touched by the
+  change. The check and every item in it are skipped with no further judgment,
+  so answer no only when the change clearly cannot reach it."
+
+**Depth (`check-depth` v1).** Each eligible kept collection gets a Choice,
+`depth-<i>`, whose `stage` says: "Stage 2 of 3, depth. Stage 1 judged that the
+change could affect the collection `<root>`. Choose the level at which stage
+3 should judge its links."
+
+Its `hierarchy` lists every level coarsest first, including levels not offered.
+Each entry has `level` (filter name), `links` (count), `example`, `contains`
+(the next level's name, or `none`), and `offered` (`true` or a reason such as
+"covers the whole collection; already kept by stage 1"). Options contain only
+offered levels, in that order, named after the filter. Their descriptions say
+"Judge each of the `<n>` `<level>` links, such as `<example>`. Each runs every
+`<contains>` item in it." The finest level omits the last sentence.
+
+The `guidance` explains that each item contains every item at the levels
+below it. Choosing a level never drops a check; it decides how finely ranking
+divides the collection, and each selected link runs everything beneath it.
+Too broad a level makes nearly the whole collection run; too fine a level
+asks ranking to guess dependencies from names that the change does not
+identify. Jev is told to choose the level whose items correspond most directly
+to the changed files and directories. For Go that is usually `go-package`:
+packages are directories, connected through imports; `go-module` is too broad
+and `go-test` too fine. Finer levels suit changes identifying specific items;
+coarser levels suit changes that cannot distinguish items. This is prompt
+guidance; the code uses Jev's choice as given.
+
+**Ranking (`check-selection` v4).** Each remaining link gets a Noul,
+`check-<i>`, with `link` and `stage`: "Stage 3 of 3, ranking. Earlier stages
+kept this check and chose how finely to divide its collection. Could the
+change in the state alter the result of the Dagger check `<link>`?"
+
+- Yes: "The check exercises a changed file, or code, configuration or generated
+  files the change affects. It runs."
+- No: "Nothing the check depends on is touched by the change. It is skipped."
+
+With the default settings this state and these questions go to OpenRouter.
+Jev holds no tool, no version control and no delivery credential.
 
 ## Limits
 
@@ -343,12 +459,20 @@ would catch, since even very low scores are ranked and only the top links
 run. One pick may cover part of a collection, such as a package's tests in a
 multi-package collection; it never names a whole collection or an equivalent
 module root. Passing checks are evidence for the review, never an approval.
-Collapsed links run their whole item, so a project with many small
-collections runs more than it would with each link judged.
-A collection with one package and more than 128 tests falls back to a full
+A breadth "no" skips every check in that collection without a finer judgment
+(unless no root reaches the threshold, in which case all are kept). A mistaken
+breadth exclusion can therefore miss a whole collection of affected checks.
+A coarse depth runs whole items: selecting a package link runs every test in
+that package. This can run more checks than judging each leaf individually.
+A collection with one package and more than 1024 tests falls back to a full
 run with `too_many_checks`, since its package link holds the whole collection.
 Coverage compares exact paths and filter values: a path prefix does not
 cover longer paths.
+
+Each stage has its own `jev.timeout`. Three sequential requests can delay
+fallback by roughly 3× a single request's timeout, about 30 seconds at the
+10-second default, in addition to listing time. The 1024 cap bounds request
+time and per-judgment cost, and cannot be configured.
 
 ## Code map
 
@@ -364,8 +488,8 @@ cover longer paths.
 
 ## Run smart checks locally
 
-`go run ./cmd/smartcheck` asks the same judgment of any Git working tree, with
-no Osmia service, configuration or trace:
+`go run ./cmd/smartcheck` uses the same three-stage selection on any Git
+working tree, with no Osmia service, configuration or trace:
 
 ```sh
 export OPENROUTER_API_KEY=...
@@ -379,17 +503,18 @@ It diffs the working tree, including uncommitted changes to tracked files but
 not untracked files, against the merge base of `--base` (`main` by default),
 lists the checks of the Dagger workspace at the repository root, and runs
 `dagger check --fail-fast --parallel 4` for each group of selected links,
-stopping at the first failure. When the factory would fall back before
-running a check, it says why and runs every check; when nothing changed, it
-runs nothing. Links Dagger refuses stop the command with Dagger's error. It
-exits with `dagger check`'s status.
+stopping at the first failure. Breadth and depth use the same stage-relative
+fallbacks as the factory. A failed expanded listing or ranking answer says why
+and runs every check; when nothing changed, it runs nothing. Links Dagger
+refuses stop the command with Dagger's error. It exits with `dagger check`'s
+status.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `-v`, `--verbose` | off | Print the changed files, each candidate's probability and the selection to standard error |
+| `-v`, `--verbose` | off | Print changed files, top-level probabilities, collection hierarchies and offered levels, chosen levels and their probabilities, and ranking scores and selection to standard error |
 | `--dry-run` | off | Print the selected links, or `every check`, instead of running them |
 | `--base` | `main` | Compare against the merge base of this revision |
-| `--threshold` | the `[jev]` default, `0.5` | The probability a check needs to be selected |
+| `--threshold` | the `[jev]` default, `0.5` | The probability needed to keep a top-level check in breadth and select a link in ranking |
 | `--fallback-picks` | `0` | When none reaches the threshold, run up to this many highest-scored candidates; 0 runs every check, negatives exit 2 |
 | `-C` | `.` | Run in another working tree |
 | `--model`, `--url` | the `[jev]` defaults | Which Jev model to ask, and where |
@@ -397,30 +522,45 @@ exits with `dagger check`'s status.
 
 Arguments after `--` go to `dagger check`, except `--parallel` (both separate
 and `=` forms) and `-j`, which are refused: every run uses `--parallel 4`.
-Listing failure exits with an error even with picks enabled, and an unchanged
-working tree runs no checks. With `-v`, the output looks like:
+A top-level or scoped listing failure restores the full ranking candidates;
+an expanded listing failure runs every check, even with picks enabled. An
+unchanged working tree runs no checks. With `-v`, output includes each
+collection's hierarchy with counts, examples, nesting and offered status,
+and the chosen level's probability. Levels chosen without a question say
+`(no judgment needed)`; a depth failure says `(fallback)`. For example:
 
 ```text
 base: main (merge base 1a2b3c4d5e6f)
 changed files:
 - internal/trace/records.go (+12 -3)
-checks: 214 links, asking about 37
+breadth: top-level checks
+  ✓ 0.96 dag+check://?check=go/modules/packages/tests/test
+  ✓ 0.62 dag+check://?check=release/version-round-trip
+depth: dag+check://?check=go/modules/packages/tests/test hierarchy (coarsest first)
+  go-module: 1 links, contains go-package, not offered: covers the whole collection; already kept by stage 1
+    example: dag+check://?check=test&go-module=.
+  go-package: 2 links, contains go-test, offered
+    example: dag+check://?check=test&go-module=.&go-package=internal/service
+  go-test: 4 links, contains none, offered
+    example: dag+check://?check=test&go-module=.&go-package=internal/service&go-test=TestRun
+depth: dag+check://?check=go/modules/packages/tests/test: chosen go-package (probability 0.83)
+checks: 5 links, asking about 3
 jev: <model> answered in 1.84s (10234 input, 74 output tokens)
-  ✓ 0.97 dag+check://go/packages/tests/test?go-package=internal/trace
-  ✓ 0.71 dag+check://go/packages/tests/test?go-package=internal/service
-    0.12 dag+check://release/version-round-trip
-selected 2 of 37 at probability 0.50 or more
+  ✓ 0.97 dag+check://?check=test&go-module=.&go-package=internal/trace
+  ✓ 0.71 dag+check://?check=test&go-module=.&go-package=internal/service
+    0.12 dag+check://?check=release/version-round-trip
+selected 2 of 3 at probability 0.50 or more
 ```
 
 With `--fallback-picks=2`, when all scores are below 0.50, the verbose
 summary instead says `no check reached probability 0.50; running the 2
-highest-scored checks as fallback picks out of 37 candidates`. `--dry-run`
+highest-scored checks as fallback picks out of 3 candidates`. `--dry-run`
 prints those links without running them.
 
-Unlike a factory run, the command records nothing, makes one request without
-retry or cool-down, does not rerun failed checks, and runs Dagger in your
-checkout with your environment rather than in a fresh export with a scrubbed
-one.
+The command sends up to three sequential requests, each with its own default
+10-second timeout. Unlike a factory run, it records nothing, has no retry or
+cool-down, does not rerun failed checks, and runs Dagger in your checkout
+with your environment rather than in a fresh export with a scrubbed one.
 
 ## Tune the selection
 
@@ -432,10 +572,11 @@ one.
 3. Optionally try `--fallback-picks=2` to bound runs where none reaches the
    threshold. Compare the risk of missing an affected check with running
    every check. Set `check_threshold` and `check_fallback_picks` in `[jev]`
-   and run `osmia reload`. Each judgment records both configured values
-   (the picks value when above 0), and a changed value is a new judgment, so
-   earlier decisions stay as they were made.
-4. A change to the questions or state in `checkselect` also bumps
-   `checkselect.Version` and updates the selection tests in
-   `internal/checkselect`, `internal/execution/unit_checks_test.go` and
+   and run `osmia reload`. Breadth records its threshold; ranking records its
+   threshold and the picks value when above 0. Changed acceptance values
+   create new judgments, so earlier decisions stay as they were made.
+4. A change to the questions, state or interpretation in `checkselect` bumps
+   the affected stage versions (`BreadthVersion`, `DepthVersion` or `Version`)
+   and updates the selection tests in `internal/checkselect`,
+   `internal/execution/unit_checks_test.go` and
    `cmd/smartcheck`.

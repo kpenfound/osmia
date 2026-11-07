@@ -1252,8 +1252,8 @@ model = "~typesafe/jev-latest"
 api_key_env = "OPENROUTER_API_KEY"
 # How long one request may take, at most 1m.
 timeout = "10s"
-# The probability at or above which smart checks run a check, above 0 and at
-# most 1. Tune it against a versioned model.
+# The probability at or above which breadth keeps a top-level check and
+# ranking selects a link, above 0 and at most 1. Tune against a versioned model.
 check_threshold = 0.5
 # When no check reaches the threshold, run this many highest-scored links.
 # Non-negative integer; 0 (default) runs every check instead.
@@ -1283,24 +1283,35 @@ sentence supports falls back to the classifier, then the code rules. The turn's
 classification records `by` as `jev`, `classifier` or `rule`, and a Jev class
 names its judgment, which the chief of staff's notice cites.
 
-With the boost on, a unit's check run lists the project's checks with
-`dagger list checks --all --format=link` and asks Jev which of them the
-candidate's changed files can affect, then runs the links at or above
-`check_threshold`. A lower value runs more checks and is less likely to miss
-an affected one. A project
-with more than 128 check links is asked about its collections' items, such as
-a Go package's tests rather than each test. When no check reaches the
-threshold, `check_fallback_picks` above 0 runs up to
-that many highest-scored candidates from the same answers, however low the
-scores. Equal scores follow sorted candidate order. Fewer scored candidates
-run all scored links; no usable score, 0 (the default), or any judgment
-fallback runs every check. A pick may cover a whole collection item. Picks
-can miss an affected check that a full run would catch. Unit, final-review
-and smart session runs share this setting, while an explicit full session
-run stays full. The selection, summary and feed distinguish fallback picks.
+With the boost on, unit, final-review and smart session check runs use three
+stages. `dagger list checks --format=link` supplies top-level checks;
+`dagger list checks --all --format=link` supplies expanded links, with scoped
+listings attributing them to top-level checks. Breadth asks which top-level
+checks the change could affect and uses `jev.check_threshold` to keep them.
+If none reaches it, all are kept. Depth chooses the granularity for each kept
+collection; ranking judges the resulting links and runs those at or above
+`jev.check_threshold`. A lower threshold keeps and runs more checks and is
+less likely to miss an affected one. Lists still exceeding the fixed 1024
+cap are narrowed to collection items, such as a Go package's tests rather
+than each test, or fall back to every check if they cannot narrow safely.
+There is no cap setting or separate breadth threshold. Each stage gets its own
+`jev.timeout`; three sequential requests can take roughly 30 seconds at the
+10-second default before falling back, in addition to listing time.
+
+A failed breadth stage or top-level or scoped listing restores the full
+candidate path for ranking. A failed depth stage keeps breadth's result at
+the finest level. A failed expanded listing or ranking judgment runs every
+check; during cool-down each stage falls back immediately.
+When no ranking link reaches the threshold, `check_fallback_picks` above 0
+runs up to that many highest-scored candidates from the same answers,
+however low the scores. Equal scores follow sorted candidate order. Fewer
+scored candidates run all scored links; no usable score or 0 (the default)
+runs every check. A pick may cover a whole collection item. Picks can miss an
+affected check that a full run would catch. An explicit full session run
+stays full. The selection, summary and feed distinguish fallback picks.
 The setting is validated with the boost on or off, reported in effective
-configuration and applied through reload. The judgment records its threshold
-and picks setting; a changed value creates a new judgment.
+configuration and applied through reload. Each stage records the acceptance
+values it applies; a changed value creates a new judgment.
 
 [Smart checks](smart-checks.md) describes the selection end to end: what Jev
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the

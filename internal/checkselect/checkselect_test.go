@@ -79,7 +79,7 @@ func TestSelectedAppliesTheThreshold(t *testing.T) {
 		t.Fatalf("request %+v: %v", request, err)
 	}
 	for i, link := range candidates {
-		if q := request.Questions[Question(i)]; q.Kind != systemone.KindNoul || !strings.Contains(q.Instructions.(string), link+"?") {
+		if q := request.Questions[Question(i)]; q.Kind != systemone.KindNoul || !strings.Contains(q.Instructions.(map[string]any)["stage"].(string), "`"+link+"`?") {
 			t.Fatalf("question %d %+v does not ask about %s", i, q, link)
 		}
 	}

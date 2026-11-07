@@ -6,14 +6,19 @@ package api
 // the project listed, before narrowing, or nil when listing did not complete.
 type CheckSelection struct {
 	// FallbackPicks is the configured count when no check reached the threshold.
-	FallbackPicks int      `json:"fallback_picks,omitempty"`
-	Mode          string   `json:"mode"`
-	Links         []string `json:"links,omitempty"`
-	Candidates    int      `json:"candidates,omitempty"`
-	Listed        *int     `json:"listed,omitempty"`
-	Judgment      string   `json:"judgment,omitempty"`
-	Reason        string   `json:"reason,omitempty"`
-	Detail        string   `json:"detail,omitempty"`
+	FallbackPicks   int               `json:"fallback_picks,omitempty"`
+	Mode            string            `json:"mode"`
+	Links           []string          `json:"links,omitempty"`
+	Candidates      int               `json:"candidates,omitempty"`
+	Listed          *int              `json:"listed,omitempty"`
+	Judgment        string            `json:"judgment,omitempty"`
+	BreadthJudgment string            `json:"breadth_judgment,omitempty"`
+	DepthJudgment   string            `json:"depth_judgment,omitempty"`
+	Roots           *int              `json:"roots,omitempty"`
+	KeptRoots       []string          `json:"kept_roots,omitempty"`
+	Levels          map[string]string `json:"levels,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
+	Detail          string            `json:"detail,omitempty"`
 }
 
 // The engines a check run can use, and the reasons a run used the cloud one.

@@ -68,7 +68,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			}
 			p.AwaitText(entry+` [data-field=selection]`, selection)
 			if mode == "narrowed" {
-				p.AwaitText(entry+` [data-field=listed]`, "narrowed from 129 listed")
+				p.AwaitText(entry+` [data-field=listed]`, fmt.Sprintf("narrowed from %d listed", count))
 			}
 			assertFeedAnnotations(t, p, entry, 1)
 			// A recorded failure tests both the terminal state and wrapping a long

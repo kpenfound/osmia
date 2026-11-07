@@ -1,7 +1,6 @@
-// Package checkselect builds the Jev judgment that selects which of a
-// project's Dagger checks a change can affect, and reads its answers. It asks
-// nothing itself: callers send the request and own the fallback of running
-// every check.
+// Package checkselect builds the Jev judgments that select which of a
+// project's Dagger checks a change can affect, and reads their answers. It asks
+// nothing itself: callers send the requests and run the checks.
 package checkselect
 
 import (
@@ -20,20 +19,19 @@ import (
 // each judgment's identity includes the acceptance values it applied.
 const (
 	Task    = "check-selection"
-	Version = 3
+	Version = 4
 )
 
-// MaxQuestions bounds the checks asked about in one judgment; a project with
-// more is asked about its collections' items, collapsed as Candidates
-// describes.
-const MaxQuestions = 128
+// MaxQuestions keeps requests within the Jev timeout and per-judgment cost;
+// it is not an API limit. Larger lists are narrowed by Candidates.
+const MaxQuestions = 1024
 
 // MaxState bounds the judgment's state in bytes, keeping it and a question
 // within Jev's context. The diff is included only when it fits.
 const MaxState = 72 * 1024
 
 // Links reads the check links from the output of
-// dagger list checks --all --format=link.
+// dagger list checks [--all] --format=link.
 func Links(output string) []string {
 	var links []string
 	for line := range strings.Lines(output) {
@@ -49,13 +47,14 @@ const linkGuide = "Each question names a Dagger check by its link: dag+check://<
 	"The path or check name says what the check is, such as a module's tests or a check that generated files are up to date. " +
 	"Filters narrow a collection to some of its items; for Go, go-package names a package directory and go-test a test function. " +
 	"A link covers every item its filters leave; a link without item filters names a standalone check with nothing narrower listed. " +
-	"A change can alter a check's result when the check builds or exercises a changed file, or code that depends on one through imports, build configuration or generated files."
+	"A change can alter a check's result when the check builds or exercises a changed file, or code that depends on one through imports, build configuration or generated files. " +
+	"A collection's filters nest in the order they appear in its links. Each level's items contain the items of the levels after it. For Go, `go-module` (when listed) contains `go-package`, which names a package directory, which contains `go-test`, a test function."
 
-// State is the judgment's state: how to read a check link, the changed files
-// with their line counts, and the diff when it fits within MaxState. It
-// reports false when the changed files alone do not fit.
+// State is shared by all three stages: the link guide, process, changed files
+// with their line counts, and diff when it fits within MaxState. It reports
+// false when the state without the diff does not fit.
 func State(diff string) (map[string]any, bool) {
-	state := map[string]any{"checks": linkGuide, "changed_files": gitdiff.ChangedFiles(diff)}
+	state := map[string]any{"checks": linkGuide, "process": process, "changed_files": gitdiff.ChangedFiles(diff)}
 	size := func() int { data, _ := json.Marshal(state); return len(data) }
 	if size() > MaxState {
 		return nil, false
@@ -63,6 +62,9 @@ func State(diff string) (map[string]any, bool) {
 	state["diff"] = diff
 	if size() > MaxState {
 		state["diff"] = "omitted: the diff is too large; judge from the changed files"
+		if size() > MaxState {
+			return nil, false
+		}
 	}
 	return state, true
 }
@@ -72,9 +74,8 @@ func State(diff string) (map[string]any, bool) {
 func Request(state map[string]any, candidates []string) systemone.Request {
 	request := systemone.Request{State: state, Questions: map[string]systemone.Question{}}
 	for i, link := range candidates {
-		q := systemone.Noul(fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link))
-		q.Yes = "The check exercises a changed file, or code, configuration or generated files the change affects."
-		q.No = "Nothing the check depends on is touched by the change."
+		q := systemone.Noul(map[string]any{"stage": fmt.Sprintf(rankingStage, link), "link": link})
+		q.Yes, q.No = rankingYes, rankingNo
 		request.Questions[Question(i)] = q
 	}
 	return request
@@ -128,9 +129,16 @@ func FallbackPicks(r systemone.Response, candidates []string, count int) []strin
 // own links. No step creates a broad link. It reports false when the links
 // cannot be narrowed to limit without one.
 func Candidates(links []string, limit int) ([]string, bool) {
-	coverage := listedCoverage(links)
+	return Narrow(links, links, limit)
+}
+
+// Narrow narrows filtered links using coverage against the original expanded
+// listing. Dropping another collection or item must not turn a kept link into
+// a whole-collection link. A false result is the too_many_checks fallback.
+func Narrow(filtered, listed []string, limit int) ([]string, bool) {
+	coverage := listedCoverage(listed)
 	set := map[string]bool{}
-	for _, l := range links {
+	for _, l := range filtered {
 		if !coverage.broad(l) {
 			set[l] = true
 		}

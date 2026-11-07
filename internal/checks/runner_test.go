@@ -439,28 +439,127 @@ exit 3
 	}
 }
 
-// serial: sets PATH and GITHUB_TOKEN via t.Setenv
-func TestDaggerChecksListExpandedLinks(t *testing.T) {
-	bin := t.TempDir()
-	script := `#!/bin/sh
-[ "$*" = "list checks --all --format=link" ] || exit 91
-[ -z "$GITHUB_TOKEN" ] || exit 92
+// serial: sets PATH and credentials via t.Setenv.
+func TestDaggerChecksListings(t *testing.T) {
+	for _, name := range []string{"top-level", "expanded", "scoped"} {
+		args := "list checks --format=link"
+		list := (DaggerChecks{}).ListTopLevel
+		if name == "expanded" {
+			args, list = "list checks --all --format=link", (DaggerChecks{}).List
+		} else if name == "scoped" {
+			const root = "dag+check://?check=go/modules/packages/tests/test"
+			args = "list checks --all --format=link " + root
+			list = func(ctx context.Context, dir string, identity Identity) ([]string, error) {
+				return (DaggerChecks{}).ListScoped(ctx, dir, identity, root)
+			}
+		}
+		t.Run(name, func(t *testing.T) {
+			bin := t.TempDir()
+			script := `#!/bin/sh
+[ "$*" = "` + args + `" ] || exit 91
+[ -z "$GITHUB_TOKEN$ANTHROPIC_API_KEY$SSH_AUTH_SOCK$DAGGER_CLOUD_TOKEN" ] || exit 92
+[ -d "$HOME" ] && [ "$HOME" = "$TMPDIR" ] || exit 93
+[ "$NO_COLOR" = 1 ] || exit 94
+[ -f candidate.txt ] || exit 95
 echo '[dagger x-release] running dagger'
 echo 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA'
 echo 'dag+check://release/version'
 `
-	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GITHUB_TOKEN", "delivery-secret")
-	links, err := (DaggerChecks{}).List(context.Background(), t.TempDir(), Identity{})
-	must(t, err)
-	if !slices.Equal(links, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"}) {
-		t.Fatalf("links %q", links)
+			must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("GITHUB_TOKEN", "delivery-secret")
+			t.Setenv("ANTHROPIC_API_KEY", "provider-secret")
+			t.Setenv("SSH_AUTH_SOCK", "/private/signing-agent")
+			t.Setenv("DAGGER_CLOUD_TOKEN", "host-cloud-secret")
+			dir := t.TempDir()
+			must(t, os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate"), 0600))
+			links, err := list(t.Context(), dir, Identity{})
+			must(t, err)
+			if !slices.Equal(links, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"}) {
+				t.Fatalf("links %q", links)
+			}
+			must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\necho 'Error: no workspace'\nexit 1\n"), 0700))
+			if _, err := list(t.Context(), dir, Identity{}); err == nil || !strings.Contains(err.Error(), "no workspace") {
+				t.Fatalf("a failed listing returned %v", err)
+			}
+		})
 	}
-	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\necho 'Error: no workspace'\nexit 1\n"), 0700))
-	if _, err := (DaggerChecks{}).List(context.Background(), t.TempDir(), Identity{}); err == nil || !strings.Contains(err.Error(), "no workspace") {
-		t.Fatalf("a failed listing returned %v", err)
-	}
+}
+
+// serial: installs a fake dagger executable through PATH.
+func TestDaggerChecksTopLevelListingFailures(t *testing.T) {
+	t.Run("failure leaves the expanded listing usable and redacts diagnostics", func(t *testing.T) {
+		installLoggingDagger(t, `case "$*" in
+'list checks --format=link') echo 'no workspace listing-private-token'; exit 1;;
+'list checks --all --format=link') echo 'dag+check://release/version';;
+*) exit 91;;
+esac
+`)
+		d := DaggerChecks{CloudToken: "listing-private-token"}
+		links, err := d.ListTopLevel(t.Context(), t.TempDir(), Identity{})
+		if err == nil || links != nil || !strings.Contains(err.Error(), "no workspace") || strings.Contains(err.Error(), d.CloudToken) {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+		links, err = d.List(t.Context(), t.TempDir(), Identity{})
+		must(t, err)
+		if !slices.Equal(links, []string{"dag+check://release/version"}) {
+			t.Fatalf("expanded listing %q", links)
+		}
+	})
+	t.Run("oversized listing fails rather than returning partial links", func(t *testing.T) {
+		installLoggingDagger(t, "head -c 4194305 /dev/zero | tr '\\000' x\nprintf '\\ndag+check://release/version\\n'\n")
+		links, err := (DaggerChecks{}).ListTopLevel(t.Context(), t.TempDir(), Identity{})
+		if err == nil || links != nil {
+			t.Fatalf("truncated listing returned links %q, error %v", links, err)
+		}
+	})
+	t.Run("caller deadline bounds the listing", func(t *testing.T) {
+		installLoggingDagger(t, "exec sleep 30\n")
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		links, err := (DaggerChecks{}).ListTopLevel(ctx, t.TempDir(), Identity{})
+		if !errors.Is(err, context.DeadlineExceeded) || links != nil {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+	})
+}
+
+// serial: installs a fake dagger executable through PATH.
+func TestDaggerChecksScopedListingFailures(t *testing.T) {
+	const root = "dag+check://?check=go/modules/packages/tests/test"
+	t.Run("failure is redacted and leaves the full listing usable", func(t *testing.T) {
+		installLoggingDagger(t, `case "$*" in
+'list checks --all --format=link') echo 'dag+check://release/version';;
+*) echo 'scoped failure listing-private-token'; exit 7;;
+esac
+`)
+		d := DaggerChecks{CloudToken: "listing-private-token"}
+		links, err := d.ListScoped(t.Context(), t.TempDir(), Identity{}, root)
+		if err == nil || links != nil || !strings.Contains(err.Error(), "scoped failure") || strings.Contains(err.Error(), d.CloudToken) {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+		links, err = d.List(t.Context(), t.TempDir(), Identity{})
+		must(t, err)
+		if !slices.Equal(links, []string{"dag+check://release/version"}) {
+			t.Fatalf("expanded listing %q", links)
+		}
+	})
+	t.Run("oversized output is a failure", func(t *testing.T) {
+		installLoggingDagger(t, "head -c 4194305 /dev/zero | tr '\\000' x\nprintf '\\ndag+check://release/version\\n'\n")
+		links, err := (DaggerChecks{}).ListScoped(t.Context(), t.TempDir(), Identity{}, root)
+		if err == nil || links != nil {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+	})
+	t.Run("caller deadline bounds the listing", func(t *testing.T) {
+		installLoggingDagger(t, "exec sleep 30\n")
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		links, err := (DaggerChecks{}).ListScoped(ctx, t.TempDir(), Identity{}, root)
+		if !errors.Is(err, context.DeadlineExceeded) || links != nil {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+	})
 }
 
 func TestFailedChecksReadTheReport(t *testing.T) {

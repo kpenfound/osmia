@@ -1,5 +1,5 @@
 // Command smartcheck runs the Dagger checks Jev selects for the change
-// between a Git working tree and a base branch, with the judgment the factory
+// between a Git working tree and a base branch, with the judgments the factory
 // uses to choose a unit's checks. It reads no Osmia configuration or state.
 package main
 
@@ -30,7 +30,8 @@ const usage = `usage: smartcheck [flags] [-- dagger check flags]
 Runs the Dagger checks Jev selects for the change between the working tree
 and the merge base of --base. When no check reaches the threshold,
 --fallback-picks can run the highest-scored checks; by default every check
-runs. When Jev cannot answer, every check runs. Every run uses --parallel 4.
+runs. Breadth and depth failures keep the preceding stage's checks for ranking.
+When ranking cannot answer, every check runs. Every run uses --parallel 4.
 Arguments after the flags go to dagger check; caller --parallel and -j
 arguments are refused.
 
@@ -166,42 +167,47 @@ func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 	}
 	h.verbosef(o, "base: %s (merge base %s)\nchanged files:\n%s", o.base, short(base), gitdiff.ChangedFiles(diff))
 
-	var listing bytes.Buffer
-	exit, err := h.dagger(ctx, o.dir, &listing, &listing, "list", "checks", "--all", "--format=link")
+	links, err := h.list(ctx, o.dir, true)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
-		return nil, fmt.Errorf("dagger list checks: %w", err)
+		return h.fallback(err.Error()), nil
 	}
-	if exit != 0 {
-		return nil, fmt.Errorf("dagger list checks exited %d:\n%s", exit, listing.String())
-	}
-	links := checkselect.Links(listing.String())
 	if len(links) == 0 {
 		return h.fallback("the project lists no check links"), nil
-	}
-	candidates, ok := checkselect.Candidates(links, checkselect.MaxQuestions)
-	if !ok {
-		return h.fallback(fmt.Sprintf("%d check links do not narrow to %d", len(links), checkselect.MaxQuestions)), nil
 	}
 	state, ok := checkselect.State(diff)
 	if !ok {
 		return h.fallback("the changed files do not fit a judgment"), nil
 	}
-	h.verbosef(o, "checks: %d links, asking about %d\n", len(links), len(candidates))
 	if d, _ := state["diff"].(string); d != diff {
 		h.verbosef(o, "the diff is too large for the judgment; Jev judges from the changed files\n")
 	}
 
-	timeout, _ := time.ParseDuration(config.DefaultJevTimeout)
-	asked, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	start := time.Now()
 	client := systemone.Client{BaseURL: o.url, Model: o.model, APIKey: key}
-	response, err := h.evaluate(client, asked, checkselect.Request(state, candidates))
+	filtered, err := h.prefilter(ctx, o, client, state, links)
+	if err != nil {
+		return nil, err
+	}
+	candidates, ok := checkselect.Narrow(filtered, links, checkselect.MaxQuestions)
+	if !ok {
+		return h.fallback(fmt.Sprintf("%d check links do not narrow to %d", len(filtered), checkselect.MaxQuestions)), nil
+	}
+	if len(candidates) == 0 {
+		return h.fallback("the project lists no candidate check links"), nil
+	}
+	h.verbosef(o, "checks: %d links, asking about %d\n", len(links), len(candidates))
+	start := time.Now()
+	response, err := h.judge(ctx, client, checkselect.Request(state, candidates))
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	if err != nil {
 		return h.fallback("Jev did not answer: " + err.Error()), nil
+	}
+	if reason := checkselect.RankingAcceptance(response, candidates, o.threshold, o.fallbackPicks); reason == "unusable ranking answer" {
+		return h.fallback("Jev did not answer: " + reason), nil
 	}
 	selected := checkselect.Selected(response, candidates, o.threshold)
 	picks := false
@@ -216,6 +222,136 @@ func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 		return h.fallback(fmt.Sprintf("no check reached probability %.2f", o.threshold)), nil
 	}
 	return selected, nil
+}
+
+func (h harness) list(ctx context.Context, dir string, all bool, roots ...string) ([]string, error) {
+	args := []string{"list", "checks"}
+	if all {
+		args = append(args, "--all")
+	}
+	args = append(args, "--format=link")
+	args = append(args, roots...)
+	var listing bytes.Buffer
+	exit, err := h.dagger(ctx, dir, &listing, &listing, args...)
+	if err != nil {
+		return nil, fmt.Errorf("dagger list checks: %w", err)
+	}
+	if exit != 0 {
+		return nil, fmt.Errorf("dagger list checks exited %d:\n%s", exit, listing.String())
+	}
+	return checkselect.Links(listing.String()), nil
+}
+
+// judge gives each stage its own full timeout, releasing it before the next.
+func (h harness) judge(ctx context.Context, client systemone.Client, request systemone.Request) (systemone.Response, error) {
+	timeout, _ := time.ParseDuration(config.DefaultJevTimeout)
+	asked, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	response, err := h.evaluate(client, asked, request)
+	if asked.Err() != nil {
+		return systemone.Response{}, asked.Err()
+	}
+	return response, err
+}
+
+func (h harness) prefilter(ctx context.Context, o options, client systemone.Client, state map[string]any, links []string) ([]string, error) {
+	roots, err := h.list(ctx, o.dir, false)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		h.verbosef(o, "breadth: listing failed; ranking the full candidate list: %s\n", err)
+		return links, nil
+	}
+	scoped := make(map[string][]string, len(roots))
+	for _, root := range roots {
+		scoped[root], err = h.list(ctx, o.dir, true, root)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil {
+			h.verbosef(o, "breadth: scoped listing failed; ranking the full candidate list: %s\n", err)
+			return links, nil
+		}
+	}
+	breadth, err := checkselect.BreadthScoped(roots, links, scoped)
+	if err != nil {
+		h.verbosef(o, "breadth: attribution failed; ranking the full candidate list: %s\n", err)
+		return links, nil
+	}
+	request := checkselect.BreadthRequest(state, breadth)
+	var response systemone.Response
+	if len(request.Questions) > 0 {
+		response, err = h.judge(ctx, client, request)
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	kept, ok := checkselect.ApplyBreadth(response, breadth, o.threshold)
+	if err != nil || !ok {
+		h.verbosef(o, "breadth: Jev did not answer; ranking the full candidate list\n")
+		return links, nil
+	}
+	if o.verbose {
+		h.explainBreadth(response, breadth, kept)
+	}
+	depth := checkselect.Depth(kept)
+	if o.verbose {
+		h.explainHierarchy(depth)
+	}
+	request = checkselect.DepthRequest(state, depth)
+	response = systemone.Response{}
+	if len(request.Questions) > 0 {
+		response, err = h.judge(ctx, client, request)
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	result, ok := checkselect.ApplyDepth(response, depth)
+	if err != nil || !ok {
+		h.verbosef(o, "depth: Jev did not answer; ranking kept collections at their finest level\n")
+		result = checkselect.Finest(depth)
+	}
+	if o.verbose {
+		for _, c := range depth.Collections {
+			probability := " (no judgment needed)"
+			if err != nil || !ok {
+				probability = " (fallback)"
+			} else if c.Question != "" {
+				answer := response.Answers[c.Question]
+				probability = fmt.Sprintf(" (probability %.2f)", answer.Probabilities[answer.Choice])
+			}
+			fmt.Fprintf(h.stderr, "depth: %s: chosen %s%s\n", c.Root, result.Levels[c.Root], probability)
+		}
+	}
+	return result.Links, nil
+}
+
+func (h harness) explainBreadth(response systemone.Response, plan checkselect.BreadthPlan, kept checkselect.BreadthResult) {
+	fmt.Fprintln(h.stderr, "breadth: top-level checks")
+	for i, root := range plan.Roots {
+		mark := " "
+		if slices.Contains(kept.KeptRoots, root.Link) {
+			mark = "✓"
+		}
+		fmt.Fprintf(h.stderr, "  %s %.2f %s\n", mark, response.Answers[checkselect.BreadthQuestion(i)].Noul, root.Link)
+	}
+}
+
+func (h harness) explainHierarchy(plan checkselect.DepthPlan) {
+	for _, c := range plan.Collections {
+		fmt.Fprintf(h.stderr, "depth: %s hierarchy (coarsest first)\n", c.Root)
+		if len(c.Hierarchy) == 0 {
+			fmt.Fprintln(h.stderr, "  inconsistent filter order; using finest links")
+		}
+		for _, level := range c.Hierarchy {
+			offered := "offered"
+			if level.Offered != true {
+				offered = fmt.Sprintf("not offered: %v", level.Offered)
+			}
+			fmt.Fprintf(h.stderr, "  %s: %d links, contains %s, %s\n    example: %s\n", level.Level, level.Links, level.Contains, offered, level.Example)
+		}
+	}
 }
 
 // explain prints Jev's answer for every candidate, most likely first.

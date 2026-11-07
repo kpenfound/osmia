@@ -119,7 +119,7 @@ func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 					t.Fatalf("questions %+v", j.requests)
 				}
 				for i, link := range offered {
-					if q := j.requests[0].Questions[checkselect.Question(i)]; fmt.Sprint(q.Instructions) != fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link) {
+					if q := j.requests[0].Questions[checkselect.Question(i)]; q.Instructions.(map[string]any)["link"] != link {
 						t.Fatalf("question %+v, want only offered link %s", q, link)
 					}
 				}
@@ -164,7 +164,8 @@ func TestSmartcheckCollectionTooManyChecksRunsFull(t *testing.T) {
 	var stdout, stderr strings.Builder
 	h := harness{stdout: &stdout, stderr: &stderr, getenv: func(k string) string { return withKey[k] }, dagger: runDagger, evaluate: j.evaluate}
 	code := h.run(t.Context(), []string{"-C", dir, "--fallback-picks=2"})
-	if code != 0 || len(j.requests) != 0 || !strings.Contains(stderr.String(), "running every check: 129 check links do not narrow to 128") {
+	want := fmt.Sprintf("running every check: %d check links do not narrow to %d", checkselect.MaxQuestions+1, checkselect.MaxQuestions)
+	if code != 0 || len(j.requests) != 0 || !strings.Contains(stderr.String(), want) {
 		t.Fatalf("exit %d: %s %s; requests %+v", code, stdout.String(), stderr.String(), j.requests)
 	}
 	cli.AssertRun(t, nil)

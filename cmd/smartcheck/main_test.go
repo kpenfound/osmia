@@ -11,8 +11,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
 )
@@ -32,18 +34,50 @@ type fakeDagger struct {
 	links    []string
 	exit     int
 	listExit int
+	// A nil topLevel simulates a runner unable to list top-level checks.
+	topLevel  []string
+	topExit   int
+	lists     [][]string
+	scoped    map[string][]string
+	scopeExit int
 
 	mu     sync.Mutex
 	checks [][]string
 }
 
 func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, args ...string) (int, error) {
+	if len(args) > 0 && args[0] == "list" {
+		d.lists = append(d.lists, slices.Clone(args))
+	}
 	if slices.Equal(args, []string{"list", "checks", "--all", "--format=link"}) {
 		fmt.Fprintln(stdout, "Loading modules")
 		for _, l := range d.links {
 			fmt.Fprintln(stdout, l)
 		}
 		return d.listExit, nil
+	}
+	if slices.Equal(args, []string{"list", "checks", "--format=link"}) {
+		if d.topLevel == nil {
+			return 1, nil
+		}
+		for _, l := range d.topLevel {
+			fmt.Fprintln(stdout, l)
+		}
+		return d.topExit, nil
+	}
+	if len(args) == 5 && slices.Equal(args[:4], []string{"list", "checks", "--all", "--format=link"}) {
+		members := d.scoped[args[4]]
+		if d.scoped == nil {
+			for _, root := range checkselect.Breadth(d.topLevel, d.links).Roots {
+				if root.Link == args[4] {
+					members = root.Links
+				}
+			}
+		}
+		for _, link := range members {
+			fmt.Fprintln(stdout, link)
+		}
+		return d.scopeExit, nil
 	}
 	if len(args) == 0 || args[0] != "check" {
 		return -1, fmt.Errorf("unexpected dagger %q", args)
@@ -72,25 +106,67 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, 
 type fakeJev struct {
 	probabilities map[string]float64
 	err           error
+	breadth       map[string]float64
+	level         string
+	failStage     string
+	unusableStage string
 
-	clients  []systemone.Client
-	requests []systemone.Request
+	clients   []systemone.Client
+	requests  []systemone.Request
+	contexts  []context.Context
+	remaining []time.Duration
 }
 
-func (j *fakeJev) evaluate(c systemone.Client, _ context.Context, r systemone.Request) (systemone.Response, error) {
+func (j *fakeJev) evaluate(c systemone.Client, ctx context.Context, r systemone.Request) (systemone.Response, error) {
 	j.clients, j.requests = append(j.clients, c), append(j.requests, r)
+	j.contexts = append(j.contexts, ctx)
+	deadline, _ := ctx.Deadline()
+	j.remaining = append(j.remaining, time.Until(deadline))
+	stage := requestStage(r)
+	if stage == j.failStage {
+		return systemone.Response{}, context.DeadlineExceeded
+	}
+	if stage == j.unusableStage {
+		return systemone.Response{}, nil
+	}
 	if j.err != nil {
 		return systemone.Response{}, j.err
 	}
 	answers := map[string]systemone.Answer{}
 	for id, q := range r.Questions {
-		for link, p := range j.probabilities {
-			if strings.HasSuffix(fmt.Sprint(q.Instructions), " "+link+"?") {
+		if q.Kind == systemone.KindChoice {
+			probabilities := map[string]float64{}
+			for _, option := range q.Options {
+				probabilities[option.Name] = .17 / float64(len(q.Options)-1)
+			}
+			probabilities[j.level] = .83
+			answers[id] = systemone.Answer{Kind: systemone.KindChoice, Choice: j.level, Probabilities: probabilities, Confidence: .61}
+			continue
+		}
+		instructions, _ := q.Instructions.(map[string]any)
+		probabilities := j.probabilities
+		if stage == checkselect.BreadthTask {
+			probabilities = j.breadth
+		}
+		for link, p := range probabilities {
+			if instructions["link"] == link {
 				answers[id] = systemone.Answer{Kind: systemone.KindNoul, Noul: p}
 			}
 		}
 	}
 	return systemone.Response{Model: "jev-1.13.0", Answers: answers, Usage: systemone.Usage{InputTokens: 900, OutputTokens: 12}}, nil
+}
+
+func requestStage(r systemone.Request) string {
+	for id := range r.Questions {
+		switch {
+		case strings.HasPrefix(id, "breadth-"):
+			return checkselect.BreadthTask
+		case strings.HasPrefix(id, "depth-"):
+			return checkselect.DepthTask
+		}
+	}
+	return checkselect.Task
 }
 
 type result struct {
@@ -365,7 +441,7 @@ func TestPicksPreserveListingFailureAndUnchangedTree(t *testing.T) {
 	}
 	write(t, dir, "README.md", "changed\n")
 	r = runHarness(t, d, j, withKey, "-C", dir, "--fallback-picks=2")
-	if r.code != 1 || !strings.Contains(r.stderr, "dagger list checks exited 7") || len(d.checks) != 0 || len(j.requests) != 0 {
+	if r.code != 0 || !strings.Contains(r.stderr, "running every check: dagger list checks exited 7") || !slices.EqualFunc(d.checks, [][]string{{"--fail-fast", "--parallel", "4"}}, slices.Equal) || len(j.requests) != 0 {
 		t.Fatalf("listing: %+v", r)
 	}
 }
