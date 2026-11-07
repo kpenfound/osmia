@@ -154,7 +154,7 @@ func TestUnitCollectionOptionsReachDagger(t *testing.T) {
 				t.Fatalf("requests %+v selection %+v", requests, run.Selection)
 			}
 			for i, link := range offered {
-				if q := requests[0].Questions[checkselect.Question(i)]; fmt.Sprint(q.Instructions) != fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link) {
+				if q := requests[0].Questions[checkselect.Question(i)]; q.Instructions.(map[string]any)["link"] != link {
 					t.Fatalf("question %+v, want only offered link %s", q, link)
 				}
 			}
