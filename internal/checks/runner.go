@@ -43,6 +43,13 @@ type TopLevelChecks interface {
 	ListTopLevel(ctx context.Context, dir string, identity Identity) ([]string, error)
 }
 
+// ScopedChecks can list the expanded items of one Dagger-listed top-level
+// check. An unavailable or failed scoped listing is a breadth failure.
+type ScopedChecks interface {
+	TopLevelChecks
+	ListScoped(ctx context.Context, dir string, identity Identity, root string) ([]string, error)
+}
+
 // SkippingChecks is a ReviewChecks that can leave checks it names out of a run.
 type SkippingChecks interface {
 	ReviewChecks
@@ -89,7 +96,13 @@ func (d DaggerChecks) ListTopLevel(ctx context.Context, dir string, identity Ide
 	return d.list(ctx, dir, identity, false)
 }
 
-func (d DaggerChecks) list(ctx context.Context, dir string, identity Identity, all bool) ([]string, error) {
+// ListScoped asks Dagger for the membership of a top-level check, using its
+// listed link as a positional selector.
+func (d DaggerChecks) ListScoped(ctx context.Context, dir string, identity Identity, root string) ([]string, error) {
+	return d.list(ctx, dir, identity, true, root)
+}
+
+func (d DaggerChecks) list(ctx context.Context, dir string, identity Identity, all bool, roots ...string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	output := &checkOutput{limit: listOutputLimit}
@@ -98,6 +111,7 @@ func (d DaggerChecks) list(ctx context.Context, dir string, identity Identity, a
 		args = append(args, "--all")
 	}
 	args = append(args, "--format=link")
+	args = append(args, roots...)
 	exit, _, err := d.dagger(ctx, dir, identity, false, output, args...)
 	if err != nil {
 		return nil, err

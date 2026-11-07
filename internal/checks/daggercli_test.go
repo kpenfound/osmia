@@ -137,12 +137,11 @@ func TestRealDaggerCLI(t *testing.T) {
 		if !slices.Equal(roots, wantRoots) {
 			t.Fatalf("top-level listing %q, want %q", roots, wantRoots)
 		}
-		// Dagger keeps the full function path in top-level collection names,
-		// but uses the item's check name in the expanded listing. The coverage
-		// comparison therefore leaves those expanded items uncovered.
-		var uncovered []string
+		// Scoped listings preserve Dagger's membership across its full-path
+		// top-level names and short check names in expanded items.
+		var stale, tests []string
 		for _, pkg := range []string{"a", "b", "broken", "lone", "neighbour", "order"} {
-			uncovered = append(uncovered, "dag+check://?check=stale&go-module=.&go-package="+pkg)
+			stale = append(stale, "dag+check://?check=stale&go-module=.&go-package="+pkg)
 		}
 		for _, item := range []struct {
 			pkg, test string
@@ -153,25 +152,39 @@ func TestRealDaggerCLI(t *testing.T) {
 			{"neighbour", "TestNeighbour"},
 			{"order", "TestIdle"}, {"order", "TestLast"},
 		} {
-			uncovered = append(uncovered, "dag+check://?check=test&go-module=.&go-package="+item.pkg+"&go-test="+item.test)
+			tests = append(tests, "dag+check://?check=test&go-module=.&go-package="+item.pkg+"&go-test="+item.test)
 		}
-		slices.Sort(uncovered)
 		standalone := wantRoots[:2]
-		wantLinks := slices.Concat(standalone, uncovered)
+		wantLinks := slices.Concat(standalone, stale, tests)
 		slices.Sort(wantLinks)
 		if !slices.Equal(links, wantLinks) {
 			t.Fatalf("expanded listing %q, want %q", links, wantLinks)
 		}
-		plan := checkselect.Breadth(roots, links)
-		if len(plan.Roots) != len(wantRoots) || !slices.Equal(plan.Uncovered, uncovered) {
+		scoped := make(map[string][]string, len(roots))
+		for _, root := range roots {
+			started := time.Now()
+			scoped[root], err = checks.ListScoped(ctx, dir, Identity{}, root)
+			must(t, err)
+			t.Logf("scoped --all listing %s took %s: %q", root, time.Since(started), scoped[root])
+		}
+		plan, err := checkselect.BreadthScoped(roots, links, scoped)
+		must(t, err)
+		if len(plan.Roots) != len(wantRoots) || len(plan.Uncovered) != 0 {
 			t.Fatalf("attribution roots %+v, uncovered %q", plan.Roots, plan.Uncovered)
 		}
 		for i, root := range plan.Roots {
-			var want []string
+			want := tests
+			if root.Link == wantRoots[2] {
+				want = stale
+			}
 			if slices.Contains(standalone, root.Link) {
 				want = []string{root.Link}
 			}
-			if root.Link != wantRoots[i] || root.Collection || !slices.Equal(root.Links, want) {
+			collection := !slices.Contains(standalone, root.Link)
+			if !slices.Equal(scoped[root.Link], want) {
+				t.Errorf("scoped listing for %s: %q, want %q", root.Link, scoped[root.Link], want)
+			}
+			if root.Link != wantRoots[i] || root.Collection != collection || !slices.Equal(root.Links, want) {
 				t.Errorf("attribution for %s: %+v, want links %q", wantRoots[i], root, want)
 			}
 		}

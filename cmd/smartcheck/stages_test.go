@@ -78,7 +78,11 @@ func TestSmartcheckThreeStagesAndVerboseHierarchy(t *testing.T) {
 		t.Fatalf("exit %d: %s", r.code, r.stderr)
 	}
 	assertStages(t, j, checkselect.BreadthTask, checkselect.DepthTask, checkselect.Task)
-	if want := [][]string{{"list", "checks", "--all", "--format=link"}, {"list", "checks", "--format=link"}}; !slices.EqualFunc(d.lists, want, slices.Equal) {
+	wantLists := [][]string{{"list", "checks", "--all", "--format=link"}, {"list", "checks", "--format=link"}}
+	for _, root := range d.topLevel {
+		wantLists = append(wantLists, []string{"list", "checks", "--all", "--format=link", root})
+	}
+	if !slices.EqualFunc(d.lists, wantLists, slices.Equal) {
 		t.Fatalf("listings %v", d.lists)
 	}
 	want := []string{packageA, packageB, release, uncovered}
@@ -124,7 +128,7 @@ func TestSmartcheckThreeStagesAndVerboseHierarchy(t *testing.T) {
 
 func TestSmartcheckStageRelativeFallbacks(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"breadth timeout", "breadth unusable", "top-level listing", "depth timeout", "depth unusable", "ranking timeout", "ranking unusable"} {
+	for _, name := range []string{"breadth timeout", "breadth unusable", "top-level listing", "scoped listing", "depth timeout", "depth unusable", "ranking timeout", "ranking unusable"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			dir := newRepository(t)
@@ -138,11 +142,14 @@ func TestSmartcheckStageRelativeFallbacks(t *testing.T) {
 			var want []string
 			stages := []string{checkselect.BreadthTask, checkselect.DepthTask, checkselect.Task}
 			switch {
-			case strings.HasPrefix(name, "breadth"), name == "top-level listing":
+			case strings.HasPrefix(name, "breadth"), name == "top-level listing", name == "scoped listing":
 				want, _ = checkselect.Candidates(d.links, checkselect.MaxQuestions)
 				stages = []string{checkselect.BreadthTask, checkselect.Task}
 				if name == "top-level listing" {
 					d.topExit = 7
+					stages = []string{checkselect.Task}
+				} else if name == "scoped listing" {
+					d.scopeExit = 7
 					stages = []string{checkselect.Task}
 				} else if strings.HasSuffix(name, "timeout") {
 					j.failStage = checkselect.BreadthTask
@@ -186,6 +193,41 @@ func TestSmartcheckStageRelativeFallbacks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSmartcheckSuppliesScopedGoMembership(t *testing.T) {
+	t.Parallel()
+	dir := newRepository(t)
+	write(t, dir, "README.md", "changed\n")
+	const testRoot = "dag+check://?check=go/modules/packages/tests/test"
+	const staleRoot = "dag+check://?check=go/modules/packages/generate/stale"
+	d, j := stageFixture()
+	d.topLevel = []string{testRoot, staleRoot, release}
+	d.scoped = map[string][]string{
+		testRoot:  {packageA + "&go-test=TestA", packageA + "&go-test=TestB", packageB + "&go-test=TestA", packageB + "&go-test=TestB"},
+		staleRoot: {"dag+check://?check=stale&go-module=.&go-package=a", "dag+check://?check=stale&go-module=.&go-package=b"},
+		release:   {release},
+	}
+	d.links = nil
+	for _, members := range d.scoped {
+		d.links = append(d.links, members...)
+	}
+	j.breadth = map[string]float64{testRoot: .9, staleRoot: .1, release: .8}
+	r := runHarness(t, d, j, withKey, "-C", dir, "--dry-run", "-v")
+	if r.code != 0 || r.stdout != packageA+"\n" {
+		t.Fatalf("scoped selection: %+v", r)
+	}
+	assertStages(t, j, checkselect.BreadthTask, checkselect.DepthTask, checkselect.Task)
+	if got := rankingLinks(j); !slices.Equal(got, []string{packageA, packageB, release}) {
+		t.Fatalf("ranked %q", got)
+	}
+	for _, root := range d.topLevel {
+		if !slices.ContainsFunc(d.lists, func(args []string) bool {
+			return slices.Equal(args, []string{"list", "checks", "--all", "--format=link", root})
+		}) {
+			t.Fatalf("no scoped listing for %s: %q", root, d.lists)
+		}
 	}
 }
 

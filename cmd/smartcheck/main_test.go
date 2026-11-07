@@ -35,9 +35,11 @@ type fakeDagger struct {
 	exit     int
 	listExit int
 	// A nil topLevel simulates a runner unable to list top-level checks.
-	topLevel []string
-	topExit  int
-	lists    [][]string
+	topLevel  []string
+	topExit   int
+	lists     [][]string
+	scoped    map[string][]string
+	scopeExit int
 
 	mu     sync.Mutex
 	checks [][]string
@@ -62,6 +64,20 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, 
 			fmt.Fprintln(stdout, l)
 		}
 		return d.topExit, nil
+	}
+	if len(args) == 5 && slices.Equal(args[:4], []string{"list", "checks", "--all", "--format=link"}) {
+		members := d.scoped[args[4]]
+		if d.scoped == nil {
+			for _, root := range checkselect.Breadth(d.topLevel, d.links).Roots {
+				if root.Link == args[4] {
+					members = root.Links
+				}
+			}
+		}
+		for _, link := range members {
+			fmt.Fprintln(stdout, link)
+		}
+		return d.scopeExit, nil
 	}
 	if len(args) == 0 || args[0] != "check" {
 		return -1, fmt.Errorf("unexpected dagger %q", args)

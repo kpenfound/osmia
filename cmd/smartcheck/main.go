@@ -224,12 +224,13 @@ func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 	return selected, nil
 }
 
-func (h harness) list(ctx context.Context, dir string, all bool) ([]string, error) {
+func (h harness) list(ctx context.Context, dir string, all bool, roots ...string) ([]string, error) {
 	args := []string{"list", "checks"}
 	if all {
 		args = append(args, "--all")
 	}
 	args = append(args, "--format=link")
+	args = append(args, roots...)
 	var listing bytes.Buffer
 	exit, err := h.dagger(ctx, dir, &listing, &listing, args...)
 	if err != nil {
@@ -262,7 +263,22 @@ func (h harness) prefilter(ctx context.Context, o options, client systemone.Clie
 		h.verbosef(o, "breadth: listing failed; ranking the full candidate list: %s\n", err)
 		return links, nil
 	}
-	breadth := checkselect.Breadth(roots, links)
+	scoped := make(map[string][]string, len(roots))
+	for _, root := range roots {
+		scoped[root], err = h.list(ctx, o.dir, true, root)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil {
+			h.verbosef(o, "breadth: scoped listing failed; ranking the full candidate list: %s\n", err)
+			return links, nil
+		}
+	}
+	breadth, err := checkselect.BreadthScoped(roots, links, scoped)
+	if err != nil {
+		h.verbosef(o, "breadth: attribution failed; ranking the full candidate list: %s\n", err)
+		return links, nil
+	}
 	request := checkselect.BreadthRequest(state, breadth)
 	var response systemone.Response
 	if len(request.Questions) > 0 {

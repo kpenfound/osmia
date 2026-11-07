@@ -441,12 +441,17 @@ exit 3
 
 // serial: sets PATH and credentials via t.Setenv.
 func TestDaggerChecksListings(t *testing.T) {
-	for _, all := range []bool{true, false} {
-		name, args := "top-level", "list checks --format=link"
+	for _, name := range []string{"top-level", "expanded", "scoped"} {
+		args := "list checks --format=link"
 		list := (DaggerChecks{}).ListTopLevel
-		if all {
-			name, args = "expanded", "list checks --all --format=link"
-			list = (DaggerChecks{}).List
+		if name == "expanded" {
+			args, list = "list checks --all --format=link", (DaggerChecks{}).List
+		} else if name == "scoped" {
+			const root = "dag+check://?check=go/modules/packages/tests/test"
+			args = "list checks --all --format=link " + root
+			list = func(ctx context.Context, dir string, identity Identity) ([]string, error) {
+				return (DaggerChecks{}).ListScoped(ctx, dir, identity, root)
+			}
 		}
 		t.Run(name, func(t *testing.T) {
 			bin := t.TempDir()
@@ -513,6 +518,44 @@ esac
 		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 		defer cancel()
 		links, err := (DaggerChecks{}).ListTopLevel(ctx, t.TempDir(), Identity{})
+		if !errors.Is(err, context.DeadlineExceeded) || links != nil {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+	})
+}
+
+// serial: installs a fake dagger executable through PATH.
+func TestDaggerChecksScopedListingFailures(t *testing.T) {
+	const root = "dag+check://?check=go/modules/packages/tests/test"
+	t.Run("failure is redacted and leaves the full listing usable", func(t *testing.T) {
+		installLoggingDagger(t, `case "$*" in
+'list checks --all --format=link') echo 'dag+check://release/version';;
+*) echo 'scoped failure listing-private-token'; exit 7;;
+esac
+`)
+		d := DaggerChecks{CloudToken: "listing-private-token"}
+		links, err := d.ListScoped(t.Context(), t.TempDir(), Identity{}, root)
+		if err == nil || links != nil || !strings.Contains(err.Error(), "scoped failure") || strings.Contains(err.Error(), d.CloudToken) {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+		links, err = d.List(t.Context(), t.TempDir(), Identity{})
+		must(t, err)
+		if !slices.Equal(links, []string{"dag+check://release/version"}) {
+			t.Fatalf("expanded listing %q", links)
+		}
+	})
+	t.Run("oversized output is a failure", func(t *testing.T) {
+		installLoggingDagger(t, "head -c 4194305 /dev/zero | tr '\\000' x\nprintf '\\ndag+check://release/version\\n'\n")
+		links, err := (DaggerChecks{}).ListScoped(t.Context(), t.TempDir(), Identity{}, root)
+		if err == nil || links != nil {
+			t.Fatalf("links %q, error %v", links, err)
+		}
+	})
+	t.Run("caller deadline bounds the listing", func(t *testing.T) {
+		installLoggingDagger(t, "exec sleep 30\n")
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		links, err := (DaggerChecks{}).ListScoped(ctx, t.TempDir(), Identity{}, root)
 		if !errors.Is(err, context.DeadlineExceeded) || links != nil {
 			t.Fatalf("links %q, error %v", links, err)
 		}

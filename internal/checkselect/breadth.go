@@ -26,14 +26,44 @@ type Root struct {
 type BreadthPlan struct {
 	Roots     []Root
 	Uncovered []string
-	listed    []string
+}
+
+// BreadthScoped attributes each non-broad expanded link to the single
+// Dagger-listed root whose scoped listing contains it. Ambiguous and unmatched
+// links bypass breadth. Every root must have a successful listing, including
+// an empty one; missing entries are a breadth failure, not unknown membership.
+func BreadthScoped(topLevel, expanded []string, scoped map[string][]string) (BreadthPlan, error) {
+	var plan BreadthPlan
+	owners := map[string][]int{}
+	for i, root := range distinct(topLevel) {
+		members, ok := scoped[root]
+		if !ok {
+			return BreadthPlan{}, fmt.Errorf("missing scoped listing for %s", root)
+		}
+		plan.Roots = append(plan.Roots, Root{Link: root})
+		for _, link := range distinct(members) {
+			owners[link] = append(owners[link], i)
+		}
+	}
+	links, _ := Candidates(expanded, len(expanded))
+	for _, link := range links {
+		matches := owners[link]
+		if len(matches) != 1 {
+			plan.Uncovered = append(plan.Uncovered, link)
+			continue
+		}
+		root := &plan.Roots[matches[0]]
+		root.Links = append(root.Links, link)
+		root.Collection = root.Collection || link != root.Link
+	}
+	return plan, nil
 }
 
 // Breadth maps each non-broad expanded link to its most specific covering
 // top-level check, using lexical order to break ties. Uncovered links bypass
 // breadth and always reach ranking. It never invents top-level checks.
 func Breadth(topLevel, expanded []string) BreadthPlan {
-	plan := BreadthPlan{listed: slices.Clone(expanded)}
+	var plan BreadthPlan
 	for _, link := range distinct(topLevel) {
 		plan.Roots = append(plan.Roots, Root{Link: link})
 	}
@@ -86,7 +116,6 @@ type BreadthResult struct {
 	KeptRoots   []string
 	Collections []Root
 	Ranking     []string
-	listed      []string
 }
 
 // ApplyBreadth applies the threshold, retaining all roots when none reaches
@@ -103,7 +132,7 @@ func ApplyBreadth(r systemone.Response, plan BreadthPlan, threshold float64) (Br
 			break
 		}
 	}
-	result := BreadthResult{Ranking: slices.Clone(plan.Uncovered), listed: plan.listed}
+	result := BreadthResult{Ranking: slices.Clone(plan.Uncovered)}
 	for i, root := range plan.Roots {
 		if !keepAll && r.Answers[BreadthQuestion(i)].Noul < threshold {
 			continue

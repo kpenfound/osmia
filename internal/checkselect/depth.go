@@ -41,11 +41,11 @@ type DepthPlan struct {
 }
 
 // Depth derives filter levels without choosing a granularity. Broadness is
-// measured against the original expanded listing, including dropped checks.
+// measured against each collection's attributed links.
 func Depth(breadth BreadthResult) DepthPlan {
 	p := DepthPlan{Ranking: slices.Clone(breadth.Ranking)}
-	coverage := listedCoverage(breadth.listed)
 	for _, root := range breadth.Collections {
+		coverage := listedCoverage(root.Links)
 		c := CollectionDepth{Root: root.Link, Finest: finest(root.Links)}
 		keys, consistent := filterOrder(c.Finest)
 		// Intermediate listed items must agree with the leaves' filter order.
