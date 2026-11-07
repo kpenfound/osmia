@@ -30,21 +30,23 @@ func realCLIWorkspace(t *testing.T) string {
 	lock, err := os.ReadFile("../../dagger.lock")
 	must(t, err)
 	files := map[string]string{
-		"dagger.lock":                 string(lock),
-		"dagger.toml":                 "[modules]\n\n[modules.go]\nsource = \"dagger.io/go\"\n",
-		"go.mod":                      "module fixture\n\ngo 1.26\n",
-		"a/a.go":                      "package a\n",
-		"a/a_test.go":                 "package a\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {}\n\nfunc TestTwo(t *testing.T) {}\n",
-		"b/b.go":                      "package b\n",
-		"b/b_test.go":                 "package b\n\nimport \"testing\"\n\nfunc TestThree(t *testing.T) {}\n\nfunc TestFour(t *testing.T) {}\n",
-		"broken/broken.go":            "package broken\n",
-		"broken/broken_test.go":       "package broken\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { t.Fatal(\"wrong answer\") }\n",
-		"order/order.go":              "package order\n",
-		"order/order_test.go":         "package order\n\nimport (\"flag\"; \"strings\"; \"testing\")\n\nfunc TestLast(t *testing.T) {\n\tif strings.Contains(flag.Lookup(\"test.run\").Value.String(), \"TestNeighbour\") {\n\t\tt.Fatal(\"fails beside TestNeighbour\")\n\t}\n}\n\nfunc TestIdle(t *testing.T) {}\n",
-		"neighbour/neighbour.go":      "package neighbour\n",
-		"neighbour/neighbour_test.go": "package neighbour\n\nimport \"testing\"\n\nfunc TestNeighbour(t *testing.T) {}\n",
-		"lone/lone.go":                "package lone\n",
-		"lone/lone_test.go":           "package lone\n\nimport \"testing\"\n\nfunc TestLone(t *testing.T) {}\n",
+		"dagger.lock":                        string(lock),
+		"dagger.toml":                        "[modules.go]\nsource = \"dagger.io/go\"\n\n[modules.dang-sdk]\nsource = \"dagger.io/sdk/dang\"\n\n[sdks.dang]\nmodule = \"dang-sdk\"\n\n[modules.fixture]\nsource = \".dagger/fixture\"\n",
+		".dagger/fixture/dagger-module.toml": "name = \"fixture\"\nengineVersion = \"v1.0.0-beta.15\"\n\n[runtime]\nsource = \"dang\"\n",
+		".dagger/fixture/main.dang":          "type Fixture {\n  pub standalone: Void @check { null }\n}\n",
+		"go.mod":                             "module fixture\n\ngo 1.26\n",
+		"a/a.go":                             "package a\n",
+		"a/a_test.go":                        "package a\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {}\n\nfunc TestTwo(t *testing.T) {}\n",
+		"b/b.go":                             "package b\n",
+		"b/b_test.go":                        "package b\n\nimport \"testing\"\n\nfunc TestThree(t *testing.T) {}\n\nfunc TestFour(t *testing.T) {}\n",
+		"broken/broken.go":                   "package broken\n",
+		"broken/broken_test.go":              "package broken\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { t.Fatal(\"wrong answer\") }\n",
+		"order/order.go":                     "package order\n",
+		"order/order_test.go":                "package order\n\nimport (\"flag\"; \"strings\"; \"testing\")\n\nfunc TestLast(t *testing.T) {\n\tif strings.Contains(flag.Lookup(\"test.run\").Value.String(), \"TestNeighbour\") {\n\t\tt.Fatal(\"fails beside TestNeighbour\")\n\t}\n}\n\nfunc TestIdle(t *testing.T) {}\n",
+		"neighbour/neighbour.go":             "package neighbour\n",
+		"neighbour/neighbour_test.go":        "package neighbour\n\nimport \"testing\"\n\nfunc TestNeighbour(t *testing.T) {}\n",
+		"lone/lone.go":                       "package lone\n",
+		"lone/lone_test.go":                  "package lone\n\nimport \"testing\"\n\nfunc TestLone(t *testing.T) {}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -120,6 +122,60 @@ func TestRealDaggerCLI(t *testing.T) {
 		if !slices.Contains(links, testOne) || !slices.Contains(links, broken+"&go-test=TestBroken") {
 			t.Fatalf("listed %q", links)
 		}
+	})
+	t.Run("attributes expanded links to top-level checks", func(t *testing.T) {
+		roots, err := checks.ListTopLevel(ctx, dir, Identity{})
+		must(t, err)
+		links, err := checks.List(ctx, dir, Identity{})
+		must(t, err)
+		wantRoots := []string{
+			"dag+check://?check=dang-sdk/generate/stale",
+			"dag+check://?check=fixture/standalone",
+			"dag+check://?check=go/modules/packages/generate/stale",
+			"dag+check://?check=go/modules/packages/tests/test",
+		}
+		if !slices.Equal(roots, wantRoots) {
+			t.Fatalf("top-level listing %q, want %q", roots, wantRoots)
+		}
+		// Dagger keeps the full function path in top-level collection names,
+		// but uses the item's check name in the expanded listing. The coverage
+		// comparison therefore leaves those expanded items uncovered.
+		var uncovered []string
+		for _, pkg := range []string{"a", "b", "broken", "lone", "neighbour", "order"} {
+			uncovered = append(uncovered, "dag+check://?check=stale&go-module=.&go-package="+pkg)
+		}
+		for _, item := range []struct {
+			pkg, test string
+		}{
+			{"a", "TestOne"}, {"a", "TestTwo"},
+			{"b", "TestFour"}, {"b", "TestThree"},
+			{"broken", "TestBroken"}, {"lone", "TestLone"},
+			{"neighbour", "TestNeighbour"},
+			{"order", "TestIdle"}, {"order", "TestLast"},
+		} {
+			uncovered = append(uncovered, "dag+check://?check=test&go-module=.&go-package="+item.pkg+"&go-test="+item.test)
+		}
+		slices.Sort(uncovered)
+		standalone := wantRoots[:2]
+		wantLinks := slices.Concat(standalone, uncovered)
+		slices.Sort(wantLinks)
+		if !slices.Equal(links, wantLinks) {
+			t.Fatalf("expanded listing %q, want %q", links, wantLinks)
+		}
+		plan := checkselect.Breadth(roots, links)
+		if len(plan.Roots) != len(wantRoots) || !slices.Equal(plan.Uncovered, uncovered) {
+			t.Fatalf("attribution roots %+v, uncovered %q", plan.Roots, plan.Uncovered)
+		}
+		for i, root := range plan.Roots {
+			var want []string
+			if slices.Contains(standalone, root.Link) {
+				want = []string{root.Link}
+			}
+			if root.Link != wantRoots[i] || root.Collection || !slices.Equal(root.Links, want) {
+				t.Errorf("attribution for %s: %+v, want links %q", wantRoots[i], root, want)
+			}
+		}
+		t.Logf("top-level listing %q; expanded listing %q; attribution roots %+v; uncovered %q", roots, links, plan.Roots, plan.Uncovered)
 	})
 	t.Run("offers narrow checks from the real listing", func(t *testing.T) {
 		links, err := checks.List(ctx, dir, Identity{})

@@ -34,6 +34,15 @@ type ReviewChecks interface {
 	Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error)
 }
 
+// TopLevelChecks is a ReviewChecks that can list unexpanded checks for breadth
+// selection. Callers fall back to the expanded listing when it is unavailable.
+type TopLevelChecks interface {
+	ReviewChecks
+	// ListTopLevel returns Dagger's top-level checks, leaving collections
+	// unexpanded. An error leaves the expanded-list selection path available.
+	ListTopLevel(ctx context.Context, dir string, identity Identity) ([]string, error)
+}
+
 // SkippingChecks is a ReviewChecks that can leave checks it names out of a run.
 type SkippingChecks interface {
 	ReviewChecks
@@ -73,10 +82,23 @@ type CheckResult = api.CheckResult
 const listOutputLimit = 4 << 20
 
 func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) ([]string, error) {
+	return d.list(ctx, dir, identity, true)
+}
+
+func (d DaggerChecks) ListTopLevel(ctx context.Context, dir string, identity Identity) ([]string, error) {
+	return d.list(ctx, dir, identity, false)
+}
+
+func (d DaggerChecks) list(ctx context.Context, dir string, identity Identity, all bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	output := &checkOutput{limit: listOutputLimit}
-	exit, _, err := d.dagger(ctx, dir, identity, false, output, "list", "checks", "--all", "--format=link")
+	args := []string{"list", "checks"}
+	if all {
+		args = append(args, "--all")
+	}
+	args = append(args, "--format=link")
+	exit, _, err := d.dagger(ctx, dir, identity, false, output, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +175,11 @@ func (d DaggerChecks) CheckSkipping(ctx context.Context, dir string, identity Id
 
 // checkRun accumulates the dagger check runs of one Check into its result.
 type checkRun struct {
-	checks      DaggerChecks
-	dir         string
-	env         []string
-	result      CheckResult
-	output      strings.Builder
+	checks DaggerChecks
+	dir    string
+	env    []string
+	result CheckResult
+	output strings.Builder
 	// labelled heads each report with its command, once there is more than one.
 	labelled bool
 }
