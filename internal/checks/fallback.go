@@ -152,6 +152,8 @@ func RunSelectionWithFallback(ctx context.Context, local, cloud ReviewChecks, bu
 	if refusal != "" && err == nil {
 		full := FullSelection(SelectionRefused, refusal)
 		full.Candidates, full.Listed, full.Judgment = selection.Candidates, selection.Listed, selection.Judgment
+		full.BreadthJudgment, full.DepthJudgment = selection.BreadthJudgment, selection.DepthJudgment
+		full.Roots, full.KeptRoots, full.Levels = selection.Roots, selection.KeptRoots, selection.Levels
 		selection = full
 		o.refused = fmt.Sprintf("\nDagger refused the selected links, so every check runs.\n$ %s\n", strings.Join(Command(nil), " "))
 		o.commandFrom = len(o.segments)

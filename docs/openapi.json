@@ -4102,8 +4102,14 @@
       },
       "CheckSelection": {
         "properties": {
+          "breadth_judgment": {
+            "type": "string"
+          },
           "candidates": {
             "type": "integer"
+          },
+          "depth_judgment": {
+            "type": "string"
           },
           "detail": {
             "type": "string"
@@ -4113,6 +4119,18 @@
           },
           "judgment": {
             "type": "string"
+          },
+          "kept_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "levels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
           },
           "links": {
             "items": {
@@ -4131,6 +4149,12 @@
           },
           "reason": {
             "type": "string"
+          },
+          "roots": {
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "type": "object"

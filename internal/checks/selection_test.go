@@ -2,6 +2,7 @@ package checks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -191,6 +192,50 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			}
 			if (tc.name == "disabled" || tc.name == "large change") && len(p.Requests()) != 0 {
 				t.Fatal("full run asked Jev")
+			}
+		})
+	}
+}
+
+func TestSelectionDescriptionAndLegacyRecord(t *testing.T) {
+	t.Parallel()
+	var legacy api.CheckSelection
+	must(t, json.Unmarshal([]byte(`{"mode":"selected","links":["dag+check://standalone"],"candidates":4,"listed":8,"judgment":"judgment_old"}`), &legacy))
+	want := "Jev selected 1 of 4 check links for the changed files in judgment judgment_old"
+	if DescribeSelection(legacy) != want || legacy.BreadthJudgment != "" || legacy.DepthJudgment != "" || legacy.Roots != nil || legacy.KeptRoots != nil || legacy.Levels != nil {
+		t.Fatalf("legacy selection %+v: %s", legacy, DescribeSelection(legacy))
+	}
+	roots := 5
+	legacy.Roots, legacy.KeptRoots = &roots, []string{"a", "b"}
+	legacy.Levels = map[string]string{"a": "go-package", "b": "go-package"}
+	if got := DescribeSelection(legacy); got != want+" within 2 of 5 top-level checks, by go-package" {
+		t.Fatal(got)
+	}
+	legacy.FallbackPicks = 1
+	if got := DescribeSelection(legacy); !strings.HasSuffix(got, "within 2 of 5 top-level checks, by go-package") || !strings.Contains(got, "highest-scored") {
+		t.Fatal(got)
+	}
+}
+
+func TestRefusalPreservesStageEvidence(t *testing.T) {
+	t.Parallel()
+	for _, useCloud := range []bool{false, true} {
+		t.Run(fmt.Sprint(useCloud), func(t *testing.T) {
+			t.Parallel()
+			roots := 5
+			selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{"dag+check://chosen"}, Candidates: 3, Judgment: "rank", BreadthJudgment: "breadth", DepthJudgment: "depth", Roots: &roots, KeptRoots: []string{"a", "b"}, Levels: map[string]string{"a": "go-package"}}
+			local := &scriptedChecks{results: []CheckResult{{ExitCode: 1, Output: "Error: no checks matched\n", Refusal: "no checks matched"}, {Output: "CHECKS  ✔ 1 passed\n"}}}
+			var cloud ReviewChecks
+			if useCloud {
+				cloud = &scriptedChecks{}
+			}
+			_, full, _, err := RunSelectionWithFallback(t.Context(), local, cloud, time.Second, Remembered{}, t.TempDir(), Identity{}, selection)
+			must(t, err)
+			if full.Mode != SelectionFull || full.BreadthJudgment != "breadth" || full.DepthJudgment != "depth" || full.Judgment != "rank" || full.Roots == nil || *full.Roots != 5 || !slices.Equal(full.KeptRoots, selection.KeptRoots) || full.Levels["a"] != "go-package" {
+				t.Fatalf("refused selection lost stage evidence: %+v", full)
+			}
+			if got := DescribeSelection(full); !strings.Contains(got, "; ranking considered links within 2 of 5 top-level checks, by go-package") {
+				t.Fatal(got)
 			}
 		})
 	}

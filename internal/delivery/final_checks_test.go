@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,7 +24,7 @@ import (
 
 // finalChecksFixture returns a final reviewer whose checks are checks and the
 // report of a commit for it to check.
-func finalChecksFixture(t *testing.T, checks *fixturekit.FakeChecks) (*FinalReviewer, *config.Config, FinalReport) {
+func finalChecksFixture(t *testing.T, checks checkrun.ReviewChecks) (*FinalReviewer, *config.Config, FinalReport) {
 	t.Helper()
 	cfg, repository := deliveryTrace(t)
 	home := filepath.Dir(cfg.Project.Clone)
@@ -150,5 +151,59 @@ func TestFinalChecksRunFallbackPicks(t *testing.T) {
 	want := []string{"dag+check://b", "dag+check://c"}
 	if ran := checks.Runs(); len(ran) != 1 || !slices.Equal(ran[0], want) || run.Selection.FallbackPicks != 2 || !slices.Equal(run.Selection.Links, want) {
 		t.Fatalf("ran %v, selection %+v", ran, run.Selection)
+	}
+}
+
+func TestFinalCheckRetryReusesBreadthDepthAndRanking(t *testing.T) {
+	t.Parallel()
+	checks := fixturekit.SmartChecks()
+	checks.Outcomes = append([]fixturekit.CheckOutcome{{Result: CheckResult{ExitCode: -1}, Err: errors.New("engine disconnected")}}, fixturekit.Passing()...)
+	reviewer, cfg, report := finalChecksFixture(t, checks)
+	now := fixturekit.DemoStart
+	reviewer.S.Now = func() time.Time { return now }
+	p := &jevtest.Provider{Results: []jevtest.Result{
+		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"breadth-0": jevtest.Noul(.9), "breadth-1": jevtest.Noul(.01), "breadth-2": jevtest.Noul(.9)}, Usage: systemone.Usage{CostUSD: .01, CostKnown: true}}},
+		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"depth-0": jevtest.Choice("go-package", .8, .8, "go-test")}, Usage: systemone.Usage{CostUSD: .02, CostKnown: true}}},
+		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.9), "check-1": jevtest.Noul(.9), "check-2": jevtest.Noul(.9), "check-3": jevtest.Noul(.9)}, Usage: systemone.Usage{CostUSD: .03, CostKnown: true}}},
+	}}
+	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: .5}
+	newJudge := func() *jev.Judge {
+		return &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: reviewer.S.Now}
+	}
+	reviewer.S.Jev = newJudge()
+	first, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
+	if err == nil {
+		t.Fatal("incomplete final checks did not request a retry")
+	}
+	if first.Status != checkrun.ChecksIncomplete || first.Selection.BreadthJudgment == "" || first.Selection.DepthJudgment == "" || first.Selection.Judgment == "" || len(p.Requests()) != 3 {
+		t.Fatalf("first run %+v selection %+v requests %d", first, first.Selection, len(p.Requests()))
+	}
+	// A restarted service retries the same review after its check backoff.
+	reviewer.S.Jev = newJudge()
+	now = now.Add(FinalCheckDelay(1))
+	second, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
+	fixturekit.Must(t, err)
+	if second.Status != checkrun.ChecksPassed || second.Attempt != 2 || !reflect.DeepEqual(second.Selection, first.Selection) || len(p.Requests()) != 3 {
+		t.Fatalf("retry %+v selection %+v requests %d", second, second.Selection, len(p.Requests()))
+	}
+	want := []string{fixturekit.SmartStandalone, fixturekit.SmartPackageA, fixturekit.SmartPackageB, fixturekit.SmartUncovered}
+	slices.Sort(want)
+	if runs := checks.Runs(); len(runs) != 2 || !slices.Equal(runs[0], want) || !slices.Equal(runs[1], want) {
+		t.Fatalf("runner %q", runs)
+	}
+	costs, err := trace.Read[trace.Cost](reviewer.Repository, stream)
+	fixturekit.Must(t, err)
+	if len(costs) != 3 {
+		t.Fatalf("retry billed again: %+v", costs)
+	}
+	ids := map[string]bool{}
+	for _, cost := range costs {
+		if cost.Entry.Scope.Role != "jev" || !cost.Entry.Usage.CostKnown {
+			t.Fatalf("cost %+v", cost)
+		}
+		ids[cost.Entry.AttemptID] = true
+	}
+	if len(ids) != 3 {
+		t.Fatalf("stages share a ledger identity: %+v", costs)
 	}
 }
