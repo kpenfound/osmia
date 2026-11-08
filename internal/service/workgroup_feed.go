@@ -167,8 +167,10 @@ func (s *Service) workgroupSend(ctx context.Context, raw string, req SendRequest
 	})
 }
 
+// workgroupFeed reads the shared thread. It needs no live member, so it still
+// answers once every member is archived.
 func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedResponse, *APIError) {
-	a, api := s.openWorkgroupFeed(ctx, raw)
+	a, api := s.openWorkgroupFeedForRead(ctx, raw)
 	if api != nil {
 		return WorkgroupFeedResponse{}, api
 	}

@@ -385,10 +385,12 @@
   }
 
   // listedFeeds names the feeds the page reads: those of the workstreams in
-  // the list of work. Archived workstreams have no readable history.
+  // the list of work. Archived workstreams have no readable history. A
+  // workgroup whose members are all archived keeps its shared conversation, which
+  // is read only while the owner has that workgroup open.
   function listedFeeds() {
     return [...streams().filter(w => !w.archived).map(w => 'feed/' + w.workstream),
-      ...workgroups().filter(g => groupMembers(g.id).some(w => !w.archived)).map(g => groupFeed(g.id))];
+      ...workgroups().filter(g => groupLive(g.id) || (ui.view === 'workgroup' && ui.workgroup === g.id)).map(g => groupFeed(g.id))];
   }
 
   // details holds, for each packet and delivery view, the entry it was read
@@ -1054,6 +1056,12 @@
     return 'workgroups/' + id + '/feed';
   }
 
+  // groupLive tells whether any member of the workgroup is unarchived. Only
+  // then can the owner write to it.
+  function groupLive(id) {
+    return groupMembers(id).some(w => !w.archived);
+  }
+
   function groupGoal(id) {
     const latest = views[groupFeed(id)]?.entries.findLast(e => e.kind === 'status');
     return latest?.status.goal || groupMembers(id).find(w => !w.archived && w.status?.goal)?.status.goal ||
@@ -1089,7 +1097,7 @@
   }
 
   function selectWorkgroup(id, aboutMember = null) {
-    if (!workgroups().some(g => g.id === id) || !groupMembers(id).some(w => !w.archived)) return;
+    if (!workgroups().some(g => g.id === id)) return;
     ui.workgroup = id;
     ui.aboutMember = aboutMember;
     ui.toEnd = true;
@@ -1104,12 +1112,27 @@
     const group = workgroups().find(g => g.id === id);
     const box = byId('workgroup-content');
     byId('workgroup-goal').textContent = groupGoal(id);
-    if (!group || !groupMembers(id).some(w => !w.archived)) {
+    const live = !!group && groupLive(id);
+    // An all-archived workgroup is gone once its shared feed cannot be read.
+    if (!group || (!live && failures[groupFeed(id)])) {
       box.replaceChildren(el('p', { class: 'meta' }, 'This workgroup is unavailable.'));
       return;
     }
     const c = card(id, true);
     const member = groupMembers(id).find(w => w.workstream === ui.aboutMember && !w.archived);
+    // Without a live member the conversation is read only.
+    c.form.hidden = !live;
+    // block records the lock where the busy painting reads it, so a later
+    // render of the outcomes keeps the send button disabled.
+    c.text.disabled = !live;
+    block(c.button, !live);
+    if (!live) {
+      c.text.value = '';
+      if (!c.readOnly) c.readOnly = el('p', { class: 'meta', 'data-field': 'read-only' }, 'Every member is archived; this conversation is read only.');
+      if (!c.readOnly.isConnected) c.form.before(c.readOnly);
+    } else if (c.readOnly?.isConnected) {
+      c.readOnly.remove();
+    }
     c.about.replaceChildren();
     if (member) {
       const clear = el('button', { type: 'button', 'aria-label': 'Send to the whole workgroup' }, '×');
@@ -1388,7 +1411,6 @@
           }
           group.title.textContent = groupGoal(id);
           group.button.title = groupGoal(id);
-          group.button.disabled = !groupMembers(id).some(m => !m.archived);
           group.button.setAttribute('aria-current', String(ui.view === 'workgroup' && ui.workgroup === id));
           const needs = groupWaiting(id);
           const now = groupActivity(id);
@@ -1489,7 +1511,7 @@
           paneGroups.set(p.id + ":" + g.id, row);
         }
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
-        row.open.disabled = !members.some(w => !w.archived);
+        row.open.disabled = g.members.length < 2 && !members.some(w => !w.archived);
         const waitingCount = waiting.length + (g.members.length > 1 ? groupProposals(g.id).length : 0);
         row.inbox.textContent = waitingCount + ' waiting for you · Open inbox';
         row.inbox.hidden = !waitingCount;
@@ -1738,6 +1760,10 @@
     const text = c.text.value.trim();
     if (text === '') {
       show(c.result, 'error', 'Write a message first.');
+      return;
+    }
+    if (group && !groupLive(id)) {
+      show(c.result, 'error', 'Every member is archived; this conversation is read only.');
       return;
     }
     const member = group && groupMembers(id).find(w => w.workstream === ui.aboutMember && !w.archived);

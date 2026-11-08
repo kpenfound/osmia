@@ -282,7 +282,7 @@ func settleWorkgroupAction(p *page) {
 	p.Run(chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams { return p.WithAwaitPromise(true) }))
 }
 
-func TestBrowserWorkgroupArchivedCardsAndDisabledRow(t *testing.T) {
+func TestBrowserWorkgroupArchivedCardsAndOpenableRow(t *testing.T) {
 	ctx := context.Background()
 	opts, repo := sidebarFixture(t)
 	retired := config.WorkstreamID("w_000000000000000000000000000000a3")
@@ -317,7 +317,7 @@ func TestBrowserWorkgroupArchivedCardsAndDisabledRow(t *testing.T) {
 	}
 	s, _ := start(t, opts)
 	p := openOutcomePage(t, s)
-	p.Await("the archived workgroup is disabled", `document.querySelector('#archived [data-select-workgroup="`+string(archived.ID)+`"]')?.disabled === true`)
+	p.Await("the archived workgroup can be opened", `document.querySelector('#archived [data-select-workgroup="`+string(archived.ID)+`"]')?.disabled === false`)
 	p.AwaitText(`#workstream-list [data-select-workgroup="`+string(active.ID)+`"]`, "Continue the live group")
 	p.Click(`#workstream-list [data-select-workgroup="` + string(active.ID) + `"]`)
 	p.AwaitText(`[data-member="`+string(quiet)+`"] [data-field=archived]`, "Archived")

@@ -234,6 +234,11 @@ The member view is laid out like a chat client:
   chief of staff”. The chief's conversation says so with the pull request
   link, and your own archive stays available for every other terminal
   workstream.
+  A workgroup whose members are all archived stays in the Archived group while
+  its shared conversation survives. Opening it shows that conversation,
+  including those archive entries, read only: it has no message field, and the
+  view says “This workgroup is unavailable.” only when the group or its shared
+  conversation is gone.
 - The settings menu opens new projects, projects and their charters, the
   priority order, each role's profile with its provider's usage today, and
   the loaded configuration with any [disk drift](#disk-drift) and settings
@@ -626,7 +631,11 @@ unit counts are empty. Entries about one member include its `workstream`
 and `repo`. `POST /v1/workgroups/{id}/conversation` accepts `{"text":"..."}`
 and acknowledges the message after it is durable, without a member-address
 note. These endpoints support both single-member and multi-member groups.
-Authority locks and membership or retirement holds return an error.
+Reading the feed needs no live member: once every member is archived it still
+returns the retained shared conversation, including each automatic-archive
+entry, for as long as the shared thread survives, while sending to the group is
+refused because no live member remains to supply context. Authority locks and
+membership or retirement holds return an error.
 
 For a member of a multi-member workgroup, `GET /v1/feed/{workstream}`
 contains only member activity: transitions, worker sessions, checks and final
