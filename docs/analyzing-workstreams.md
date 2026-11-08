@@ -26,7 +26,7 @@ one SQLite database, `trace.db`, in its own directory.
 
 | Path | What it answers |
 |---|---|
-| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`), profile overrides |
+| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`, and `actor` when the chief of staff archived it because its pull request merged), profile overrides |
 | `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
 | `projects/<p>/trace.db` | The project's charter, KB, entity map, role notes and lasting decisions |
 | `workstreams/<p>/<w>/trace.db` | The workstream's complete trace |

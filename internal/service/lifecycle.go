@@ -160,6 +160,12 @@ func (s *Service) chiefRepository(ctx context.Context, repository *trace.Reposit
 	return s.lifecycle().ChiefRepository(ctx, repository, stream)
 }
 
+// chiefRepositoryForRead is chiefRepository for reading the shared thread; it
+// does not need a live member to supply context.
+func (s *Service) chiefRepositoryForRead(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
+	return s.lifecycle().ChiefRepositoryForRead(ctx, repository, stream)
+}
+
 func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 	return s.lifecycle().Archive(raw)
 }
@@ -173,8 +179,10 @@ func (s *Service) archivedWorkstream(raw string) (runtime.Archive, bool) {
 }
 
 var archivedIn = lifecycle.ArchivedIn
+var archivedBy = lifecycle.ArchivedBy
 
 type archiveCleanup = lifecycle.ArchiveCleanup
+type mergeArchiver = lifecycle.MergeArchiver
 
 var readMemberEvidence = lifecycle.ReadMemberEvidence
 

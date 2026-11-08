@@ -56,7 +56,12 @@ type ArchivePublication struct {
 	PullRequest int    `json:"pull_request"`
 }
 
-// Archive records a delivered or abandoned workstream the owner archived.
+// ArchiveActorChief is the Actor of an archive the chief of staff made when
+// the workstream's own pull request merged. An empty Actor is an owner archive.
+const ArchiveActorChief = "chief_of_staff"
+
+// Archive records a delivered or abandoned workstream that was archived, by
+// the owner or by the chief of staff once its pull request merged.
 // State holds the outcome, delivered or abandoned. DeliveryLink is, where
 // one exists, the pull request URL or the recorded upstream commit of an
 // owner-recorded merge. The title, state and delivery link survive
@@ -68,6 +73,8 @@ type Archive struct {
 	// CleanupStartedAt records authorized deletion intent.
 	Workgroup          config.WorkgroupID `json:"workgroup,omitempty"`
 	ResolutionEvidence string             `json:"resolution_evidence,omitempty"`
+	// Actor names who archived: ArchiveActorChief, or empty for the owner.
+	Actor string `json:"actor,omitempty"`
 	// MergeCommit and MergeReference pin verified merge identity for dependents
 	// after trace cleanup. Resolution alone does not supply a dependency commit.
 	Publication      ArchivePublication  `json:"publication,omitzero"`
@@ -549,6 +556,9 @@ func validate(st State) error {
 				return err
 			}
 		}
+		if a.Actor != "" && a.Actor != ArchiveActorChief {
+			return fmt.Errorf("invalid archive actor")
+		}
 		switch a.ResolutionEvidence {
 		case "":
 		case "unresolved":
@@ -882,6 +892,7 @@ func (s *Store) UpdateArchive(a Archive) error {
 					a.CleanupStartedAt = old.CleanupStartedAt
 				}
 				a.ArchivedAt = old.ArchivedAt
+				a.Actor = old.Actor
 				st.Archived[i] = a
 				st.Pauses = slices.DeleteFunc(st.Pauses, func(p Pause) bool { return p.Target.Workstream == a.Workstream })
 				for i := range st.Priorities {

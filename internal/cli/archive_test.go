@@ -27,7 +27,7 @@ func TestArchiveCommands(t *testing.T) {
 		t.Fatalf("archive output %q", text)
 	}
 	successful(t, root, "archive", id)
-	if status := successful(t, root, "status", id); !strings.Contains(status, "state=abandoned") || !strings.Contains(status, "archived=true") {
+	if status := successful(t, root, "status", id); !strings.Contains(status, "state=abandoned") || !strings.Contains(status, "archived=true archived_by=owner") {
 		t.Fatalf("status of the archived workstream:\n%s", status)
 	}
 	list := successful(t, root, "status")
@@ -67,5 +67,23 @@ func TestArchiveCommands(t *testing.T) {
 		if code, _, _ := invoke(t, root, args...); code != 2 {
 			t.Fatalf("%v: exit %d", args, code)
 		}
+	}
+}
+
+// An archive reads as the chief of staff's only when its record says so.
+func TestStatusFactsNameWhoArchived(t *testing.T) {
+	state := "delivered"
+	for _, tc := range []struct{ by, want string }{
+		{wire.ArchivedByChief, " archived=true archived_by=chief_of_staff"},
+		{wire.ArchivedByOwner, " archived=true archived_by=owner"},
+		{"", " archived=true"},
+	} {
+		got := facts(wire.WorkstreamStatus{State: &state, Archived: true, ArchivedBy: tc.by})
+		if !strings.HasSuffix(got, tc.want) {
+			t.Errorf("archived by %q: %q", tc.by, got)
+		}
+	}
+	if got := facts(wire.WorkstreamStatus{State: &state}); strings.Contains(got, "archived") {
+		t.Errorf("live workstream: %q", got)
 	}
 }

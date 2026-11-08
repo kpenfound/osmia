@@ -15,6 +15,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/readview"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -35,11 +36,38 @@ func (s *Service) now() time.Time {
 // returns the project's open trace. The librarian's workstream is unknown
 // here as it is in status: its chief of staff never gets a turn.
 func (s *Service) conversationTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
+	return s.resolveConversationTrace(raw, false)
+}
+
+// conversationReadTrace is conversationTrace for reading a conversation. It
+// also admits a workstream the chief of staff archived because its pull
+// request merged, for as long as archive cleanup has not removed its trace, so
+// the entry saying so stays readable.
+func (s *Service) conversationReadTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
+	return s.resolveConversationTrace(raw, true)
+}
+
+func (s *Service) resolveConversationTrace(raw string, readingChiefArchive bool) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
 		return "", "", nil, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	if _, ok := s.archivedWorkstream(raw); ok {
+	if archive, ok := s.archivedWorkstream(raw); ok && !(readingChiefArchive && archive.Actor == runtime.ArchiveActorChief) {
+		return "", "", nil, &APIError{Code: Conflict, Message: "workstream is permanently archived; its history is unavailable"}
+	} else if ok {
+		cfg, projects := s.runtimes()
+		for _, active := range projects {
+			if active.id != archive.Project || !cfg.Active(active.id) {
+				continue
+			}
+			streams, err := active.repository.Workstreams()
+			if err != nil {
+				return "", "", nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+			}
+			if slices.Contains(streams, id) {
+				return active.id, id, active.repository, nil
+			}
+		}
 		return "", "", nil, &APIError{Code: Conflict, Message: "workstream is permanently archived; its history is unavailable"}
 	}
 	cfg, projects := s.runtimes()
@@ -176,20 +204,61 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 // conversationList reads the owner's messages to the workstream's chief of
 // staff, and its final responses to them, from the thread's turn log.
 func (s *Service) conversationList(raw string) (ConversationResponse, *APIError) {
-	_, stream, repository, api := s.conversationTrace(raw)
+	_, stream, repository, api := s.conversationReadTrace(raw)
 	if api != nil {
 		return ConversationResponse{}, api
 	}
-	target, _, _, closeTarget, err := s.chiefRepository(context.Background(), repository, stream)
+	target, thread, closeTarget, err := s.conversationTarget(context.Background(), repository, stream)
 	if err != nil {
+		var wrapped apiErrAsError
+		if errors.As(err, &wrapped) {
+			return ConversationResponse{}, wrapped.Api
+		}
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeTarget()
-	entries, err := readview.Consistent(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
+	entries, err := readview.Consistent(func() ([]ConversationEntry, error) {
+		entries, err := conversationEntries(target, thread)
+		if err != nil {
+			return nil, err
+		}
+		archives, err := s.chiefArchiveActions(repository, stream)
+		if err != nil {
+			return nil, err
+		}
+		actions := make([]ConversationEntry, 0, len(archives))
+		for _, a := range archives {
+			actions = append(actions, a.ConversationEntry)
+		}
+		return withActions(entries, actions), nil
+	}, target.Generation, s.storeGeneration)
 	if err != nil {
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}
 	return ConversationResponse{Workstream: stream, Entries: entries}, nil
+}
+
+// conversationTarget opens the trace holding stream's chief-of-staff thread and
+// names the workstream to read it as. A workstream archived out of a shared
+// workgroup no longer joins it, so the thread is opened through the
+// workgroup's live members and read as its host. Reading needs no member to
+// supply context, so the thread also opens once every member is archived.
+func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*trace.Repository, config.WorkstreamID, func(), error) {
+	if _, archived := s.archivedWorkstream(string(stream)); archived {
+		group, err := repository.CrossRepoWorkgroupOf(stream)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		if group != "" {
+			a, api := s.openWorkgroupFeedForRead(ctx, string(group))
+			if api != nil {
+				return nil, "", nil, apiErrAsError{Api: api}
+			}
+			return a.chief, a.host, a.close, nil
+		}
+	}
+	target, _, _, closeTarget, err := s.chiefRepositoryForRead(ctx, repository, stream)
+	return target, stream, closeTarget, err
 }
 
 // conversationEntries returns the workstream's conversation with its chief of
@@ -224,6 +293,55 @@ func conversationEntries(repository *trace.Repository, stream config.WorkstreamI
 		return nil, err
 	}
 	return withActions(out, actions), nil
+}
+
+// archiveAction is the conversation entry for one archive the chief of staff
+// made, with the archived workstream it is about.
+type archiveAction struct {
+	ConversationEntry
+	Workstream config.WorkstreamID
+}
+
+// chiefArchiveActions returns the entries for the workstreams the chief of
+// staff archived because their pull request merged and whose conversation is
+// stream's: stream itself and the other members of its workgroup. Each is
+// derived from its archive record, so it exists exactly when that archive was
+// committed and is shown once, and a member's cleanup leaves it in the shared
+// thread. repository must be the project's own repository.
+func (s *Service) chiefArchiveActions(repository *trace.Repository, stream config.WorkstreamID) ([]archiveAction, error) {
+	members, err := repository.WorkgroupMembers(stream)
+	if err != nil {
+		return nil, err
+	}
+	group, err := repository.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return nil, err
+	}
+	return chiefArchiveActionsOf(s.memberArchives(), func(a runtime.Archive) bool {
+		if a.Workstream == stream || group != "" && a.Workgroup == group {
+			return true
+		}
+		return a.Project == repository.Project() && slices.Contains(members, a.Workstream)
+	}), nil
+}
+
+func chiefArchiveActionsOf(archives []runtime.Archive, shared func(runtime.Archive) bool) []archiveAction {
+	var out []archiveAction
+	for _, a := range archives {
+		if a.Actor != runtime.ArchiveActorChief || !shared(a) {
+			continue
+		}
+		title := a.Title
+		if title == "" {
+			title = string(a.Workstream)
+		}
+		text := fmt.Sprintf("Archived workstream %s (%s) because its pull request merged", a.Workstream, title)
+		if a.DeliveryLink != "" {
+			text += ": " + a.DeliveryLink
+		}
+		out = append(out, archiveAction{ConversationEntry{Turn: "archive-" + string(a.Workstream), Kind: "action", Text: text, At: a.ArchivedAt, State: TurnDone}, a.Workstream})
+	}
+	return out
 }
 
 // withActions places each action before the first entry recorded after it,

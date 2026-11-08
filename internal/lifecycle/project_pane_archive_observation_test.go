@@ -6,6 +6,7 @@ import (
 	fmt "fmt"
 	config "github.com/kpenfound/osmia/internal/config"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	reflect "reflect"
@@ -142,6 +143,10 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				f.clock.Advance(10 * time.Minute)
 			}
 			archived := members
+			// shown is every member the pane reports as archived: the ones the
+			// owner archives and, in a hard-block graph, the merged upstream member
+			// the chief of staff archives.
+			shown := members
 			if graph == trace.EdgeHardBlock {
 				merge(0)
 				down, err := f.s.repository(f.project2)
@@ -150,6 +155,12 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					wait, err := edgeWaitDisplay(down, f.stream2)
 					must(t, err)
 					return wait == ""
+				})
+				// The merged upstream member is archived by the chief of staff and
+				// then cleaned up; the owner archives the rest.
+				await("chief of staff archives and cleans up the merged member", func() bool {
+					a, ok := archiveRecord(t, f.s.store, members[0].stream)
+					return ok && a.Actor == runtime.ArchiveActorChief && !a.CleanedAt.IsZero()
 				})
 				archived = members[1:]
 			}
@@ -162,11 +173,14 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				})
 			}
 			merged := map[config.WorkstreamID]bool{}
+			if graph == trace.EdgeHardBlock {
+				merged[members[0].stream] = true
+			}
 			check := func(wantRevision int) {
 				t.Helper()
 				list, err := f.c.Statuses(ctx)
 				must(t, err)
-				for _, m := range archived {
+				for _, m := range shown {
 					wantState, wantWait := "delivered (merged)", ""
 					if !merged[m.stream] {
 						wantState = "blocked"
@@ -202,13 +216,6 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					entries, err := conversationEntries(authority, f.origin)
 					must(t, err)
 					must(t, authority.Close())
-					if graph == trace.EdgeHardBlock {
-						current, err := f.c.Conversation(ctx, f.stream1)
-						must(t, err)
-						if !slices.Equal(current.Entries, entries) {
-							t.Fatal("live member lost the shared conversation route")
-						}
-					}
 					if len(entries) < len(conversation.Entries) || !slices.Equal(entries[:len(conversation.Entries)], conversation.Entries) {
 						t.Fatal("workgroup lost the original shared conversation")
 					}

@@ -3921,6 +3921,9 @@
           "archived": {
             "type": "boolean"
           },
+          "archived_by": {
+            "type": "string"
+          },
           "project": {
             "type": "string"
           },
@@ -7033,6 +7036,9 @@
       },
       "RuntimeArchive": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "archived_at": {
             "format": "date-time",
             "type": "string"
@@ -8790,6 +8796,9 @@
           "archived": {
             "type": "boolean"
           },
+          "archived_by": {
+            "type": "string"
+          },
           "display_state": {
             "type": "string"
           },
@@ -8970,6 +8979,9 @@
           },
           "archived": {
             "type": "boolean"
+          },
+          "archived_by": {
+            "type": "string"
           },
           "base": {
             "type": "string"

@@ -15,8 +15,22 @@ var ErrNoLiveWorkgroupContext = fmt.Errorf("%w: no live member remains to supply
 // the live member supplying context. Ordinary workstreams keep their local
 // Repository and host. Each successful shared open owns the returned close;
 // closing it never closes a member's repository. Lifecycle bindings validate
-// retired identities without opening their history.
+// retired identities without opening their history. Addressing the workgroup's
+// conversation origin needs a live member to supply context: when every member
+// is archived it fails with ErrNoLiveWorkgroupContext.
 func (s *Controller) ChiefRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
+	return s.chiefRepository(ctx, repository, stream, true)
+}
+
+// ChiefRepositoryForRead is ChiefRepository for reading the shared thread,
+// which needs no member to supply context: it still opens the thread of a
+// workgroup whose members are all archived, and then returns an empty bundle
+// stream.
+func (s *Controller) ChiefRepositoryForRead(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
+	return s.chiefRepository(ctx, repository, stream, false)
+}
+
+func (s *Controller) chiefRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, needContext bool) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
 	noop := func() {
 	}
 	id, err := repository.CrossRepoWorkgroupOf(stream)
@@ -77,7 +91,7 @@ func (s *Controller) ChiefRepository(ctx context.Context, repository *trace.Repo
 			wt.Close()
 			return nil, "", "", noop, err
 		}
-		if stream == "" {
+		if stream == "" && needContext {
 			wt.Close()
 			return nil, "", "", noop, fmt.Errorf("%w: workgroup %s member %s", ErrNoLiveWorkgroupContext, id, g.Members[1])
 		}

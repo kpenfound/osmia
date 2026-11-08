@@ -403,12 +403,21 @@ type BaseUpstreamResponse struct {
 // when the workstream's own base was abandoned: continue from upstream.
 const BaseDecisionUpstream = "upstream"
 
+// The actors that archive a workstream: the owner by request, or the chief of
+// staff once the workstream's own pull request merged.
+const (
+	ArchivedByOwner = "owner"
+	ArchivedByChief = "chief_of_staff"
+)
+
 // ArchiveResponse reports whether a workstream is archived after the
-// owner's request.
+// owner's request. ArchivedBy names who archived it, owner or chief_of_staff,
+// and is empty while the workstream is not archived.
 type ArchiveResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Archived   bool                `json:"archived"`
+	ArchivedBy string              `json:"archived_by,omitempty"`
 }
 
 // ShedObjectRequest adds the owner's own objection to the current round.
@@ -749,6 +758,9 @@ type WorkstreamStatus struct {
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
+	// ArchivedBy names who archived the workstream: owner, or chief_of_staff
+	// when it archived the workstream because its pull request merged.
+	ArchivedBy string `json:"archived_by,omitempty"`
 	// TraceDeleted is set after permanent archive cleanup completes.
 	TraceDeleted bool `json:"trace_deleted,omitempty"`
 	// DeliveryLink is, for an archived workstream and where one exists, the
@@ -1071,6 +1083,8 @@ type WorkgroupMemberSummary struct {
 	PRLink       string              `json:"pr_link"`
 	Running      bool                `json:"running"`
 	Archived     bool                `json:"archived"`
+	// ArchivedBy names who archived the member, owner or chief_of_staff.
+	ArchivedBy string `json:"archived_by,omitempty"`
 }
 
 // FeedResponse lists a workstream's feed, oldest first.

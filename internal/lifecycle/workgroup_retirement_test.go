@@ -233,6 +233,11 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	}) {
 		t.Fatal("design-start event was not held before archive")
 	}
+	shared, err := f.c.Conversation(ctx, f.origin)
+	must(t, err)
+	if len(shared.Entries) == 0 {
+		t.Fatal("the shared conversation is empty before the members are archived")
+	}
 	for _, m := range resolutionMembers(f) {
 		_, err := f.c.Archive(ctx, m.stream)
 		must(t, err)
@@ -289,6 +294,21 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 			}
 			if !equalJSONTest(journals, readJournals(wt)) {
 				t.Fatal("retirement changed the recorded journal bytes or revision history")
+			}
+		}
+		// Every member is archived by the owner, yet the shared thread stays
+		// readable through its origin with all of its earlier entries and no
+		// automatic-archive entry.
+		read, err := f.c.Conversation(ctx, f.origin)
+		must(t, err)
+		for _, earlier := range shared.Entries {
+			if !slices.ContainsFunc(read.Entries, func(e ConversationEntry) bool { return e.Turn == earlier.Turn && e.Kind == earlier.Kind && e.Text == earlier.Text }) {
+				t.Fatalf("the shared conversation lost %+v", earlier)
+			}
+		}
+		for _, e := range read.Entries {
+			if strings.HasPrefix(e.Turn, "archive-") {
+				t.Fatalf("an owner archive was announced: %+v", e)
 			}
 		}
 		groups, _, err := trace.Workgroups(wt)

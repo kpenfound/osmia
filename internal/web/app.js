@@ -873,6 +873,10 @@
     return p?.name || id;
   }
 
+  // archiveLabel says who archived a workstream and how far its cleanup is.
+  function archiveLabel(w) {
+    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ' · ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
+  }
   function repoLabel(id) {
     return configuredRepos().find(r => r.id === id)?.label || id;
   }
@@ -1127,7 +1131,7 @@
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
           el('strong', { 'data-field': 'repo' }, repoLabel(m.repo)),
           el('span', { class: 'tag', 'data-field': 'state' }, m.display_state || m.state || 'planning'),
-          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'Archived') : null,
+          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, m.archived_by === 'chief_of_staff' ? 'Archived by chief of staff' : 'Archived') : null,
           m.running ? el('span', { class: 'working', 'data-field': 'running', 'aria-label': 'Agent running' }) : null);
         button.disabled = m.archived;
         button.addEventListener('click', () => select(m.workstream));
@@ -1348,7 +1352,7 @@
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
-      r.state.textContent = w.archived ? (w.trace_deleted ? 'archived · trace deleted' : 'archived · cleanup pending') : (w.state || 'handed');
+      r.state.textContent = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(ui.view !== 'workgroup' && current !== null && current.workstream === w.workstream));
@@ -1453,7 +1457,7 @@
       row.wait.hidden = !w.wait;
       row.needs.textContent = needs + ' waiting for you';
       row.needs.hidden = !needs;
-      row.archive.textContent = w.trace_deleted ? 'Archived · trace deleted' : 'Archived · cleanup pending';
+      row.archive.textContent = archiveLabel(w);
       row.archive.hidden = !w.archived;
       return row.node;
     };
@@ -2074,7 +2078,7 @@
       el('div', { class: 'line' },
         el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
-        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'archived') : ''),
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : ''),
       el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       renderUnitCounts(w.units), isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null));
   }

@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -88,13 +89,24 @@ func deliverResolutionMembers(t *testing.T, f *productionDesignFixture) []Delive
 	return f.sharedDesign().DeliverResolutionMembers(t, publicationDocument, publicationPath)
 }
 
+// resolutionGroupID reads the workgroup through the design's origin workstream,
+// whose trace stays in place when archive cleanup removes the members' traces.
+func resolutionGroupID(t *testing.T, f *productionDesignFixture) config.WorkgroupID {
+	t.Helper()
+	repo, err := f.s.repository(f.project)
+	must(t, err)
+	id, err := repo.CrossRepoWorkgroupOf(f.origin)
+	must(t, err)
+	if id == "" {
+		t.Fatal("the origin workstream has no workgroup")
+	}
+	return id
+}
+
 func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved bool) {
 	t.Helper()
 	ctx := context.Background()
-	repo, err := f.s.repository(f.project)
-	must(t, err)
-	id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
+	id := resolutionGroupID(t, f)
 	authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
 	must(t, err)
 	defer authority.Close()
@@ -130,20 +142,23 @@ func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved
 		}
 	}
 }
-func awaitMemberMergeResolution(t *testing.T, f *productionDesignFixture) {
+// awaitGroupResolutionRevision waits until the group's resolution is recorded.
+// It reads only the shared authority, so it is safe while the chief of staff
+// archives and cleans the members.
+func awaitGroupResolutionRevision(t *testing.T, f *productionDesignFixture) {
 	t.Helper()
 	lifecycleAwait(t, f, "group merge resolution", func() bool {
-		repo, err := f.s.repository(f.project)
-		must(t, err)
-		id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-		must(t, err)
-		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
+		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, resolutionGroupID(t, f))
 		must(t, err)
 		defer authority.Close()
 		_, revision, err := trace.ResolvedWorkgroups(authority)
 		must(t, err)
 		return revision == 1
 	})
+}
+func awaitMemberMergeResolution(t *testing.T, f *productionDesignFixture) {
+	t.Helper()
+	awaitGroupResolutionRevision(t, f)
 	resolutionGroupState(t, f, true)
 }
 func TestDesignProductionProjectSpecWaitsForEveryMemberMerge(t *testing.T) {
@@ -172,13 +187,11 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			host := &resolutionPulls{fakePulls: &fakePulls{}}
 			host.fail.Store(true)
 			var hold atomic.Bool
-			reached := make(chan struct{}, 1)
+			// Once both merges are observed, the chief of staff's archive and the
+			// group's resolution both wait, so the restart lands between the
+			// durable observations and everything they cause.
 			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
-				if step == "workgroup-resolution-ready" && hold.Load() {
-					select {
-					case reached <- struct{}{}:
-					default:
-					}
+				if (step == "workgroup-resolution-ready" || step == "auto-archive-selected") && hold.Load() {
 					<-ctx.Done()
 					return ctx.Err()
 				}
@@ -242,7 +255,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 					return false
 				}
 			})
-			// Hold final resolution after every durable observation, then perform a real restart.
+			// Hold the archive and final resolution after every durable observation, then perform a real restart.
 			hold.Store(true)
 			host.Mu.Lock()
 			for i := range host.Prs {
@@ -256,12 +269,14 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			// Poll completions can schedule another cadence while the host changes.
 			// Advance through those deadlines until both outcomes are durable.
 			lifecycleAwait(t, f, "durable outcomes before resolution", func() bool {
-				select {
-				case <-reached:
-					return true
-				default:
-					return false
+				for _, m := range resolutionMembers(f) {
+					repo, err := f.s.repository(m.project)
+					must(t, err)
+					if _, rev, err := ownPullRequestOutcomeAt(repo, m.stream); err != nil || rev == 0 {
+						return false
+					}
 				}
+				return true
 			})
 			for i, m := range resolutionMembers(f) {
 				repo, err := f.s.repository(m.project)
@@ -273,18 +288,42 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				}
 			}
 			resolutionGroupState(t, f, false)
+			for _, m := range resolutionMembers(f) {
+				if _, archived := archiveRecord(t, f.s.store, m.stream); archived {
+					t.Fatalf("member %s archived before the restart", m.stream)
+				}
+			}
 			f.stop(t)
 			hold.Store(false)
 			host.Mu.Lock()
 			calls := host.Finds
 			host.Mu.Unlock()
 			f.start(t)
-			awaitMemberMergeResolution(t, f)
+			// The chief of staff's archives and the group's resolution run together
+			// once the hold is released, in either order.
+			awaitGroupResolutionRevision(t, f)
 			host.Mu.Lock()
 			after := host.Finds
 			host.Mu.Unlock()
 			if after != calls {
 				t.Fatalf("finished own PRs polled after restart: %d -> %d", calls, after)
+			}
+			// The chief of staff archives each merged member, and the archive keeps the
+			// observed merge evidence after cleanup removes the member's trace.
+			lifecycleAwait(t, f, "chief of staff archives of the merged members", func() bool {
+				for _, m := range resolutionMembers(f) {
+					if a, ok := archiveRecord(t, f.s.store, m.stream); !ok || a.CleanedAt.IsZero() {
+						return false
+					}
+				}
+				return true
+			})
+			resolutionGroupState(t, f, true)
+			for i, m := range resolutionMembers(f) {
+				a, _ := archiveRecord(t, f.s.store, m.stream)
+				if a.Actor != runtime.ArchiveActorChief || !archiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
+					t.Fatalf("archive of %s=%+v", m.stream, a)
+				}
 			}
 			f.stop(t)
 			f.start(t)
