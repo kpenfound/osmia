@@ -83,3 +83,34 @@ func TestArchiveResolutionEvidenceValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestArchiveActorSurvivesRestartAndCleanupUpdates(t *testing.T) {
+	in := fixture(t)
+	store := open(t, in)
+	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	a := Archive{Project: pid, Workstream: w1, Actor: ArchiveActorChief, Resolved: true, ResolutionEvidence: "merged", State: "delivered", Title: "Merged PR", ArchivedAt: at}
+	must(t, store.SetArchived(a))
+	// Cleanup updates carry the record it read; the actor stays what was recorded.
+	update := a
+	update.Actor, update.CleanedAt = "", at.Add(time.Minute)
+	must(t, store.UpdateArchive(update))
+	reopened := open(t, in)
+	state, _ := reopened.Snapshot()
+	a.CleanedAt = at.Add(time.Minute)
+	if len(state.Archived) != 1 || state.Archived[0] != a {
+		t.Fatalf("archive after restart: %+v", state.Archived)
+	}
+	// An older record names no actor and reads as the owner's.
+	if err := reopened.SetArchived(Archive{Project: pid, Workstream: w2, Actor: "somebody", State: "abandoned", Title: "Odd", ArchivedAt: at}); err == nil {
+		t.Fatal("an unknown archive actor was accepted")
+	}
+	must(t, reopened.SetArchived(Archive{Project: pid, Workstream: w2, State: "abandoned", Title: "Owner", ArchivedAt: at}))
+	// A second archive never replaces the first's record or actor.
+	must(t, reopened.SetArchived(Archive{Project: pid, Workstream: w2, Actor: ArchiveActorChief, State: "abandoned", Title: "Owner", ArchivedAt: at.Add(time.Hour)}))
+	state, _ = reopened.Snapshot()
+	for _, got := range state.Archived {
+		if got.Workstream == w2 && (got.Actor != "" || !got.ArchivedAt.Equal(at)) {
+			t.Fatalf("an owner archive was replaced: %+v", got)
+		}
+	}
+}

@@ -5,9 +5,11 @@ import (
 	fmt "fmt"
 	config "github.com/kpenfound/osmia/internal/config"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	reflect "reflect"
 	slices "slices"
+	strings "strings"
 	testing "testing"
 	time "time"
 )
@@ -75,12 +77,37 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		if !row.Archived || !row.TraceDeleted || row.DisplayState != wantState || row.Wait != wantWait || !reflect.DeepEqual(row.Workgroup, group) {
 			t.Fatalf("archived drill-down=%+v", row)
 		}
-		current, err := f.c.Conversation(ctx, f.stream2)
-		must(t, err)
+		// The shared conversation stays readable through its origin, also once
+		// the last member's merge has resolved the group, the chief of staff has
+		// archived that member and its cleanup has removed its history. It shows
+		// one automatic-archive entry for that member and none before.
 		original, err := f.c.Conversation(ctx, f.origin)
 		must(t, err)
-		if !slices.Equal(current.Entries, original.Entries) || len(current.Entries) < len(conversation.Entries) || !slices.Equal(current.Entries[:len(conversation.Entries)], conversation.Entries) {
-			t.Fatal("survivor no longer reads the original shared conversation")
+		if len(original.Entries) < len(conversation.Entries) || !slices.Equal(original.Entries[:len(conversation.Entries)], conversation.Entries) {
+			t.Fatal("the shared conversation lost its original entries")
+		}
+		wantArchiveEntries := 0
+		if resolved {
+			wantArchiveEntries = 1
+		}
+		archiveEntries := 0
+		for _, entry := range original.Entries {
+			if entry.Kind == "action" && strings.HasPrefix(entry.Turn, "archive-") {
+				archiveEntries++
+				if entry.Turn != "archive-"+string(f.stream2) || !strings.Contains(entry.Text, "pull request merged") {
+					t.Fatalf("unexpected archive entry %+v", entry)
+				}
+			}
+		}
+		if archiveEntries != wantArchiveEntries {
+			t.Fatalf("archive entries=%d; want %d in %+v", archiveEntries, wantArchiveEntries, original.Entries)
+		}
+		if !resolved {
+			current, err := f.c.Conversation(ctx, f.stream2)
+			must(t, err)
+			if !slices.Equal(current.Entries, original.Entries) {
+				t.Fatal("survivor no longer reads the original shared conversation")
+			}
 		}
 		gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
 		must(t, err)
@@ -160,6 +187,10 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 	lifecycleAwait(t, f, "last pane member merged and group resolved", func() bool {
 		_, revision, _ := groupResolution()
 		return revision == 1
+	})
+	lifecycleAwait(t, f, "chief of staff archived and cleaned the merged sink", func() bool {
+		a, ok := archiveRecord(t, f.s.store, f.stream2)
+		return ok && a.Actor == runtime.ArchiveActorChief && !a.CleanedAt.IsZero()
 	})
 	check(true, true)
 	f.stop(t)

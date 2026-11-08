@@ -164,7 +164,7 @@ On member resolution (merged or cancelled), its own slice, spec, plan and
 workspaces leave active state and bundles. The workgroup spec remains active
 for the shared chief and all unresolved members until every member resolves,
 including a dependent waiting on or repairing after a merge. At both levels,
-trace history is retained until owner archive. Archiving and eligible cleanup
+trace history is retained until archive. Archiving and eligible cleanup
 of one terminal member preserve the survivor's original conversation and
 workgroup spec across restart; missing live history yields a truthful error or
 hold and does not count as a merge. Archive and cleanup never establish a merge
@@ -494,7 +494,13 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   The archived list retains its title, ID, outcome, archive time and, where one
   exists, its delivery link (the pull request URL, or the recorded upstream
   commit for an owner-recorded merge); `status <workstream-id>` marks it
-  `archived=true`. The service then deletes the workstream's own independent
+  `archived=true` and names who archived it, `archived_by=owner` or
+  `archived_by=chief_of_staff`. The chief of staff archives a delivered
+  workstream by itself when its own pull request merges, so you rarely need
+  to; the owner's archive stays available for every terminal workstream, and an
+  archive that exists is never replaced, so `archive` on a workstream the chief
+  of staff archived changes nothing and reports the chief of staff. The service
+  then deletes the workstream's own independent
   storage, its dedicated trace repository and its temporary workspaces,
   including handed inputs, decisions, turns and complete check output, from
   disk. It does not rewrite or prune any Git history. The archive record

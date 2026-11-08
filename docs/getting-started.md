@@ -278,7 +278,7 @@ Expected waits appear in status without an inbox entry or notification.
 Resolution retires each member's own documents and workspaces from active
 context. The shared workgroup spec stays active for the chief and unresolved
 members until all members resolve (merged or cancelled). Trace history at both
-levels is retained until owner archive. The same lifetime applies to one-member
+levels is retained until archive. The same lifetime applies to one-member
 workgroups. A ready or closed-without-merge PR remains unresolved; archive and
 cleanup supply no merge evidence. You can request amend or cancel in the
 shared chat; approve one impact summary, and at cancellation choose whether

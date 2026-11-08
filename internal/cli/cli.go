@@ -672,7 +672,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		if result.Archived {
+		if result.Archived && result.ArchivedBy == wire.ArchivedByChief {
+			fmt.Fprintf(stdout, "Workstream %s was permanently archived by the chief of staff because its pull request merged; its title remains and its trace will be deleted\n", result.Workstream)
+		} else if result.Archived {
 			fmt.Fprintf(stdout, "Workstream %s permanently archived; its title remains and its trace will be deleted\n", result.Workstream)
 		} else {
 			fmt.Fprintf(stdout, "Workstream %s is in the list of work\n", result.Workstream)
@@ -2048,6 +2050,9 @@ func facts(st wire.WorkstreamStatus) string {
 	out := fmt.Sprintf("state=%s open_questions=%d context_mode=%s workspaces=%s", state, st.OpenQuestions, st.ContextMode, st.Workspaces)
 	if st.Archived {
 		out += " archived=true"
+		if st.ArchivedBy != "" {
+			out += " archived_by=" + st.ArchivedBy
+		}
 	}
 	return out
 }

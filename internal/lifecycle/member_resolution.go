@@ -69,6 +69,13 @@ func (e MemberEvidence) Merged() bool {
 	return e.ResolutionEvidence().Merged()
 }
 
+// OwnPullRequestMerged reports that the outcome recorded for the current
+// publication's pull request is merged. An owner-recorded merge, an open or
+// closed pull request and an outcome of an earlier pull request are not.
+func (e MemberEvidence) OwnPullRequestMerged() bool {
+	return e.ResolutionEvidence().OwnPullRequestMerged()
+}
+
 // Resolution is the shared member predicate for live history and archive pins.
 func (e MemberEvidence) Resolution(state string) string {
 	return e.ResolutionEvidence().Resolution(state)

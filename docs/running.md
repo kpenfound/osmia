@@ -167,13 +167,13 @@ unmerged PR shows **PR open**; ready, draft and closed-without-merge PRs remain
 unresolved. An archived member without pinned merge or cancel evidence shows
 **blocked**, with a wait explaining that the workgroup remains unresolved.
 The workgroup spec stays active until every member is merged or cancelled,
-including in one-member workgroups. Trace history remains until owner archive.
+including in one-member workgroups. Trace history remains until archive.
 
 Selecting a member opens its existing view, with a direct workstream link
 that survives reload; an original design link follows the adopted conversation
 after start. Shared questions appear once in the project overview and can be
 answered from either member, preserving the original entry and project pin.
-Owner-approved archive and eligible cleanup of a terminal member do not remove
+Archive and eligible cleanup of a terminal member do not remove
 the survivor's shared conversation or active workgroup spec. Unexplained missing
 live history yields a truthful diagnostic. Archive does not count as merge.
 
@@ -228,7 +228,17 @@ The member view is laid out like a chat client:
   abandons and archives one in progress. Archive keeps the title and a few
   other facts in the archived list, then permanently deletes the workstream's
   own trace, including full check output. It cannot be undone; see
-  [the command line](cli.md).
+  [the command line](cli.md). You do not have to archive a delivered
+  workstream whose pull request has merged: the chief of staff archives it
+  when the merge is recorded, and the archived list shows “Archived by the
+  chief of staff”. The chief's conversation says so with the pull request
+  link, and your own archive stays available for every other terminal
+  workstream.
+  A workgroup whose members are all archived stays in the Archived group while
+  its shared conversation survives. Opening it shows that conversation,
+  including those archive entries, read only: it has no message field, and the
+  view says “This workgroup is unavailable.” only when the group or its shared
+  conversation is gone.
 - The settings menu opens new projects, projects and their charters, the
   priority order, each role's profile with its provider's usage today, and
   the loaded configuration with any [disk drift](#disk-drift) and settings
@@ -615,12 +625,17 @@ responses; see the [command line](cli.md) for each command's shape.
 statuses and actions in `entries`, and one current summary per member in
 `members`. Each summary includes `workstream`, `repo`, `state`,
 `display_state`, unit counts by state in `units`, `wait`, `pr_link`,
-`running` and `archived`. Archived cards use pinned archive facts; their
+`running`, `archived` and, for an archived member, `archived_by` (`owner` or
+`chief_of_staff`). Archived cards use pinned archive facts; their
 unit counts are empty. Entries about one member include its `workstream`
 and `repo`. `POST /v1/workgroups/{id}/conversation` accepts `{"text":"..."}`
 and acknowledges the message after it is durable, without a member-address
 note. These endpoints support both single-member and multi-member groups.
-Authority locks and membership or retirement holds return an error.
+Reading the feed needs no live member: once every member is archived it still
+returns the retained shared conversation, including each automatic-archive
+entry, for as long as the shared thread survives, while sending to the group is
+refused because no live member remains to supply context. Authority locks and
+membership or retirement holds return an error.
 
 For a member of a multi-member workgroup, `GET /v1/feed/{workstream}`
 contains only member activity: transitions, worker sessions, checks and final
@@ -637,7 +652,10 @@ publication state `delivered` alone does not establish merge. Runtime archive
 records expose `resolution_evidence` (`merged`, `cancelled` or `unresolved`)
 and `resolved`, pinned from history before cleanup. Only merge or cancel
 evidence resolves an archived member; a missing pin keeps the workgroup and
-workgroup spec active with a visible diagnostic. See
+workgroup spec active with a visible diagnostic. An archive record also names
+its actor, `chief_of_staff` when the chief of staff archived the workstream
+because its pull request merged and nothing for the owner's archive; the
+status, archive and member-summary responses expose it as `archived_by`. See
 [resolution and retention](configuration.md#resolution-retention-and-shared-lifecycle).
 
 Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET

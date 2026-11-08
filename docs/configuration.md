@@ -1364,7 +1364,7 @@ matching merged or closed outcome. Failed lookups record nothing and retry
 on the next cadence; a closed-without-merge outcome remains unresolved.
 These are service rules, with no additional polling configuration.
 
-Owner archive and eligible cleanup of a terminal member preserve the original
+Archive, by the owner or by the chief of staff, and eligible cleanup of a terminal member preserve the original
 shared conversation, active workgroup spec and status for unresolved survivors,
 including across restart and when the retired member was the conversation's
 source or the controller's driver. Durable archive identity and verified
@@ -1387,13 +1387,35 @@ unavailable ruling or relay effects remain pending.
 ### Permanent workstream archives
 
 `osmia archive <workstream>` permanently archives delivered or abandoned work.
+The chief of staff also archives a delivered workstream on its own, as itself,
+once the own-pull-request outcome recorded for the workstream's current
+publication is `merged`: every reconciliation pass picks the delivered,
+unarchived workstreams with that evidence, including ones recorded before this
+behaviour existed, and archives them through the same path, guards and record
+as the owner's archive. It adds no pull request lookup. It writes nothing
+and tries again on a later pass when the publication or its outcome changed
+since the pick, a workgroup change holds the archive, or the workstream's
+state changed. Open, closed-without-merge and unobserved pull requests,
+an earlier pull request's merge, an owner-recorded merge without a pull
+request of its own, abandoned workstreams, sessions and workstreams reopened
+out of delivered are never archived this way, and an existing archive is never
+replaced. The owner's archive stays available for every terminal workstream.
 `runtime.json` keeps a small archive record outside the deleted storage: the
 project, the workstream ID, the title, the outcome (delivered or abandoned),
 the archive time and, where one exists, the delivery link (the pull request
 URL, or the recorded upstream commit for an owner-recorded merge). The
 record also pins `resolution_evidence` from the member's history as `merged`,
 `cancelled` or `unresolved`; `resolved` is true only with merged or cancelled
-evidence. Both fields are exposed in the API's runtime archive records. An
+evidence. Both fields are exposed in the API's runtime archive records. The
+record's optional `actor` is `chief_of_staff` for an automatic archive and
+absent for the owner's, including every record made before the chief of staff
+archived; the API shows it as `archived_by` (`owner` or `chief_of_staff`). The
+chief's conversation shows an entry saying the workstream was archived because
+its pull request merged, with the pull request link, derived from the committed
+archive record: it appears once, survives an interruption, and is absent for
+a refused attempt and for an owner archive. A shared chief thread keeps it
+after the member's cleanup; a solo workstream's conversation, with its entry,
+goes when cleanup removes its trace. An
 archived member without that evidence keeps the workgroup unresolved and its
 workgroup spec active. The pane shows **blocked** with the wait
 `archived member <id> has no pinned merge or cancel evidence; workgroup remains unresolved`.

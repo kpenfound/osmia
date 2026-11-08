@@ -17,7 +17,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	if api != nil {
 		return FeedResponse{}, api
 	}
-	chief, _, _, closeChief, err := s.chiefRepository(context.Background(), repository, stream)
+	chief, _, _, closeChief, err := s.chiefRepositoryForRead(context.Background(), repository, stream)
 	if err != nil {
 		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}

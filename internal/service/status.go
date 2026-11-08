@@ -125,7 +125,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 				if title == "" {
 					title = string(a.Workstream)
 				}
-				archivedView := WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}
+				archivedView := WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, ArchivedBy: archivedBy(a), TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}
 				if err := presentArchivedWorkstream(active.repository, &archivedView, a); err != nil {
 					projectUnreadable[a.Workstream] = Diagnostic{Field: "presentation", Code: Internal, Message: err.Error()}
 				}

@@ -30,8 +30,14 @@ type MemberResolutionEvidence struct {
 	Outcome            string
 }
 
+// OwnPullRequestMerged reports that the current publication's own pull
+// request is recorded merged. An owner-recorded merge alone is not one.
+func (e MemberResolutionEvidence) OwnPullRequestMerged() bool {
+	return e.Publication > 0 && e.Publication == e.OutcomePullRequest && e.Outcome == "merged"
+}
+
 func (e MemberResolutionEvidence) Merged() bool {
-	return e.OwnerMerge || e.Publication > 0 && e.Publication == e.OutcomePullRequest && e.Outcome == "merged"
+	return e.OwnerMerge || e.OwnPullRequestMerged()
 }
 
 func (e MemberResolutionEvidence) Resolution(state string) string {

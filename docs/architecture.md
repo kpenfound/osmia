@@ -38,7 +38,7 @@ gate. Every PR still needs its own delivery approval and owner signing.
 Ordinary file, issue and stdin hand-ins use an owner-selected ordered project list, with the first project home. A single project uses ordinary drafting and ratification. Several projects use the shared allocation and join path and all-member packet without an architect selection turn. Design start pins the brief text, revision and ordered list durably, preserving the same member identities through recovery. Each member's charter governs its slice and units; the shared spec and contracts satisfy every member's charter.
 
 Repo/member bindings preserve shared authority when a terminal member is
-owner-archived and legitimately cleanup-deleted. Archive identity, verified
+archived (by the owner, or by the chief of staff when its pull request merged) and legitimately cleanup-deleted. Archive identity, verified
 resolution and cleanup intent keep survivor reads, conversation, dispatch,
 events, questions and group journals usable without reviving a retired trace.
 Unknown or corrupt live history yields errors or recoverable holds. Pending
@@ -48,7 +48,7 @@ completion. Archive does not establish merge or release dependencies.
 Resolution retires a member's own documents and workspaces from active state.
 The workgroup spec remains active for the shared chief and unresolved members
 until all members resolve (merged or cancelled). A ready but unmerged PR keeps
-its member unresolved. Traces and decisions remain until owner archive.
+its member unresolved. Traces and decisions remain until archive.
 The same snapshot-based predicate governs live resolution, archive pins and
 pane labels: cancellation/abandonment, or delivery with an owner merge record
 or merged outcome matching the current publication's PR. Archive records pin

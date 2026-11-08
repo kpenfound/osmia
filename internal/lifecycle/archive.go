@@ -7,23 +7,75 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// archiveRequest says who archives. The chief of staff archives only while
+// eligible holds, which is evaluated again on the snapshot that commits the
+// archive.
+type archiveRequest struct {
+	actor    string
+	eligible func(state string, evidence MemberEvidence) bool
+}
+
 // Archive permanently retires a terminal workstream, retaining its title.
 func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
-	if a, ok := s.ArchivedWorkstream(raw); ok {
-		return ArchiveResponse{Project: a.Project, Workstream: a.Workstream, Archived: true}, nil
+	return s.archive(raw, archiveRequest{})
+}
+
+// ArchiveOnMerge archives a delivered workstream as the chief of staff,
+// through the owner's archive, while the outcome recorded for its current
+// own pull request is merged. It writes nothing when that no longer holds,
+// when the workstream is archived already, or when the archive cannot
+// proceed now; the caller retries on a later pass.
+func (s *Controller) ArchiveOnMerge(raw string) (ArchiveResponse, *APIError) {
+	return s.archive(raw, archiveRequest{actor: runtime.ArchiveActorChief, eligible: mergedOwnPullRequest})
+}
+
+func mergedOwnPullRequest(state string, evidence MemberEvidence) bool {
+	return state == DeliveredState && evidence.OwnPullRequestMerged()
+}
+
+// ArchivedBy names who archived a: the owner unless the record names the
+// chief of staff.
+func ArchivedBy(a runtime.Archive) string {
+	if a.Actor == runtime.ArchiveActorChief {
+		return api.ArchivedByChief
 	}
-	project, stream, repository, api := s.ConversationTrace(raw)
-	if api != nil {
-		return ArchiveResponse{}, api
+	return api.ArchivedByOwner
+}
+
+func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *APIError) {
+	if a, ok := s.ArchivedWorkstream(raw); ok {
+		return ArchiveResponse{Project: a.Project, Workstream: a.Workstream, Archived: true, ArchivedBy: ArchivedBy(a)}, nil
+	}
+	project, stream, repository, apiErr := s.ConversationTrace(raw)
+	if apiErr != nil {
+		return ArchiveResponse{}, apiErr
 	}
 	state, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return ArchiveResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of workstream %s; check the trace repository", stream)}
+	}
+	if req.eligible != nil {
+		if session, err := isSession(repository, stream); err != nil {
+			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		} else if session {
+			return ArchiveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is a session; the chief of staff does not archive sessions", stream)}
+		}
+		evidence, err := ReadMemberEvidence(repository, stream)
+		if err != nil {
+			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		if !req.eligible(state.Value, evidence) {
+			return ArchiveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no merged pull request of its own to archive on", stream)}
+		}
+		if err := s.Step("auto-archive-prepared"); err != nil {
+			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
+		}
 	}
 	if state.Value != DeliveredState && state.Value != AbandonedState {
 		current := state.Value
@@ -36,6 +88,7 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 	if err != nil {
 		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
+	a.Actor = req.actor
 	if err := s.ArchiveLifecycle(repository, &a); err != nil {
 		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
@@ -45,9 +98,9 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 		return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if a.Workgroup != "" {
-		release, api := s.ChangeArchiveGuard(a.Workgroup)
-		if api != nil {
-			return ArchiveResponse{}, api
+		release, apiErr := s.ChangeArchiveGuard(a.Workgroup)
+		if apiErr != nil {
+			return ArchiveResponse{}, apiErr
 		}
 		defer release()
 	}
@@ -86,6 +139,15 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 		if err != nil {
 			return err
 		}
+		if req.eligible != nil {
+			if !req.eligible(snapshot.Feature.Value, evidence) {
+				return trace.ErrConflict
+			}
+			// An archive made since the selection stays as it was recorded.
+			if current, _ := s.Store().Snapshot(); ArchivedIn(current, stream) {
+				return nil
+			}
+		}
 		a.ResolutionEvidence = evidence.Resolution(snapshot.Feature.Value)
 		a.Resolved = a.ResolutionEvidence != "unresolved"
 		evidence.PinArchiveMerge(&a, s.About(repository).Project.Upstream)
@@ -109,7 +171,9 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 			}
 		}
 		a.DeliveryLink = publicationLink
-		if mergeLink != "" {
+		// An automatic archive links the pull request that merged, which its
+		// conversation entry names.
+		if mergeLink != "" && req.eligible == nil {
 			a.DeliveryLink = mergeLink
 		}
 		if authority != nil && len(group.Members) > 1 && slices.Contains(group.Members[1:], stream) {
@@ -128,10 +192,13 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 	if errors.Is(err, trace.ErrFeatureState) || errors.Is(err, trace.ErrConflict) {
 		return ArchiveResponse{}, &APIError{Code: Conflict, Message: "workstream changed while archiving; check its state and retry"}
 	}
-	if api := ArchiveError(err); api != nil {
-		return ArchiveResponse{}, api
+	if apiErr := ArchiveError(err); apiErr != nil {
+		return ArchiveResponse{}, apiErr
 	}
-	return ArchiveResponse{Project: project, Workstream: stream, Archived: true}, nil
+	if recorded, ok := s.ArchivedWorkstream(string(stream)); ok {
+		a = recorded
+	}
+	return ArchiveResponse{Project: project, Workstream: stream, Archived: true, ArchivedBy: ArchivedBy(a)}, nil
 }
 
 // DeliveryLinkFor returns the delivery link to keep in a workstream's

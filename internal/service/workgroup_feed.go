@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/readview"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -38,6 +39,22 @@ func workgroupAuthorityError(err error) *APIError {
 // groups through the existing lifecycle binding. The latter validates joins
 // and retired identities before granting access to the original authority.
 func (s *Service) openWorkgroupFeed(ctx context.Context, raw string) (workgroupFeedAuthority, *APIError) {
+	return s.openWorkgroupFeedMode(ctx, raw, true)
+}
+
+// openWorkgroupFeedForRead is openWorkgroupFeed for reading the shared thread.
+// It needs no live member to supply context, so it also opens the thread of a
+// workgroup whose members are all archived; the authority's bundle stream is
+// then empty.
+func (s *Service) openWorkgroupFeedForRead(ctx context.Context, raw string) (workgroupFeedAuthority, *APIError) {
+	return s.openWorkgroupFeedMode(ctx, raw, false)
+}
+
+func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needContext bool) (workgroupFeedAuthority, *APIError) {
+	chiefRepository := s.chiefRepository
+	if !needContext {
+		chiefRepository = s.chiefRepositoryForRead
+	}
 	id, err := config.ParseWorkgroupID(raw)
 	if err != nil {
 		return workgroupFeedAuthority{}, &APIError{Code: Validation, Message: "workgroup must be a workgroup ID: g_ followed by 32 lowercase hexadecimal digits"}
@@ -66,10 +83,10 @@ func (s *Service) openWorkgroupFeed(ctx context.Context, raw string) (workgroupF
 					break
 				}
 			}
-			if !live {
+			if !live && needContext {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(lifecycle.ErrNoLiveWorkgroupContext)
 			}
-			chief, host, bundle, close, err := s.chiefRepository(ctx, active.repository, group.Members[0])
+			chief, host, bundle, close, err := chiefRepository(ctx, active.repository, group.Members[0])
 			if err != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 			}
@@ -110,13 +127,26 @@ func (s *Service) openWorkgroupFeed(ctx context.Context, raw string) (workgroupF
 			return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 		}
 		if member == "" {
-			return workgroupFeedAuthority{}, workgroupAuthorityError(lifecycle.ErrNoLiveWorkgroupContext)
+			if needContext || group.Conversation == nil {
+				return workgroupFeedAuthority{}, workgroupAuthorityError(lifecycle.ErrNoLiveWorkgroupContext)
+			}
+			// Every member is archived, so the shared thread is opened through
+			// the workgroup's conversation origin.
+			_, _, origin, api := s.conversationTrace(string(group.Conversation.Workstream))
+			if api != nil {
+				return workgroupFeedAuthority{}, workgroupAuthorityError(apiErrAsError{Api: api})
+			}
+			chief, host, bundle, close, err := chiefRepository(ctx, origin, group.Conversation.Workstream)
+			if err != nil {
+				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
+			}
+			return workgroupFeedAuthority{chief, host, bundle, members, close}, nil
 		}
 		for _, m := range members {
 			if m.Workstream != member {
 				continue
 			}
-			chief, host, bundle, close, err := s.chiefRepository(ctx, m.Project, member)
+			chief, host, bundle, close, err := chiefRepository(ctx, m.Project, member)
 			if err != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 			}
@@ -137,8 +167,10 @@ func (s *Service) workgroupSend(ctx context.Context, raw string, req SendRequest
 	})
 }
 
+// workgroupFeed reads the shared thread. It needs no live member, so it still
+// answers once every member is archived.
 func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedResponse, *APIError) {
-	a, api := s.openWorkgroupFeed(ctx, raw)
+	a, api := s.openWorkgroupFeedForRead(ctx, raw)
 	if api != nil {
 		return WorkgroupFeedResponse{}, api
 	}
@@ -205,6 +237,11 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		if _, err := chiefActionsWithIdentity(a.chief, a.host, emit); err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
+		for _, archive := range chiefArchiveActionsOf(s.memberArchives(), func(archived runtime.Archive) bool {
+			return slices.Contains(workstreamsOf(a.members), archived.Workstream)
+		}) {
+			emit(archive.ConversationEntry, archive.Workstream)
+		}
 		summaries := []WorkgroupMemberSummary{}
 		for _, m := range a.members {
 			summary, err := s.workgroupMemberSummary(m)
@@ -255,6 +292,14 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 	return out, nil
 }
 
+func workstreamsOf(members []trace.CrossRepoMember) []config.WorkstreamID {
+	out := make([]config.WorkstreamID, 0, len(members))
+	for _, m := range members {
+		out = append(out, m.Workstream)
+	}
+	return out
+}
+
 func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemberSummary, error) {
 	summary := WorkgroupMemberSummary{Workstream: m.Workstream, Repo: m.Project.Project(), Units: map[string]int{}}
 	if archive, ok := s.archivedWorkstream(string(m.Workstream)); ok {
@@ -265,7 +310,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 		if err := presentArchivedWorkstream(m.Project, &w, archive); err != nil {
 			return summary, err
 		}
-		summary.State, summary.DisplayState, summary.Wait, summary.PRLink, summary.Archived = w.State, w.DisplayState, w.Wait, archive.DeliveryLink, true
+		summary.State, summary.DisplayState, summary.Wait, summary.PRLink, summary.Archived, summary.ArchivedBy = w.State, w.DisplayState, w.Wait, archive.DeliveryLink, true, archivedBy(archive)
 		return summary, nil
 	}
 	// Use the same projection as the status endpoint, including edge waits,

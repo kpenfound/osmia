@@ -385,10 +385,12 @@
   }
 
   // listedFeeds names the feeds the page reads: those of the workstreams in
-  // the list of work. Archived workstreams have no readable history.
+  // the list of work. Archived workstreams have no readable history. A
+  // workgroup whose members are all archived keeps its shared conversation, which
+  // is read only while the owner has that workgroup open.
   function listedFeeds() {
     return [...streams().filter(w => !w.archived).map(w => 'feed/' + w.workstream),
-      ...workgroups().filter(g => groupMembers(g.id).some(w => !w.archived)).map(g => groupFeed(g.id))];
+      ...workgroups().filter(g => groupLive(g.id) || (ui.view === 'workgroup' && ui.workgroup === g.id)).map(g => groupFeed(g.id))];
   }
 
   // details holds, for each packet and delivery view, the entry it was read
@@ -873,6 +875,10 @@
     return p?.name || id;
   }
 
+  // archiveLabel says who archived a workstream and how far its cleanup is.
+  function archiveLabel(w) {
+    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ' · ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
+  }
   function repoLabel(id) {
     return configuredRepos().find(r => r.id === id)?.label || id;
   }
@@ -1050,6 +1056,12 @@
     return 'workgroups/' + id + '/feed';
   }
 
+  // groupLive tells whether any member of the workgroup is unarchived. Only
+  // then can the owner write to it.
+  function groupLive(id) {
+    return groupMembers(id).some(w => !w.archived);
+  }
+
   function groupGoal(id) {
     const latest = views[groupFeed(id)]?.entries.findLast(e => e.kind === 'status');
     return latest?.status.goal || groupMembers(id).find(w => !w.archived && w.status?.goal)?.status.goal ||
@@ -1085,7 +1097,7 @@
   }
 
   function selectWorkgroup(id, aboutMember = null) {
-    if (!workgroups().some(g => g.id === id) || !groupMembers(id).some(w => !w.archived)) return;
+    if (!workgroups().some(g => g.id === id)) return;
     ui.workgroup = id;
     ui.aboutMember = aboutMember;
     ui.toEnd = true;
@@ -1100,12 +1112,27 @@
     const group = workgroups().find(g => g.id === id);
     const box = byId('workgroup-content');
     byId('workgroup-goal').textContent = groupGoal(id);
-    if (!group || !groupMembers(id).some(w => !w.archived)) {
+    const live = !!group && groupLive(id);
+    // An all-archived workgroup is gone once its shared feed cannot be read.
+    if (!group || (!live && failures[groupFeed(id)])) {
       box.replaceChildren(el('p', { class: 'meta' }, 'This workgroup is unavailable.'));
       return;
     }
     const c = card(id, true);
     const member = groupMembers(id).find(w => w.workstream === ui.aboutMember && !w.archived);
+    // Without a live member the conversation is read only.
+    c.form.hidden = !live;
+    // block records the lock where the busy painting reads it, so a later
+    // render of the outcomes keeps the send button disabled.
+    c.text.disabled = !live;
+    block(c.button, !live);
+    if (!live) {
+      c.text.value = '';
+      if (!c.readOnly) c.readOnly = el('p', { class: 'meta', 'data-field': 'read-only' }, 'Every member is archived; this conversation is read only.');
+      if (!c.readOnly.isConnected) c.form.before(c.readOnly);
+    } else if (c.readOnly?.isConnected) {
+      c.readOnly.remove();
+    }
     c.about.replaceChildren();
     if (member) {
       const clear = el('button', { type: 'button', 'aria-label': 'Send to the whole workgroup' }, '×');
@@ -1127,7 +1154,7 @@
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
           el('strong', { 'data-field': 'repo' }, repoLabel(m.repo)),
           el('span', { class: 'tag', 'data-field': 'state' }, m.display_state || m.state || 'planning'),
-          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'Archived') : null,
+          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, m.archived_by === 'chief_of_staff' ? 'Archived by chief of staff' : 'Archived') : null,
           m.running ? el('span', { class: 'working', 'data-field': 'running', 'aria-label': 'Agent running' }) : null);
         button.disabled = m.archived;
         button.addEventListener('click', () => select(m.workstream));
@@ -1348,7 +1375,7 @@
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
-      r.state.textContent = w.archived ? (w.trace_deleted ? 'archived · trace deleted' : 'archived · cleanup pending') : (w.state || 'handed');
+      r.state.textContent = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(ui.view !== 'workgroup' && current !== null && current.workstream === w.workstream));
@@ -1384,7 +1411,6 @@
           }
           group.title.textContent = groupGoal(id);
           group.button.title = groupGoal(id);
-          group.button.disabled = !groupMembers(id).some(m => !m.archived);
           group.button.setAttribute('aria-current', String(ui.view === 'workgroup' && ui.workgroup === id));
           const needs = groupWaiting(id);
           const now = groupActivity(id);
@@ -1453,7 +1479,7 @@
       row.wait.hidden = !w.wait;
       row.needs.textContent = needs + ' waiting for you';
       row.needs.hidden = !needs;
-      row.archive.textContent = w.trace_deleted ? 'Archived · trace deleted' : 'Archived · cleanup pending';
+      row.archive.textContent = archiveLabel(w);
       row.archive.hidden = !w.archived;
       return row.node;
     };
@@ -1485,7 +1511,7 @@
           paneGroups.set(p.id + ":" + g.id, row);
         }
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
-        row.open.disabled = !members.some(w => !w.archived);
+        row.open.disabled = g.members.length < 2 && !members.some(w => !w.archived);
         const waitingCount = waiting.length + (g.members.length > 1 ? groupProposals(g.id).length : 0);
         row.inbox.textContent = waitingCount + ' waiting for you · Open inbox';
         row.inbox.hidden = !waitingCount;
@@ -1734,6 +1760,10 @@
     const text = c.text.value.trim();
     if (text === '') {
       show(c.result, 'error', 'Write a message first.');
+      return;
+    }
+    if (group && !groupLive(id)) {
+      show(c.result, 'error', 'Every member is archived; this conversation is read only.');
       return;
     }
     const member = group && groupMembers(id).find(w => w.workstream === ui.aboutMember && !w.archived);
@@ -2074,7 +2104,7 @@
       el('div', { class: 'line' },
         el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
-        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'archived') : ''),
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : ''),
       el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       renderUnitCounts(w.units), isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null));
   }
