@@ -26,6 +26,9 @@ type chatAPI struct {
 	posts    []string
 	entries  map[string][]map[string]any
 	action   fakeAction
+	// transcribe answers the page's transcription route and says whether the
+	// configuration reports transcription as on.
+	transcribe fakeTranscribe
 }
 
 type chatMessage struct {
@@ -44,6 +47,7 @@ var chatViews = []chatView{
 
 func newChatAPI() *chatAPI {
 	a := &chatAPI{base: newFakeAPI(5), entries: make(map[string][]map[string]any)}
+	a.transcribe.url = "http://whisper.test/v1/audio/transcriptions"
 	text := strings.Repeat("The conversation should use the available space beside the workstream picker. This is a longer message with several sentences so the owner can read the full explanation comfortably. ", 8)
 	for _, id := range []string{"w_000", "w_002", "g_test"} {
 		a.entries[id] = []map[string]any{
@@ -96,6 +100,8 @@ func (a *chatAPI) handler() http.Handler {
 		json.NewEncoder(w).Encode(map[string]any{"entries": a.entries["w_002"]})
 	})
 	mux.HandleFunc("/v1/sessions/w_001/changes", handleJSON(`{"changes":"","commits":[]}`))
+	mux.HandleFunc("/v1/config", a.transcribe.handleConfig)
+	mux.HandleFunc("/v1/transcribe", a.transcribe.handle)
 	for _, view := range chatViews {
 		mux.HandleFunc(view.endpoint, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {

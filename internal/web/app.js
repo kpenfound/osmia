@@ -1670,78 +1670,206 @@
     return address.href;
   }
 
+  // recordingTypes are the audio formats the page asks MediaRecorder for, in
+  // order of preference; the first the browser supports is used.
+  const recordingTypes = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm', 'audio/ogg'];
+
+  // transcriptionOn says whether the service has a Whisper server configured.
+  function transcriptionOn() {
+    return !!views.config?.effective?.transcribe?.url;
+  }
+
+  // recordingAvailable says whether a composer can offer the microphone:
+  // transcription is configured and the browser records audio, which it
+  // allows only in a secure context.
+  function recordingAvailable() {
+    return window.isSecureContext && transcriptionOn() &&
+      !!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder === 'function';
+  }
+
   function renderDictationAvailability(button, link) {
-    button.hidden = !window.isSecureContext || !(window.SpeechRecognition || window.webkitSpeechRecognition);
+    button.hidden = !recordingAvailable();
     const address = dictationHTTPSAddress();
     link.hidden = !address;
     if (address) link.href = address;
     else link.removeAttribute('href');
   }
 
+  function stopTracks(stream) {
+    for (const track of stream ? stream.getTracks() : []) track.stop();
+  }
+
+  // blobBase64 reads a recording as standard base64 without a data: prefix.
+  function blobBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result);
+        resolve(url.slice(url.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(reader.error || new Error('The recording could not be read.'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // transcriptGap is the whitespace between a draft and the transcript
+  // appended after it: none for an empty draft or one already ending in
+  // whitespace.
+  function transcriptGap(draft) {
+    return draft === '' || /\s$/.test(draft) ? '' : ' ';
+  }
+
+  function microphoneMessage(err) {
+    switch (err && err.name) {
+      case 'NotAllowedError':
+      case 'SecurityError':
+        return 'Microphone permission denied.';
+      case 'NotFoundError':
+      case 'OverconstrainedError':
+        return 'No microphone was found.';
+      default:
+        return 'Could not start recording: ' + (err && err.message ? err.message : 'the microphone is unavailable.');
+    }
+  }
+
+  const transcribingText = 'Transcribing…';
+
+  // clearOutcome removes the outcome a captured target holds.
+  function clearOutcome(target) {
+    if (!target.scope) return;
+    target.scope.entries.delete(target.key);
+    paintOutcome(target.scope);
+  }
+
+  // setupDictation gives a composer its microphone. One recording at a time
+  // belongs to the composer and the conversation that started it, and stays
+  // current through its upload; every callback of the recorder and of the
+  // upload first checks that its recording is still current, so a stopped,
+  // sent or abandoned recording can no longer change any draft or outcome.
   function setupDictation(form, result, owner) {
     const button = form.querySelector('[aria-label="Dictate"]');
     const link = el('a', { class: 'dictation-https', hidden: true }, 'Use HTTPS for dictation');
     button.before(link);
     const text = form.elements.text;
+    const submit = form.querySelector('[type=submit]');
     let current = null;
     button.setAttribute('aria-pressed', 'false');
-    function finish(stop = true) {
-      const session = current;
-      current = null;
-      button.setAttribute('aria-pressed', 'false');
-      if (stop && session) {
-        try { session.recognition.stop(); } catch (_) { /* The browser may already have ended it. */ }
-      }
+    function paint() {
+      const phase = current ? current.phase : '';
+      button.setAttribute('aria-pressed', String(phase === 'starting' || phase === 'recording'));
+      block(button, text.disabled || submit.disabled || phase === 'stopping' || phase === 'transcribing');
     }
     function active(session) {
-      return current === session && owner() === session.owner;
+      return current === session && !session.cancelled && owner() === session.owner;
+    }
+    // end retires a recording: the recorder and the microphone stop, and
+    // nothing the recording reports later is accepted.
+    function end(session) {
+      session.cancelled = true;
+      if (current === session) current = null;
+      try {
+        if (session.recorder && session.recorder.state !== 'inactive') session.recorder.stop();
+      } catch (_) { /* The browser may already have ended it. */ }
+      stopTracks(session.stream);
+      paint();
+    }
+    function fail(session, message) {
+      if (!active(session)) return;
+      end(session);
+      show(session.target, 'error', message);
+    }
+    // finish abandons the current recording, taking back its progress
+    // message while that still stands.
+    function finish() {
+      const session = current;
+      if (!session) {
+        paint();
+        return;
+      }
+      end(session);
+      const scope = session.target.scope;
+      const shown = scope && scope.entries.get(session.target.key);
+      if (shown && shown.outcome === 'pending' && shown.text === transcribingText) clearOutcome(session.target);
     }
     function render() {
       renderDictationAvailability(button, link);
-      button.disabled = text.disabled || form.querySelector('[type=submit]').disabled;
-      if (current && (!active(current) || !form.isConnected || button.hidden || button.disabled)) finish();
+      paint();
+      if (current && (!active(current) || !form.isConnected || button.hidden || text.disabled || submit.disabled)) finish();
+    }
+    async function transcribe(session) {
+      if (!active(session) || session.phase === 'transcribing') return;
+      session.phase = 'transcribing';
+      show(session.target, 'pending', transcribingText);
+      paint();
+      stopTracks(session.stream);
+      const blob = new Blob(session.chunks, { type: session.chunks[0]?.type || session.type || 'audio/webm' });
+      if (blob.size === 0) {
+        fail(session, 'Nothing was recorded. Try again.');
+        return;
+      }
+      try {
+        const audio = await blobBase64(blob);
+        if (!active(session)) return;
+        const out = await request('POST', '/transcribe', { mime_type: blob.type, audio });
+        if (!active(session)) return;
+        const transcript = out && typeof out.text === 'string' ? out.text.trim() : '';
+        if (transcript === '') {
+          fail(session, 'No speech was detected. Try again.');
+          return;
+        }
+        end(session);
+        const at = text.value.length;
+        text.setRangeText(transcriptGap(text.value) + transcript, at, at, 'end');
+        clearOutcome(session.target);
+      } catch (err) {
+        fail(session, err.message);
+      }
+    }
+    async function begin() {
+      const key = owner();
+      if (!key) return;
+      const session = { owner: key, target: captureOutcome(result), phase: 'starting', chunks: [], stream: null, recorder: null, type: '' };
+      current = session;
+      paint();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        session.stream = stream;
+        if (!active(session)) {
+          stopTracks(stream);
+          return;
+        }
+        const type = recordingTypes.find(t => MediaRecorder.isTypeSupported ? MediaRecorder.isTypeSupported(t) : false) || '';
+        const recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+        session.recorder = recorder;
+        session.type = type || recorder.mimeType || '';
+        recorder.ondataavailable = event => {
+          if (!session.cancelled && event.data && event.data.size > 0) session.chunks.push(event.data);
+        };
+        recorder.onerror = event => fail(session, 'Recording failed' + (event.error && event.error.message ? ': ' + event.error.message : '.'));
+        recorder.onstop = () => transcribe(session);
+        recorder.start();
+        session.phase = 'recording';
+        paint();
+      } catch (err) {
+        fail(session, microphoneMessage(err));
+      }
     }
     dictationComposers.set(form, { stop: finish, render });
     button.addEventListener('click', () => {
-      if (current) {
+      const session = current;
+      if (!session) {
+        begin();
+      } else if (session.phase === 'starting') {
         finish();
-        return;
-      }
-      const key = owner();
-      if (!key) return;
-      try {
-        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!window.isSecureContext || !Recognition) throw new Error('Speech recognition is not supported in this browser.');
-        const recognition = new Recognition();
-        const session = { recognition, owner: key, start: text.selectionStart, end: text.selectionEnd };
-        recognition.interimResults = true;
-        recognition.lang = document.documentElement.lang || navigator.language;
-        recognition.onresult = event => {
-          if (!active(session)) return;
-          const transcript = Array.from(event.results, result => result[0].transcript).join('');
-          text.setRangeText(transcript, session.start, session.end, 'end');
-          session.end = session.start + transcript.length;
-        };
-        recognition.onerror = event => {
-          if (!active(session)) return;
-          const message = {
-            'not-allowed': 'Microphone permission denied.',
-            'service-not-allowed': 'Speech recognition permission denied.',
-            'no-speech': 'No speech was detected. Try dictating again.',
-            network: 'Speech recognition network error. Try again.',
-          }[event.error] || 'Speech recognition is unavailable (' + event.error + ').';
-          finish();
-          show(result, 'error', message);
-        };
-        recognition.onend = () => {
-          if (active(session)) finish(false);
-        };
-        current = session;
-        button.setAttribute('aria-pressed', 'true');
-        recognition.start();
-      } catch (err) {
-        finish();
-        show(result, 'error', 'Could not start dictation: ' + err.message);
+      } else if (session.phase === 'recording') {
+        session.phase = 'stopping';
+        show(session.target, 'pending', transcribingText);
+        paint();
+        try {
+          session.recorder.stop();
+        } catch (err) {
+          fail(session, 'Could not stop recording: ' + err.message);
+        }
       }
     });
     render();
