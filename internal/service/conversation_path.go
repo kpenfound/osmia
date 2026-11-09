@@ -52,10 +52,13 @@ type conversationPath struct {
 	pipeline    *pipeline
 	drain       chan struct{}
 	once        sync.Once
+	scanning    sync.Mutex // held for one discovery, queue and reconciliation iteration
 	mu          sync.Mutex
 	controllers []*reconcile.Controller
 }
 
+// Drain stops the path from admitting work. It does not wait for an iteration
+// that already started, so it is safe under locks that iteration may take.
 func (p *conversationPath) Drain() {
 	if p == nil {
 		return
@@ -66,6 +69,62 @@ func (p *conversationPath) Drain() {
 	for _, controller := range p.controllers {
 		controller.Drain()
 	}
+}
+
+func (p *conversationPath) draining() bool {
+	select {
+	case <-p.drain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Quiesce drains the path and waits for the iteration in progress, so that no
+// later iteration publishes or dispatches a turn on any trace it targets.
+// Operations the controllers already started are not joined.
+func (p *conversationPath) Quiesce() {
+	if p == nil {
+		return
+	}
+	p.Drain()
+	p.scanning.Lock()
+	defer p.scanning.Unlock()
+}
+
+// scan runs one iteration and stops publishing as soon as the path drains.
+// Quiesce returns only after the iteration's last trace write.
+func (p *conversationPath) scan(ctx context.Context, targets map[config.WorkgroupID]*conversationTarget) error {
+	p.scanning.Lock()
+	defer p.scanning.Unlock()
+	if p.draining() {
+		return nil
+	}
+	if err := p.discover(ctx, targets); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		p.s.log().Warn("conversation discovery failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
+	}
+	for _, t := range targets {
+		if p.draining() {
+			return nil
+		}
+		if err := p.queue(ctx, t.repository); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			p.s.log().Warn("conversation queue scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
+			continue
+		}
+		if err := t.controller.Pass(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			p.s.log().Warn("conversation reconciliation scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
+		}
+	}
+	return nil
 }
 
 type conversationTarget struct {
@@ -116,26 +175,8 @@ func (p *conversationPath) run(ctx context.Context) (err error) {
 			return nil
 		default:
 		}
-		if err := p.discover(ctx, targets); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			p.s.log().Warn("conversation discovery failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
-		}
-		for _, t := range targets {
-			if err := p.queue(ctx, t.repository); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				p.s.log().Warn("conversation queue scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
-				continue
-			}
-			if err := t.controller.Pass(ctx); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				p.s.log().Warn("conversation reconciliation scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
-			}
+		if err := p.scan(ctx, targets); err != nil {
+			return err
 		}
 		select {
 		case <-ctx.Done():
