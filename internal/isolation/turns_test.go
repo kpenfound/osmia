@@ -698,3 +698,143 @@ func TestPreviewIsChiefServiceTool(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleGrantKeepsWebOnlyForPlanningRoles(t *testing.T) {
+	for role, keeps := range map[string]bool{"chief_of_staff": true, "architect": true, "committee": true, "session": true,
+		"mason": false, "librarian": false, "reviewer": false, "foreman": false, "classifier": false} {
+		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"file_read"}, Web: true})
+		if err != nil || grant.Web != keeps {
+			t.Fatalf("%s: web=%v err=%v, want %v", role, grant.Web, err, keeps)
+		}
+		if grant, err = roleGrant(role, a.Capabilities{Tools: []string{"file_read"}}); err != nil || grant.Web {
+			t.Fatalf("%s: web granted by the role: %+v %v", role, grant, err)
+		}
+	}
+}
+
+func TestNarrowIntersectsWeb(t *testing.T) {
+	grant := a.Capabilities{Tools: []string{"file_read"}, Web: true}
+	for name, test := range map[string]struct {
+		request *a.Capabilities
+		want    bool
+	}{
+		"no request":      {nil, true},
+		"request has web": {&a.Capabilities{Tools: []string{"file_read"}, Web: true}, true},
+		"request lacks":   {&a.Capabilities{Tools: []string{"file_read"}}, false},
+	} {
+		if got := narrow(grant, test.request); got.Web != test.want {
+			t.Fatalf("%s: web=%v, want %v", name, got.Web, test.want)
+		}
+	}
+	// The request cannot add Web to a grant without it.
+	if got := narrow(a.Capabilities{Tools: []string{"file_read"}}, &a.Capabilities{Tools: []string{"file_read"}, Web: true}); got.Web {
+		t.Fatal("narrowing request added Web")
+	}
+}
+
+func TestWebTurnsStayReadOnly(t *testing.T) {
+	webTools := []string{"WebSearch", "WebFetch"}
+	for _, role := range []string{"chief_of_staff", "architect", "committee"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, engine, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "file_write", "shell", "fetch"}, WriteFiles: true, Execute: true, Network: true, Web: true}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			req := engine.Requests[0]
+			if want := []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}; !reflect.DeepEqual(req.Grants.Tools, want) {
+				t.Fatalf("native tools %v, want %v", req.Grants.Tools, want)
+			}
+			if req.Grants.Mounts[0].Access != agent.ReadOnly || req.Grants.VCS {
+				t.Fatalf("mounts %+v", req.Grants.Mounts)
+			}
+			// Web admits neither a service fetch tool nor write or shell tools.
+			if len(h.requests) != 1 || len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || h.requests[0].Capabilities.Network {
+				t.Fatalf("service tools %+v", h.requests)
+			}
+			if !h.requests[0].Capabilities.Web {
+				t.Fatal("host not told of Web")
+			}
+		})
+	}
+	// An exploratory session keeps the write and execute grants it has.
+	r, _, _, engine, input := fixture(t, "session", "container")
+	r.Grants["session"] = a.Capabilities{Tools: []string{"file_read"}, WriteFiles: true, Execute: true, Web: true}
+	if _, err := r.Run(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "mcp__osmia_0"}; !reflect.DeepEqual(engine.Requests[0].Grants.Tools, want) {
+		t.Fatalf("session tools %v", engine.Requests[0].Grants.Tools)
+	}
+	// Roles without web access get no web tool even when the service grant sets it.
+	for _, role := range []string{"mason", "librarian", "reviewer", "foreman", "classifier"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, _, engine, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read"}, Web: true}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			for _, tool := range engine.Requests[0].Grants.Tools {
+				if slices.Contains(webTools, tool) {
+					t.Fatalf("%s holds %s", role, tool)
+				}
+			}
+		})
+	}
+	// A narrowing that leaves Web out drops it.
+	r, _, _, engine, input = fixture(t, "architect", "container")
+	r.Grants["architect"] = a.Capabilities{Tools: []string{"file_read"}, Web: true}
+	selectBase := r.Select
+	r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
+		selected, err := selectBase(ctx, scope)
+		selected.Narrow = &a.Capabilities{Tools: []string{"file_read"}}
+		return selected, err
+	}
+	if _, err := r.Run(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Read", "Glob", "Grep", "mcp__osmia_0"}; !reflect.DeepEqual(engine.Requests[0].Grants.Tools, want) {
+		t.Fatalf("narrowed tools %v", engine.Requests[0].Grants.Tools)
+	}
+}
+
+func TestWebGuidanceReachesOnlyTurnsHoldingWeb(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		role   string
+		grant  a.Capabilities
+		narrow *a.Capabilities
+		want   bool
+	}{
+		{"architect with web", "architect", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, true},
+		{"session with web", "session", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, true},
+		{"architect without web", "architect", a.Capabilities{Tools: []string{"file_read"}}, nil, false},
+		{"narrowed away", "architect", a.Capabilities{Tools: []string{"file_read"}, Web: true}, &a.Capabilities{Tools: []string{"file_read"}}, false},
+		{"mason cannot hold web", "mason", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, false},
+		{"reviewer cannot hold web", "reviewer", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r, _, _, engine, input := fixture(t, test.role, "container")
+			r.Grants[test.role] = test.grant
+			if test.narrow != nil {
+				base := r.Select
+				r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
+					selected, err := base(ctx, scope)
+					selected.Narrow = test.narrow
+					return selected, err
+				}
+			}
+			input.SystemPrompt = "You are the " + test.role + "."
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			prompt := engine.Requests[0].SystemPrompt
+			if got := strings.Contains(prompt, WebGuidance); got != test.want {
+				t.Fatalf("guidance present=%v, want %v in %q", got, test.want, prompt)
+			}
+			if !strings.HasPrefix(prompt, "You are the "+test.role+".") {
+				t.Fatalf("role prompt lost: %q", prompt)
+			}
+		})
+	}
+}

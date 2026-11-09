@@ -685,11 +685,14 @@ func (d *Drafter) Dispatch(ctx context.Context, stream config.WorkstreamID, turn
 
 // turns is the architect's isolated turn path: a read-only private view of
 // the handed input, the charter and the context bundle, the file reading
-// tool, the delivery tool and the question tool, and no notes, write,
-// execute, network or VCS capability: notes are the project's, and would
-// carry one workstream's drafting into another's. A turn that asks ends
-// waiting, so its thread parks and its slot is free while the answer is
-// found.
+// tool, the delivery tool and the question tool, the backend's own web search
+// and page fetch tools (the Web permission, which every architect turn path
+// holds through ArchitectGrant), and no notes, write, execute, Network or VCS
+// capability: notes are the project's, and would carry one workstream's
+// drafting into another's. A backend or placement that cannot hold the turn
+// to its granted tools with the web tools in them runs it without them. A
+// turn that asks ends waiting, so its thread parks and its slot is free while
+// the answer is found.
 func (d *Drafter) Turns(stream config.WorkstreamID) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -700,7 +703,7 @@ func (d *Drafter) Turns(stream config.WorkstreamID) *isolation.Turns {
 		Workspaces: StagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.S.Current().Root.String(), "views")},
 		Select:     d.SelectView,
-		Grants:     map[string]coreadapter.Capabilities{ArchitectRole: {Tools: []string{"file_read", FactoryContextTool, ReadRemoteFileTool, "inspect_code", DraftTool, questions.AskTool}}},
+		Grants:     map[string]coreadapter.Capabilities{ArchitectRole: ArchitectGrant("file_read", FactoryContextTool, ReadRemoteFileTool, "inspect_code", DraftTool, questions.AskTool)},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
@@ -1051,6 +1054,13 @@ func (d *Drafter) Sketch(ctx context.Context, operation string, stream config.Wo
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+}
+
+// ArchitectGrant is what every architect turn path may call: tools, and the
+// backend's own web tools. The architect never holds a write, execute or
+// Network capability, so its view stays read-only.
+func ArchitectGrant(tools ...string) coreadapter.Capabilities {
+	return coreadapter.Capabilities{Tools: tools, Web: true}
 }
 
 func ArchitectSystemPrompt(p config.Project) string {

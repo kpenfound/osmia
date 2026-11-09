@@ -56,8 +56,10 @@ func CoreEnforcement(root config.Root) Enforcement {
 // an ordinary
 // chief-of-staff turn's grant down to chiefOrdinaryTools, which excludes
 // them, and a design session's turn down to designOnlyTools, which excludes
-// everything else, so the ceiling here is never itself the enforced set.
-var chiefGrant = coreadapter.Capabilities{Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
+// everything else, so the ceiling here is never itself the enforced set. It
+// holds the Web permission, which both narrowings set explicitly because a
+// narrowing intersects it.
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
 
 // chiefOrdinaryTools is chiefGrant's tool list without the two design-only
 // tools, so an ordinary chief-of-staff turn never reaches them.
@@ -65,11 +67,20 @@ var chiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(
 	return name == draftBriefToolName || name == designReadRepoToolName
 })
 
+// chiefOrdinaryNarrow is what Select narrows an ordinary chief-of-staff turn
+// to: chiefOrdinaryTools, and the Web permission.
+var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: chiefOrdinaryTools, Web: true}
+
 // designOnlyTools is the entire toolset a design session's turn may reach:
 // read-only file access to its staged view, read-only cross-repo code
 // access, and recording its drafted brief. No write, version-control,
 // credential or owner-gate tool of chiefGrant is reachable through it.
 var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName}
+
+// designNarrow is what Select narrows a design session's turn to:
+// designOnlyTools, and the Web permission. The backend's own web tools are
+// native tools, not service tools, so they add nothing to the tools above.
+var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 
 // chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
@@ -169,7 +180,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == "classifier" && scope.Project == project {
 					workspace := filepath.Join(root, "classifier", project)
@@ -215,7 +226,7 @@ func Enforce(opts Options, e Enforcement) Options {
 							return isolation.Selection{}, err
 						}
 						return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
-							Narrow: &coreadapter.Capabilities{Tools: designOnlyTools}}, nil
+							Narrow: &designNarrow}, nil
 					}
 					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
 					paths, err := stageChiefDocuments(r, stream, workspace)
@@ -223,7 +234,7 @@ func Enforce(opts Options, e Enforcement) Options {
 						return isolation.Selection{}, err
 					}
 					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
-						Narrow: &coreadapter.Capabilities{Tools: chiefOrdinaryTools}}, nil
+						Narrow: &chiefOrdinaryNarrow}, nil
 				}
 				return isolation.Selection{}, errors.New("view selection denied")
 			},

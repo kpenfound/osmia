@@ -628,6 +628,10 @@ func (a AmendmentDebate) Replied(stream config.WorkstreamID, t trace.Thread, q *
 	return reply, nil
 }
 
+// ReplyTurns is the architect's isolated turn path for an amendment debate
+// round's reply: a read-only staged view of the amendment's documents, the
+// file reading tool and the reply tool, and the backend's own web tools like
+// every architect turn path (ArchitectGrant).
 func (a AmendmentDebate) ReplyTurns(stream config.WorkstreamID, id string, n int, open []shed.Entry) *isolation.Turns {
 	cfg := a.S.About(a.Repository)
 	var engine coreadapter.Engine
@@ -636,7 +640,7 @@ func (a AmendmentDebate) ReplyTurns(stream config.WorkstreamID, id string, n int
 		engine = a.S.Options.Architect.Engine
 		hosts = a.S.Options.Architect.Hosts
 	}
-	turns := &isolation.Turns{Workspaces: StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(cfg.Root.String(), "views")}, Grants: map[string]coreadapter.Capabilities{ArchitectRole: {Tools: []string{"file_read", shed.ReplyTool}}}, Hosts: hosts, Engine: engine,
+	turns := &isolation.Turns{Workspaces: StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(cfg.Root.String(), "views")}, Grants: map[string]coreadapter.Capabilities{ArchitectRole: ArchitectGrant("file_read", shed.ReplyTool)}, Hosts: hosts, Engine: engine,
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			if scope.Workstream != string(stream) || scope.Role != ArchitectRole {
 				return isolation.Selection{}, errors.New("turn scope denied")

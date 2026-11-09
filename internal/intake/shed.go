@@ -1210,12 +1210,23 @@ func (d *Debate) Dispatch(ctx context.Context, stream config.WorkstreamID, in Ro
 	return dispatcher.Apply(ctx, op)
 }
 
+// CommitteeDebateGrant is what every committee debate turn path may call:
+// tools, and the backend's own web tools. A final review's turn path grants
+// no Web, and no committee turn holds a write, execute or Network capability.
+func CommitteeDebateGrant(tools ...string) coreadapter.Capabilities {
+	return coreadapter.Capabilities{Tools: tools, Web: true}
+}
+
 // turns is a committee member's isolated turn path: a read-only private view
 // of the owner's clone, the pinned spec and plan, the handed input, the
 // charter, the context bundle and the earlier rounds, the file reading tool,
-// the two contribution tools and the question tool, and no notes, write,
-// execute, network or VCS capability. A turn that asks ends waiting, so its
-// thread parks and its slot is free while the answer is found.
+// the two contribution tools and the question tool, the backend's own web
+// search and page fetch tools (the Web permission, held in plan and amendment
+// debate rounds alone: a final review's turn path grants none), and no notes,
+// write, execute, Network or VCS capability. A backend or placement that
+// cannot hold the turn to its granted tools with the web tools in them runs
+// it without them. A turn that asks ends waiting, so its thread parks and its
+// slot is free while the answer is found.
 func (d *Debate) Turns(stream config.WorkstreamID, in RoundInput) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -1228,7 +1239,7 @@ func (d *Debate) Turns(stream config.WorkstreamID, in RoundInput) *isolation.Tur
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return d.SelectView(ctx, scope, in)
 		},
-		Grants: map[string]coreadapter.Capabilities{CommitteeRole: {Tools: []string{"file_read", shed.ObjectTool, shed.ConcedeTool, questions.AskTool}}},
+		Grants: map[string]coreadapter.Capabilities{CommitteeRole: CommitteeDebateGrant("file_read", shed.ObjectTool, shed.ConcedeTool, questions.AskTool)},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
@@ -1481,7 +1492,7 @@ func (d *Debate) Record(ctx context.Context, operation string, stream config.Wor
 }
 
 func CommitteeSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the decisions the knowledge base holds. You read; you hold no tool that writes, runs or fetches. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
+	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the decisions the knowledge base holds. You read; you hold no tool that writes or runs. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
 }
 
 func CommitteePrompt(in RoundInput, standing []shed.Dissent, answers []string) string {

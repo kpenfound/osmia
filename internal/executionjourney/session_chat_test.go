@@ -6,6 +6,7 @@ import (
 	enforcertest "github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -16,6 +17,7 @@ import (
 	os "os"
 	filepath "path/filepath"
 	regexp "regexp"
+	slices "slices"
 	strings "strings"
 	sync "sync"
 	testing "testing"
@@ -120,6 +122,13 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 			if strings.HasPrefix(name, "mcp__") && !strings.HasPrefix(name, "mcp__osmia_") {
 				t.Errorf("session turn has an unexpected MCP tool: %s", name)
 			}
+		}
+		// An exploratory session keeps the write and execute tools it has and also holds the backend's web tools.
+		if want := []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "mcp__osmia_0"}; !slices.Equal(req.Grants.Tools, want) {
+			t.Errorf("session native tools %v, want %v", req.Grants.Tools, want)
+		}
+		if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(req.SystemPrompt, sessionRolePrompt) {
+			t.Errorf("session system prompt lacks the web guidance after its role prompt: %q", req.SystemPrompt)
 		}
 		if _, ok := req.Env[coreadapter.TokenEnvironment]; !ok {
 			t.Error("session attachment tool has no scoped MCP token")

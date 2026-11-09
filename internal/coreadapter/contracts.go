@@ -46,9 +46,14 @@ type Workspaces interface {
 
 // Capabilities are an allowlist selected by the service for this role. An empty
 // list grants nothing. Repository configuration cannot expand these permissions.
+//
+// Web grants the backend's own web search and page fetch tools. It is separate
+// from Network, which grants service tools that fetch, and a read-only turn may
+// hold it.
 type Capabilities struct {
 	Tools                        []string
 	WriteFiles, Execute, Network bool
+	Web                          bool
 }
 
 // Isolation describes required enforcement, not profile hints. Environment is

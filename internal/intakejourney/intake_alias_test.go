@@ -127,6 +127,8 @@ var ownerActor = intake.OwnerActor
 const draftBriefToolName = intakefixture.DraftBriefToolName
 
 const designReadRepoToolName = intake.DesignReadRepoToolName
+
+const designRolePrompt = intake.DesignRolePrompt
 const designDraftDocument = intakefixture.DesignDraftDocument
 
 const designBriefPath = intake.DesignBriefPath
