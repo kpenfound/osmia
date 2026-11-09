@@ -1,0 +1,56 @@
+# systemd user unit that keeps `osmia serve` running as the login user.
+#
+# Install:
+#   install -D -m 0644 osmia.service ~/.config/systemd/user/osmia.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now osmia
+#   loginctl enable-linger "$USER"   # start at boot without a login session
+#
+# The service runs as the owner, not a service account: it needs the agent CLI
+# logins under $HOME, the clones of your projects, Docker access for the
+# managed Dagger engine and the default XDG root. The unit therefore names no
+# account and carries no sandboxing directives.
+#
+# Read the log (JSON lines on stdout/stderr, collected by the user journal):
+#   journalctl --user -u osmia -o cat | jq .
+
+[Unit]
+Description=Osmia factory service
+Documentation=https://github.com/kpenfound/osmia
+# Osmia retries its own network work, so it does not wait for the network to
+# be online.
+After=network.target
+
+[Service]
+Type=exec
+
+# Runs in the foreground and never forks away; systemd supervises the process.
+# Adjust the path if the osmia binary lives elsewhere.
+# The unit uses the default XDG root (~/.local/share/osmia and
+# ~/.config/osmia). For a self-contained root that holds its own config.toml,
+# add --root PATH, for example:
+#   ExecStart=/usr/local/bin/osmia serve --root %h/osmia
+ExecStart=/usr/local/bin/osmia serve
+
+# User units get a minimal PATH. Adjust this so that the agent CLI (claude,
+# codex or opencode), dagger, jj and docker are found.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Optional secrets, one KEY=value per line, for example GITHUB_TOKEN,
+# TS_AUTHKEY (first tailnet login) and the Dagger Cloud token variable that
+# dagger.cloud_token_env names. The unit starts without this file. Keep
+# secrets in it, never in this unit file, and make it readable only by you
+# (chmod 600).
+EnvironmentFile=-%h/.config/osmia/osmia.env
+
+Restart=on-failure
+RestartSec=5
+
+# SIGTERM reaches only `osmia serve`, which drains and exits; whatever is left
+# in the unit's cgroup (agent, git and dagger children) is killed after it
+# exits or the stop times out.
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

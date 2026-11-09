@@ -31,8 +31,8 @@ type Release {
   Build release archives for every platform.
 
   The result holds one osmia_<version>_<os>_<arch>.tar.gz per platform, each
-  containing the stamped osmia binary, LICENSE and README.md, and a
-  checksums.txt with their SHA-256 sums. Attach its files to a GitHub release.
+  containing the stamped osmia binary, LICENSE, README.md and the systemd user
+  unit osmia.service, and a checksums.txt with their SHA-256 sums. Attach its files to a GitHub release.
   """
   pub build(
     ws: Workspace!,
@@ -52,16 +52,13 @@ type Release {
       platforms
         .reduce(builder(ws)) { ctr, platform =>
           let name = "osmia_" + version + "_" + platform.os + "_" + platform.arch
-          ctr
-            .withEnvVariable("GOOS", platform.os)
-            .withEnvVariable("GOARCH", platform.arch)
-            .withExec(goBuild(version, rev, "/dist/" + name + "/osmia"))
-            .withExec(["cp", "LICENSE", "README.md", "/dist/" + name + "/"])
-            .withExec([
-              "tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner",
-              "--mtime=@0", "--use-compress-program=gzip -n",
-              "-C", "/dist", "-cf", "/out/" + name + ".tar.gz", name,
-            ])
+          archive(
+            ctr
+              .withEnvVariable("GOOS", platform.os)
+              .withEnvVariable("GOARCH", platform.arch)
+              .withExec(goBuild(version, rev, "/dist/" + name + "/osmia")),
+            name,
+          )
         }
         .withWorkdir("/out")
         .withExec(["sh", "-c", "sha256sum *.tar.gz > checksums.txt"])
@@ -82,6 +79,32 @@ type Release {
     let want = "osmia " + version + " (" + rev + ")\n"
     if (out != want) {
       raise "osmia --version printed " + out + ", want " + want
+    }
+    null
+  }
+
+  """
+  Check that the systemd user unit travels from the workspace to an install.
+
+  A placeholder binary is packaged by the same archive step as the release
+  build. The archive is unpacked, osmia.service is installed into a temporary
+  home's ~/.config/systemd/user/ with the command getting started documents,
+  and the installed file must equal deploy/osmia.service and run
+  osmia serve in the foreground.
+  """
+  pub serviceInstall(ws: Workspace!): Void @check {
+    let name = "osmia_v0.0.0-check_linux_amd64"
+    let script = "set -eu; name=$1; tmp=$(mktemp -d); export HOME=$tmp/home; mkdir -p $HOME $tmp/unpack; tar -xzf /out/$name.tar.gz -C $tmp/unpack; cd $tmp/unpack; for f in osmia LICENSE README.md osmia.service; do test -f $name/$f || { echo archive lacks $f >&2; exit 1; }; done; install -D -m 0644 $name/osmia.service ~/.config/systemd/user/osmia.service; unit=$HOME/.config/systemd/user/osmia.service; cmp /src/deploy/osmia.service $unit; grep -Eq '^ExecStart=([^ ]*/)?osmia serve$' $unit || { echo 'ExecStart does not run osmia serve' >&2; exit 1; }; if grep -Eq '^ExecStart=.*--detach' $unit; then echo 'ExecStart passes --detach' >&2; exit 1; fi; echo ok"
+    let out = archive(
+      builder(ws)
+        .withExec(["mkdir", "-p", "/dist/" + name])
+        .withExec(["sh", "-c", "printf placeholder > /dist/" + name + "/osmia"]),
+      name,
+    )
+      .withExec(["sh", "-c", script, "sh", name])
+      .stdout
+    if (out != "ok\n") {
+      raise "service install check printed " + out + ", want ok"
     }
     null
   }
@@ -108,12 +131,27 @@ type Release {
         "/src",
         ws.directory(
           "/",
-          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "LICENSE", "README.md"],
+          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "LICENSE", "README.md", "deploy/osmia.service"],
           exclude: [".bees/**", ".dagger/**"],
         ),
       )
       .withWorkdir("/src")
       .withExec(["mkdir", "-p", "/dist", "/out"])
+  }
+
+  """
+  Package /dist/<name> into /out/<name>.tar.gz, after adding LICENSE, README.md
+  and the systemd user unit beside the osmia binary already there. The tar
+  options fix ordering, timestamps and ownership so archives are reproducible.
+  """
+  let archive(ctr: Container!, name: String!): Container! {
+    ctr
+      .withExec(["cp", "LICENSE", "README.md", "deploy/osmia.service", "/dist/" + name + "/"])
+      .withExec([
+        "tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner",
+        "--mtime=@0", "--use-compress-program=gzip -n",
+        "-C", "/dist", "-cf", "/out/" + name + ".tar.gz", name,
+      ])
   }
 
   """

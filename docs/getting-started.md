@@ -122,6 +122,53 @@ restart-required or reload-required setting appears among the diagnostics; after
 editing the file, `osmia reload` applies what it can
 ([reload](running.md#reload)).
 
+### Run it as a service
+
+On Linux, a systemd user unit keeps the service running and starts it at boot,
+instead of `osmia serve` in a terminal. The unit runs as you, so the agent CLI
+logins, your clones and the default root under `~/.local/share/osmia` work as
+they do in a terminal. Your user needs Docker access for the managed Dagger
+engine. Skip this section to run the service in a terminal.
+
+From the directory where you unpacked the archive in step 1, with the same
+`$name`, install the unit (`osmia.service` sits beside the `osmia` binary in
+the unpacked `$name` directory) and reload the user manager:
+
+```sh
+install -D -m 0644 "$name/osmia.service" ~/.config/systemd/user/osmia.service
+systemctl --user daemon-reload
+```
+
+The unit runs `/usr/local/bin/osmia serve`; edit its `ExecStart` if the binary
+lives elsewhere. User units get a minimal `PATH`, so the unit sets
+`Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`. Edit that line
+so the agent CLI (`claude`, `codex` or `opencode`), `dagger`, `jj` and `docker`
+are found.
+
+Secrets come from an optional environment file, `~/.config/osmia/osmia.env`;
+the unit starts without it. Put one `KEY=value` per line, such as
+`GITHUB_TOKEN`, `TS_AUTHKEY` for the first tailnet login, and the Dagger Cloud
+token variable that [`dagger.cloud_token_env`](configuration.md#top-level-configtoml)
+names:
+
+```sh
+install -D -m 0600 /dev/null ~/.config/osmia/osmia.env
+$EDITOR ~/.config/osmia/osmia.env
+```
+
+For a self-contained root, add `--root PATH` to `ExecStart`. Then enable and
+start the unit, and make it start at boot without a login session:
+
+```sh
+systemctl --user enable --now osmia
+loginctl enable-linger $USER
+```
+
+The unit's log goes to the user journal; see
+[running under systemd](running.md#running-under-systemd) to read it and to
+start, stop, restart and check the service. `osmia status` and the health
+request above work the same against the unit.
+
 ## 4. Add a project and, optionally, write its charter
 
 ```sh
