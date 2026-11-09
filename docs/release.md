@@ -36,7 +36,9 @@ not be empty or contain slashes or spaces.
 
 - `osmia_<version>_<os>_<arch>.tar.gz` for `linux_amd64`, `linux_arm64`,
   `darwin_amd64` and `darwin_arm64`. Each unpacks to a directory of the same
-  name holding the `osmia` binary, `LICENSE` and `README.md`.
+  name holding the `osmia` binary, `LICENSE`, `README.md` and `osmia.service`,
+  the [systemd user unit](getting-started.md#run-it-as-a-service) from
+  `deploy/osmia.service`.
 - `checksums.txt`, in `sha256sum` format.
 
 Attach these files to a GitHub release. The binaries are statically linked
@@ -44,7 +46,11 @@ Attach these files to a GitHub release. The binaries are statically linked
 
 `dagger check` includes `release:version-round-trip`, which builds a stamped
 binary and checks that `osmia --version` prints the stamped version and
-commit. The release build itself is not a check.
+commit. `release:service-install` packages a placeholder binary with the same
+archive step as the release build, unpacks it, installs `osmia.service` as
+getting started documents and checks that the installed file equals
+`deploy/osmia.service` and runs `osmia serve` in the foreground. The release
+build itself is not a check.
 
 ## Installing from an archive
 

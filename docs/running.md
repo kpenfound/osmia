@@ -538,7 +538,7 @@ While a notification problem stands, `osmia status` and `osmia config` show a
 
 ## Service log
 
-While `osmia serve` runs, foreground or detached, everything it writes to its
+While `osmia serve` runs, foreground, detached or under systemd, everything it writes to its
 standard output and standard error is a structured log record: one JSON
 object per line, with a `time`, a `level` and a `msg`, and the record's
 details as named fields rather than only in the message text. In detached
@@ -561,6 +561,34 @@ Filter the stream with any JSON-lines tool, for example `jq`:
 ```sh
 osmia serve 2>&1 | jq -c 'select(.level == "ERROR")'
 ```
+
+### Running under systemd
+
+The [systemd user unit](getting-started.md#run-it-as-a-service) runs the
+service in the foreground, so its log goes to the user journal and
+`<root>/service.log` is not written. `osmia serve --detach` is not used under
+systemd. Read the records with `-o cat`, which prints the JSON lines as
+written:
+
+```sh
+journalctl --user -u osmia -o cat | jq -c 'select(.level == "ERROR")'
+journalctl --user -u osmia -o cat -f | jq -c .   # follow
+```
+
+Manage the service with `systemctl --user`:
+
+```sh
+systemctl --user start osmia
+systemctl --user stop osmia
+systemctl --user restart osmia
+systemctl --user status osmia
+```
+
+Stopping sends SIGTERM to `osmia serve` and waits up to 90 seconds for it to
+drain and exit before killing what remains of the unit's processes. The managed
+Dagger engine is a Docker container outside the unit, so it keeps running.
+`osmia reload` applies configuration changes without a restart
+([reload](#reload)).
 
 ### GitHub activity log
 
