@@ -45,11 +45,12 @@ func (a TestAccess) TryGitOperation(repo *trace.Repository) (func(), bool) {
 // WakeConversations wakes background conversation and network observers.
 func (a TestAccess) WakeConversations() { a.s.conversationSignal.wake() }
 
-// DrainConversations joins conversation paths before seeding recovery evidence.
+// DrainConversations stops conversation paths and waits for their iteration in
+// progress, so none writes a trace after it returns.
 func (a TestAccess) DrainConversations() {
 	_, projects := a.s.runtimes()
 	for _, p := range projects {
-		p.conversations.Drain()
+		p.conversations.Quiesce()
 	}
 }
 

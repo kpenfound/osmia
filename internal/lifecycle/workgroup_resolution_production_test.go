@@ -142,6 +142,7 @@ func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved
 		}
 	}
 }
+
 // awaitGroupResolutionRevision waits until the group's resolution is recorded.
 // It reads only the shared authority, so it is safe while the chief of staff
 // archives and cleans the members.
