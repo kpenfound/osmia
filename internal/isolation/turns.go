@@ -73,6 +73,7 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 	grant.WriteFiles = grant.WriteFiles && request.WriteFiles
 	grant.Execute = grant.Execute && request.Execute
 	grant.Network = grant.Network && request.Network
+	grant.Web = grant.Web && request.Web
 	grant.Tools = slices.DeleteFunc(grant.Tools, func(name string) bool { return !slices.Contains(request.Tools, name) })
 	return grant
 }
@@ -94,6 +95,10 @@ func roleRestrictedTool(role, name string) bool {
 		name == "workstream_diff" && role != "reviewer" && role != "committee"
 }
 
+// webRoles are the roles that may hold the Web permission, whatever the service
+// grant says. Every other role is held to no web tools.
+var webRoles = []string{"chief_of_staff", "architect", "committee", "session"}
+
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
 	case "mason", "librarian", "session":
@@ -101,6 +106,9 @@ func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabil
 		grant.WriteFiles, grant.Execute, grant.Network = false, false, false
 	default:
 		return coreadapter.Capabilities{}, errors.New("unknown Osmia role")
+	}
+	if !slices.Contains(webRoles, role) {
+		grant.Web = false
 	}
 	grant.Tools = slices.DeleteFunc(slices.Clone(grant.Tools), func(name string) bool {
 		owner, reserved := roleTools[name]

@@ -22,7 +22,11 @@ type Engine struct {
 	EnforcerErr, PrepareErr, RunErr error
 	// Policy alters the policy of every prepared session.
 	Policy func(*agent.Policy)
-	OnRun  func() error
+	// PrepareFor, when set, may refuse the grants a session is prepared for.
+	PrepareFor func(agent.Grants) error
+	// PolicyFor alters the policy of a session by the grants it was prepared for.
+	PolicyFor func(agent.Grants, *agent.Policy)
+	OnRun     func() error
 	// Resume answers CheckResume when set; otherwise the saved session is unavailable.
 	Resume       func(previous, next a.Profile, session a.BackendSession) error
 	ResumeChecks int
@@ -94,6 +98,11 @@ type enforcer struct {
 }
 
 func (e enforcer) Prepare(ctx context.Context, grants agent.Grants) (agent.Session, error) {
+	if e.f.PrepareFor != nil {
+		if err := e.f.PrepareFor(grants); err != nil {
+			return nil, err
+		}
+	}
 	s, err := e.fake.Prepare(ctx, grants)
 	if err != nil {
 		return nil, err
@@ -101,10 +110,17 @@ func (e enforcer) Prepare(ctx context.Context, grants agent.Grants) (agent.Sessi
 	e.f.mu.Lock()
 	e.f.Prepared = append(e.f.Prepared, s)
 	e.f.mu.Unlock()
-	if e.f.Policy == nil {
+	if e.f.Policy == nil && e.f.PolicyFor == nil {
 		return s, nil
 	}
-	return session{s, e.f.Policy}, nil
+	return session{s, func(p *agent.Policy) {
+		if e.f.Policy != nil {
+			e.f.Policy(p)
+		}
+		if e.f.PolicyFor != nil {
+			e.f.PolicyFor(grants, p)
+		}
+	}}, nil
 }
 
 type session struct {

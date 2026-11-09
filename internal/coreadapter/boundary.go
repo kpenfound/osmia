@@ -98,6 +98,14 @@ func checkMode(settings ExecutionSettings) error {
 // view as the only mount besides the session's own directory, the service
 // environment as the complete allowlist, role-selected native tools and scoped MCP servers, and no VCS. Before the turn runs, the prepared session's policy must
 // match those grants and leave every Pinned directory unwritable.
+//
+// A turn granted Web whose backend or placement cannot hold it to its granted
+// tools runs without Web instead of failing: when the engine refuses the grants
+// as unsupported or not granted, or prepares a session whose policy matches the
+// grants only once its web tools are set aside, that session is released unrun
+// and the turn is prepared once more without Web. The reduced session must match
+// the reduced grants exactly, the turn is told it has no web tools, and a turn
+// whose session has run is never retried.
 type CoreExecutor struct {
 	Required Isolation
 	Runner   Engine
@@ -139,7 +147,7 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 		return unsupported("workspace", "invalid access")
 	}
 	if iso.Workspace.Access == ReadOnly && (iso.Capabilities.WriteFiles || iso.Capabilities.Execute || iso.Capabilities.Network) {
-		return unsupported("read-only role", "write, execute and fetch are forbidden")
+		return unsupported("read-only role", "write, execute and fetch are forbidden; only web search is permitted")
 	}
 	if iso.Workspace.Access == ReadWrite && !iso.Capabilities.WriteFiles {
 		return unsupported("workspace", "writable mount requires a file-write grant")
@@ -253,7 +261,9 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	engine := e.Runner
 	// Core refuses whatever the grants do not cover. These are the request
 	// fields grants do not describe; they also protect callers that invoke
-	// Run without the normal turn translator.
+	// Run without the normal turn translator. A request that carries grants
+	// carries the turn's full grants; a turn that runs without its web tools
+	// runs under narrower ones.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
 		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || !slices.Equal(req.Profile.Skills, turnSkills(settings, req.Profile.Agent)) || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
@@ -280,23 +290,35 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		req.Workspace = vcs.Directory(scratch)
 		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + viewLocation(iso.Workspace.Directory))
 	}
-	req.Grants = &grants
 	settings.Agent = req.Profile.Agent
 	if settings.Agent == "" {
 		settings.Agent = agent.AgentClaude
 	}
-	enforcer, err := engine.Enforcer(settings)
-	if err != nil {
-		return nil, refusal(err)
+	full := attempt{iso, grants}
+	var reduced *attempt
+	if iso.Capabilities.Web {
+		reducedIso := iso
+		reducedIso.Capabilities.Web = false
+		reducedGrants, grantErr := coreGrants(reducedIso, req.SessionDir, settings, req.Profile.Agent, req.Profile.MCP, skillDirs)
+		if grantErr != nil {
+			return nil, grantErr
+		}
+		reduced = &attempt{reducedIso, reducedGrants}
 	}
-	session, err := enforcer.Prepare(ctx, grants)
-	if err != nil {
-		return nil, refusal(err)
+	session, fallback, err := e.prepare(ctx, engine, full, reduced, settings)
+	if fallback {
+		// The backend or placement cannot hold the turn to its granted tools
+		// with the web tools in them. The turn runs again without them, held to
+		// the reduced grants as strictly, and says so.
+		full = *reduced
+		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + webUnavailable)
+		session, _, err = e.prepare(ctx, engine, full, nil, settings)
 	}
-	defer func() { err = errors.Join(err, session.Release(context.WithoutCancel(ctx))) }()
-	if err = checkPolicy(session.Policy(), iso, settings, grants, e.Pinned); err != nil {
+	if err != nil {
 		return nil, err
 	}
+	req.Grants = &full.grants
+	defer func() { err = errors.Join(err, session.Release(context.WithoutCancel(ctx))) }()
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -313,6 +335,62 @@ func refusal(err error) error {
 		}
 	}
 	return err
+}
+
+// webUnavailable tells a turn that was granted web tools but runs without them
+// that it has none, whatever its other instructions say.
+const webUnavailable = "Web search and page fetching are not available on this turn: the execution environment could not keep it to its granted tools with them. Work without them, and cite no URL you did not read."
+
+// attempt is one set of grants for a turn and the isolation they were built from.
+type attempt struct {
+	iso    Isolation
+	grants agent.Grants
+}
+
+// prepare has the engine prepare a session for the attempt's grants and holds
+// its policy to them. A session whose policy does not match is released and
+// never returned. When the attempt grants Web, fallback reports that the
+// refusal or mismatch is only the web tools' and the turn may be prepared once
+// more as the reduced attempt: the engine refused the grants as unsupported or
+// not granted, or the policy matches the reduced grants once the backend's web
+// tools are set aside. Any other failure is final.
+func (e CoreExecutor) prepare(ctx context.Context, engine Engine, att attempt, reduced *attempt, settings ExecutionSettings) (session agent.Session, fallback bool, err error) {
+	web := reduced != nil
+	enforcer, err := engine.Enforcer(settings)
+	if err != nil {
+		return nil, web && agentRefusal(err), refusal(err)
+	}
+	session, err = enforcer.Prepare(ctx, att.grants)
+	if err != nil {
+		return nil, web && agentRefusal(err), refusal(err)
+	}
+	policy := session.Policy()
+	if err = checkPolicy(policy, att.iso, settings, att.grants, e.Pinned); err != nil {
+		if web {
+			policy.Tools = withoutWebTools(policy.Tools, settings.Agent)
+			fallback = checkPolicy(policy, reduced.iso, settings, reduced.grants, e.Pinned) == nil
+		}
+		if releaseErr := session.Release(context.WithoutCancel(ctx)); releaseErr != nil {
+			return nil, false, errors.Join(err, releaseErr)
+		}
+		return nil, fallback, err
+	}
+	return session, false, nil
+}
+
+// agentRefusal reports whether err is core refusing grants as unsupported or
+// not granted.
+func agentRefusal(err error) bool {
+	return errors.Is(err, agent.ErrUnsupported) || errors.Is(err, agent.ErrNotGranted)
+}
+
+// withoutWebTools is tools less the backend's web tools; nil stays nil.
+func withoutWebTools(tools []string, backend string) []string {
+	if tools == nil {
+		return nil
+	}
+	web := webTools(backend)
+	return slices.DeleteFunc(slices.Clone(tools), func(name string) bool { return slices.Contains(web, name) })
 }
 
 // scratchDirectory is the session subdirectory a read-only turn starts in.
@@ -380,8 +458,9 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 // checkPolicy refuses a session whose policy is not the one the grants
 // describe: another sandbox or image, a view that is not readable or whose
 // write access differs from the isolation's, a writable pinned directory, VCS
-// granted or a VCS executable left undenied, extra native tools, or MCP servers
-// other than the granted ones.
+// granted or a VCS executable left undenied, native tools other than those the
+// isolation's capabilities give the backend (web tools included only when Web
+// is granted), or MCP servers other than the granted ones.
 func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
 	if p.DaggerEngine != grants.DaggerEngine || !slices.Equal(p.HostServers, grants.HostServers) {
 		return unsupported("session policy", "host services differ from the grants")

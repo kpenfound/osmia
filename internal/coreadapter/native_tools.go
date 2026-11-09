@@ -6,10 +6,12 @@ import "github.com/kpenfound/agentcore/agent"
 const skillTool = "Skill"
 
 // nativeTools maps service capabilities to each backend's tool vocabulary.
-// Delegation, arbitrary MCP discovery and provider-native web tools are absent.
-// Shell grants permit execution in the disposable view under the selected
-// sandbox's network policy; delivery credentials and VCS remain withheld. A
-// Claude turn given skills also holds the Skill tool.
+// Delegation and arbitrary MCP discovery are absent. The Web permission adds
+// the backend's own web tools after all others (webTools); without it no web
+// tool is listed, whatever else is granted. Shell grants permit execution in
+// the disposable view under the selected sandbox's network policy; delivery
+// credentials and VCS remain withheld. A Claude turn given skills also holds
+// the Skill tool.
 func nativeTools(backend string, c Capabilities, skills bool) []string {
 	tools := []string{}
 	switch backend {
@@ -40,5 +42,23 @@ func nativeTools(backend string, c Capabilities, skills bool) []string {
 			}
 		}
 	}
+	if c.Web {
+		tools = append(tools, webTools(backend)...)
+	}
 	return tools
+}
+
+// webTools are the web search and page fetch tools of a backend itself: the
+// tools the Web permission grants. The service runs no search or fetch of its
+// own.
+func webTools(backend string) []string {
+	switch backend {
+	case "", agent.AgentClaude:
+		return []string{"WebSearch", "WebFetch"}
+	case agent.AgentCodex:
+		return []string{"web_search"}
+	case agent.AgentOpenCode:
+		return []string{"websearch", "webfetch"}
+	}
+	return nil
 }
