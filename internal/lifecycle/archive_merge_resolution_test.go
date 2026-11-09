@@ -19,7 +19,20 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	host := &fakePulls{}
 	var interrupt, reached atomic.Bool
 	interrupt.Store(true)
+	// The chief of staff archives and cleans the sink once its own PR is
+	// recorded merged, which removes the sink's trace. Holding that archive keeps
+	// the sink's trace readable through the final restart; the upstream member's
+	// controller still retires the group meanwhile.
+	sinkArchive := make(chan struct{})
 	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
+		if step == "auto-archive-selected" {
+			select {
+			case <-sinkArchive:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		if (step == "archive-edge-merge-resolution" || step == "archive-own-pr-merge-observed") && interrupt.Load() {
 			if step == "archive-edge-merge-resolution" {
 				reached.Store(true)
@@ -31,10 +44,7 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	}}, trace.EdgeHardBlock, host)
 	defer f.stop(t)
 	publications := deliverResolutionMembers(t, f)
-	up, err := f.s.repository(f.project)
-	must(t, err)
-	group, err := up.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
+	group := resolutionGroupID(t, f)
 	check := func(want bool) {
 		t.Helper()
 		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
@@ -64,7 +74,7 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 			t.Fatal("shared spec history lost")
 		}
 	}
-	_, err = f.c.Archive(ctx, f.stream1)
+	_, err := f.c.Archive(ctx, f.stream1)
 	must(t, err)
 	lifecycleAwait(t, f, "unmerged upstream cleanup", func() bool { a, ok := archiveRecord(t, f.s.store, f.stream1); return ok && !a.CleanedAt.IsZero() })
 	before, ok := archiveRecord(t, f.s.store, f.stream1)
@@ -131,6 +141,24 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	must(t, err)
 	if !gone {
 		t.Fatal("resolution recreated cleaned member history")
+	}
+	// Releasing the sink's archive lets the chief of staff archive and clean it
+	// after every check of its trace. Only the shared authority and the runtime
+	// archive are read while that cleanup runs.
+	close(sinkArchive)
+	lifecycleAwait(t, f, "sink archive cleanup", func() bool { a, ok := archiveRecord(t, f.s.store, f.stream2); return ok && !a.CleanedAt.IsZero() })
+	if a, _ := archiveRecord(t, f.s.store, f.stream2); !archiveResolved(a) || a.MergeCommit != "sink-merge" || a.Publication.PullRequest != sink.PullRequest {
+		t.Fatalf("sink archive=%+v", a)
+	}
+	authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
+	must(t, err)
+	defer authority.Close()
+	ids, rev, err := trace.ResolvedWorkgroups(authority)
+	must(t, err)
+	active, err := trace.ProjectSpecActive(authority, group)
+	must(t, err)
+	if !slices.Equal(ids, []config.WorkgroupID{group}) || rev != 1 || active {
+		t.Fatalf("group after sink cleanup=%v rev=%d active=%v", ids, rev, active)
 	}
 }
 func TestSameRepoArchivedMergeReceiptRequiresExactPublication(t *testing.T) {
