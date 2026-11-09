@@ -68,6 +68,49 @@ func TestGitConcurrentWorktreeUpkeep(t *testing.T) {
 	}
 }
 
+// A directory removed while Git is forgetting its worktree is half gone for a
+// moment: its .git file is deleted before the directory itself. Git lists such a
+// worktree as prunable but `git worktree remove` refuses it, because the
+// directory exists without a .git file. Concurrent upkeep meets this state
+// whenever one provider forgets a worktree whose directory another is deleting.
+func TestGitForgetsAWorktreeWhoseDirectoryIsHalfRemoved(t *testing.T) {
+	t.Parallel()
+	for name, forget := range map[string]func(*Git, context.Context) error{
+		"prune": func(g *Git, ctx context.Context) error { return g.Prune(ctx) },
+		"workspace": func(g *Git, ctx context.Context) error {
+			if _, found, err := g.Workspace(ctx, "a"); err != nil || found {
+				return fmt.Errorf("half-removed worktree found %t: %w", found, err)
+			}
+			return nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			ctx := context.Background()
+			req := vcs.Request{Name: "a", Branch: "a", Ref: "main"}
+			w, err := f.provider.Acquire(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFiles(t, w.Directory(), map[string]string{"leftover.txt": "not yet deleted\n"})
+			if err := os.Remove(filepath.Join(w.Directory(), ".git")); err != nil {
+				t.Fatal(err)
+			}
+			if err := forget(f.provider, ctx); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := f.provider.list(ctx)
+			if err != nil || len(entries) != 1 || entries[0].path != f.clone {
+				t.Fatalf("worktree list after forgetting: %+v: %v", entries, err)
+			}
+			if _, err := f.provider.Acquire(ctx, req); err != nil {
+				t.Fatalf("worktree not made again: %v", err)
+			}
+		})
+	}
+}
+
 func TestGitConcurrentReplaysUseOperationScratchWorktrees(t *testing.T) {
 	// A wrapper gates core's first command after the scratch worktree is added,
 	// proving both scratch directories coexist while their replays are active.

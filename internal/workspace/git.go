@@ -1296,10 +1296,20 @@ func (g *Git) replayedBranch(ctx context.Context, dir string) (string, error) {
 	return branch, nil
 }
 
-// forget removes one worktree's metadata from the clone.
+// forget removes one worktree's metadata from the clone. Git lists a worktree
+// as prunable once its .git file is gone, yet refuses to remove it while its
+// directory still exists. That is the state of a directory whose deletion is in
+// progress or was interrupted, so what remains of it is deleted first, and
+// Git then removes the registration of a missing directory. A directory that
+// still has its .git file is left to Git.
 func (g *Git) forget(ctx context.Context, entry listed) error {
 	ctx, unlock := lockClone(ctx, g.Clone)
 	defer unlock()
+	if _, err := os.Lstat(filepath.Join(entry.path, ".git")); errors.Is(err, os.ErrNotExist) {
+		if err := os.RemoveAll(entry.path); err != nil {
+			return err
+		}
+	}
 	_, err := g.run(ctx, "worktree", "remove", "--force", entry.path)
 	return err
 }
