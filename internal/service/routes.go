@@ -32,6 +32,7 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/health", Summary: "Report API availability, backend readiness, API version and build identity", Response: api.HealthResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/activity", Summary: "List the backend operations the activity record holds", Response: api.ActivityResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/stop", Summary: "Stop the service; refused on the web and tailnet listeners", Response: api.StopResponse{}, Status: http.StatusAccepted},
+	{Method: http.MethodPost, Path: api.Prefix + "/transcribe", Summary: "Transcribe one recorded audio clip, sent base64-encoded with its MIME type, through the configured Whisper server; refused when [transcribe] url is empty or the clip is too large", Request: api.TranscribeRequest{}, Response: api.TranscribeResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/events", Summary: "Follow the event stream", Response: api.Event{}, Stream: true},
 
 	{Method: http.MethodGet, Path: api.Prefix + "/config", Summary: "Show the loaded configuration, its disk drift and diagnostics", Response: api.ConfigResponse{}},

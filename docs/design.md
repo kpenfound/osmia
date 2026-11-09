@@ -957,6 +957,12 @@ enabled = false                      # one switch for every Jev judgment
 # model = "~typesafe/jev-latest"
 # api_key_env = "OPENROUTER_API_KEY"
 
+[transcribe]
+# Optional Whisper transcription for the composers' microphone; empty url is off.
+# url = "http://whisper.<tailnet>.ts.net:8000/v1/audio/transcriptions"
+# model = "large-v3-turbo"
+# api_key_env = "WHISPER_API_KEY"      # optional bearer key, read from the environment
+
 [notify]
 webhook = "https://ntfy.sh/..."
 
@@ -1050,6 +1056,7 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 ## 15. Security
 
 - Tailnet membership is the boundary for the web interface and the API. The unix socket is the boundary locally, and the loopback interface is the boundary for the optional web listener, which binds no other address and refuses requests whose `Host` is not loopback or whose writes are not JSON. The tailnet listener refuses requests whose `Host` is neither an IP address nor one of the node's names, and writes that are not JSON. There is no in-app authentication and no multi-user isolation.
+- Recorded audio goes from the page to the service as a JSON write (`POST /v1/transcribe`, subject to the same `Host` and JSON rules) and on to the owner's configured Whisper server; it and its transcription are transient, never stored or written to a trace, log or event, and the Whisper bearer key is read from the environment and never leaves the service.
 - Sessions never hold a version control tool, so a session cannot push, force-push or rewrite history.
 - Web access is granted to the planning roles alone (§9.5). A page they read may carry hostile instructions; this risk is accepted because those roles hold no write, shell, credential or owner-gate capability, and the shed, the reviewers and the owner's ratification check what they produce. In sbx, the owner's network policy decides which hosts a fetch reaches.
 - GitHub credentials reach the foreman's push and pull request calls as environment variables, never as arguments, and never reach a session.

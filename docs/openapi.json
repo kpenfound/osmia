@@ -3580,6 +3580,43 @@
         }
       }
     },
+    "/v1/transcribe": {
+      "post": {
+        "summary": "Transcribe one recorded audio clip, sent base64-encoded with its MIME type, through the configured Whisper server; refused when [transcribe] url is empty or the clip is too large",
+        "operationId": "postTranscribe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscribeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscribeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/workgroups/{id}/conversation": {
       "post": {
         "summary": "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note",
@@ -4374,6 +4411,9 @@
           "skills": {
             "$ref": "#/components/schemas/ConfigSkills"
           },
+          "transcribe": {
+            "$ref": "#/components/schemas/ConfigTranscribe"
+          },
           "version": {
             "type": "integer"
           },
@@ -4780,6 +4820,20 @@
       "ConfigSkills": {
         "properties": {
           "refresh": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigTranscribe": {
+        "properties": {
+          "api_key_env": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         },
@@ -8452,6 +8506,25 @@
             "type": "integer"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TranscribeRequest": {
+        "properties": {
+          "audio": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TranscribeResponse": {
+        "properties": {
+          "text": {
             "type": "string"
           }
         },

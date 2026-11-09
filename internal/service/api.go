@@ -154,6 +154,16 @@ const NotFound = api.NotFound
 
 const Forbidden = api.Forbidden
 
+const TranscriptionOff = api.TranscriptionOff
+
+const TranscriptionFailed = api.TranscriptionFailed
+
+const TooLarge = api.TooLarge
+
+type TranscribeRequest = api.TranscribeRequest
+
+type TranscribeResponse = api.TranscribeResponse
+
 type APIError = api.APIError
 
 type ErrorResponse = api.ErrorResponse

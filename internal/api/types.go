@@ -32,6 +32,15 @@ const (
 	ProjectActive   Code = "project_active"
 	NotFound        Code = "not_found"
 	Forbidden       Code = "forbidden"
+	// TranscriptionOff answers a transcription request while no [transcribe]
+	// url is configured.
+	TranscriptionOff Code = "transcription_off"
+	// TranscriptionFailed answers a transcription request the configured
+	// server could not complete: unreachable, timed out, a non-success status
+	// or an unreadable reply.
+	TranscriptionFailed Code = "transcription_failed"
+	// TooLarge answers an upload over its size limit.
+	TooLarge Code = "too_large"
 )
 
 type APIError struct {

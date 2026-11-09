@@ -251,6 +251,15 @@ webhook = ""
 # "never", "always" or a duration.
 refresh = "24h"
 
+[transcribe]
+# The full OpenAI-compatible transcription endpoint recorded audio is posted
+# to; empty turns Whisper transcription off.
+url = ""
+# The model name sent with each request.
+model = "large-v3-turbo"
+# The environment variable holding an optional bearer key.
+api_key_env = "WHISPER_API_KEY"
+
 [roles.mason]
 profile = "default"
 sandbox = "none"
@@ -293,10 +302,10 @@ unavailable with a reason, and a failed certificate request is retried (see
 [Tailnet listener](running.md#tailnet-listener)). HTTP does not redirect to
 HTTPS.
 
-Dictation uses the browser's speech recognition over HTTPS or localhost.
-Osmia never receives audio: Chrome sends audio to Google for processing, and
-Safari sends audio to Apple. See [dictation](running.md#dictation) for use in
-conversation composers.
+Dictation in conversation composers records in the browser, which allows
+microphone capture only over HTTPS or localhost, and transcribes the recording
+through the Whisper server named by [`[transcribe]`](#optional-whisper-transcription).
+See [dictation](running.md#dictation) for use in conversation composers.
 
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
@@ -1133,7 +1142,7 @@ in `runtime.json`, never these files.
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
 `listen.web`, `listen.tailnet` and `listen.tailnet_https` keep their loaded
 values until the service restarts. Role skills and `skills.refresh` apply to turns that start after a
-reload. The `active_projects` list applies live: additions start their retained
+reload, and `[transcribe]` to transcriptions that start after one. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
@@ -1232,6 +1241,59 @@ the parent's feature branch. After the parent integrates, fresh review and
 owner delivery approval authorize retargeting that same pull request to the
 project's base branch with the approved description. Interrupted updates are
 reconciled against the recorded request before retrying.
+
+## Optional Whisper transcription
+
+Conversation composers can turn a spoken recording into text through a Whisper
+server you run, such as an OpenAI-compatible `/v1/audio/transcriptions`
+endpoint reachable over your tailnet. Transcription is off until `url` is set;
+with it off, the composers show no microphone and the service contacts no
+server.
+
+```toml
+[transcribe]
+# The full transcription endpoint audio is posted to. Empty (the default)
+# turns transcription off.
+url = "http://whisper.<tailnet>.ts.net:8000/v1/audio/transcriptions"
+# The model name sent with each request.
+model = "large-v3-turbo"
+# The environment variable holding an optional bearer key.
+api_key_env = "WHISPER_API_KEY"
+```
+
+`url` must be an `http` or `https` URL with a host and without credentials, a
+query or a fragment; plain `http` to a tailnet address is expected. `model`
+names a model in up to 128 characters without whitespace, and `api_key_env`
+names an environment variable. The settings are validated whether or not
+transcription is on; an invalid one fails the load with an error naming the
+field, such as `transcribe.url`. They apply through reload: the next
+transcription after `osmia reload` uses the new endpoint and model, with no
+restart. `osmia config` and `GET /v1/config` show the three settings, which is
+how the page learns whether transcription is on.
+
+### Where audio goes
+
+The page records in the browser and uploads each clip to the Osmia service
+(`POST /v1/transcribe`, a JSON body carrying the clip base64-encoded with its
+MIME type). The service posts it to `url` as a multipart request, the audio as
+`file` with its MIME type and a matching filename extension, and `model`, and
+answers the page with the transcribed text. The browser never contacts the
+Whisper server, so the page's content security policy is unchanged. The
+service does not store the clip or the text, and neither reaches the trace,
+the log, an event or a file under the root.
+
+The service adds `Authorization: Bearer <key>` exactly when the variable named
+by `api_key_env` is set in the service's environment. The key is read from
+the environment for each request, never stored in configuration, and it appears
+in no response, error or log record. The service does not follow redirects
+from the Whisper server, so a clip and the key go only to the configured URL.
+
+A clip over 25 MiB is refused without being forwarded. A request to the Whisper
+server may take two minutes at most. An unreachable server, a non-success
+status, a reply that is not a `{"text": ...}` object and a timeout each answer
+a transcription error with no text. On the web and tailnet listeners the route
+follows the other writes: the `Host` must name the listener and the request
+body must be JSON.
 
 ## Optional Jev boost
 
