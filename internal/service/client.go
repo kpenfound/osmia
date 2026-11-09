@@ -213,6 +213,13 @@ func (c *Client) Reload(ctx context.Context) (api.ReloadResponse, error) {
 	err := c.Do(ctx, "POST", api.Prefix+"/reload", nil, &v)
 	return v, err
 }
+
+// Transcribe sends one recorded clip to the service's Whisper transcription.
+func (c *Client) Transcribe(ctx context.Context, req api.TranscribeRequest) (api.TranscribeResponse, error) {
+	var v api.TranscribeResponse
+	err := c.do(ctx, "POST", api.Prefix+"/transcribe", req, &v, 3*transcribeTimeout)
+	return v, err
+}
 func (c *Client) Runtime(ctx context.Context) (api.RuntimeResponse, error) {
 	var v api.RuntimeResponse
 	err := c.Do(ctx, "GET", api.Prefix+"/runtime", nil, &v)

@@ -159,6 +159,12 @@ type Options struct {
 	// use it to wait for a pass to demonstrably complete instead of a fixed
 	// number of ticks or a sleep.
 	schedulePassed func()
+	// getenv replaces os.Getenv for the transcription key, for tests.
+	getenv func(string) string
+	// transcribeLimit and transcribeTimeout replace the clip size limit and
+	// the request bound to the transcription server, for tests.
+	transcribeLimit   int64
+	transcribeTimeout time.Duration
 }
 
 // activeProject is the runtime state of one active project: its open trace

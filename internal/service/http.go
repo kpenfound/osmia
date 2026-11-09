@@ -65,6 +65,14 @@ func failWith(w http.ResponseWriter, api *APIError) {
 		status = 501
 	case Unavailable:
 		status = 503
+	case Malformed:
+		status = 400
+	case TranscriptionOff:
+		status = 409
+	case TranscriptionFailed:
+		status = 502
+	case TooLarge:
+		status = 413
 	}
 	respond(w, status, ErrorResponse{Error: *api})
 }
@@ -232,6 +240,10 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		respond(w, http.StatusAccepted, StopResponse{Stopping: true})
 		s.cancel()
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/transcribe" {
+		s.transcribeRequest(w, r)
 		return
 	}
 	if s.documentRequest(w, r) {
@@ -970,8 +982,19 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 }
 func decode(w http.ResponseWriter, r *http.Request, out any) bool {
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		fail(w, Malformed)
+		return false
+	}
+	return decodeBody(w, data, out)
+}
+
+// decodeBody reads data as one JSON object with known, unique fields into
+// out. It answers a malformed body without echoing any of it.
+func decodeBody(w http.ResponseWriter, data []byte, out any) bool {
 	data = bytes.TrimSpace(data)
-	if err != nil || len(data) == 0 || data[0] != '{' {
+	var err error
+	if len(data) == 0 || data[0] != '{' {
 		fail(w, Malformed)
 		return false
 	}

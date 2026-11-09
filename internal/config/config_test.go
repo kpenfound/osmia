@@ -108,6 +108,29 @@ func TestJevBoostIsOneSwitch(t *testing.T) {
 	}
 }
 
+func TestTranscribeDefaultsToOff(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || c.Transcribe != (Transcribe{Model: "large-v3-turbo", APIKeyEnv: "WHISPER_API_KEY"}) || c.Transcribe.Enabled() {
+		t.Fatalf("transcribe defaults: %+v %v", c.Transcribe, err)
+	}
+	c, err = Load(fixture(t, topConfig+"[transcribe]\nurl = ''\n", projectConfig))
+	if err != nil || c.Transcribe.Enabled() {
+		t.Fatalf("an empty url turns transcription off: %+v %v", c.Transcribe, err)
+	}
+}
+
+func TestTranscribeSettings(t *testing.T) {
+	const url = "http://whisper.tail1234.ts.net:8000/v1/audio/transcriptions"
+	c, err := Load(fixture(t, topConfig+"[transcribe]\nurl = '"+url+"'\n", projectConfig))
+	if err != nil || c.Transcribe != (Transcribe{URL: url, Model: DefaultTranscribeModel, APIKeyEnv: DefaultTranscribeAPIKeyEnv}) || !c.Transcribe.Enabled() {
+		t.Fatalf("a url alone keeps the other defaults: %+v %v", c.Transcribe, err)
+	}
+	c, err = Load(fixture(t, topConfig+"[transcribe]\nurl = 'https://whisper.example/v1/audio/transcriptions'\nmodel = 'whisper-1'\napi_key_env = 'MY_WHISPER_KEY'\n", projectConfig))
+	if err != nil || c.Transcribe != (Transcribe{URL: "https://whisper.example/v1/audio/transcriptions", Model: "whisper-1", APIKeyEnv: "MY_WHISPER_KEY"}) {
+		t.Fatalf("transcribe: %+v %v", c.Transcribe, err)
+	}
+}
+
 func TestJevCheckThreshold(t *testing.T) {
 	for _, c := range []struct {
 		value string
@@ -306,6 +329,20 @@ func TestInvalid(t *testing.T) {
 		{"jev check threshold above one", topConfig + "[jev]\ncheck_threshold = 1.5\n", "", "jev.check_threshold"},
 		{"jev check threshold nan", topConfig + "[jev]\ncheck_threshold = nan\n", "", "jev.check_threshold"},
 		{"jev unknown key", topConfig + "[jev]\nclassification = true\n", "", "jev.classification"},
+		{"transcribe url scheme", topConfig + "[transcribe]\nurl = 'ftp://whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
+		{"transcribe url relative", topConfig + "[transcribe]\nurl = '/v1/audio/transcriptions'\n", "", "transcribe.url"},
+		{"transcribe url no host", topConfig + "[transcribe]\nurl = 'http:///v1/audio/transcriptions'\n", "", "transcribe.url"},
+		{"transcribe url credentials", topConfig + "[transcribe]\nurl = 'http://user:pass@whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
+		{"transcribe url token credentials", topConfig + "[transcribe]\nurl = 'http://token@whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
+		{"transcribe url query", topConfig + "[transcribe]\nurl = 'http://whisper.example/v1/audio/transcriptions?key=1'\n", "", "transcribe.url"},
+		{"transcribe url fragment", topConfig + "[transcribe]\nurl = 'http://whisper.example/v1/audio/transcriptions#x'\n", "", "transcribe.url"},
+		{"transcribe url malformed", topConfig + "[transcribe]\nurl = 'http://exa mple.com/%zz'\n", "", "transcribe.url"},
+		{"transcribe model blank", topConfig + "[transcribe]\nmodel = ' '\n", "", "transcribe.model"},
+		{"transcribe model spaced", topConfig + "[transcribe]\nmodel = 'large v3'\n", "", "transcribe.model"},
+		{"transcribe key value", topConfig + "[transcribe]\napi_key_env = 'sk-123 456'\n", "", "transcribe.api_key_env"},
+		{"transcribe key empty", topConfig + "[transcribe]\napi_key_env = ''\n", "", "transcribe.api_key_env"},
+		{"transcribe unknown key", topConfig + "[transcribe]\ntimeout = '5s'\n", "", "transcribe.timeout"},
+		{"transcribe wrong type", topConfig + "[transcribe]\nurl = 1\n", "", "config.toml:"},
 		{"beekeeper unknown key", topConfig + "[beekeeper]\nfoo = 1\n", "", "beekeeper.foo"},
 		{"pause override", topConfig + "[pause]\n", "", "runtime overrides belong in runtime.json"},
 		{"priority override", topConfig + "[priority]\n", "", "runtime overrides belong in runtime.json"},

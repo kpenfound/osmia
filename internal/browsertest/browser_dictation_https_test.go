@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -30,8 +33,19 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	}
 	const nodeName = "osmia.tail0.ts.net"
 	const secureAddress = "https://" + nodeName + "/"
+	const text = "Please keep the upload API stable."
+	whisper := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"text":` + quote(text) + `}`))
+	}))
+	t.Cleanup(whisper.Close)
 	opts, _ := servicetest.ConversationFixture(t, "dictation-https-")
 	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
+	top, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
+	must(t, err)
+	_, err = top.WriteString("[transcribe]\nurl = " + quote(whisper.URL+"/v1/audio/transcriptions") + "\n")
+	must(t, err)
+	must(t, top.Close())
 	join, joined := fixturekit.TailnetJoiner(nodeName, "osmia")
 	opts.JoinTailnet = func(host, dir string) (service.TailnetListener, error) { return join(host, dir) }
 	s, c := servicetest.Start(t, opts)
@@ -78,12 +92,18 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	})
 	p.Run(network.Enable(), chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`
-		 window.recognizers = [];
-		 window.SpeechRecognition = class {
-		  constructor() { recognizers.push(this); this.stops = 0; }
-		  start() { this.started = true; }
-		  stop() { this.stops++; }
-		  result(text) { this.onresult({results: [Object.assign([{transcript: text}], {isFinal:true})]}); }
+		 window.recorders = [];
+		 Object.defineProperty(navigator, 'mediaDevices', {configurable: true, value: {
+		  getUserMedia: async () => ({getTracks: () => [{stop() {}}]}),
+		 }});
+		 window.MediaRecorder = class {
+		  static isTypeSupported(type) { return type === 'audio/webm;codecs=opus'; }
+		  constructor(stream, options = {}) { recorders.push(this); this.mimeType = options.mimeType || ''; this.state = 'inactive'; }
+		  start() { this.state = 'recording'; }
+		  stop() {
+		   this.state = 'inactive';
+		   setTimeout(() => { this.ondataavailable({data: new Blob(['voice'], {type: this.mimeType})}); this.onstop(); }, 0);
+		  }
 		 };
 		`).Do(ctx)
 		return err
@@ -106,11 +126,10 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	 const mic = document.querySelector(`+quote(mic)+`), link = document.querySelector(`+quote(link)+`);
 	 return mic && !mic.hidden && mic.getBoundingClientRect().width > 0 && link.hidden;
 	})()`)
-	const text = "Please keep the upload API stable."
 	p.Click(mic)
-	p.Await("listening", `recognizers.at(-1)?.started && document.querySelector(`+quote(mic)+`).getAttribute('aria-pressed') === 'true'`)
-	p.Eval(`recognizers.at(-1).result(`+quote(text)+`)`, nil)
-	p.Await("the dictated draft", `document.querySelector(`+quote(form+" textarea")+`).value === `+quote(text))
+	p.Await("recording", `recorders.at(-1)?.state === 'recording' && document.querySelector(`+quote(mic)+`).getAttribute('aria-pressed') === 'true'`)
+	p.Click(mic)
+	p.Await("the transcribed draft", `document.querySelector(`+quote(form+" textarea")+`).value === `+quote(text))
 	before, err := c.Conversation(context.Background(), stream)
 	must(t, err)
 	if len(before.Entries) != 0 {
@@ -118,7 +137,7 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	}
 	p.Click(form + ` [aria-label=Send]`)
 	p.AwaitText(form+" .result", "Sent; the chief of staff answers in its next turn")
-	p.Await("stopped recognition and cleared draft", `recognizers.at(-1).stops === 1 && document.querySelector(`+quote(form+" textarea")+`).value === ''`)
+	p.Await("cleared draft", `document.querySelector(`+quote(form+" textarea")+`).value === ''`)
 	select {
 	case response := <-responses:
 		_, port, err := net.SplitHostPort(node.HTTPSAddr())

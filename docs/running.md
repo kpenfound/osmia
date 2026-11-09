@@ -339,15 +339,33 @@ online or the page becomes visible again.
 
 ## Dictation
 
-Each conversation composer offers a microphone when the browser supports speech
-recognition and the page uses HTTPS or localhost. On a plain HTTP tailnet page,
-the composer offers a link to HTTPS when it is available, keeping the selected
-conversation. Tap the microphone to start or stop dictation, edit the text, then
-press Send. Dictation never sends a message automatically.
-The Settings menu shows the tailnet HTTPS address or the reason it is unavailable.
+Each conversation composer (workstream, workgroup, exploratory session and
+design session) offers a microphone immediately before Send when
+[`[transcribe]`](configuration.md#optional-whisper-transcription) names a
+Whisper server and the browser can record audio, which browsers allow only on
+an HTTPS or localhost page. Otherwise the microphone is hidden. On a plain HTTP
+tailnet page, the composer offers a link to HTTPS when it is available, keeping
+the selected conversation. The Settings menu shows the tailnet HTTPS address or
+the reason it is unavailable.
 
-Dictation uses the browser's speech recognition. Osmia never receives audio:
-Chrome sends audio to Google for processing, and Safari sends audio to Apple.
+Tap the microphone and allow microphone access to start recording; the button
+shows it is recording. Tap it again to stop. The composer shows that
+transcription is in progress until the Osmia service answers, and then the
+transcribed text goes into the message box. An empty box receives the text as
+is. A box that already holds text, typed or from an earlier recording, keeps all
+of it and gets the transcription added at its end after a space, wherever the
+cursor or selection is. Edit the text, then press Send or Enter. Recording and
+transcription never send a message on their own.
+
+A refused microphone, an empty recording, transcription not being configured
+and a failed transcription each show a message beside the composer, leave the
+draft as it was and put the microphone back to idle. A recording belongs to the
+composer and conversation where it started: switching conversation or sending
+stops it, and a transcription that finishes afterwards is discarded.
+
+Audio goes from the browser to the Osmia service and on to the configured
+Whisper server, and nowhere else. The service does not store it and does not
+write it, or the transcribed text, to the trace, the log or an event.
 
 ## Sessions
 

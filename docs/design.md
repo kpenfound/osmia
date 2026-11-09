@@ -803,7 +803,7 @@ Single-member workgroups keep the member's conversation, composer and decisions 
 
 Workgroup, workstream, design and exploratory conversation feeds scroll to their newest entry when opened, including direct hash links and returning to the Feed tab. If entries arrive after opening, scrolling waits for them to render. Every new displayed entry scrolls the conversation to its end even when the owner has scrolled up; an exploratory message's local echo counts once, and its recorded replacement does not count again. Reads and renders without new entries preserve the scroll position. Hidden feeds and other views do not scroll in response to entries, and the composer keeps its focus and draft text.
 
-Each conversation composer offers an icon-only microphone immediately before Send when the page is a secure context and the browser supports speech recognition. Tap it to dictate in the page or browser language; tap again to stop. The same microphone turns the accent colour while listening. Interim and final text replace the textarea selection at the cursor, preserving surrounding text. Dictation never sends automatically: Send, including desktop Enter, stops listening and uses the ordinary message path. Recognition errors appear beside the composer and preserve its draft. A recognition session belongs to the composer and conversation where it started; stopping, sending or leaving that conversation ends its authority, including any later browser callbacks.
+Each conversation composer offers an icon-only microphone immediately before Send when transcription is configured (`effective.transcribe.url` of `GET /v1/config` is non-empty) and the page is a secure context in a browser with `MediaRecorder` and `getUserMedia`; otherwise it is hidden, and a plain-HTTP tailnet page still offers the link to its HTTPS address. Tap it to ask for the microphone and record; the button turns the accent colour while recording. Tap again to stop: the composer shows that transcription is in progress, the clip goes base64-encoded in the JSON body of `POST /v1/transcribe`, and the returned text is appended to the end of the textarea after whitespace (as is when the textarea is empty), never replacing a selection or any existing text. Recording and transcription never send automatically; Send and Enter keep their ordinary path. A refused microphone, an empty recording, transcription being off and a transcription failure appear in the composer's outcome line and leave the draft unchanged. A recording belongs to the composer and conversation where it started; sending or leaving that conversation stops it and discards any later transcription.
 
 The sidebar groups multi-member workgroups with each member labelled by project name. The newest member activity orders each group, and selection preserves that order. The adopted design host is omitted from the workstream rows. Archived members retain their grouping in the archive list.
 
@@ -957,6 +957,12 @@ enabled = false                      # one switch for every Jev judgment
 # model = "~typesafe/jev-latest"
 # api_key_env = "OPENROUTER_API_KEY"
 
+[transcribe]
+# Optional Whisper transcription for the composers' microphone; empty url is off.
+# url = "http://whisper.<tailnet>.ts.net:8000/v1/audio/transcriptions"
+# model = "large-v3-turbo"
+# api_key_env = "WHISPER_API_KEY"      # optional bearer key, read from the environment
+
 [notify]
 webhook = "https://ntfy.sh/..."
 
@@ -1050,6 +1056,7 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 ## 15. Security
 
 - Tailnet membership is the boundary for the web interface and the API. The unix socket is the boundary locally, and the loopback interface is the boundary for the optional web listener, which binds no other address and refuses requests whose `Host` is not loopback or whose writes are not JSON. The tailnet listener refuses requests whose `Host` is neither an IP address nor one of the node's names, and writes that are not JSON. There is no in-app authentication and no multi-user isolation.
+- Recorded audio goes from the page to the service as a JSON write (`POST /v1/transcribe`, subject to the same `Host` and JSON rules) and on to the owner's configured Whisper server; it and its transcription are transient, never stored or written to a trace, log or event, and the Whisper bearer key is read from the environment and never leaves the service.
 - Sessions never hold a version control tool, so a session cannot push, force-push or rewrite history.
 - Web access is granted to the planning roles alone (§9.5). A page they read may carry hostile instructions; this risk is accepted because those roles hold no write, shell, credential or owner-gate capability, and the shed, the reviewers and the owner's ratification check what they produce. In sbx, the owner's network policy decides which hosts a fetch reaches.
 - GitHub credentials reach the foreman's push and pull request calls as environment variables, never as arguments, and never reach a session.
