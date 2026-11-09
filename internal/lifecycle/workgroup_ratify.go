@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -519,8 +520,10 @@ func (s *Controller) EnqueueProjectSpecDraft(ctx context.Context, wt *trace.Repo
 
 // ProjectSpecDraftTurns is the architect's isolated turn path for the
 // Project-spec draft: a read-only staged view of every member's own already
-// recorded handed input, spec.md and plan.json, the delivery tool, and no
-// write, execute, network, VCS or ask capability. Unlike a per-member
+// recorded handed input, spec.md and plan.json, the delivery tool, the
+// backend's own web search and page fetch tools (the Web permission every
+// architect turn path holds), and no write, execute, Network, VCS or ask
+// capability. Unlike a per-member
 // draft, this step cannot ask a question: it only combines what members'
 // own drafting already resolved.
 func (s *Controller) ProjectSpecDraftTurns(wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, input ProjectSpecDraftInput) *isolation.Turns {
@@ -539,7 +542,7 @@ func (s *Controller) ProjectSpecDraftTurns(wt *trace.Repository, g trace.Workgro
 			return isolation.Selection{}, err
 		}
 		return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"members"}, Execution: settings}, nil
-	}, Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{ProjectSpecDraftTool}}}, Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+	}, Grants: map[string]coreadapter.Capabilities{architectRole: intake.ArchitectGrant(ProjectSpecDraftTool)}, Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 		if scope.Workstream != string(host) {
 			return nil, errors.New("turn scope denied")
 		}

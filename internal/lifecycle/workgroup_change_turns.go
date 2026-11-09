@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -596,6 +597,13 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 	}
 	return nil
 }
+
+// DeltaSystemPrompt is the role prompt of a delta debate turn. The web
+// guidance a turn holding Web is told is added when the turn runs.
+func DeltaSystemPrompt(role string) string {
+	return "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve."
+}
+
 func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c WorkgroupChange, role, agent, tool string) error {
 	turn := DeltaTurnID(c, agent, tool)
 	if _, err := wt.Thread(c.Host, agent); errors.Is(err, os.ErrNotExist) {
@@ -632,56 +640,16 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 			return err
 		}
 		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read charters.md and check shared behaviour and contracts against every member charter. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
-		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve.", Prompt: prompt + acceptanceDraftInstructions})
+		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: DeltaSystemPrompt(role), Prompt: prompt + acceptanceDraftInstructions})
 		if err != nil {
 			return err
 		}
 	}
 	directory := filepath.Join(s.Current().Root.String(), "workgroup-changes", string(c.Workgroup), c.ID, turn)
-	var engine coreadapter.Engine
-	var hosts coreadapter.MCPHosts
-	if role == committeeRole {
-		if s.Options.Committee == nil {
-			return errors.New("delta committee runner unavailable")
-		}
-		engine, hosts = s.Options.Committee.Engine, s.Options.Committee.Hosts
-	} else {
-		if s.Options.Architect == nil {
-			return errors.New("delta architect runner unavailable")
-		}
-		engine, hosts = s.Options.Architect.Engine, s.Options.Architect.Hosts
-	}
-	views := filepath.Join(directory, "views")
-	if err := os.MkdirAll(views, 0700); err != nil {
+	turns, err := s.ChangeTurns(ctx, wt, c, role, agent, tool, identity, directory)
+	if err != nil {
 		return err
 	}
-	turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: engine, Hosts: hosts, Grants: map[string]coreadapter.Capabilities{role: {Tools: []string{"file_read", tool}}}, Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-		if scope.Workstream != string(c.Host) || scope.Role != role {
-			return isolation.Selection{}, errors.New("delta scope denied")
-		}
-		workspace := filepath.Join(directory, "workspace")
-		if err := os.MkdirAll(workspace, 0700); err != nil {
-			return isolation.Selection{}, err
-		}
-		charters, err := WorkgroupCharterText(ctx, wt, c.Host)
-		if err != nil {
-			return isolation.Selection{}, err
-		}
-		before, _ := json.MarshalIndent(c.Before, "", "  ")
-		change, _ := json.MarshalIndent(c, "", "  ")
-		for name, data := range map[string][]byte{"before.json": before, "change.json": change, "charters.md": []byte(charters)} {
-			if err := os.WriteFile(filepath.Join(workspace, name), data, 0600); err != nil {
-				return isolation.Selection{}, err
-			}
-		}
-		_, settings, err := s.RoleExecution(s.Current(), role)
-		return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"before.json", "change.json", "charters.md"}, Execution: settings}, err
-	}, Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-		if scope.Workstream != string(c.Host) || scope.Thread != identity {
-			return nil, errors.New("delta scope denied")
-		}
-		return []coreadapter.Tool{s.DeltaTool(wt, c, agent, tool)}, nil
-	}}
 	dispatcher := thread.Dispatcher{Runner: s.ThreadRunner(s.Current(), wt, turns, s.Now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		session := filepath.Join(directory, "session")
 		return coreadapter.PreparedTurn{SessionDirectory: session}, os.MkdirAll(session, 0700)
@@ -892,4 +860,64 @@ func RevisionSlice(c WorkgroupChange, row amendment.StreamImpact) (trace.Slice, 
 	}
 	now.Plan = string(data)
 	return now, err
+}
+
+// ChangeTurns is the isolated turn path of one delta debate turn: the
+// architect's deliver_delta and answer_delta, or the committee's review_delta.
+// Its view is read-only staged files, its service tools are file_read and the
+// turn's own tool, and it holds the backend's web tools through the same
+// grants as the architect's and the committee's other planning turns. It
+// holds no write, execute, Network or VCS capability.
+func (s *Controller) ChangeTurns(ctx context.Context, wt *trace.Repository, c WorkgroupChange, role, agent, tool, identity, directory string) (*isolation.Turns, error) {
+	var engine coreadapter.Engine
+	var hosts coreadapter.MCPHosts
+	if role == committeeRole {
+		if s.Options.Committee == nil {
+			return nil, errors.New("delta committee runner unavailable")
+		}
+		engine, hosts = s.Options.Committee.Engine, s.Options.Committee.Hosts
+	} else {
+		if s.Options.Architect == nil {
+			return nil, errors.New("delta architect runner unavailable")
+		}
+		engine, hosts = s.Options.Architect.Engine, s.Options.Architect.Hosts
+	}
+	views := filepath.Join(directory, "views")
+	if err := os.MkdirAll(views, 0700); err != nil {
+		return nil, err
+	}
+	// Both roles hold the backend's web tools on these debate turns, through
+	// the same grants as the architect's and the committee's other paths.
+	grant := intake.ArchitectGrant("file_read", tool)
+	if role == committeeRole {
+		grant = intake.CommitteeDebateGrant("file_read", tool)
+	}
+	turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: engine, Hosts: hosts, Grants: map[string]coreadapter.Capabilities{role: grant}, Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+		if scope.Workstream != string(c.Host) || scope.Role != role {
+			return isolation.Selection{}, errors.New("delta scope denied")
+		}
+		workspace := filepath.Join(directory, "workspace")
+		if err := os.MkdirAll(workspace, 0700); err != nil {
+			return isolation.Selection{}, err
+		}
+		charters, err := WorkgroupCharterText(ctx, wt, c.Host)
+		if err != nil {
+			return isolation.Selection{}, err
+		}
+		before, _ := json.MarshalIndent(c.Before, "", "  ")
+		change, _ := json.MarshalIndent(c, "", "  ")
+		for name, data := range map[string][]byte{"before.json": before, "change.json": change, "charters.md": []byte(charters)} {
+			if err := os.WriteFile(filepath.Join(workspace, name), data, 0600); err != nil {
+				return isolation.Selection{}, err
+			}
+		}
+		_, settings, err := s.RoleExecution(s.Current(), role)
+		return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"before.json", "change.json", "charters.md"}, Execution: settings}, err
+	}, Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+		if scope.Workstream != string(c.Host) || scope.Thread != identity {
+			return nil, errors.New("delta scope denied")
+		}
+		return []coreadapter.Tool{s.DeltaTool(wt, c, agent, tool)}, nil
+	}}
+	return turns, nil
 }

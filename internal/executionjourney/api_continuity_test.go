@@ -63,7 +63,11 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 			fail("runtime read %s", path)
 		}
 	}
+	// checkGrants pins the native tools to the file tools alone: the mason holds no web tool, and is not told it can search the web.
 	checkGrants(req, verified, clone, fail)
+	if strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
+		fail("mason system prompt carries the web guidance")
+	}
 	if _, err := os.Lstat(filepath.Join(req.Workspace.Directory(), ".git")); !errors.Is(err, fs.ErrNotExist) {
 		fail("view contains VCS metadata")
 	}

@@ -797,3 +797,44 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 		t.Fatalf("narrowed tools %v", engine.Requests[0].Grants.Tools)
 	}
 }
+
+func TestWebGuidanceReachesOnlyTurnsHoldingWeb(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		role   string
+		grant  a.Capabilities
+		narrow *a.Capabilities
+		want   bool
+	}{
+		{"architect with web", "architect", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, true},
+		{"session with web", "session", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, true},
+		{"architect without web", "architect", a.Capabilities{Tools: []string{"file_read"}}, nil, false},
+		{"narrowed away", "architect", a.Capabilities{Tools: []string{"file_read"}, Web: true}, &a.Capabilities{Tools: []string{"file_read"}}, false},
+		{"mason cannot hold web", "mason", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, false},
+		{"reviewer cannot hold web", "reviewer", a.Capabilities{Tools: []string{"file_read"}, Web: true}, nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r, _, _, engine, input := fixture(t, test.role, "container")
+			r.Grants[test.role] = test.grant
+			if test.narrow != nil {
+				base := r.Select
+				r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
+					selected, err := base(ctx, scope)
+					selected.Narrow = test.narrow
+					return selected, err
+				}
+			}
+			input.SystemPrompt = "You are the " + test.role + "."
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			prompt := engine.Requests[0].SystemPrompt
+			if got := strings.Contains(prompt, WebGuidance); got != test.want {
+				t.Fatalf("guidance present=%v, want %v in %q", got, test.want, prompt)
+			}
+			if !strings.HasPrefix(prompt, "You are the "+test.role+".") {
+				t.Fatalf("role prompt lost: %q", prompt)
+			}
+		})
+	}
+}

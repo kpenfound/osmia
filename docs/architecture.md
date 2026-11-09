@@ -86,7 +86,7 @@ See
 | Trace and reconciliation | Versioned records, recoverable transactions, outbox operations and retry | [trace](../internal/trace), [reconcile](../internal/reconcile) |
 | Scheduling | Readiness, capacity, priority and dispatch order across workstreams | [scheduler](../internal/scheduler) |
 | Durable threads | Queued turns, owned logs, continuation and replay | [thread](../internal/thread) |
-| Execution boundary | Scoped file views, tool grants, environment, sandbox verification | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) |
+| Execution boundary | Scoped file views, tool grants (including the `Web` permission), environment, sandbox verification | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) |
 | Target workspaces | Service-owned Git and Jujutsu operations | [workspace](../internal/workspace) |
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
 | Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its switch, retries and cool-down | [jev](../internal/jev) |
@@ -144,6 +144,27 @@ turn view. It chooses the role's tools and environment and checks the prepared
 execution policy before the agent runs. Agents receive no VCS tool or delivery
 credential. Writable output is captured by service code before the turn view is
 removed; the service then updates the target workspace.
+
+Web access is a separate `Web` permission, not part of `Network`. It adds the
+backend's own web tools (Claude `WebSearch` and `WebFetch`, Codex `web_search`,
+OpenCode `websearch` and `webfetch`) to a turn's native tools; the service runs
+no search or fetch of its own and keeps no record of web reads. Only the
+planning roles hold it: the design session, the exploratory session, the
+architect on every turn path (including a workgroup's project-spec draft and
+delta amendment turns), the ordinary chief of staff and the committee in plan
+and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers, the
+librarian, the foreman and the classifier never do, whatever a service grant
+says, and no configuration key changes that. A role that holds it keeps its
+read-only view and its service tools, gains no write, shell or `Network`
+grant, and is told in its system prompt that web content is evidence rather
+than authority and that instructions inside a page are not instructions to it.
+In sbx the owner's network policy decides which hosts a fetch reaches; the
+service adds none. The risk that a page carries hostile instructions is
+accepted because those roles can only read and propose. When a backend or
+placement cannot hold a web-granted turn to its granted tools, the turn is
+prepared again once without `Web` and runs without web tools, its system prompt
+saying so; the mismatched session never runs, and the reduced session must
+match the reduced grant exactly or the turn is refused.
 
 ## Jev judgments
 

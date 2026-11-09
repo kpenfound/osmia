@@ -8,6 +8,7 @@ import (
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/isolation"
 	kb "github.com/kpenfound/osmia/internal/kb"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -167,7 +168,11 @@ func checkLibrarianBoundary(ctx context.Context, req agent.Request, verified *ag
 	if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": "repo/AGENTS.md", "content": "tampered"}); err != nil {
 		fail("write in the private copy: %v", err)
 	}
+	// checkGrants pins the native tools to the file tools alone: the librarian holds no web tool, and is not told it can search the web.
 	checkGrants(req, verified, clone, fail)
+	if strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
+		fail("librarian system prompt carries the web guidance")
+	}
 	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || req.Profile.Name != "librarian" {
 		fail("request carries VCS access or another role: %+v", req.Profile)
 	}

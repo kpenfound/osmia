@@ -12,6 +12,7 @@ import (
 	testing "testing"
 
 	intake "github.com/kpenfound/osmia/internal/intake"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
 	questions "github.com/kpenfound/osmia/internal/questions"
 
 	json "encoding/json"
@@ -197,7 +198,8 @@ func ReadTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 
 // checkReadOnlyGrants asserts the grants core verified for a read-only turn:
 // the private view read-only, the session read-only with the scratch
-// directory the turn starts in, native reading tools and the scoped MCP server, and
+// directory the turn starts in, native reading tools and the backend's web
+// tools (with the guidance on how to use them) and the scoped MCP server, and
 // no VCS or host environment.
 func CheckReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, fail func(string, ...any)) {
 	g := req.Grants
@@ -213,8 +215,11 @@ func CheckReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	if g.VCS || verified.VCS || !slices.Equal(verified.DeniedExecutables, agent.VCSExecutables) {
 		fail("VCS is not denied: %+v", verified)
 	}
-	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep"}) {
+	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch"}) {
 		fail("tools %v %v exceed the role grant", g.Tools, verified.Tools)
+	}
+	if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
+		fail("system prompt lacks the web guidance: %q", req.SystemPrompt)
 	}
 	for _, kv := range verified.Env {
 		key, value, _ := strings.Cut(kv, "=")
@@ -430,7 +435,7 @@ func Answers(p *Faults, text string, ids ...string) FakeTurn {
 
 // checkReplyBoundary makes the assertions from inside the architect's reply
 // turn: it reads the round and the draft, answers and redrafts, and holds
-// nothing that contributes as a member, writes, runs or fetches.
+// nothing that contributes as a member, writes or runs.
 func CheckReplyBoundary(ctx context.Context, p *Faults, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) {
 	listed, err := tools.ListTools(ctx, nil)
 	if err != nil {
@@ -716,6 +721,10 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 	title, err := d.Design(req)
 	if err != nil {
 		return nil, err
+	}
+	if strings.HasPrefix(req.Name, "mason-") {
+		// A ratified plan's units start their masons, which build nothing here.
+		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Nothing built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	if !strings.HasPrefix(req.Name, "events_") {
 		d.Problem("chief of staff turn %s of %q", req.Name, title)
@@ -1064,7 +1073,7 @@ func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 	if strings.Contains(req.Prompt, "still stand") {
 		fail("round 1 lists earlier objections:\n%s", req.Prompt)
 	}
-	if !strings.Contains(req.SystemPrompt, "member of the committee") || !strings.Contains(req.SystemPrompt, "no tool that writes, runs or fetches") || !strings.Contains(req.SystemPrompt, "call "+questions.AskTool+": the round waits for the answer") {
+	if !strings.Contains(req.SystemPrompt, "member of the committee") || !strings.Contains(req.SystemPrompt, "no tool that writes or runs") || !strings.Contains(req.SystemPrompt, "call "+questions.AskTool+": the round waits for the answer") {
 		fail("system prompt: %q", req.SystemPrompt)
 	}
 	return errors.Join(problems...)

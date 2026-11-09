@@ -460,6 +460,13 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 				fail("design session granted the write or execute native tool %q", name)
 			}
 		}
+		// The design session holds the backend's web tools and nothing else native.
+		if want := []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}; !slices.Equal(g.Tools, want) {
+			fail("design session's native tools %v, want %v", g.Tools, want)
+		}
+		if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(req.SystemPrompt, designRolePrompt) {
+			fail("design session's system prompt lacks the web guidance after its role prompt")
+		}
 		for _, m := range g.Mounts {
 
 			if m.Access != agent.ReadOnly && filepath.Base(m.Path) != "work" {

@@ -799,9 +799,11 @@ func (d *Debate) DispatchReply(ctx context.Context, stream config.WorkstreamID, 
 // replyPath is the architect's isolated turn path for a reply: a read-only
 // private view of the latest spec and plan, the handed input, the charter,
 // the context bundle and the shed's records, the file reading tool, the reply
-// tool, the draft delivery tool and the question tool, and no notes, write,
-// execute, network or VCS capability. A turn that asks ends waiting, so its
-// thread parks and its slot is free while the answer is found.
+// tool, the draft delivery tool and the question tool, the backend's own web
+// search and page fetch tools like every architect turn path (ArchitectGrant),
+// and no notes, write, execute, Network or VCS capability. A turn that asks
+// ends waiting, so its thread parks and its slot is free while the answer is
+// found.
 func (d *Debate) ReplyPath(stream config.WorkstreamID, in RoundInput) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -815,7 +817,7 @@ func (d *Debate) ReplyPath(stream config.WorkstreamID, in RoundInput) *isolation
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return d.SelectReplyView(ctx, scope, in)
 		},
-		Grants: map[string]coreadapter.Capabilities{ArchitectRole: {Tools: []string{"file_read", shed.ReplyTool, DraftTool, questions.AskTool}}},
+		Grants: map[string]coreadapter.Capabilities{ArchitectRole: ArchitectGrant("file_read", shed.ReplyTool, DraftTool, questions.AskTool)},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) || scope.Role != ArchitectRole || scope.Project != string(d.Repository.Project()) || scope.Thread != ArchitectThread {
 				return nil, denied
