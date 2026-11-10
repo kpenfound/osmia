@@ -2,6 +2,7 @@ package executionjourney
 
 import (
 	context "context"
+	fmt "fmt"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
@@ -59,7 +60,14 @@ var resumed = intakefixture.Resumed
 func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	passed, prepare := countingSchedule()
+	passed, schedule := countingSchedule()
+	// The fake masons end their turns without a report, so each unit's mason
+	// is continued turn after turn. The bound is raised so the continuations
+	// this test holds and releases never contest a unit.
+	prepare := func(opts *Options) {
+		schedule(opts)
+		appendConfig(t, opts, "\n[mason]\nmax_clean_turns = 20\n")
+	}
 	f, masons, _ := newAskingMasonFixturePrepared(t, 1, independentPlan, p, prepare)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
@@ -69,6 +77,45 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	ids := []config.WorkstreamID{a, b, c}
 	slices.Sort(ids)
 	asking, other, third := ids[0], ids[1], ids[2]
+
+	// A mason that ends a turn without a report gets a continuation, and the
+	// only mason slot belongs to whichever turn runs. The continuations of
+	// the masons that do not report hold their turn until released: those
+	// started before the answer is queued end once it is, so the answer turn
+	// is the next to take the slot; those started after wait to be finished,
+	// which the test does before the last workstream needs the slot.
+	answerQueued, finished := make(chan struct{}), make(chan struct{})
+	continued := func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		select {
+		case <-answerQueued:
+			select {
+			case <-finished:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		default:
+			select {
+			case <-answerQueued:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return masons.Turn(ctx, req, turn, tools)
+	}
+	masons.Mu.Lock()
+	for i := 4; i <= 6; i++ {
+		masons.Play[fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i)] = failMasonTurn
+	}
+	masons.Mu.Unlock()
+	f.engine.Mu.Lock()
+	for i := 1; i <= 6; i++ {
+		f.engine.Turns[fmt.Sprintf("%s-continue-%d", masonAgent("resume"), i)] = continued
+		f.engine.Turns[fmt.Sprintf("%s-recover-%d", masonAgent("resume"), i)] = continued
+		if i > 3 {
+			f.engine.Turns[fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i)] = masons.Turn
+		}
+	}
+	f.engine.Mu.Unlock()
 
 	var mu sync.Mutex
 	var answered []agent.Request
@@ -160,6 +207,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	f.rule(t, "1")
 	f.awaitTurn(t, asking, masonAgent("resume"), questions.TurnID("1"))
+	// The answer turn is queued: let the other workstream's held
+	// continuation end, so the answer turn takes the slot it frees.
+	close(answerQueued)
 	f.awaitCompleted(t, asking, masonAgent("resume"), questions.TurnID("1"))
 
 	awaitPasses(t, passed, 3)
@@ -195,6 +245,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 		t.Fatalf("%s started a unit while one was implementing with one mason slot: %+v", third, got)
 	}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: asking}, Mode: "soft", Source: "owner"})
+	// Both workstreams that hold continuations are paused: finishing those
+	// turns frees the slot for the third workstream's mason.
+	close(finished)
 	f.awaitMasonRan(t, third, "resume")
 	masons.Check(t)
 }

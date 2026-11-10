@@ -35,10 +35,11 @@ var (
 	proseGiveUp   = regexp.MustCompile(`(?i)\b(?:i (?:cannot|can't|give up|am unable to) (?:complete|finish|continue|proceed)|unable to (?:complete|finish|continue|proceed)|giving up|cannot proceed)\b`)
 )
 
-// ClassifyMasonTurn returns nil unless the mason completed without an outcome
-// or execution failure. A tool call count is evidence even when no phrase matches.
+// ClassifyMasonTurn returns nil unless the mason completed without an outcome,
+// a refused report or an execution failure. A tool call count is evidence even
+// when no phrase matches.
 func ClassifyMasonTurn(result coreadapter.SessionResult, failure string) *TurnClassification {
-	if failure != "" || result.Outcome != nil || result.Cancelled || result.IsError || result.TimedOut || result.ExitCode != 0 || result.Signal != 0 {
+	if failure != "" || result.Refusal != "" || result.Outcome != nil || result.Cancelled || result.IsError || result.TimedOut || result.ExitCode != 0 || result.Signal != 0 {
 		return nil
 	}
 	runes := []rune(result.FinalResponse)

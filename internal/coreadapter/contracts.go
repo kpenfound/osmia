@@ -215,6 +215,9 @@ type SessionResult struct {
 	// Records counts the session's calls to service tools that record state.
 	Records int `json:"records,omitempty"`
 	Limit   *ProviderLimit
+	// Refusal is the latest reason the service refused a report the turn's
+	// agent made, kept when the turn ended without an accepted one.
+	Refusal string `json:"refusal,omitempty"`
 }
 type ProviderLimit struct {
 	Status, Kind string

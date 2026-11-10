@@ -21,6 +21,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// driftCarrying is the outcome of a drift rebase that moved the feature branch
+// and is carrying the units' workspaces over.
+const driftCarrying = "carrying"
+
 const recoveryPlan = `{"version": 1, "units": [
   {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
   {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]},
@@ -50,6 +54,12 @@ type recoveryDemo struct {
 	entered chan struct{}
 
 	ask chan struct{}
+	// auditWrote is closed once audit's mason has written its file, and
+	// carrying once the drift rebase has moved the feature branch and set out
+	// to carry the units over. Audit's mason ends its turn, with its report,
+	// only then.
+	auditWrote, carrying chan struct{}
+	wroteOnce            sync.Once
 	// auditReviewed holds dedupe until audit has been reviewed on the drift base.
 	auditReviewed chan struct{}
 	auditOnce     sync.Once
@@ -112,17 +122,18 @@ func (d *recoveryDemo) build(unit string) func(context.Context, agent.Request, *
 			return nil, err
 		}
 		if unit == "audit" {
-			return recoveryResult(req, "Half built"), nil
+			d.wroteOnce.Do(func() { close(d.auditWrote) })
+			select {
+			case <-d.carrying:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built " + unit}); err != nil || !recorded {
 			return nil, fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return recoveryResult(req, "Built"), nil
 	}
-}
-
-func clarified(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reported", SessionDir: req.SessionDir, NumTurns: 1, HasOutcome: true, Outcome: agent.Outcome{Status: "shipped"}}, nil
 }
 
 func (d *recoveryDemo) resolve(path, resolved string, unit bool, args map[string]any) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
@@ -214,7 +225,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	f.opts.schedulePassed = func() { passed.Add(1) }
 
 	demo := &recoveryDemo{units: &landingDemo{reviews: map[string][]UnitReviewIdentity{}}, project: f.project, owner: func() *Client { return f.c },
-		entered: make(chan struct{}), ask: make(chan struct{}), auditReviewed: make(chan struct{}), marked: map[string]string{}}
+		entered: make(chan struct{}), ask: make(chan struct{}), auditWrote: make(chan struct{}), carrying: make(chan struct{}), auditReviewed: make(chan struct{}), marked: map[string]string{}}
 
 	const (
 		resolvedGit    = "package trace\n\n// changed before the interruption, on upstream's change\n"
@@ -228,9 +239,6 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	for unit, resolved := range resolutions {
 		f.engine.Turns[masonTurnID(unit)] = demo.build(unit)
 		f.engine.Turns[resolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
-	}
-	for i := 1; i <= 3; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-clarify-%d", masonAgent("audit"), i)] = clarified
 	}
 	f.engine.Turns[driftResolveTurnID(1, 1)] = demo.resolve(trackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
 	f.engine.Turns[driftReviewTurnID(1, 1)] = reviewDrift
@@ -327,10 +335,22 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	}
 
 	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
-	f.awaitMasonSettled(t, stream, "audit", 2)
+	select {
+	case <-demo.auditWrote:
+	case <-time.After(demoTimeout):
+		t.Fatal("audit's mason never wrote its file")
+	}
 	from := seals(t, f.repository(), stream)[0].Base.Commit
 	upstream := advanceUpstream(t, f, recoveryUpstream)
 	close(demo.ask)
+	// Audit's mason is mid-turn while the feature branch moves, so its
+	// workspace is carried over only once its turn ends with its report.
+	eventually(t, "the drift rebase never set out to carry the units over", func() bool {
+		return slices.ContainsFunc(driftRecords(t, f.repository(), stream), func(r DriftRebase) bool {
+			return r.Outcome == driftCarrying || r.Outcome == driftRebased
+		})
+	})
+	close(demo.carrying)
 
 	f.awaitMerged(t, stream, "dedupe")
 	f.awaitMerged(t, stream, "audit")

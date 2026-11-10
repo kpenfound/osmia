@@ -1,13 +1,16 @@
 package executionjourney
 
 import (
+	context "context"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	slices "slices"
 	testing "testing"
 
+	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	plan "github.com/kpenfound/osmia/internal/plan"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
@@ -45,8 +48,40 @@ func (f *shedFixture) awaitDispatches(t *testing.T, stream config.WorkstreamID, 
 
 func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	t.Parallel()
-	f, masons := newParallelMasonFixture(t, 1, 3, disjointPlan)
+	// The fake masons end their turns without a report, so each unit's mason
+	// is continued, and a continuation that is running holds the only mason
+	// slot. The bound is raised so the continuations this test holds and
+	// releases never contest a unit.
+	f, masons := newParallelMasonFixturePrepared(t, config.WorkspacesGit, 1, 3, disjointPlan, func(opts *Options) {
+		appendConfig(t, opts, "\n[mason]\nmax_clean_turns = 20\n")
+	})
 	defer f.stop(t)
+	// A continuation that starts before the higher-priority workstream is
+	// paused ends once it is, so the lower-priority workstream's mason takes
+	// the slot; one that starts later keeps its turn running.
+	hiPaused := make(chan struct{})
+	continued := func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		select {
+		case <-hiPaused:
+			<-ctx.Done()
+			return nil, ctx.Err()
+		default:
+		}
+		select {
+		case <-hiPaused:
+			return masons.Turn(ctx, req, turn, tools)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	f.engine.Mu.Lock()
+	for _, unit := range []string{"resume", "upload", "audit"} {
+		for i := 1; i <= 6; i++ {
+			f.engine.Turns[fmt.Sprintf("%s-continue-%d", masonAgent(unit), i)] = continued
+			f.engine.Turns[fmt.Sprintf("%s-recover-%d", masonAgent(unit), i)] = continued
+		}
+	}
+	f.engine.Mu.Unlock()
 	factory := runtime.Target{Scope: "factory"}
 	built := f.builtPaused(t, factory, "first", "second")
 	a, b := built[0], built[1]
@@ -84,6 +119,7 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 
 	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"}
 	mutation(t, f.c, "PUT", "pause", PauseRequest(pause))
+	close(hiPaused)
 	f.awaitMasonRan(t, lo, "resume")
 	decisions := map[config.WorkstreamID]map[string][]string{
 		lo: {"resume": {"deferred paused", "deferred priority", "started"}, "upload": {"deferred paused", "deferred priority", "deferred capacity"}},

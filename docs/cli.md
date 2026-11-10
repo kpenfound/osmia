@@ -401,7 +401,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   rule on any contested unit yourself.
   `review` requests another reviewer verdict on the same candidate; `revise`
   returns the findings and your note to the mason. For a mason contest,
-  `status` shows whether the mason gave up or exhausted the clean-turn bound;
+  `status` shows whether the mason gave up or exhausted the clean-turn bound, which
+  counts the continuations after turns that ended without an accepted report;
   only `revise` is accepted, resuming its thread in the existing workspace
   with a fresh clean-turn allowance. Neither decision approves a unit.
 - `move <workstream-id> <sketched|in-shed|ratified|building|assembled|delivered|abandoned> <note>`

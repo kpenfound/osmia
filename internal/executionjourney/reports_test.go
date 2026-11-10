@@ -13,7 +13,6 @@ import (
 	strings "strings"
 	atomic "sync/atomic"
 	testing "testing"
-	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -111,23 +110,11 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		th, err := f.repository().Thread(stream, masonAgent("dedupe"))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		if err == nil && len(th.Turns) > 0 && !th.Turns[0].CompletedAt.IsZero() {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the mason of unit dedupe never ran")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	f.awaitUnit(t, stream, "dedupe", UnitImplementing)
+	// The failure that ended dedupe's turn after its accepted done does not
+	// stand in the way of its report.
+	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
 	masons.Check(t)
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitImplementing}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitReviewing, Card: &exampleCard}})
 
 	th, err := f.repository().Thread(stream, masonAgent("resume"))
 	must(t, err)
@@ -158,7 +145,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 	status, err := f.c.Status(context.Background(), stream)
 	must(t, err)
-	if len(status.Units) != 2 || status.Units[0].Card == nil || *status.Units[0].Card != exampleCard || status.Units[1].Card != nil {
+	if len(status.Units) != 2 || status.Units[0].Card == nil || *status.Units[0].Card != exampleCard || status.Units[1].Card == nil || *status.Units[1].Card != exampleCard {
 		t.Fatalf("unit cards in status: %+v", status.Units)
 	}
 	var api WorkstreamStatus
@@ -172,7 +159,12 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 
 	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", masonTurnID("resume"), report.Candidate, unitBranch(stream, "resume"), featureBranch(stream), report.Base)
 	checking := transitionMove{ID: checkingTransitionID("resume", 1), Subject: trace.UnitSubject("resume"), From: UnitImplementing, To: UnitChecking, Cause: turn.Response.ID, Reason: reason}
-	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), checking, started("dedupe", f.startedReason(t, stream, "dedupe"))}; !reflect.DeepEqual(got, want) {
+	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
+	dedupeChecking := masonTransitions(t, f, stream)[3]
+	if dedupeChecking.ID != checkingTransitionID("dedupe", 1) || dedupeChecking.To != UnitChecking {
+		t.Fatalf("dedupe's move to checking %+v", dedupeChecking)
+	}
+	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), checking, started("dedupe", f.startedReason(t, stream, "dedupe")), dedupeChecking}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
@@ -183,13 +175,14 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	f.awaitEventTurns(t, stream, reviewNotice, "Unit dedupe is implementing: its mason works on it in its unit workspace on "+unitBranch(stream, "dedupe")+".")
 	f.awaitAcknowledgedNotices(t, stream)
 
-	if got := f.reports(t, stream, "dedupe"); len(got) != 0 {
-		t.Fatalf("the failed turn's report was recorded: %+v", got)
-	}
 	th, err = f.repository().Thread(stream, masonAgent("dedupe"))
 	must(t, err)
-	if turn := th.Turns[0]; turn.Status() != "failed" || turn.Response.Result.Outcome == nil || turn.Response.Result.Outcome.Status != masonDone {
-		t.Fatalf("the failing mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
+	failed := th.Turns[0]
+	if len(th.Turns) != 1 || failed.Status() != "failed" || failed.Response.Result.Outcome == nil || failed.Response.Result.Outcome.Status != masonDone {
+		t.Fatalf("the failing mason's turns %+v", th.Turns)
+	}
+	if got := f.reports(t, stream, "dedupe"); len(got) != 1 || got[0].Cause != failed.Response.ID {
+		t.Fatalf("the failed turn's report %+v", got)
 	}
 
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: masonAgent("resume"), Turn: "late", Role: masonRole}

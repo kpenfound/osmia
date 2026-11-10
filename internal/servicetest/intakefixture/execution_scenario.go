@@ -215,7 +215,9 @@ func AwaitMasonSettled(t *testing.T, repository *trace.Repository, stream config
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
-		if err == nil && len(th.Turns) >= turns && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }) {
+		if err == nil && len(th.Turns) >= turns && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
+			return q.CompletedAt.IsZero() && !strings.Contains(q.Request.TurnID, "-continue-")
+		}) {
 			return
 		}
 		if time.Now().After(deadline) {

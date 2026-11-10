@@ -34,7 +34,9 @@ func masonTransitionID(unit string) string {
 
 // masons is the mason controller. Its pass parks and resumes units on their
 // masons' questions, and moves each implementing unit whose mason reported
-// done to reviewing, with the unit's workspace snapshotted as its candidate.
+// done to checking, with the unit's workspace snapshotted as its candidate. A
+// mason turn that ended without a report the service takes gets a bounded
+// continuation or its unit a contest.
 // It then starts ready units of building and assembled workstreams: while
 // fewer units than capacity.masons are implementing, it moves a ready unit
 // entangled with none of its workstream's implementing or waiting units to
@@ -166,7 +168,7 @@ func (m *masons) Pass(ctx context.Context) error {
 			if err := m.resumeBounceRevision(ctx, stream, u.ID, b.reviewTransitions[trace.UnitSubject(u.ID)]); err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
-			moved, stuck, err := m.finish(ctx, b, u.ID)
+			moved, stuck, uncollected, err := m.finishReport(ctx, b, u.ID)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
@@ -185,9 +187,16 @@ func (m *masons) Pass(ctx context.Context) error {
 			} else if contested {
 				continue
 			}
+			continued, contested, err := m.continueEnding(ctx, stream, u.ID, state, uncollected)
+			if err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+			if contested {
+				continue
+			}
 			b.inFlight = append(b.inFlight, u.ID)
 			b.implementing++
-			queued := classified
+			queued := classified || continued
 			if !stuck && !queued {
 				if queued, err = m.recoverTurn(ctx, stream, u.ID); err != nil {
 					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
@@ -310,7 +319,7 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	}
 	attempts := 0
 	for _, turn := range th.Turns {
-		if turn.Sequence > reset && !turn.CompletedAt.IsZero() && turn.Response != nil && turn.Response.Classification != nil {
+		if turn.Sequence > reset && countsAsAttempt(th, unit, turn) {
 			attempts++
 		}
 	}

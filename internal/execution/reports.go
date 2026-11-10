@@ -83,11 +83,25 @@ func checkingTransitionID(unit string, k int) string {
 	return fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), UnitChecking, k)
 }
 
-// masonReports holds the report each running mason turn's done accepted,
-// until the turn ends and reports it as its outcome.
+// masonReports holds the report each running mason turn's done accepted, and
+// the latest reason it refused one, until the turn ends and reports them as
+// its outcome and its result's refusal.
 type masonReports struct {
 	mu       sync.Mutex
 	accepted map[string]reportedDone
+	refused  map[string]string
+}
+
+// refuse records reason as the latest refusal of the turn key names and
+// returns it as the refusal result of the done tool.
+func (r *masonReports) refuse(key, reason string) (json.RawMessage, error) {
+	r.mu.Lock()
+	if r.refused == nil {
+		r.refused = map[string]string{}
+	}
+	r.refused[key] = reason
+	r.mu.Unlock()
+	return refuseReport("%s", reason)
 }
 
 type reportedDone struct {
@@ -154,7 +168,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			}
 		}
 		if !canReport {
-			return refuseReport("unit %s is %s, not implementing", scope.Unit, state.Value)
+			return r.refuse(turnKey(scope), fmt.Sprintf("unit %s is %s, not implementing", scope.Unit, state.Value))
 		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
 		threads, err := repository.Threads(config.WorkstreamID(scope.Workstream))
@@ -171,7 +185,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			}
 		}
 		if reason := checkReport(input.MasonReport); reason != "" {
-			return refuseReport("%s", reason)
+			return r.refuse(turnKey(scope), reason)
 		}
 		fitted := status.FitCard(input.Card, known)
 		accepted := reportedDone{Report: input.MasonReport, Card: fitted.Card}
@@ -254,7 +268,8 @@ func checkReport(report MasonReport) string {
 
 // reportingTurns ends every mason turn whose done the service accepted with
 // the outcome masonDone and the report, with its card when it has one,
-// whatever the agent reported.
+// whatever the agent reported. A turn without an accepted done keeps the
+// latest reason the service refused one as its result's refusal.
 type reportingTurns struct {
 	Turns   coreadapter.Turns
 	reports *masonReports
@@ -270,7 +285,12 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 	defer t.reports.mu.Unlock()
 	key := turnKey(prepared.Scope)
 	report, ok := t.reports.accepted[key]
+	refusal := t.reports.refused[key]
 	delete(t.reports.accepted, key)
+	delete(t.reports.refused, key)
+	if !ok {
+		result.Refusal = refusal
+	}
 	if ok {
 		data, encodeErr := json.Marshal(doneReport{MasonReport: report.Report, OwnerAction: report.OwnerAction})
 		if encodeErr != nil {
@@ -291,8 +311,26 @@ func (t *reportingTurns) CheckResume(ctx context.Context, previous, next coreada
 	return coreadapter.ErrResumeUnavailable
 }
 
+// reportTaken reports whether a completed mason turn ended with an accepted
+// done that the service processes: one that ended cleanly, or with a failure
+// that is not an exhausted infrastructure failure. An interrupted turn is
+// continued by recovery and an exhausted infrastructure failure is contested,
+// whatever the turn reported.
+func reportTaken(q trace.QueuedTurn) bool {
+	switch q.Status() {
+	case "idle":
+	case "failed":
+		if exhausted(q) {
+			return false
+		}
+	default:
+		return false
+	}
+	return q.Response.Result.Outcome != nil && q.Response.Result.Outcome.Status == masonDone
+}
+
 // reported returns the report of the unit's mason when the last turn of its
-// thread ended cleanly with done, and that turn.
+// thread ended with an accepted done the service processes, and that turn.
 func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport, trace.QueuedTurn, bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -302,7 +340,7 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 		return MasonReport{}, trace.QueuedTurn{}, false, err
 	}
 	last := th.Turns[len(th.Turns)-1]
-	if last.Status() != "idle" || last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != masonDone {
+	if !reportTaken(last) {
 		return MasonReport{}, trace.QueuedTurn{}, false, nil
 	}
 	report, err := parseDoneReport(last)
@@ -332,40 +370,51 @@ func parseDoneReport(turn trace.QueuedTurn) (doneReport, error) {
 // implementing, and its mason gets a turn that names those files. A unit whose state moved since it was read is left to the
 // next pass.
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
+	moved, blocked, _, err = m.finishReport(ctx, b, unit)
+	return moved, blocked, err
+}
+
+// finishReport is finish. When the report's turn also ended with a failure and
+// the unit's candidate cannot be made, it records no block and returns why in
+// uncollected, for the unit's mason to continue from.
+func (m *masons) finishReport(ctx context.Context, b building, unit string) (moved, blocked bool, uncollected error, err error) {
 	// Queue an ordinary send-back before looking at the last done turn. The
 	// move may have committed after the review pass or before a restart.
 	if ordinarySendBack(b.reviewTransitions[trace.UnitSubject(unit)]) {
 		if err := (&reviewers{masons: m}).resumeFindings(ctx, b.stream, unit, b.states[trace.UnitSubject(unit)]); err != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
 	}
 	report, turn, found, err := m.reported(b.stream, unit)
 	if err != nil || !found {
-		return false, false, err
+		return false, false, nil, err
 	}
 	units := newUnitWorkspaces(m.cfg, m.repository)
 	if behind, err := units.behind(ctx, b.stream, unit); err != nil || behind {
-		return false, false, err
+		return false, false, nil, err
 	}
 	w, base, candidate, err := units.snapshot(ctx, b.stream, unit)
 	if err != nil {
 		if ctx.Err() != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
-		return false, true, m.block(ctx, b.stream, unit, turn.Response.ID, fmt.Sprintf("unit %s stays implementing: its mason reported done, and its candidate cannot be made: %v", unit, err))
+		if turn.Status() == "failed" {
+			return false, false, err, nil
+		}
+		return false, true, nil, m.block(ctx, b.stream, unit, turn.Response.ID, fmt.Sprintf("unit %s stays implementing: its mason reported done, and its candidate cannot be made: %v", unit, err))
 	}
 	conflicted, rebase, err := m.conflicts(b.stream, unit)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	g, err := units.Of(b.stream)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	if len(conflicted) != 0 {
 		th, err := m.repository.Thread(b.stream, masonAgent(unit))
 		if err != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
 		resolution := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.TurnID == resolveTurnID(unit, rebase.Rebase)
@@ -374,16 +423,16 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 		// new work, so a done response from before the resolution was queued
 		// cannot count as an attempt to resolve them.
 		if resolution < 0 || turn.Sequence < th.Turns[resolution].Sequence {
-			return false, false, nil
+			return false, false, nil, nil
 		}
 	}
 	stored, err := g.StoredConflicts(ctx, candidate)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	marked, err := g.Markers(ctx, candidate, conflicted)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	for _, p := range marked {
 		if !slices.Contains(stored, p) {
@@ -393,15 +442,15 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if len(stored) != 0 {
 		slices.Sort(stored)
 		moved, err := m.remind(ctx, b.stream, unit, b.states[trace.UnitSubject(unit)], turn, stored)
-		return moved, false, err
+		return moved, false, nil, err
 	}
 	latest, _, _, err := seal.Latest(m.repository, b.stream)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	docs, err := trace.Read[trace.Document](m.repository, b.stream)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	k := 1
 	for _, d := range docs {
@@ -412,11 +461,11 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	card := turn.Response.Result.Outcome.Card
 	done, err := parseDoneReport(turn)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Learnings: report.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	at := m.s.Now()
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument(unit), Revision: k, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: at, Actor: masonActor, Cause: turn.Response.ID, Depth: turn.Request.Depth}
@@ -437,11 +486,11 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
 		Events: []trace.Event{event}}
 	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
-		return false, false, nil
+		return false, false, nil, nil
 	} else if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
-	return true, false, nil
+	return true, false, nil, nil
 }
 
 // ownerActionOf returns the text of the owner action the mason flagged, or
