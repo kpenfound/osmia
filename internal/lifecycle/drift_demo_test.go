@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -75,14 +76,109 @@ func (f *shedFixture) awaitMasonSettled(t *testing.T, stream config.WorkstreamID
 	intakefixture.AwaitMasonSettled(t, f.repository(), stream, unit, turns)
 }
 
+// appendMasonConfig appends extra to the service configuration the fixture
+// writes.
+func appendMasonConfig(t *testing.T, opts *Options, extra string) {
+	t.Helper()
+	path := filepath.Join(opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(path)
+	must(t, err)
+	must(t, os.WriteFile(path, append(data, []byte(extra)...), 0600))
+}
+
+// continuationGate plays the continuations of a unit's mason turns: each one
+// reports that it runs and then ends cleanly, without done, once the gate is
+// released, or ends when the service stops it.
+type continuationGate struct {
+	mu      sync.Mutex
+	running map[string]chan struct{}
+	release chan struct{}
+}
+
+func newContinuationGate() *continuationGate {
+	return &continuationGate{running: map[string]chan struct{}{}, release: make(chan struct{})}
+}
+
+// started returns the channel that closes once a continuation of the
+// workstream's mason runs.
+func (g *continuationGate) started(stream string) chan struct{} {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.running[stream] == nil {
+		g.running[stream] = make(chan struct{})
+	}
+	return g.running[stream]
+}
+
+func (g *continuationGate) turn(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	started := g.started(intakefixture.SessionStream(req))
+	g.mu.Lock()
+	select {
+	case <-started:
+	default:
+		close(started)
+	}
+	g.mu.Unlock()
+	select {
+	case <-g.release:
+		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Released", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// awaitRunning waits until a continuation of the workstream's mason runs.
+func (g *continuationGate) awaitRunning(t *testing.T, stream config.WorkstreamID) {
+	t.Helper()
+	intakefixture.Await(t, "a continuation of the mason of "+string(stream)+" to run", g.started(string(stream)))
+}
+
+// awaitQueuedFollowUp waits until the unit's mason thread ends in a
+// continuation that is queued and not claimed, and returns the thread.
+func (f *shedFixture) awaitQueuedFollowUp(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		th, err := f.repository().Thread(stream, masonAgent(unit))
+		if err == nil && len(th.Turns) > 0 {
+			last := th.Turns[len(th.Turns)-1]
+			if last.CompletedAt.IsZero() && last.Claim == nil && strings.HasPrefix(last.Request.TurnID, masonAgent(unit)+"-clarify-") {
+				return th
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the mason of %s in %s never had a follow-up queued: %+v %v", unit, stream, th.Turns, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // TestDriftCadenceDemonstration keeps two building workstreams of one
 // project current with upstream on the project's upstream_rebase cadence,
 // through the local API with fake masons. See docs/upstream-drift-demonstration.md.
+//
+// Each workstream's resume is implementing with its mason's work unreported.
+// An implementing unit always has a mason turn queued or running, and a
+// drift rebase carries a unit's workspace only while none of its mason's turns
+// runs. So the mason role is paused, which holds queued mason turns back
+// without making the workstreams ineligible for drift rebases, and the
+// continuations that ran are ended. resume's follow-ups then wait queued in
+// its workspace when the drift rebase becomes due. The follow-ups count as
+// turns that ended without a report, so mason.max_clean_turns is raised
+// above the turns resume has had by then.
 func TestDriftCadenceDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 2, independentPlan)
+	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 2\n", independentPlan, "", func(opts *Options) {
+		appendMasonConfig(t, opts, "\n[mason]\nmax_clean_turns = 5\n")
+	})
 	defer func() { f.stop(t) }()
+	continuations := newContinuationGate()
+	f.engine.Mu.Lock()
+	for i := 1; i <= 6; i++ {
+		f.engine.Turns[fmt.Sprintf("%s-continue-%d", masonAgent("resume"), i)] = continuations.turn
+	}
+	f.engine.Mu.Unlock()
 
 	// The owner sets the project's cadence to three hours.
 	path, err := f.s.cfg.Root.ProjectConfig(f.project)
@@ -99,7 +195,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 
 	// Each workstream starts resume, whose mason leaves its work in the
 	// unit's workspace without reporting done, so the unit stays
-	// implementing.
+	// implementing, with a continuation of its mason running.
 	streams := []config.WorkstreamID{}
 	for _, key := range []string{"cadence-uploads", "cadence-audits"} {
 		stream, _ := f.builtAs(t, key)
@@ -108,6 +204,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 	sealed := map[config.WorkstreamID]string{}
 	for _, stream := range streams {
 		f.awaitMasonSettled(t, stream, "resume", 2)
+		continuations.awaitRunning(t, stream)
 		sealed[stream] = seals(t, f.repository(), stream)[0].Base.Commit
 		st, err := f.c.Status(ctx, stream)
 		must(t, err)
@@ -116,6 +213,22 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 		}
 	}
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+
+	// The mason role is paused and the running continuations end. resume
+	// is still implementing, and its follow-up waits queued and unclaimed.
+	must(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "role", Role: masonRole}, Mode: "soft", Reason: "hold mason turns", Source: "owner"}, nil))
+	close(continuations.release)
+	for _, stream := range streams {
+		th := f.awaitQueuedFollowUp(t, stream, "resume")
+		for _, q := range th.Turns[:len(th.Turns)-1] {
+			if q.CompletedAt.IsZero() {
+				t.Fatalf("a mason turn of resume in %s still runs when its drift rebase becomes due: %+v", stream, q.Request.TurnID)
+			}
+		}
+		if state, err := f.unitState(stream, "resume"); err != nil || state != UnitImplementing {
+			t.Fatalf("resume of %s is %s before its drift rebase: %v", stream, state, err)
+		}
+	}
 
 	// Three hours of service time after the later sealing, both workstreams
 	// are due. Each gets one drift rebase on the project's lander.
