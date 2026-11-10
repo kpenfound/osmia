@@ -39,7 +39,12 @@ func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 
 func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "")
+	return newParallelMasonFixturePrepared(t, backend, masons, perWorkstream, drafted, nil)
+}
+
+func newParallelMasonFixturePrepared(t *testing.T, backend string, masons, perWorkstream int, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+	t.Helper()
+	f, fake := newMasonFixtureWith(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "", prepare)
 	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
 	return f, fake
 }

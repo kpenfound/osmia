@@ -5,12 +5,10 @@ import (
 	fmt "fmt"
 	strings "strings"
 	sync "sync"
-	atomic "sync/atomic"
 	testing "testing"
 	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -62,24 +60,31 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 
 func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	t.Parallel()
-	var passed atomic.Int64
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(opts *Options) {
-		opts.schedulePassed = func() { passed.Add(1) }
-	})
+	f, fake := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	fake.Play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
+	continued := masonAgent("resume") + "-continue-1"
+	fake.Play[continued] = reportDone("Built")
+	f.engine.Mu.Lock()
+	f.engine.Turns[continued] = fake.Turn
+	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "misreporting-mason", validPlan)
 	q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
 	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Behavioural || len(q.Attempts) != 1 {
 		t.Fatalf("turn ended %s with %+v after %d attempts", q.Status(), q.Response, len(q.Attempts))
 	}
-	// Later passes leave the unit implementing, and never contest it.
-	awaitPasses(t, &passed, 3)
-	if state, err := f.repository().Workflow(stream, trace.UnitSubject("resume")); err != nil || state.Value != UnitImplementing {
-		t.Fatalf("unit resume is %+v: %v", state, err)
+	// The failure is not retried; the mason's next turn is a continuation
+	// that says what ended the turn, and the unit goes on.
+	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	ran := map[string]int{}
+	for _, req := range fake.Requests(stream) {
+		ran[req.Name]++
 	}
-	if len(fake.Requests(stream)) != 1 {
-		t.Fatalf("mason turns %+v", fake.Requests(stream))
+	if ran[masonTurnID("resume")] != 1 || ran[continued] != 1 || len(ran) != 2 {
+		t.Fatalf("mason turns %v", ran)
+	}
+	if th := f.thread(t, stream, masonAgent("resume")); len(th.Turns) != 2 || th.Turns[1].Request.TurnID != continued {
+		t.Fatalf("mason turns %+v", th.Turns)
 	}
 	if s, ok := f.streak(t, masonRole); ok {
 		t.Fatalf("a behavioural failure made a streak: %+v", s)

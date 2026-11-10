@@ -46,3 +46,13 @@ func TestClassifyMasonTurnWindowAndExclusions(t *testing.T) {
 		t.Fatalf("classified failed turn: %+v", got)
 	}
 }
+
+func TestClassifyMasonTurnLeavesARefusedReportToItsContinuation(t *testing.T) {
+	t.Parallel()
+	if got := ClassifyMasonTurn(coreadapter.SessionResult{FinalResponse: "Work is ongoing.", Refusal: "outcome is required"}, ""); got != nil {
+		t.Fatalf("classified a turn whose report the service refused: %+v", got)
+	}
+	if got := ClassifyMasonTurn(coreadapter.SessionResult{FinalResponse: "Work is ongoing."}, ""); got == nil {
+		t.Fatal("did not classify a clean ending")
+	}
+}

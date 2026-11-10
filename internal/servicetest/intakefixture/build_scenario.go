@@ -503,8 +503,26 @@ func ScriptMasons(engine *fixturekit.DemoEngine, turnID func(string) string) *Fa
 			fake.Play[name] = FailMasonTurn
 			engine.Turns[name] = fake.Turn
 		}
+		HoldContinuations(engine, MasonAgent(unit))
 	}
 	return fake
+}
+
+// HoldContinuations has the turns that continue the mason's turns, after a
+// failed turn or an interruption, run until the service stops them, so a unit
+// whose mason keeps ending its turns without a report stays implementing with
+// a turn running.
+func HoldContinuations(engine *fixturekit.DemoEngine, mason string) {
+	for i := 1; i <= 6; i++ {
+		engine.Turns[fmt.Sprintf("%s-continue-%d", mason, i)] = HoldMasonTurn
+		engine.Turns[fmt.Sprintf("%s-recover-%d", mason, i)] = HoldMasonTurn
+	}
+}
+
+// HoldMasonTurn is a mason turn that does nothing until the service stops it.
+func HoldMasonTurn(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func ExtendParallelMasons(t *testing.T, repository *trace.Repository, now time.Time, engine *fixturekit.DemoEngine, fake *FakeMasons, turnID func(string) string, actor trace.Actor) {
@@ -524,6 +542,7 @@ func ExtendParallelMasons(t *testing.T, repository *trace.Repository, now time.T
 			fake.Play[name] = FailMasonTurn
 			engine.Turns[name] = fake.Turn
 		}
+		HoldContinuations(engine, MasonAgent(unit))
 	}
 }
 func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string, contest func() (trace.Header, bool, error), actor trace.Actor, escalate string, path func(string, string) string) {

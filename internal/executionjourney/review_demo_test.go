@@ -26,6 +26,16 @@ func TestExactReviewDemonstration(t *testing.T) {
 	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer f.stop(t)
 	masons.Play[masonTurnID("resume")] = reportDone("Initial candidate")
+	// Dedupe's mason is unscripted and ends its turns without a report. Its
+	// continuations end at once instead of running until the service stops, so
+	// the unit uses up mason.max_clean_turns and is contested, and holds no
+	// turn while resume is reviewed and revised.
+	f.engine.Mu.Lock()
+	for i := 1; i <= 8; i++ {
+		f.engine.Turns[fmt.Sprintf("%s-continue-%d", masonAgent("dedupe"), i)] = masons.Turn
+		f.engine.Turns[fmt.Sprintf("%s-recover-%d", masonAgent("dedupe"), i)] = masons.Turn
+	}
+	f.engine.Mu.Unlock()
 	var reviews atomic.Int32
 	var old, revised UnitReviewIdentity
 	f.engine.Mu.Lock()

@@ -329,7 +329,13 @@ Check slots are independent of the model-role and per-workstream limits, so
 other work continues while checks wait. Reloading applies a changed limit to
 new starts immediately; executing runs finish even when the limit is lowered.
 
-`mason.max_clean_turns` also bounds the reminders a mason, or a drift mason,
+`mason.max_clean_turns` bounds the continuations of a mason turn that ended
+without an accepted report: the clarify turn after a clean ending without a
+tool call, the turn after a refused `done`, which states the refusal reason, and
+the turn after a failure, which says what ended the turn. A card problem
+never refuses a report, so a refusal comes only from the report itself. Past the
+bound the unit is contested, with a notice that names the reason. It also
+bounds the reminders a mason, or a drift mason,
 gets when it reports done with conflict markers left; past it the unit is
 contested or the drift rebase is held. `loop.max_sessions` is how many agent
 sessions a workstream may run without progress before the loop guard pauses
