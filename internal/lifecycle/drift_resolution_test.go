@@ -493,7 +493,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 			t.Fatalf("done %s returned %s", raw, out)
 		}
 	}
-	if got := reports.AcceptedForTest(turnKey(scope)); got.Report.Outcome != "Kept both owners" || got.Card != (coreadapter.Card{}) {
+	if got := reports.AcceptedForTest(turnKey(scope)); got.Report.Outcome != "Kept both owners" || got.Card != nil {
 		t.Fatalf("the accepted report %+v", got)
 	}
 }

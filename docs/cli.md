@@ -276,7 +276,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, its latest drift rebase with its reason and one
   `Moved:` line for each of its upstream moved events, then `Units:` with one line per unit of the sealed plan or follow-up and its state
-  and the latest available card (headline, happened and any owner action) beneath it
+  and the latest available card (headline, happened and any owner action) beneath it; the service fits a mason's card rather than refusing its report, so a unit whose mason gave a card that did not fit shows the shortened card, or none
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that
   landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active

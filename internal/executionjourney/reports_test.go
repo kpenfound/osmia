@@ -78,24 +78,6 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		{map[string]any{"outcome": "Built", "learnings": []string{" "}}, "learning 1 is empty"},
 	}
 	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		missing, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "approved"})
-		if err != nil || !strings.Contains(missing, `"recorded":false`) || !strings.Contains(missing, `headline is required`) {
-			return fmt.Errorf("missing card: %q %v", missing, err)
-		}
-		for _, bad := range []struct{ field, value, reason string }{
-			{"headline", " ", "headline is required"},
-			{"happened", " ", "happened is required"},
-			{"headline", strings.Repeat("x", 65), "headline must be at most 64 characters"},
-			{"happened", "One\nTwo", "happened must be a single line"},
-			{"happened", "Completed " + masonTurnID("resume"), "happened contains an Osmia or backend identifier"},
-			{"needs_you", "See parser.go", "needs_you contains a file name"},
-		} {
-			args := map[string]any{"outcome": "approved", bad.field: bad.value}
-			recorded, reason, err := done(ctx, tools, args)
-			if err != nil || recorded || !strings.Contains(reason, bad.reason) {
-				return fmt.Errorf("bad %s: recorded %t reason %q err %v", bad.field, recorded, reason, err)
-			}
-		}
 		for _, r := range refused {
 			recorded, reason, err := done(ctx, tools, r.args)
 			if err != nil || recorded || reason != r.reason {
