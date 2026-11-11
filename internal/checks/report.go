@@ -51,14 +51,14 @@ func parseCheckReportResults(output string) (heading string, failures []checkFai
 	lines := strings.Split(reportColor.ReplaceAllString(output, ""), "\n")
 	active := -1
 	inChecks := false
-	checkIndent := 0
+	checkIndent, childIndent := 0, 0
 	for i, line := range lines {
 		if reportHeading.MatchString(line) {
 			if heading != "" {
 				heading += "\n"
 			}
 			heading, inChecks, active = heading+line, true, -1
-			checkIndent = 0
+			checkIndent, childIndent = 0, 0
 			continue
 		}
 		if !inChecks {
@@ -67,6 +67,12 @@ func parseCheckReportResults(output string) (heading string, failures []checkFai
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
 		if reportHeading.MatchString(strings.TrimSpace(line)) && indent <= checkIndent+2 {
 			checkIndent = indent
+			// Dagger lists the checks of a nested report one level inside its
+			// heading; a top-level report lists them flush with it.
+			childIndent = 0
+			if indent > 0 {
+				childIndent = indent + 2
+			}
 			active = -1
 			continue
 		}
@@ -75,7 +81,7 @@ func parseCheckReportResults(output string) (heading string, failures []checkFai
 			inChecks, active = false, -1
 			continue
 		}
-		if m := reportCheck.FindStringSubmatch(line); m != nil && len(m[1]) <= checkIndent {
+		if m := reportCheck.FindStringSubmatch(line); m != nil && len(m[1]) <= max(checkIndent, childIndent) {
 			checkIndent = len(m[1])
 			active = -1
 			switch m[2] {

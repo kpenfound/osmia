@@ -676,6 +676,30 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 	}
 }
 
+func TestCreateSeededWithCharterRecordsItAsTheFirstRevision(t *testing.T) {
+	root, p := fixture(t)
+	seed := []byte("{\"version\": 1, \"entities\": []}\n")
+	for _, charter := range []string{"", " \n"} {
+		if _, err := CreateSeededWithCharter(context.Background(), root, p, at, owner, seed, charter); err == nil {
+			t.Fatalf("blank charter %q accepted", charter)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root.String(), "projects", string(p.ID))); !os.IsNotExist(err) {
+		t.Fatalf("a blank charter created a trace: %v", err)
+	}
+	charter := "# Charter\n\n1. Keep it small.\n"
+	r, err := CreateSeededWithCharter(context.Background(), root, p, at, owner, seed, charter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	docs := charterRevisions(t, r)
+	want := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: "charter", Revision: 1, Project: p.ID, At: at, Actor: owner, Cause: "project-create"}, Path: "charter.md", Content: charter}
+	if len(docs) != 1 || docs[0] != want {
+		t.Fatalf("charter revisions: %+v", docs)
+	}
+}
+
 func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
 	r, root, p := create(t)
 	// A duplicate descriptor shares the lock the way a child process forked

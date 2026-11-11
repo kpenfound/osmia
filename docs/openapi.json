@@ -2056,6 +2056,111 @@
         }
       }
     },
+    "/v1/projects/create": {
+      "post": {
+        "summary": "Create a project: create its GitHub repository under projects.repo_owner, clone it into projects.clone_dir, make main its default branch and register it. Repeating a request with the same id finishes the same creation; a request with only the id finishes a creation already planned under it. Refused, before anything is recorded or created, when creation is off, GITHUB_TOKEN is missing or is for another account, the repository name is taken or the clone path exists",
+        "operationId": "postProjectsCreate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/create/identity": {
+      "post": {
+        "summary": "Reserve a project creation identity, the ID the created project will have, to record before the create request is sent",
+        "operationId": "postProjectsCreateIdentity",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCreationIdentity"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/create/{id}": {
+      "get": {
+        "summary": "Report where the creation under an identity stands: not started, pending with the step reached and why it is stuck, or complete with the registered project",
+        "operationId": "getProjectsCreateById",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCreationState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/projects/extract": {
       "post": {
         "summary": "Start a knowledge-base extraction",
@@ -6751,6 +6856,71 @@
               "null",
               "string"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "ProjectCreateRequest": {
+        "properties": {
+          "charter": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectCreationIdentity": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectCreationState": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "step": {
+            "type": "string"
+          },
+          "stuck": {
+            "$ref": "#/components/schemas/ProjectCreationStuck"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectCreationStuck": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "type": "object"

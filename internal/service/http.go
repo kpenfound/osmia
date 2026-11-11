@@ -121,7 +121,12 @@ func (s *Service) configuration() ConfigResponse {
 	}
 	out.Diagnostics = append(out.Diagnostics, s.notifier.diagnostics()...)
 	if pending != nil {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "projects", Code: Internal, Message: "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
+		message := "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"
+		var creation *creationError
+		if errors.As(pending, &creation) {
+			message = fmt.Sprintf("an interrupted project creation is incomplete (%v); resolve it, then run osmia project create --id %s to finish it", creation.Err, creation.ID)
+		}
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "projects", Code: Internal, Message: message})
 	}
 	next, restart, err := s.candidate(cfg)
 	out.Drift = s.configDrift(cfg, err)
@@ -557,6 +562,41 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut && (r.URL.Path == Prefix+"/config/root" || r.URL.Path == Prefix+"/config/listen") {
 		fail(w, RestartRequired)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/create" {
+		// The create step clones over the network, so it extends the write
+		// deadline the way the project-add route does.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(createProjectTimeout)); err != nil {
+			fail(w, Internal)
+			return
+		}
+		var v ProjectCreateRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.CreateProject(r.Context(), v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/create/identity" {
+		id, err := s.ReserveProjectCreation()
+		if err != nil {
+			failWith(w, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"})
+			return
+		}
+		respond(w, 200, ProjectCreationIdentity{ID: id})
+		return
+	}
+	if raw, ok := strings.CutPrefix(r.URL.Path, Prefix+"/projects/create/"); ok && r.Method == http.MethodGet {
+		if out, api := s.ProjectCreation(config.ProjectID(raw)); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
 		return
 	}
 	if r.URL.Path == Prefix+"/projects" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {

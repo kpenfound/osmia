@@ -181,6 +181,50 @@ func TestCheckReportReadsNestedFailuresAndColors(t *testing.T) {
 	}
 }
 
+func TestCheckReportReadsChecksListedInsideAGroup(t *testing.T) {
+	t.Parallel()
+	raw := "CHECKS  ✘ 1 failed  ✔ 1 passed\n" +
+		"✘ go/tests/test 0.2s ERROR\n" +
+		"  CHECKS  ✘ 1 failed  ✔ 1 passed\n" +
+		"    ✘ dag://?check=test&go-test=TestBroken 0.1s ERROR\n" +
+		"      ! wrong answer\n" +
+		"    ✔ dag://?check=test&go-test=TestOne 0.1s OK\n" +
+		"✔ dag://?check=other 0.0s OK\n" +
+		"RUN LOCALLY\n  dagger check x\n"
+	if got := FailedChecks(raw); !slices.Equal(got, []string{"dag://?check=test&go-test=TestBroken"}) {
+		t.Fatalf("failures: %v", got)
+	}
+	if got := PassedChecks(raw); !slices.Equal(got, []string{"dag://?check=test&go-test=TestOne", "dag://?check=other"}) {
+		t.Fatalf("passed: %v", got)
+	}
+	status, failed, err := ClassifyChecks(CheckResult{ExitCode: 1, Output: raw}, nil)
+	if status != ChecksFailed || err != nil || !slices.Equal(failed, []string{"dag://?check=test&go-test=TestBroken"}) {
+		t.Fatalf("classified %s %v: %v", status, failed, err)
+	}
+}
+
+func TestNestedGroupFailureIsClassifiedFailed(t *testing.T) {
+	t.Parallel()
+	raw := "CHECKS  ✘ 1 failed\n" +
+		"✘ go/modules/packages/tests/test 0.2s ERROR\n" +
+		"  CHECKS  ✘ 1 failed  ✔ 1 passed\n" +
+		"    ✘ dag://?check=test&go-module=.&go-package=broken&go-test=TestBroken 0.1s ERROR\n" +
+		"      ! Go tests in broken: TestBroken failed\n" +
+		"        ✔ dag://?check=quoted 0.0s OK\n" +
+		"    ✔ dag://?check=test&go-module=.&go-package=a&go-test=TestOne 0.1s OK\n"
+	link := "dag://?check=test&go-module=.&go-package=broken&go-test=TestBroken"
+	if got := FailedChecks(raw); !slices.Equal(got, []string{link}) {
+		t.Fatalf("failures: %v", got)
+	}
+	if got := PassedChecks(raw); slices.Contains(got, "dag://?check=quoted") {
+		t.Fatalf("quoted output read as a result: %v", got)
+	}
+	status, failed, err := ClassifyChecks(CheckResult{ExitCode: 1, Output: raw}, nil)
+	if status != ChecksFailed || err != nil || !slices.Equal(failed, []string{link}) {
+		t.Fatalf("classified %s %v: %v", status, failed, err)
+	}
+}
+
 func TestCheckReportKeepsUnrecognizedAndInfrastructureOutput(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{

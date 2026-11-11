@@ -302,6 +302,12 @@ type ShedResponse = api.ShedResponse
 
 type ProjectAddRequest = api.ProjectAddRequest
 
+type ProjectCreateRequest = api.ProjectCreateRequest
+
+type ProjectCreationIdentity = api.ProjectCreationIdentity
+
+type ProjectCreationState = api.ProjectCreationState
+
 type ProjectRemoveRequest = api.ProjectRemoveRequest
 
 type ProjectResponse = api.ProjectResponse

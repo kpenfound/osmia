@@ -109,6 +109,10 @@ type Options struct {
 	// workstreams. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
 	PullRequests pulls.Client
+	// Repositories reads and creates the GitHub repositories of project
+	// creation. It defaults to the GitHub REST API with the service's
+	// GITHUB_TOKEN environment variable, which no session receives.
+	Repositories pulls.Repositories
 	// JevProvider returns the Jev provider for the current settings and API
 	// key. It defaults to the TypeSafe-compatible HTTP API the settings name.
 	JevProvider func(corejev.Settings, string) corejev.Provider
@@ -300,6 +304,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	if opts.PullRequests == nil {
 		opts.PullRequests = pulls.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	}
+	if opts.Repositories == nil {
+		opts.Repositories = pulls.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}
 	cfg, err := config.Load(opts.Config)
 	if err != nil {

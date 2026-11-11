@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -24,6 +25,9 @@ type pendingProject struct {
 	Version     int            `json:"version"`
 	Project     config.Project `json:"project"`
 	CharterCopy *projectSplit  `json:"charter_copy,omitempty"`
+	// Creation is set when the registration is the end of a project creation,
+	// which first creates and clones the repository.
+	Creation *projectCreation `json:"creation,omitempty"`
 }
 
 func (s *Service) step(name string) error {
@@ -127,6 +131,9 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 		return ProjectResponse{}, &APIError{Code: Internal, Message: "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
+		if pending.Creation != nil {
+			return ProjectResponse{}, pendingRegistrationError(*pending)
+		}
 		if conflict := pendingCloneConflict(s.current(), pending.Project); conflict != nil {
 			return ProjectResponse{}, conflict
 		}
@@ -239,16 +246,20 @@ func (s *Service) readPending() (*pendingProject, error) {
 			config.Project
 			Source config.ProjectID `json:"group_id,omitempty"`
 		} `json:"project"`
-		CharterCopy *projectSplit `json:"charter_copy,omitempty"`
+		CharterCopy *projectSplit    `json:"charter_copy,omitempty"`
+		Creation    *projectCreation `json:"creation,omitempty"`
 	}
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&stored); err != nil {
 		return nil, err
 	}
-	p := pendingProject{Version: stored.Version, Project: stored.Project.Project, CharterCopy: stored.CharterCopy}
+	p := pendingProject{Version: stored.Version, Project: stored.Project.Project, CharterCopy: stored.CharterCopy, Creation: stored.Creation}
 	if p.Version != 1 || config.CheckProjectIDs(p.Project.ID) != nil || !filepath.IsAbs(p.Project.Clone) {
 		return nil, errors.New("invalid project registration journal")
+	}
+	if c := p.Creation; c != nil && (!validRepoName(c.Owner, c.Repo) || c.Owner+"/"+c.Repo != p.Project.Upstream || strings.TrimSpace(c.Charter) == "" || c.Visibility != api.VisibilityPrivate && c.Visibility != api.VisibilityPublic) {
+		return nil, errors.New("invalid project creation journal")
 	}
 	if stored.Project.Source != "" && p.CharterCopy == nil {
 		cfg, err := s.current().AddProject(stored.Project.Source, s.options.Config.Home)
@@ -361,7 +372,12 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		if err != nil {
 			return p, err
 		}
-		repository, err := trace.CreateSeeded(ctx, root, p, time.Now().UTC(), registrationActor, entities)
+		var repository *trace.Repository
+		if pending.Creation != nil {
+			repository, err = trace.CreateSeededWithCharter(ctx, root, p, time.Now().UTC(), registrationActor, entities, pending.Creation.Charter)
+		} else {
+			repository, err = trace.CreateSeeded(ctx, root, p, time.Now().UTC(), registrationActor, entities)
+		}
 		if err != nil {
 			return p, err
 		}
@@ -506,7 +522,14 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	if conflict := pendingCloneConflict(cfg, pending.Project); conflict != nil {
 		return cfg, conflict
 	}
-	if _, err := s.complete(ctx, *pending, false); err != nil {
+	if pending.Creation != nil {
+		// A creation first needs its repository and clone, which the creation
+		// steps find or make; registration alone would run on a clone that may
+		// not exist yet.
+		if _, err := s.runCreation(ctx, pending, false); err != nil {
+			return cfg, &creationError{ID: pending.Project.ID, Err: err}
+		}
+	} else if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
 	}
 	loaded, err := config.Load(s.options.Config)

@@ -35,6 +35,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   engine status|restart|prune [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
+  project create <name> --repo NAME --charter-file PATH|- [--description TEXT] [--public] [--id PROJECT-ID] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -94,9 +95,10 @@ type options struct {
 	root, socket, reason, project, base             string
 	messageFile, messagesFile                       string
 	upstream, fork, clone, baseBranch               string
+	repo, description, charterFile, id              string
 	profile, title, from                            string
 	json, hard, reasonSet, help, target, accept     bool
-	skipDebate, version, detach                     bool
+	skipDebate, version, detach, public, creating   bool
 	projectSpecRevision, specRevision, planRevision int
 	args                                            []string
 	with                                            []string
@@ -116,7 +118,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -151,6 +153,18 @@ func parse(args []string) (o options, err error) {
 			case "--base-branch":
 				o.baseBranch = value
 				o.target = true
+			case "--repo":
+				o.repo = value
+				o.creating = true
+			case "--description":
+				o.description = value
+				o.creating = true
+			case "--charter-file":
+				o.charterFile = value
+				o.creating = true
+			case "--id":
+				o.id = value
+				o.creating = true
 			case "--with":
 				o.with = append(o.with, value)
 			case "--base":
@@ -177,7 +191,7 @@ func parse(args []string) (o options, err error) {
 					o.planRevision = n
 				}
 			}
-		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
+		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--public", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
@@ -192,6 +206,9 @@ func parse(args []string) (o options, err error) {
 				o.skipDebate = true
 			case "--accept":
 				o.accept = true
+			case "--public":
+				o.public = true
+				o.creating = true
 			case "--version":
 				o.version = true
 			default:
@@ -295,7 +312,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -311,7 +328,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return invalid()
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -487,7 +505,29 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "project" {
 		var result wire.ProjectResponse
-		if a[0] == "add" {
+		if a[0] == "create" {
+			charter, code := readCharter(o.charterFile, stdin, stderr)
+			if code != 0 {
+				return code
+			}
+			req := wire.ProjectCreateRequest{Name: a[1], Repo: o.repo, Description: o.description, Charter: charter}
+			if o.public {
+				req.Visibility = wire.VisibilityPublic
+			}
+			if o.id != "" {
+				id, err := config.ParseProjectID(o.id)
+				if err != nil {
+					return invalid()
+				}
+				req.ID = id
+			} else if req.ID, err = c.ReserveProjectCreation(ctx); err != nil {
+				return fail(err)
+			}
+			result, err = c.CreateProject(ctx, req)
+			if err != nil {
+				return fail(err)
+			}
+		} else if a[0] == "add" {
 			clone, err := filepath.Abs(o.clone)
 			if err != nil {
 				return invalid()
@@ -510,8 +550,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		verb := "added"
-		if a[0] == "remove" {
+		switch a[0] {
+		case "remove":
 			verb = "removed"
+		case "create":
+			verb = "created"
 		}
 		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s push repository: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, (config.Project{Upstream: result.Project.Upstream, Fork: result.Project.Fork}).PushRepository(), result.Project.Clone, result.Project.Trace, result.NextStep)
 		return 0
@@ -2157,4 +2200,35 @@ func showFeed(w io.Writer, entries []wire.FeedEntry) {
 			fmt.Fprintf(w, "  %s\n", e.Text)
 		}
 	}
+}
+
+// readCharter reads the charter a project creation records: the file at path,
+// or standard input for "-". It returns the exit code to stop with, zero when
+// the charter was read.
+func readCharter(path string, stdin io.Reader, stderr io.Writer) (string, int) {
+	var (
+		data []byte
+		err  error
+	)
+	if path == "-" {
+		data, err = io.ReadAll(io.LimitReader(stdin, service.MaxHandedBytes+1))
+	} else {
+		var f *os.File
+		if f, err = os.Open(path); err == nil {
+			data, err = io.ReadAll(io.LimitReader(f, service.MaxHandedBytes+1))
+			f.Close()
+		}
+	}
+	switch {
+	case err != nil:
+		fmt.Fprintln(stderr, "cannot read the charter")
+		return "", 1
+	case len(data) > service.MaxHandedBytes:
+		fmt.Fprintf(stderr, "the charter is larger than %d bytes; use a smaller charter\n", service.MaxHandedBytes)
+		return "", 4
+	case !utf8.Valid(data):
+		fmt.Fprintln(stderr, "the charter is not UTF-8 text")
+		return "", 4
+	}
+	return string(data), 0
 }
