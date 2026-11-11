@@ -137,7 +137,7 @@ func Run(ctx context.Context, o Options) []Check {
 	for _, p := range projects {
 		r.project(ctx, p)
 	}
-	r.github(ctx, projects)
+	r.github(ctx, cfg, projects)
 	if lock != nil && cfg != nil {
 		r.state(cfg, projects)
 	}
@@ -463,19 +463,32 @@ func (r *run) remote(ctx context.Context, g *workspace.Git, check, repository, b
 
 // github checks the token the service fetches issues and opens pull requests
 // with, and that it reads each project's repositories.
-func (r *run) github(ctx context.Context, projects []config.Project) {
+func (r *run) github(ctx context.Context, cfg *config.Config, projects []config.Project) {
+	creation := r.creationConfigured(cfg)
 	if r.Token == "" {
 		r.add(GroupGitHub, "GITHUB_TOKEN", Warn, "GITHUB_TOKEN is not set", "export GITHUB_TOKEN before osmia serve; hand-ins from issue URLs and pull requests need it")
+		if creation {
+			r.add(GroupGitHub, "creation account", Warn, "cannot confirm that the token's account is projects.repo_owner: GITHUB_TOKEN is not set", "export GITHUB_TOKEN before osmia serve; project creation needs it")
+			r.add(GroupGitHub, "creation permission", Warn, "cannot confirm that the token can create repositories: GITHUB_TOKEN is not set", "export GITHUB_TOKEN before osmia serve; project creation needs it")
+		}
 		return
 	}
 	var user struct {
 		Login string `json:"login"`
 	}
-	if err := r.get(ctx, "/user", &user); err != nil {
+	header, err := r.getHeader(ctx, "/user", &user)
+	if err != nil {
 		r.add(GroupGitHub, "GITHUB_TOKEN", Fail, "GitHub refuses the token: "+reason(err), "replace GITHUB_TOKEN with a valid token")
+		if creation {
+			r.add(GroupGitHub, "creation account", Warn, "cannot confirm that the token's account is projects.repo_owner: GitHub refuses the token", "replace GITHUB_TOKEN with a valid token")
+			r.add(GroupGitHub, "creation permission", Warn, "cannot confirm that the token can create repositories: GitHub refuses the token", "replace GITHUB_TOKEN with a valid token")
+		}
 		return
 	}
 	r.add(GroupGitHub, "GITHUB_TOKEN", Pass, "authenticates as "+user.Login, "")
+	if creation {
+		r.creationToken(cfg.ProjectCreation.RepoOwner, user.Login, header)
+	}
 	for _, p := range projects {
 		repositories := []string{p.Upstream}
 		if push := p.PushRepository(); push != p.Upstream {
@@ -495,25 +508,70 @@ func (r *run) github(ctx context.Context, projects []config.Project) {
 	}
 }
 
+// creationConfigured reports whether project creation is configured, and
+// records that finding: creation stays off until both [projects] keys are set.
+func (r *run) creationConfigured(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if missing := cfg.ProjectCreation.MissingSetting(); missing != "" {
+		r.add(GroupGitHub, "project creation", Pass, "not configured: "+missing+" is not set, so new projects cannot be created", "")
+		return false
+	}
+	r.add(GroupGitHub, "project creation", Pass, "configured: new repositories are created under "+cfg.ProjectCreation.RepoOwner+" and cloned into "+cfg.ProjectCreation.CloneDir, "")
+	return true
+}
+
+// creationToken checks what project creation needs of the token that
+// answered GET /user as login: that it is the account of repoOwner, which
+// POST /user/repos always creates under, and that it can create repositories.
+// A classic token lists its scopes in X-OAuth-Scopes; a fine-grained token
+// lists none, and its permissions cannot be read, so doctor says it cannot
+// confirm them rather than passing.
+func (r *run) creationToken(repoOwner, login string, header http.Header) {
+	if strings.EqualFold(login, repoOwner) {
+		r.add(GroupGitHub, "creation account", Pass, "the token's account is projects.repo_owner ("+login+")", "")
+	} else {
+		r.add(GroupGitHub, "creation account", Warn, "the token authenticates as "+login+" but projects.repo_owner is "+repoOwner+"; repositories are always created under the token's own account", "set projects.repo_owner to "+login+", or use a token of "+repoOwner)
+	}
+	scopes := header.Get("X-OAuth-Scopes")
+	if scopes == "" {
+		r.add(GroupGitHub, "creation permission", Warn, "cannot confirm that the token can create repositories: GitHub reported no scopes, as for a fine-grained token", "a fine-grained token needs Administration (or repository creation) write plus Pull requests and Metadata, with access to all repositories; a classic token needs the repo scope")
+		return
+	}
+	if slices.ContainsFunc(strings.Split(scopes, ","), func(scope string) bool { return strings.TrimSpace(scope) == "repo" }) {
+		r.add(GroupGitHub, "creation permission", Pass, "the token has the repo scope", "")
+		return
+	}
+	r.add(GroupGitHub, "creation permission", Warn, "the token's scopes ("+firstLine(scopes)+") do not include repo, so it cannot create repositories", "create a classic token with the repo scope, or a fine-grained token with Administration write, Pull requests and Metadata for all repositories")
+}
+
 // get reads one GitHub API resource into out.
 func (r *run) get(ctx context.Context, path string, out any) error {
+	_, err := r.getHeader(ctx, path, out)
+	return err
+}
+
+// getHeader reads one GitHub API resource into out and returns the response
+// headers.
+func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(r.GitHubAPI, "/")+path, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := r.HTTP.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
 // state opens each project's trace and the runtime state as serve does on

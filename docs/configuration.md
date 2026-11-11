@@ -260,6 +260,14 @@ model = "large-v3-turbo"
 # The environment variable holding an optional bearer key.
 api_key_env = "WHISPER_API_KEY"
 
+[projects]
+# The GitHub user account new project repositories are created under; it must
+# be the account GITHUB_TOKEN authenticates as. Empty keeps creation off.
+repo_owner = ""
+# The absolute directory new clones are made in; ~/ is expanded. Empty keeps
+# creation off.
+clone_dir = ""
+
 [roles.mason]
 profile = "default"
 sandbox = "none"
@@ -1247,6 +1255,50 @@ the parent's feature branch. After the parent integrates, fresh review and
 owner delivery approval authorize retargeting that same pull request to the
 project's base branch with the approved description. Interrupted updates are
 reconciled against the recorded request before retrying.
+
+## Project creation
+
+A design session can describe a brand-new project, and Osmia creates its
+repository, clones it and registers it. That stays off until the top-level
+`[projects]` table sets both keys:
+
+```toml
+[projects]
+# The GitHub user account the repository is created under.
+repo_owner = "octocat"
+# The directory the new clone goes in, as <clone_dir>/<repo>.
+clone_dir = "~/src"
+```
+
+`repo_owner` is a GitHub user account name: up to 39 letters, digits and single
+hyphens. It must be the account `GITHUB_TOKEN` authenticates as, because
+GitHub's create-repository call always creates under the token's own account;
+an organization is not supported. The service confirms the account before it
+records or creates anything and refuses on a mismatch. `clone_dir` must be an
+absolute directory, or start with `~/`, and must not overlap the Osmia root.
+Both keys are validated whether or not creation is on, and an invalid one fails
+the load with an error naming the field, such as `projects.repo_owner` or
+`projects.clone_dir`. Setting only one key leaves creation off.
+`osmia config` and `GET /v1/config` report the table.
+
+New repositories are private unless the owner confirms a public one in the
+design session, and each is initialised with only a README.
+
+`GITHUB_TOKEN` needs permission to create repositories:
+
+- A classic token needs the `repo` scope.
+- A fine-grained token needs Administration (or repository creation) write
+  permission plus Pull requests and Metadata, with access to All repositories,
+  because the repository does not exist when the token is chosen.
+
+The token is used only for GitHub API calls. Clone, fetch and push use the
+host's own git configuration, SSH or HTTPS, as they do for every registered
+project; the clone uses the SSH URL GitHub returns. Osmia adds no git
+credential handling of its own. `osmia doctor` reports whether creation is
+configured, whether the token's account is `repo_owner` and whether the token
+can create repositories, reading `X-OAuth-Scopes` for a classic token. A
+fine-grained token reports no scopes, so doctor says it cannot confirm the
+permission rather than passing. Doctor makes no claim about git credentials.
 
 ## Optional Whisper transcription
 

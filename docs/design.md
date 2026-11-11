@@ -967,6 +967,11 @@ enabled = false                      # one switch for every Jev judgment
 # model = "large-v3-turbo"
 # api_key_env = "WHISPER_API_KEY"      # optional bearer key, read from the environment
 
+[projects]
+# Optional project creation; both keys must be set to turn it on.
+# repo_owner = "octocat"               # GitHub user account; must be GITHUB_TOKEN's account
+# clone_dir = "~/src"                  # absolute directory new clones go in
+
 [notify]
 webhook = "https://ntfy.sh/..."
 

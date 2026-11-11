@@ -4390,6 +4390,9 @@
           "project": {
             "$ref": "#/components/schemas/ConfigProject"
           },
+          "project_creation": {
+            "$ref": "#/components/schemas/ConfigProjectCreation"
+          },
           "projects": {
             "items": {
               "$ref": "#/components/schemas/ConfigProject"
@@ -4735,6 +4738,17 @@
           },
           "per_workstream": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigProjectCreation": {
+        "properties": {
+          "clone_dir": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
           }
         },
         "type": "object"

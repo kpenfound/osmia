@@ -46,6 +46,9 @@ type Config struct {
 	Transcribe     Transcribe         `toml:"transcribe" json:"transcribe"`
 	Notify         Notify             `toml:"notify" json:"notify"`
 	Skills         Skills             `toml:"skills" json:"skills"`
+	// ProjectCreation is the [projects] table. Its JSON name differs because
+	// Projects lists the active projects.
+	ProjectCreation ProjectCreation `toml:"projects" json:"project_creation"`
 	// Project is the project this configuration is about: the only active
 	// project of a loaded configuration, or the project For selected. It is
 	// zero when no project, or more than one, is active.
@@ -402,6 +405,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 		return nil, err
 	}
 	if err := c.Transcribe.validate(path); err != nil {
+		return nil, err
+	}
+	if err := c.ProjectCreation.validate(path, root, options.Home); err != nil {
 		return nil, err
 	}
 	if _, _, err := skills.ParseRefresh(c.Skills.Refresh); err != nil {
@@ -798,7 +804,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "dagger", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
