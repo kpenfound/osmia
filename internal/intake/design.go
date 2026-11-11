@@ -854,8 +854,22 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 				brief.Projects = append(brief.Projects, member.Repo)
 			}
 		}
-		if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
-			return DesignStartResponse{}, api
+		if len(brief.Projects) > 0 || brief.NewProject == nil {
+			if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
+				return DesignStartResponse{}, api
+			}
+		}
+		var creation config.ProjectID
+		if brief.NewProject != nil {
+			// Refused here, before any intent is recorded, nothing has been
+			// created on GitHub.
+			if api := s.CheckDesignNewProject(ctx, brief.NewProject); api != nil {
+				return DesignStartResponse{}, api
+			}
+			creation, err = s.ProjectCreation.Reserve()
+			if err != nil {
+				return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
+			}
 		}
 		transcript, err := DesignTranscript(repository, stream)
 		if err != nil {
@@ -866,6 +880,10 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 			Content: strings.TrimRight(brief.Content, "\n") + "\n" + DesignTranscriptHeading + transcript, Source: "design:" + string(stream)}
 		handed.Schema = "osmia.trace.document"
 		intent = DesignStartIntent{BriefRevision: latest, Projects: brief.Projects, Handed: handed}
+		if brief.NewProject != nil {
+			pinned := *brief.NewProject
+			intent.NewProject, intent.Creation = &pinned, creation
+		}
 		data, err := json.Marshal(intent)
 		if err != nil {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}

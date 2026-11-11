@@ -27,7 +27,8 @@ import (
 // escalations, recorded only in its own trace, are listed exactly once,
 // never duplicated by each of its real members' own project, and never
 // merged with either member's own unrelated escalations: each project's
-// own inbox counter is independent of the workgroup's.
+// own inbox counter is independent of the workgroup's. A project creation
+// that cannot finish is listed once, with the decisions of every project.
 func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 	cfg, projects := s.Runtimes()
 	out := InboxResponse{Entries: []InboxEntry{}}
@@ -75,6 +76,11 @@ func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 			out.Entries = append(out.Entries, entries...)
 		}
 	}
+	creations, err := s.ProjectCreationEntries(projects)
+	if err != nil {
+		return InboxResponse{}, &APIError{Code: Internal, Message: "cannot read the pending project creation; check the project registration journal"}
+	}
+	out.Entries = append(out.Entries, creations...)
 	slices.SortStableFunc(out.Entries, func(a, b InboxEntry) int { return a.OpenedAt.Compare(b.OpenedAt) })
 	return out, nil
 }

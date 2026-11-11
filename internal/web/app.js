@@ -1070,7 +1070,7 @@
 
   function groupInbox(id) {
     const members = new Set(groupMembers(id).map(w => w.workstream));
-    return (views.inbox?.entries || []).filter(e => (e.workgroup === id || (!e.workgroup && members.has(e.workstream))) && !dismissed.has(decisionKey(e)));
+    return (views.inbox?.entries || []).filter(e => e.kind !== 'project-creation' && (e.workgroup === id || (!e.workgroup && members.has(e.workstream))) && !dismissed.has(decisionKey(e)));
   }
 
   function groupProposals(id) {
@@ -1226,7 +1226,8 @@
   function inboxOf(id) {
     const w = streams().find(w => w.workstream === id);
     const group = w?.workgroup?.id;
-    return views.inbox ? views.inbox.entries.filter((e) => (isMultiMember(w) ? !e.workgroup && e.kind !== 'escalation' && !e.answer?.body?.project_spec_revision && e.workstream === id : (e.workstream === id || (group && e.workgroup === group))) && !dismissed.has(decisionKey(e))) : [];
+    // A stuck project creation waits on the project pane, not on a workstream.
+    return views.inbox ? views.inbox.entries.filter((e) => e.kind !== 'project-creation' && (isMultiMember(w) ? !e.workgroup && e.kind !== 'escalation' && !e.answer?.body?.project_spec_revision && e.workstream === id : (e.workstream === id || (group && e.workgroup === group))) && !dismissed.has(decisionKey(e))) : [];
   }
 
   function proposalsOf(id) {
@@ -1562,7 +1563,10 @@
       }
       return row.node;
     });
-    place(byId('project-pane'), projectNodes);
+    // A creation that cannot finish waits for the owner here, whether a start,
+    // the CLI or the API began it.
+    const creations = (views.inbox ? views.inbox.entries : []).filter((e) => e.kind === 'project-creation' && !dismissed.has(decisionKey(e))).map(renderDecision);
+    place(byId('project-pane'), [...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes]);
     if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
     for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
@@ -2950,6 +2954,7 @@
     notices: 'Notices held',
     loop: 'Loop guard',
     base: 'Base parked',
+    'project-creation': 'Project creation stuck',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -2974,6 +2979,7 @@
     round: 'Debate another round',
     overrule: 'Overrule the objections',
     upstream: 'Continue from upstream',
+    retry: 'Retry',
   };
 
   function workstreamName(id) {
@@ -3169,6 +3175,12 @@
         }
         send(entry.answer.method, endpoint(entry), { ...body, decision },
           () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.', decisionKey(entry));
+        return;
+      case 'project-creation':
+        // The retry finishes the creation under its identity, reusing only the
+        // repository that creation made.
+        send(entry.answer.method, endpoint(entry), body,
+          () => 'The project was created and registered.', decisionKey(entry));
         return;
       case 'base':
         send(entry.answer.method, endpoint(entry), body,
@@ -3419,6 +3431,8 @@
         // base was abandoned.
         if (entry.kind === 'base') {
           d.form.hidden = entry.options.length === 0;
+          d.note.parentElement.hidden = true;
+        } else if (entry.kind === 'project-creation') {
           d.note.parentElement.hidden = true;
         }
     }

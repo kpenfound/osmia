@@ -746,6 +746,12 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
     registered or adopted. Rename or remove the other repository on GitHub,
     then run the command again with `--id`.
 
+  `project create --id PROJECT-ID` alone finishes the creation already planned
+  under that identity, reusing only the repository that creation made; it is
+  also what an inbox entry for a stuck creation asks you to run, whether a
+  design Start, the CLI or the API began it, and a Start goes on to allocate
+  its workgroup once the creation completes.
+
   While a creation is pending, `project add` and other creations are refused
   and name it. The API is `POST /v1/projects/create` with `POST
   /v1/projects/create/identity` to reserve the identity and `GET

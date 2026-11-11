@@ -112,3 +112,47 @@ func TestProjectCreateReadsTheCharterFromStandardInput(t *testing.T) {
 		t.Fatalf("--public created a private repository: %+v", repo)
 	}
 }
+
+// The identity alone finishes a planned creation, and a stuck creation's
+// inbox entry names that command.
+func TestProjectCreateWithOnlyAnIdentity(t *testing.T) {
+	root, _, github := creationService(t)
+	charter := filepath.Join(t.TempDir(), "charter.md")
+	must(t, os.WriteFile(charter, []byte("# Charter\n\n1. Keep it small.\n"), 0600))
+	for _, args := range [][]string{
+		{"project", "create", "--id", "nope"},
+		{"project", "create", "--id", "p_0123456789abcdef0123456789abcdef", "--repo", "newrepo"},
+		{"project", "create", "--id", "p_0123456789abcdef0123456789abcdef", "--public"},
+		{"project", "create"},
+	} {
+		if code, out, diag := invoke(t, root, args...); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
+			t.Fatalf("%v: %d %q %q", args, code, out, diag)
+		}
+	}
+	created := successful(t, root, "project", "create", "New Project", "--repo", "newrepo", "--charter-file", charter, "--json")
+	var first wire.ProjectResponse
+	must(t, json.Unmarshal([]byte(created), &first))
+	again := successful(t, root, "project", "create", "--id", string(first.Project.ID), "--json")
+	var repeated wire.ProjectResponse
+	must(t, json.Unmarshal([]byte(again), &repeated))
+	if repeated.Project.ID != first.Project.ID || github.CreateCalls() != 1 {
+		t.Fatalf("%+v, %d create calls", repeated, github.CreateCalls())
+	}
+	code, out, diag := invoke(t, root, "project", "create", "--id", "p_0123456789abcdef0123456789abcdef")
+	if code == 0 || out != "" || diag == "" {
+		t.Fatalf("an identity with no plan: %d %q %q", code, out, diag)
+	}
+}
+
+func TestInboxNamesTheCommandThatRetriesAStuckCreation(t *testing.T) {
+	var out bytes.Buffer
+	showInbox(&out, wire.InboxResponse{Entries: []wire.InboxEntry{{
+		Kind: wire.InboxProjectCreation, Question: "Creating the project for owner/gadget stopped.", Blocked: "Creating and registering the project.",
+		Options: []string{"retry"}, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/projects/create", Body: map[string]any{"id": "p_0123456789abcdef0123456789abcdef"}},
+	}}})
+	for _, want := range []string{"[project-creation]", "Options: retry", "osmia project create --id p_0123456789abcdef0123456789abcdef"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("inbox lacks %q:\n%s", want, out.String())
+		}
+	}
+}

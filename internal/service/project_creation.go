@@ -139,6 +139,49 @@ func (s *Service) ProjectCreation(id config.ProjectID) (api.ProjectCreationState
 	return state, nil
 }
 
+// CheckProjectCreation runs the checks a creation makes before it writes
+// anything, for a caller that must refuse before it records any intent of its
+// own: creation is enabled, the token is present and is for repo_owner, the
+// repo name is valid and free, and the clone path is free. A registration or
+// creation already in progress also refuses, because it would keep the
+// creation from starting. Nothing is recorded or created.
+func (s *Service) CheckProjectCreation(ctx context.Context, req ProjectCreateRequest) *APIError {
+	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
+	pending, err := s.readPending()
+	if err != nil {
+		return &APIError{Code: Internal, Message: "the project registration journal is unreadable; inspect project-add.json under the root"}
+	}
+	if pending != nil {
+		return pendingRegistrationError(*pending)
+	}
+	req.ID = ""
+	_, refusal := s.planCreation(ctx, req)
+	return refusal
+}
+
+// StuckProjectCreation reports the creation in progress when its last attempt
+// stopped for a reason only the owner can resolve, and when that was saved.
+func (s *Service) StuckProjectCreation() (state api.ProjectCreationState, at time.Time, stuck bool, err error) {
+	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
+	pending, err := s.readPending()
+	if err != nil || pending == nil || pending.Creation == nil || pending.Creation.Stuck == nil {
+		return api.ProjectCreationState{}, time.Time{}, false, err
+	}
+	c := pending.Creation
+	state = api.ProjectCreationState{ID: pending.Project.ID, State: api.CreationPending, Step: c.Step, Repository: c.repository(), Stuck: c.Stuck}
+	path, err := s.current().Root.PendingProject()
+	if err != nil {
+		return state, time.Time{}, false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return state, time.Time{}, false, err
+	}
+	return state, info.ModTime().UTC(), true, nil
+}
+
 // CreateProject creates the project under the creation identity in req, or
 // finishes the creation already begun under it. It validates before writing
 // anything, saves the creation plan in the registration journal, then creates
@@ -313,7 +356,7 @@ func (s *Service) finishCreation(ctx context.Context, pending *pendingProject) (
 
 func creationIncomplete(id config.ProjectID, err error) *APIError {
 	var blocked *creationStuck
-	if errors.As(err, &blocked) {
+	if errors.As(err, &blocked) && blocked.Kind != api.StuckUnknown {
 		return &APIError{Code: Conflict, Message: fmt.Sprintf("project creation %s is stuck (%s): %s; resolve it, then run osmia project create --id %s to finish it", id, blocked.Kind, blocked.Reason, id)}
 	}
 	return &APIError{Code: Internal, Message: fmt.Sprintf("project creation %s is incomplete (%v); run osmia project create --id %s to finish it", id, err, id)}
@@ -413,7 +456,7 @@ func (s *Service) ensureRepository(ctx context.Context, pending *pendingProject)
 		case pulls.CreateRefused:
 			return stuck(api.StuckRefused, "GitHub refused to create %s: %v", name, err)
 		}
-		return fmt.Errorf("the outcome of creating %s is unknown: %w", name, err)
+		return stuck(api.StuckUnknown, "the outcome of creating %s is unknown: %v. A retry sends the create again only when no repository of that name exists", name, err)
 	}
 	c.RepositoryID, c.FullName, c.SSHURL, c.DefaultBranch = created.ID, created.FullName, created.SSHURL, created.DefaultBranch
 	if strings.EqualFold(created.FullName, name) {

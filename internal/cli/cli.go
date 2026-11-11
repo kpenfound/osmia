@@ -36,6 +36,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
   project create <name> --repo NAME --charter-file PATH|- [--description TEXT] [--public] [--id PROJECT-ID] [--json]
+  project create --id PROJECT-ID [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -312,7 +313,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory") ||
+			len(a) == 1 && a[0] == "create" && o.id != "" && o.repo == "" && o.charterFile == "" && o.description == "" && !o.public
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
@@ -505,7 +507,17 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "project" {
 		var result wire.ProjectResponse
-		if a[0] == "create" {
+		if a[0] == "create" && len(a) == 1 {
+			// Only the identity: finish the creation already planned under it.
+			id, err := config.ParseProjectID(o.id)
+			if err != nil {
+				return invalid()
+			}
+			result, err = c.CreateProject(ctx, wire.ProjectCreateRequest{ID: id})
+			if err != nil {
+				return fail(err)
+			}
+		} else if a[0] == "create" {
 			charter, code := readCharter(o.charterFile, stdin, stderr)
 			if code != 0 {
 				return code
@@ -2038,6 +2050,8 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			} else {
 				block("Answer", fmt.Sprintf("none while its base is unavailable; or osmia abandon %s \"...\"", stream))
 			}
+		case wire.InboxProjectCreation:
+			block("Answer", fmt.Sprintf("osmia project create --id %v once the cause is fixed; the retry reuses only the repository this creation made", e.Answer.Body["id"]))
 		case wire.InboxLoop:
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case wire.InboxNotices:

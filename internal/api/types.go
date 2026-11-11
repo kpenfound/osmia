@@ -596,6 +596,10 @@ const (
 	StuckClone = "clone_failed"
 	// StuckBranch: the repository could not be given a main branch.
 	StuckBranch = "main_branch_failed"
+	// StuckUnknown: the create call's outcome is unknown, as after a
+	// transport error, a timeout or a server error. A retry sends the create
+	// again only when no repository of that name exists.
+	StuckUnknown = "create_outcome_unknown"
 )
 
 // Steps a pending creation has reached.
@@ -1058,6 +1062,10 @@ const (
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
 	InboxBase         = "base"
+	// InboxProjectCreation reports a project creation that cannot finish
+	// without the owner. Its answer retries the creation; it never adopts or
+	// deletes a repository.
+	InboxProjectCreation = "project-creation"
 )
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it
