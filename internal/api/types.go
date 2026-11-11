@@ -315,9 +315,30 @@ type HandInResponse struct {
 }
 
 // DesignOpenRequest opens a design session in a project. The project may be
-// left out while exactly one project is active.
+// left out while exactly one project is active. NewProject opens the session
+// to design a project that does not exist yet: it is still hosted in an
+// existing project, the named one or else the first active project.
 type DesignOpenRequest struct {
-	Project config.ProjectID `json:"project"`
+	Project    config.ProjectID `json:"project"`
+	NewProject bool             `json:"new_project,omitempty"`
+}
+
+// Repository visibilities of a new project.
+const (
+	VisibilityPrivate = "private"
+	VisibilityPublic  = "public"
+)
+
+// NewProject is the project a design brief asks Start to create: its display
+// name, its repository name under the owner's GitHub account, the repository's
+// visibility (private unless the brief says public), its description and its
+// first charter.
+type NewProject struct {
+	Name        string `json:"name"`
+	Repo        string `json:"repo"`
+	Visibility  string `json:"visibility"`
+	Description string `json:"description,omitempty"`
+	Charter     string `json:"charter"`
 }
 
 // DesignView is a design session and its latest brief, revision and ordered
@@ -330,6 +351,8 @@ type DesignView struct {
 	BriefRevision int                 `json:"brief_revision"`
 	Brief         string              `json:"brief"`
 	Projects      []config.ProjectID  `json:"projects"`
+	// NewProject is the project the latest brief asks Start to create, if any.
+	NewProject *NewProject `json:"new_project,omitempty"`
 }
 
 // DesignResponse answers opening or reading one design session.

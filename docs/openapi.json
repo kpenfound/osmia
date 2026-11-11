@@ -5282,6 +5282,9 @@
       },
       "DesignOpenRequest": {
         "properties": {
+          "new_project": {
+            "type": "boolean"
+          },
           "project": {
             "type": "string"
           }
@@ -5338,6 +5341,9 @@
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "new_project": {
+            "$ref": "#/components/schemas/NewProject"
           },
           "project": {
             "type": "string"
@@ -6393,6 +6399,26 @@
         "properties": {
           "applied": {
             "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "NewProject": {
+        "properties": {
+          "charter": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
           }
         },
         "type": "object"

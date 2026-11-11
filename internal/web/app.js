@@ -2727,9 +2727,21 @@
       el('p', { class: 'meta', 'data-field': 'home' }, 'Home project: ' + projectName(design.project)),
       el('ul', { 'data-field': 'projects' }, ...design.projects.map(id =>
         el('li', { 'data-project': id }, projectName(id) + (id === design.project ? ' (home)' : '')))),
+      ...(design.new_project ? [renderDraftedNewProject(design.new_project)] : []),
       design.brief_revision > 0
         ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
         : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
+  }
+
+  // renderDraftedNewProject shows the project the brief asks Start to
+  // create, with the visibility its repository will have.
+  function renderDraftedNewProject(np) {
+    return el('div', { 'data-field': 'new-project' },
+      el('h4', {}, 'New project: ' + np.name),
+      el('p', { 'data-field': 'new-project-repo' }, 'Repository: ' + np.repo),
+      el('p', { 'data-field': 'new-project-visibility' }, 'Visibility: ' + np.visibility),
+      np.description ? el('p', { 'data-field': 'new-project-description' }, 'Description: ' + np.description) : null,
+      el('details', {}, el('summary', {}, 'First charter'), renderMarkdown(np.charter)));
   }
 
   function renderDesignView() {
@@ -4344,9 +4356,17 @@
   // setupDesignForms wires design creation, chat, workgroup start and destroy.
   function setupDesignForms() {
     const add = byId('design-add-form');
+    // A new-project session lives in the chosen project or, with none chosen,
+    // in the first active project, so the project choice is optional then.
+    const syncNewProject = () => {
+      add.elements.project.required = !add.elements.new_project.checked;
+    };
+    add.elements.new_project.addEventListener('change', syncNewProject);
+    add.addEventListener('reset', () => setTimeout(syncNewProject));
     add.addEventListener('submit', (event) => {
       event.preventDefault();
-      formAction(add, event.submitter, () => request('POST', '/design', { project: add.elements.project.value }), (out) => {
+      const newProject = add.elements.new_project.checked;
+      formAction(add, event.submitter, () => request('POST', '/design', { project: add.elements.project.value, new_project: newProject }), (out) => {
         designIds.set(out.design.workstream, out.design);
         select(out.design.workstream);
         return 'Opened design session ' + out.design.workstream + '.';
