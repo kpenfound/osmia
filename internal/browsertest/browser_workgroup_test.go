@@ -234,16 +234,21 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	settleWorkgroupAction(p)
 	p.Await("the originating member receives the completion", `document.querySelector('#inbox-result').dataset.outcome === '' && typeof releaseOutcome[`+quote(first.Answer.Path)+`] === 'function'`)
 	p.SelectWorkstream(stream)
-	assertOutcome(p, "#inbox-result", "ok", "Ruled revise on unit upload.")
+	assertFeedOutcomes(p, "#workstreams", "Ruled revise on unit upload.")
+	assertOutcome(p, "#inbox-result", "", "")
 	openWorkgroup(p, f.group.ID)
+	assertFeedOutcomes(p, "#workgroup-content")
 	answer(second, "Keep the second interface.")
 	p.SelectWorkstream(quiet)
 	assertOutcome(p, "#inbox-result", "", "")
 	releaseOutcome(p, second.Answer.Path)
 	settleWorkgroupAction(p)
 	assertOutcome(p, "#inbox-result", "", "")
+	assertFeedOutcomes(p, "#workstreams")
 	openWorkgroup(p, f.group.ID)
-	assertOutcome(p, "#inbox-result", "ok", fmt.Sprintf("Answered inbox entry %d.", second.Number))
+	answered := fmt.Sprintf("Answered inbox entry %d.", second.Number)
+	assertFeedOutcomes(p, "#workgroup-content", answered)
+	assertOutcome(p, "#inbox-result", "", "")
 	if got := entriesOf(t, f.c, InboxEscalation); len(got) != 0 {
 		t.Fatalf("shared answers did not settle: %+v", got)
 	}
@@ -255,7 +260,8 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	p.AwaitText("#workgroup-content [data-proposal] [data-group-decision-repo]", "Uploads repo")
 	p.AwaitText(`[data-select-workgroup="`+string(f.group.ID)+`"] [data-field=needs]`, "1")
 	p.Click("#workgroup-content [data-proposal] [data-field=ratify]")
-	assertOutcome(p, "#inbox-result", "ok", "Charter decision recorded.")
+	assertFeedOutcomes(p, "#workgroup-content", answered, "Charter decision recorded.")
+	assertOutcome(p, "#inbox-result", "", "")
 	p.AwaitGone("the ratified charter decision", "#workgroup-content [data-proposal]")
 }
 
@@ -414,7 +420,10 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		t.Fatalf("answer target changed: %+v, want %s %s %s", actual, e.Answer.Method, e.Answer.Path, want)
 	}
 	releaseOutcome(p, e.Answer.Path)
-	assertOutcome(p, "#inbox-result", "ok", fmt.Sprintf("Answered inbox entry %d.", e.Number))
+	// The accepted outcome is an entry of the workgroup's conversation feed;
+	// the shared result line shows nothing.
+	assertFeedOutcomes(p, "#workgroup-content", fmt.Sprintf("Answered inbox entry %d.", e.Number))
+	assertOutcome(p, "#inbox-result", "", "")
 	if remaining := entriesOf(t, c, InboxEscalation); len(remaining) != 0 {
 		t.Fatalf("shared answer did not settle: %+v", remaining)
 	}
@@ -488,7 +497,8 @@ func TestBrowserWorkgroupAndMemberDecisionButtonsAnswerOriginalEndpoint(t *testi
 			p.Await("the card has no decision select or submit", `!document.querySelector(`+quote(card+`select[name=decision]`)+`) && !document.querySelector(`+quote(card+`[type=submit]`)+`)`)
 			p.TypeInto(card+`[name=note]`, "Use the shared contract.")
 			p.Click(card + `[data-decision-choice="revise"]`)
-			p.AwaitText("#inbox-result", "Ruled revise on unit upload.")
+			assertFeedOutcomes(p, strings.TrimSpace(prefix), "Ruled revise on unit upload.")
+			assertOutcome(p, "#inbox-result", "", "")
 			p.AwaitGone("the ruled member decision", card)
 			state, err := f.repo.Workflow(stream, trace.UnitSubject("upload"))
 			must(t, err)

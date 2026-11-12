@@ -728,7 +728,8 @@
     show(result, 'pending', 'Sending…');
     try {
       const text = done(await call());
-      if (text !== null && typeof text === 'object') show(result, text.outcome, text.text);
+      if (text !== null && typeof text === 'object' && 'feed' in text) acceptOutcome(result, text.feed);
+      else if (text !== null && typeof text === 'object') show(result, text.outcome, text.text);
       else show(result, 'ok', text);
     } catch (err) {
       show(result, err.code === 'unavailable' ? 'unavailable' : 'error', err.message);
@@ -746,6 +747,16 @@
         button.disabled = button.dataset.blocked === 'true';
       }
     }
+  }
+
+  // actOwner runs an owner command whose accepted outcome goes into the feed
+  // of the instance the command was taken on, in place of the shared result
+  // line: done's text is that outcome. A command taken where no feed is shown,
+  // such as on the project pane, keeps its outcome in the result line.
+  // Sending…, a refusal and the card restore behave as act's do.
+  function actOwner(button, call, done, refused) {
+    const feed = ui.view === 'workstream' || ui.view === 'workgroup';
+    return act(inboxResult, button, call, (out) => feed ? { feed: done(out) } : done(out), refused);
   }
 
   let engineStatusRead = 0;
@@ -1104,7 +1115,7 @@
 
   function groupActivity(id) {
     const feed = views[groupFeed(id)];
-    return feed ? JSON.stringify(feed.entries.filter(e => conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status')) : null;
+    return feed ? JSON.stringify(feed.entries.filter(groupEntry)) : null;
   }
 
   function selectWorkgroup(id, aboutMember = null) {
@@ -1151,16 +1162,18 @@
       c.about.append(el('span', { class: 'tag', 'data-field': 'about' }, 'About: ' + repoLabel(member.project), ' ', clear));
     }
     const feed = views[groupFeed(id)];
-    const key = JSON.stringify([feed, group.edges, views.config]);
+    const outcomes = ownerOutcomes.get('workgroup:' + id) || [];
+    const key = JSON.stringify([feed, group.edges, views.config, outcomes]);
     if (c.shown !== key) {
       c.shown = key;
-      const entries = (feed?.entries || []).filter(e => conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status');
+      const entries = (feed?.entries || []).filter(groupEntry);
       const latest = entries.findLastIndex(e => e.kind === 'status');
-      c.entries.replaceChildren(feed ? el('ol', {}, ...entries.map((e, i) => {
+      c.entries.replaceChildren(...(feed ? [el('ol', {}, ...withOutcomes(entries, outcomes, (e, i) => {
         const node = e.kind === 'status' ? renderStatus(e, i === latest) : renderConversationEntry(e);
         if (e.repo) node.prepend(el('span', { class: 'tag', 'data-field': 'repo' }, repoLabel(e.repo)));
         return node;
-      })) : el('p', { class: 'meta' }, failures[groupFeed(id)] ? 'The conversation is unavailable.' : 'Reading the conversation…'));
+      }))] : [el('p', { class: 'meta' }, failures[groupFeed(id)] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
+        ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : [])]));
       const members = el('div', { class: 'workgroup-members', 'data-field': 'members' }, ...(feed?.members || []).map(m => {
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
           el('strong', { 'data-field': 'repo' }, repoLabel(m.repo)),
@@ -2162,24 +2175,24 @@
   // include the chief conversation, statuses and turns.
   function renderFeed(c, id) {
     const name = 'feed/' + id;
-    const raw = views[name];
-    const multi = isMultiMember(streams().find(w => w.workstream === id));
-    const view = raw && multi ? { ...raw, entries: raw.entries.filter(e => !conversationKinds.has(e.kind) && e.kind !== 'status' && !(e.kind === 'session' && e.session.role === 'chief_of_staff')) } : raw;
-    const key = view ? JSON.stringify(view.entries) : (failures[name] ? 'failed' : 'reading');
+    const view = feedView(id);
+    const outcomes = ownerOutcomes.get(id) || [];
+    const key = view ? JSON.stringify([view.entries, outcomes]) : (failures[name] ? 'failed' : 'reading');
     if (c.shown === key) {
       return;
     }
     c.shown = key;
     if (!view) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The feed is unavailable.' : 'Reading the feed…'));
+      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The feed is unavailable.' : 'Reading the feed…'),
+        ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : []));
       return;
     }
-    if (view.entries.length === 0) {
+    if (view.entries.length === 0 && outcomes.length === 0) {
       c.entries.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
       return;
     }
     const latest = view.entries.findLastIndex((e) => e.kind === 'status');
-    c.entries.replaceChildren(el('ol', {}, ...view.entries.map((e, i) => {
+    c.entries.replaceChildren(el('ol', {}, ...withOutcomes(view.entries, outcomes, (e, i) => {
       switch (e.kind) {
         case 'status':
           return renderStatus(e, i === latest);
@@ -2197,6 +2210,98 @@
           return renderConversationEntry(e);
       }
     })));
+  }
+
+  // feedView is the feed the workstream's card shows: its read feed, less the
+  // conversation, statuses and chief turns the shared conversation of a
+  // multi-member workgroup shows instead.
+  function feedView(id) {
+    const raw = views['feed/' + id];
+    const multi = isMultiMember(streams().find(w => w.workstream === id));
+    return raw && multi ? { ...raw, entries: raw.entries.filter(e => !conversationKinds.has(e.kind) && e.kind !== 'status' && !(e.kind === 'session' && e.session.role === 'chief_of_staff')) } : raw;
+  }
+
+  // groupEntry reports whether a workgroup feed entry is part of its
+  // conversation view.
+  function groupEntry(e) {
+    return conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status';
+  }
+
+  // ownerOutcomes holds, per displayed instance (a workstream ID, or
+  // 'workgroup:<id>'), the accepted owner commands' outcomes the page
+  // shows in that instance's feed for as long as the page lives. Each entry
+  // is {text, at, known}: known lists the identities of the feed entries
+  // shown when the command was accepted. The service never records them,
+  // and the unread activity ignores them.
+  const ownerOutcomes = new Map();
+
+  // feedIdentity names a feed entry by the fields that stay the same while
+  // it progresses, so an anchor still finds its entry after a re-read.
+  function feedIdentity(e) {
+    return JSON.stringify([
+      e.kind, e.at, e.turn || '', e.repo || '', e.image?.id || '',
+      e.session ? [e.session.agent, e.session.turn] : '',
+      e.transition ? [e.transition.subject, e.transition.unit, e.transition.from, e.transition.to] : '',
+      e.unit_checks ? [e.unit_checks.unit, e.unit_checks.run] : '',
+      e.session_checks ? [e.session_checks.run, e.session_checks.kind] : '',
+      e.final_checks ? [e.final_checks.review, e.final_checks.attempt] : '',
+      e.final_review ? e.final_review.review : '']);
+  }
+
+  // shownEntries lists the feed entries the instance's feed shows now, or
+  // null while that feed is not read.
+  function shownEntries(key) {
+    if (key.startsWith('workgroup:')) {
+      return views[groupFeed(key.slice('workgroup:'.length))]?.entries.filter(groupEntry) || null;
+    }
+    return feedView(key)?.entries || null;
+  }
+
+  // acceptOutcome adds the accepted command's outcome to the feed of the
+  // instance the command was taken on and clears that instance's result
+  // line. An action taken where no instance is displayed keeps its text in
+  // the result line.
+  function acceptOutcome(target, text) {
+    if (!target.scope || target.key === null) {
+      show(target, 'ok', text);
+      return;
+    }
+    const known = (shownEntries(target.key) || []).map(feedIdentity);
+    const held = ownerOutcomes.get(target.key) || [];
+    ownerOutcomes.set(target.key, [...held, { text, at: new Date().toISOString(), known }]);
+    target.scope.entries.delete(target.key);
+    paintOutcome(target.scope);
+    render();
+  }
+
+  // withOutcomes renders the feed entries and puts each page-held outcome
+  // after the entries the feed showed when the command was accepted. An
+  // entry the outcome's command did not see, wherever the read feed orders
+  // it, renders after that outcome, and the entries of each stretch keep the
+  // feed's order.
+  function withOutcomes(entries, outcomes, renderEntry) {
+    const seen = outcomes.map((o) => new Set(o.known));
+    const stretch = entries.map((e) => {
+      const id = feedIdentity(e);
+      const first = seen.findIndex((s) => s.has(id));
+      return first < 0 ? outcomes.length : first;
+    });
+    const nodes = [];
+    for (let n = 0; n <= outcomes.length; n++) {
+      entries.forEach((e, i) => { if (stretch[i] === n) nodes.push(renderEntry(e, i)); });
+      if (n < outcomes.length) nodes.push(renderOwnerOutcome(outcomes[n]));
+    }
+    return nodes;
+  }
+
+  function renderOwnerOutcome(o) {
+    return el('li', { class: 'entry event', 'data-kind': 'outcome', 'data-outcome': 'ok' },
+      el('div', { class: 'event-line' },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('span', { 'data-field': 'outcome' },
+          el('strong', { 'data-ann': 'role' }, 'Your command'), ': ',
+          el('span', { 'data-field': 'text', 'data-ann': 'action' }, o.text)),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(o.at))));
   }
 
   // renderDecisions shows what waits for the owner on the workstream above
@@ -2886,7 +2991,7 @@
     }
     if (action === 'rebase') {
       const button = document.querySelector('[data-workstream-action="rebase"]');
-      act(inboxResult, button, () => request('POST', '/rebase/' + w.workstream), (out) => {
+      actOwner(button, () => request('POST', '/rebase/' + w.workstream), (out) => {
         mark(['status', 'inbox', 'feed/' + w.workstream]);
         return 'Drift rebase ' + out.drift + ' of ' + goal(w) + ' is requested; the foreman runs it once no landing or other drift rebase holds the project.';
       });
@@ -2894,7 +2999,7 @@
     }
     if (action === 'merged') {
       const button = document.querySelector('[data-workstream-action="merged"]');
-      act(inboxResult, button, () => request('POST', '/delivery/' + w.workstream + '/merged'), (out) => {
+      actOwner(button, () => request('POST', '/delivery/' + w.workstream + '/merged'), (out) => {
         mark(['status', 'runtime', 'inbox', 'feed/' + w.workstream]);
         return goal(w) + ' is delivered: ' + out.merge.upstream.remote + '/' + out.merge.upstream.branch + ' holds ' + out.merge.branch + '.';
       });
@@ -3102,7 +3207,7 @@
       dismiss(dismissKey);
       render();
     }
-    return act(inboxResult, button, () => request(method, path, body), (out) => {
+    return actOwner(button, () => request(method, path, body), (out) => {
       if (dismissKey) {
         acknowledge(dismissKey);
       }
@@ -3495,7 +3600,7 @@
       const decide = (decision) => {
         const button = el('button', { type: 'button', 'data-field': decision }, decision === 'ratify' ? 'Ratify rule' : 'Decline rule');
         button.addEventListener('click', () => {
-          act(inboxResult, button, () => request('POST', '/charter/' + p.workstream + '/' + p.question, { decision }),
+          actOwner(button, () => request('POST', '/charter/' + p.workstream + '/' + p.question, { decision }),
             () => {
               mark(['charter', 'config']);
               return 'Charter decision recorded.';

@@ -172,6 +172,34 @@ func (p *Page) AwaitText(selector, want string) {
 	p.Await(fmt.Sprintf("%q in %s", want, selector), TextOf(selector)+".includes("+Quote(want)+")")
 }
 
+// OutcomeEntries selects the feed entries that show the outcome of the
+// owner's own accepted commands.
+const OutcomeEntries = "[data-field=feed] [data-kind=outcome]"
+
+// AwaitOutcome waits until a feed shows an entry for the outcome of the
+// owner's own accepted command, containing want.
+func (p *Page) AwaitOutcome(want string) {
+	p.T.Helper()
+	p.AwaitOutcomes(want, 1)
+}
+
+// AwaitOutcomes waits until a feed shows at least count entries for the
+// outcomes of the owner's own accepted commands, each containing want.
+func (p *Page) AwaitOutcomes(want string, count int) {
+	p.T.Helper()
+	p.Await(fmt.Sprintf("%d owner command outcomes with %q in the feed", count, want),
+		fmt.Sprintf("[...document.querySelectorAll(%s)].filter(n => n.textContent.includes(%s)).length >= %d", Quote(OutcomeEntries), Quote(want), count))
+}
+
+// OutcomeTexts lists the text of every owner command outcome entry inside
+// the elements scope selects, in the order the feed shows them.
+func (p *Page) OutcomeTexts(scope string) []string {
+	p.T.Helper()
+	var texts []string
+	p.Eval("[...document.querySelectorAll("+Quote(scope+" "+OutcomeEntries)+")].map(n => n.querySelector('[data-field=text]').textContent)", &texts)
+	return texts
+}
+
 // click clicks the first element selector matches, once it is scrolled to
 // the middle of the Page, clear of the sticky heading and message field.
 func (p *Page) Click(selector string) {

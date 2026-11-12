@@ -186,7 +186,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 	p.TypeInto(written+"textarea", "Keep the history; add a fixup commit.")
 	p.Click(written + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Answered inbox entry 2.")
+	p.AwaitOutcome("Answered inbox entry 2.")
 	p.AwaitGone("the written answer's entry", written)
 	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "3")
 	if r := ruling(second.ID); r == nil || r.OwnerResponse != "Keep the history; add a fixup commit." || r.Actor != ownerActor {
@@ -198,7 +198,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.Click(accepted + "[data-field=option]:nth-of-type(2)")
 	p.Await("the option in the answer", `document.querySelector(`+quote(accepted+"textarea")+`).value === 'A database'`)
 	p.Click(accepted + "[data-field=accept]")
-	p.AwaitText("#inbox-result", "Accepted the recommendation on inbox entry 1.")
+	p.AwaitOutcome("Accepted the recommendation on inbox entry 1.")
 	p.AwaitGone("the accepted entry", accepted)
 	if r := ruling(first.ID); r == nil || r.OwnerResponse != "Keep it in files." || r.Actor != ownerActor {
 		t.Fatalf("the accepted ruling: %+v", r)
@@ -209,7 +209,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.AwaitText("#inbox-result", "Give a note for the ruling.")
 	p.TypeInto(contest+"input[name=note]", "The reviewer's sandbox failed; review it again.")
 	p.Click(contest + `[data-decision-choice="review"]`)
-	p.AwaitText("#inbox-result", "Ruled review on unit index.")
+	p.AwaitOutcome("Ruled review on unit index.")
 	p.AwaitGone("the contested unit", contest)
 	if state, err := live.Workflow(stream, trace.UnitSubject("index")); err != nil || state.Value != UnitReviewing {
 		t.Fatalf("the ruled unit: %+v %v", state, err)
@@ -241,7 +241,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	gate.Set(false)
 	p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
 	p.Click(amendment + `[data-decision-choice="` + AmendmentReject + `"]`)
-	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
+	p.AwaitOutcome("Decided reject on amendment 1.")
 	p.AwaitGone("the decided amendment", amendment)
 	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.Decision == nil || out.Decision.Decision != AmendmentReject || out.Decision.Packet != 2 {
 		t.Fatalf("the decided amendment: %+v %v", out, err)
@@ -319,7 +319,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 
 	p.TypeInto(card+"input[name=note]", "I accept the risk.")
 	p.Click(card + `[data-decision-choice="overrule ` + veto + `"]`)
-	p.AwaitText("#inbox-result", "I accept the risk.")
+	p.AwaitOutcome("I accept the risk.")
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "advice, overruled")
 	p.TypeInto(card+"input[name=note]", "Split the resume unit.")
 	p.Click(card + `[data-decision-choice="sustain ` + size + `"]`)
@@ -354,7 +354,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	}
 
 	p.Click(card + `[data-decision-choice="ratify"]`)
-	p.AwaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
+	p.AwaitOutcome("the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
 	p.AwaitGone("the ratified packet", card)
 	if record := f.ratification(t, ws, 2); record.Revision != (shed.Pin{Spec: 1, Plan: 2}) || record.Round != 2 {
 		t.Fatalf("the recorded ratification %+v", record)

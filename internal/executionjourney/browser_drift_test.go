@@ -26,7 +26,7 @@ func TestBrowserDeliveredWorkstreamCanCheckForDrift(t *testing.T) {
 	p.Click("#workstream-menu-button")
 	p.Await("delivered drift action", `!document.querySelector('[data-workstream-action="rebase"]').hidden`)
 	p.Click(`[data-workstream-action="rebase"]`)
-	p.AwaitText("#inbox-result", "Drift rebase 1")
+	p.AwaitOutcome("Drift rebase 1")
 	state, err := f.s.sole().repository.Workflow(f.stream, driftRequestSubject)
 	must(t, err)
 	if state.Value != "requested-1" {

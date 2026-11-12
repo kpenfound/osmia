@@ -129,6 +129,47 @@ func (p *page) awaitText(selector, want string) {
 	p.await(want+" in "+selector, expr)
 }
 
+// awaitOutcome waits until a feed shows an entry for the outcome of the
+// owner's own accepted command, containing want.
+func (p *page) awaitOutcome(want string) {
+	p.t.Helper()
+	p.await(want+" as an owner command outcome in the feed",
+		`[...document.querySelectorAll('[data-field=feed] [data-kind=outcome]')].some(n => n.textContent.includes(`+quote(want)+`))`)
+}
+
+// outcomeTexts lists the text of every owner command outcome entry inside
+// the elements scope selects, in the order the feed shows them.
+func (p *page) outcomeTexts(scope string) []string {
+	p.t.Helper()
+	var texts []string
+	p.eval(`[...document.querySelectorAll(`+quote(scope+` [data-field=feed] [data-kind=outcome]`)+`)].map(n => n.querySelector('[data-field=text]').textContent)`, &texts)
+	return texts
+}
+
+// assertOutcomes fails the test unless the feed inside scope shows exactly
+// the outcome entries want, and the shared result line is empty.
+func (p *page) assertOutcomes(scope string, want ...string) {
+	p.t.Helper()
+	texts := p.outcomeTexts(scope)
+	if strings.Join(texts, "\n") != strings.Join(want, "\n") {
+		p.t.Fatalf("the outcome entries in %s: %q, want %q", scope, texts, want)
+	}
+	var line string
+	p.eval(`document.querySelector('#inbox-result').textContent`, &line)
+	if line != "" {
+		p.t.Fatalf("the shared result line shows %q, want nothing", line)
+	}
+}
+
+// assertNoOutcomes fails the test when the feed inside scope shows any
+// owner command outcome entry.
+func (p *page) assertNoOutcomes(scope string) {
+	p.t.Helper()
+	if texts := p.outcomeTexts(scope); len(texts) != 0 {
+		p.t.Fatalf("the feed in %s shows outcome entries %q, want none", scope, texts)
+	}
+}
+
 // fakeAPI serves the page's own files, through Serve, beside a minimal,
 // hand-built /v1 API: just enough of every view the first page load reads
 // for the page to render without error, with no backing service. It counts
@@ -147,6 +188,13 @@ type fakeAPI struct {
 
 	inboxEntries    []string
 	activityEntries []string
+	// feeds holds each workstream's feed entries, as JSON, empty until a
+	// test sets some. state is the workflow state every workstream shows,
+	// building when unset. charter is the JSON the charter read answers,
+	// no proposals when unset.
+	feeds   map[string][]string
+	state   string
+	charter string
 	events          chan string
 
 	// contested and ratify answer the inbox entries' own decision
@@ -196,15 +244,19 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if hold != nil {
 		<-hold
 	}
+	state := f.state
+	if state == "" {
+		state = "building"
+	}
 	var workstreams strings.Builder
 	for i := 0; i < f.workstreams; i++ {
 		if i > 0 {
 			workstreams.WriteString(",")
 		}
-		fmt.Fprintf(&workstreams, `{"workstream":"w_%03d","project":"p_fake","workspaces":"git","state":"building",`+
-			`"display_state":"building","workgroup":{"id":"g_%03d","members":["w_%03d"],"edges":[]},`+
+		fmt.Fprintf(&workstreams, `{"workstream":"w_%03d","project":"p_fake","workspaces":"git","state":%s,`+
+			`"display_state":%s,"workgroup":{"id":"g_%03d","members":["w_%03d"],"edges":[]},`+
 			`"units":[],"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
-			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, i, i, i)
+			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, quote(state), quote(state), i, i, i)
 	}
 	writeJSON(w, `{"workstreams":[`+workstreams.String()+`],"profiles":{},"daily_budget":null,"capacity":null,`+
 		`"provider_usage":null,"diagnostics":[],"workspaces":{"setting":"git","backend":"git"}}`)
@@ -214,7 +266,32 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 // is enough for the page to show it without error.
 func (f *fakeAPI) handleFeed(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/v1/feed/")
-	writeJSON(w, fmt.Sprintf(`{"workstream":%s,"entries":[]}`, quote(id)))
+	f.mu.Lock()
+	entries := strings.Join(f.feeds[id], ",")
+	f.mu.Unlock()
+	writeJSON(w, fmt.Sprintf(`{"workstream":%s,"entries":[%s]}`, quote(id), entries))
+}
+
+// setFeed replaces the entries, as JSON, the workstream's feed answers with.
+func (f *fakeAPI) setFeed(workstream string, entries ...string) {
+	f.mu.Lock()
+	if f.feeds == nil {
+		f.feeds = map[string][]string{}
+	}
+	f.feeds[workstream] = entries
+	f.mu.Unlock()
+}
+
+// handleCharter answers the charter's proposals: none unless a test set
+// charter.
+func (f *fakeAPI) handleCharter(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	body := f.charter
+	f.mu.Unlock()
+	if body == "" {
+		body = `{"proposals":[]}`
+	}
+	writeJSON(w, body)
 }
 
 // handleEvents answers the event stream with a single resync and then holds
@@ -298,7 +375,7 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/v1/config", handleJSON(`{"root":"","digest":"fake","effective":{"profiles":{}},"project":null,"projects":[],"diagnostics":[],"drift":{"differs":false,"files":[]}}`))
 	mux.HandleFunc("/v1/inbox", f.handleInbox)
 	mux.HandleFunc("/v1/activity", f.handleActivity)
-	mux.HandleFunc("/v1/charter", handleJSON(`{"proposals":[]}`))
+	mux.HandleFunc("/v1/charter", f.handleCharter)
 	mux.HandleFunc("/v1/feed/", f.handleFeed)
 	mux.HandleFunc("/v1/events", f.handleEvents)
 	mux.HandleFunc("/v1/contested/", func(w http.ResponseWriter, r *http.Request) { f.contested.serve(w, r, `{}`) })

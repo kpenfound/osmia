@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,6 +69,23 @@ func openOutcomePage(t *testing.T, s *Service, scripts ...string) *page {
 func assertOutcome(p *page, selector, state, text string) {
 	p.T.Helper()
 	p.Await("the exact outcome in "+selector, `document.querySelector(`+quote(selector)+`).dataset.outcome === `+quote(state)+` && `+textOf(selector)+` === `+quote(text))
+}
+
+// assertFeedOutcomes waits until the feed inside scope shows exactly the
+// outcome entries of the owner's accepted commands in want, in order, each
+// with a time.
+func assertFeedOutcomes(p *page, scope string, want ...string) {
+	p.T.Helper()
+	if want == nil {
+		want = []string{}
+	}
+	encoded, err := json.Marshal(want)
+	if err != nil {
+		p.T.Fatal(err)
+	}
+	p.Await("exactly the outcome entries "+string(encoded)+" in "+scope,
+		`JSON.stringify([...document.querySelectorAll(`+quote(scope+" "+OutcomeEntries)+`)].map(n => n.querySelector('[data-field=text]').textContent)) === `+quote(string(encoded))+
+			` && [...document.querySelectorAll(`+quote(scope+" "+OutcomeEntries)+`)].every(n => n.dataset.outcome === 'ok' && n.querySelector('[data-ann=when]').textContent !== '')`)
 }
 
 func holdOutcome(p *page, url string) {
@@ -267,13 +285,17 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	releaseOutcome(p, url)
 	p.Run(chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams { return p.WithAwaitPromise(true) }))
 	assertOutcome(p, "#inbox-result", "", "")
+	assertFeedOutcomes(p, "#workstreams")
 	p.SelectWorkstream(stream)
 	expected := fmt.Sprintf("Answered inbox entry %d.", entry.Number)
-	assertOutcome(p, "#inbox-result", "ok", expected)
+	assertFeedOutcomes(p, "#workstreams", expected)
+	assertOutcome(p, "#inbox-result", "", "")
 	p.SelectWorkstream(quiet)
 	assertOutcome(p, "#inbox-result", "", "")
+	assertFeedOutcomes(p, "#workstreams")
 	p.SelectWorkstream(stream)
-	assertOutcome(p, "#inbox-result", "ok", expected)
+	assertFeedOutcomes(p, "#workstreams", expected)
+	assertOutcome(p, "#inbox-result", "", "")
 	// Documents, dependency and action forms have independent outcome
 	// areas. Use the feed tab for reselection so no new document read is
 	// requested as part of selecting the next workstream.
@@ -340,10 +362,16 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	// shared inbox result and for the workstream forms.
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="rebase"]`)
-	p.Await("the fallback menu action answered", `['ok', 'error', 'unavailable'].includes(document.querySelector('#inbox-result').dataset.outcome)`)
+	// An accepted rebase goes into the feed of the workstream it was taken
+	// on; a refusal stays in the shared result line.
+	p.Await("the fallback menu action answered", `['error', 'unavailable'].includes(document.querySelector('#inbox-result').dataset.outcome) || document.querySelector('#workstreams `+OutcomeEntries+`') !== null`)
 	var menuText, menuState string
 	p.Eval(textOf("#inbox-result"), &menuText)
 	p.Eval(`document.querySelector('#inbox-result').dataset.outcome`, &menuState)
+	menuFeed := p.OutcomeTexts("#workstreams")
+	if (menuState == "") != (len(menuFeed) == 1) || len(menuFeed) > 1 {
+		t.Fatalf("the fallback menu action left result %q %q and feed entries %q", menuState, menuText, menuFeed)
+	}
 	p.Click("[data-tab=documents]")
 	p.AwaitText("#documents-form .result[data-outcome=ok]", "Documents loaded.")
 	p.AwaitText("#base-form .result[data-outcome=ok]", "loaded.")
@@ -357,6 +385,8 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	assertFallbackOutcomes := func() {
 		t.Helper()
 		assertOutcome(p, "#inbox-result", menuState, menuText)
+		// Archive adds no outcome entry to any feed; only the rebase did.
+		assertFeedOutcomes(p, "body", menuFeed...)
 		assertOutcome(p, "#documents-form .result", "ok", documentsText)
 		assertOutcome(p, "#base-form .result", "ok", baseText)
 		assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")

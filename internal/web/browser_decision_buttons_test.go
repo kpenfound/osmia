@@ -139,7 +139,7 @@ func TestBrowserDecisionButtonsSendOfferedRulings(t *testing.T) {
 			}
 			f.p.click(card + `[data-decision-choice="` + tc.choice + `"]`)
 			f.p.awaitGone("the ruled card", card)
-			f.p.await("the recorded outcome", `document.querySelector('#inbox-result').dataset.outcome === 'ok'`)
+			f.p.await("the recorded outcome in the feed", `document.querySelectorAll('#workstreams [data-field=feed] [data-kind=outcome][data-outcome=ok]').length === 1 && document.querySelector('#inbox-result').textContent === ''`)
 			assertDecisionRequest(t, f, path, body)
 		})
 	}
@@ -156,7 +156,7 @@ func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
 	}
 	f.p.typeInto(card+`[name=note]`, "  Split the unit.  ")
 	f.p.click(card + `[data-decision-choice="redraft"]`)
-	f.p.awaitText("#inbox-result", "Decision recorded.")
+	f.p.awaitOutcome("Decision recorded.")
 	f.p.awaitVisible("the ratification card", card)
 	assertDecisionRequest(t, f, "/v1/shed/redraft/w_000", map[string]any{"note": "Split the unit."})
 }
@@ -175,7 +175,7 @@ func TestBrowserRatificationObjectionButtonsSendDispositions(t *testing.T) {
 			assertDecisionButtons(f.p, card, map[string]string{"ratify": "Ratify", "redraft": "Ask for a Redraft", "sustain objection-1": "Sustain objection-1", "overrule objection-1": "Overrule objection-1"})
 			f.p.typeInto(card+`[name=note]`, "Keep the contract.")
 			f.p.click(card + `[data-decision-choice="` + choice + ` objection-1"]`)
-			f.p.awaitText("#inbox-result", "Decision recorded.")
+			f.p.awaitOutcome("Decision recorded.")
 			f.p.awaitVisible("the ratification card", card)
 			body := map[string]any{"objection": "objection-1"}
 			path := "/v1/shed/overrule/w_000"

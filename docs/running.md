@@ -132,6 +132,20 @@ shows that instance's latest outcome, including a response received while
 another instance was open. Create forms start with an empty outcome when
 opened or switched to another project.
 
+When the service accepts one of your commands on a workstream or workgroup, the
+page adds its outcome to that feed as an entry marked "Your command", with the
+time it was accepted: a ratification, a shed or contested-unit ruling, an
+amendment decision, an answer, a delivery approval, a base continuation, a
+project selection, a charter rule decision, a drift rebase or a recorded merge.
+The entry goes in after what the feed showed then, so later events follow it
+rather than leaving it pinned below the decisions. It stays in that feed only,
+even if you opened another workstream before the service answered, for as long
+as the page stays open; the service records nothing extra and the entry never
+marks the workstream unread. While a command is sending, the line below the
+decisions shows "Sending…"; a refused command shows its reason there next to
+the restored card and adds no entry. Archiving a workstream keeps its
+acknowledgement in that line and adds no feed entry.
+
 The project pane is the main entry point. Each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared chief and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement. Choose **New project** in the design form to design a project that does not exist yet: the session lives in the project whose card you opened the form from, or in the first active project, and the form refuses when no project is active. The agent drafts the project's name, repo name, visibility, description and first charter with the brief, and the design page shows them, including the visibility, before you press Start. The visibility is private unless you confirm public in the session. The repo is created with only a README, so the new project's first unit sets up `dagger check`. Once the agent has titled a design session, its title replaces the workstream ID in the sidebar row, the project pane's design-session list and the design page's heading, and follows a later title without a reload; an untitled session keeps its ID. After you press Start, the chief of staff titles the started work from the handed brief, and the page shows that title as the work's goal.
 
 Above **Start workgroup from brief**, the read-only **Brief** panel shows the latest revision, project names with home marked and text collapsed by default. It updates live and Start sends the displayed revision. A stale brief shows a conflict and refreshes the panel without allocating work. One member per selected project is created without an architect selection turn. The list stays fixed until ratification; changing it requires abandoning and handing in again. One ratification covers the workgroup spec, graph and slices; the original conversation continues as the shared chief, at the session's project even when it is not a member.

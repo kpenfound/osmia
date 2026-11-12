@@ -38,7 +38,7 @@ func TestBrowserRatifySendsDisplayedProjectSpecRevision(t *testing.T) {
 	card := decisionSelector("ratification", "w_000", "")
 	p.awaitText(card+`[data-field=project-spec]`, "Workgroup spec revision 7")
 	p.click(card + `[data-decision-choice="ratify"]`)
-	p.awaitText("#inbox-result", "the owner ratified the packet.")
+	p.awaitOutcome("the owner ratified the packet.")
 	p.awaitGone("the ratified packet", card)
 	req := <-requests
 	if req["spec"] != 1 || req["plan"] != 1 || req["project_spec_revision"] != 7 {

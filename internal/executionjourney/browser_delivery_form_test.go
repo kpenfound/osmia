@@ -26,7 +26,7 @@ func TestBrowserPageResetsTheDeliveryFormAfterSuccess(t *testing.T) {
 	p.AwaitText(card+"[data-field=kind]", "Delivery")
 	p.Await("the drafted description", `document.querySelector(`+quote(description)+`).value !== ''`)
 	p.Click(card + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved the delivery of final review 1")
 	// Approving delivers the workstream, so the card may also leave the
 	// inbox before the test next reads it, taking the drafted description
 	// with it; either outcome leaves no stale description showing.

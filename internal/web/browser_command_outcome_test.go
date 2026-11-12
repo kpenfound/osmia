@@ -52,6 +52,7 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 		t.Fatalf("unavailable outcome: data-outcome=%q", outcome)
 	}
 	p.awaitVisible("the ratification packet, restored after unavailable", card)
+	p.assertNoOutcomes("#workstreams")
 
 	// Rejected: the owner's view is stale. The card comes back the same
 	// way, but the outcome is distinct from unavailable. Held open for the
@@ -67,6 +68,7 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 		t.Fatalf("rejected outcome: data-outcome=%q", outcome)
 	}
 	p.awaitVisible("the ratification packet, restored after rejection", card)
+	p.assertNoOutcomes("#workstreams")
 
 	// Accepted: a fresh submission succeeds and dismisses the card for
 	// good. Success never restores the card (app.js's submit calls
@@ -80,8 +82,9 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 	p.click(card + `[data-decision-choice="ratify"]`)
 	p.awaitGone("the ratification packet", card)
 	release()
-	p.awaitText("#inbox-result", "the owner ratified the packet.")
-	if outcome := p.outcomeOf("#inbox-result"); outcome != "ok" {
-		t.Fatalf("accepted outcome: data-outcome=%q", outcome)
+	p.awaitOutcome("the owner ratified the packet.")
+	p.assertOutcomes("#workstreams", "the owner ratified the packet.")
+	if outcome := p.outcomeOf("#inbox-result"); outcome != "" {
+		t.Fatalf("accepted outcome left data-outcome=%q on the shared result line", outcome)
 	}
 }
