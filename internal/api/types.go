@@ -769,15 +769,26 @@ type CapacityStatus struct {
 }
 
 // RoleCapacity is one pool's slots: Used includes turns, workflow reservations
-// or check runs, and Limit is its configured global capacity. A zero Limit means
-// no global limit; architect and librarian each run at most once per workstream.
+// or check runs. A pool with a configured factory-wide limit reports it in
+// Limit. A pool without one (architect, librarian) sets Unbounded, omits
+// Limit, and says in Scope and Note how it is bounded instead.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role    string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams."`
-	Used    int        `json:"used" description:"Number of slots currently in use."`
-	Limit   int        `json:"limit" description:"Configured slot limit."`
-	Waiting []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session."`
+	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams."`
+	Used      int        `json:"used" description:"Number of slots currently in use."`
+	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
+	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect, librarian). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`
+	Scope     string     `json:"scope,omitempty" description:"How an unbounded pool is bounded instead: per_workstream means at most one turn runs per workstream. Absent for bounded pools."`
+	Note      string     `json:"note,omitempty" description:"Plain-words explanation of an unbounded pool: no factory-wide limit, at most one turn per workstream, no configuration setting. Absent for bounded pools."`
+	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session."`
 }
+
+// UnboundedScope is RoleCapacity.Scope of a pool that runs at most one turn
+// per workstream and has no factory-wide limit.
+const UnboundedScope = "per_workstream"
+
+// UnboundedNote is RoleCapacity.Note of an unbounded pool.
+const UnboundedNote = "No factory-wide limit: this pool runs at most one turn per workstream, and no configuration setting controls it. Nothing to raise; it is not zero capacity."
 
 // SlotWait identifies a queued turn, a deferred ready unit, or a check run.
 // For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.

@@ -557,7 +557,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 			t.Fatalf("the resolve turns were never in flight together: %+v", masons)
 		}
 	}
-	if masons.Limit != 2 || len(masons.Waiting) != 0 {
+	if limitOf(t, masons) != 2 || len(masons.Waiting) != 0 {
 		t.Fatalf("mason capacity with both resolve turns in flight %+v", masons)
 	}
 	for _, unit := range []string{"resume", "audit"} {

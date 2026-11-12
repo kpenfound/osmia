@@ -255,8 +255,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   available` for the roles the limit affects, and an `unattributed:` line for
   costs no attempt names a provider for), the
   capacity (`Capacity (per workstream <n>):`, then
-  `<role>: <used> of <limit> slot(s) in use` for mason, reviewer and
-  committee, each followed by `Waiting: <workstream> turn <turn> of <agent>
+  `<role>: <used> of <limit> slot(s) in use` for mason, reviewer,
+  committee and checks, and `<role>: <used> in use, unbounded (no factory-wide
+  limit; at most one turn per workstream)` for architect and librarian, which
+  no configuration setting limits, each followed by `Waiting: <workstream> turn <turn> of <agent>
   (<reason>)` or `Waiting: <workstream> unit <unit> (<reason>)` for the work
   waiting for a slot), each
   role and profile whose latest turn attempts failed with infrastructure

@@ -137,7 +137,7 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 				return false
 			}
 			got := roleCapacity(t, status.Capacity, checksRole)
-			return got.Limit == 2 && got.Used == used && reflect.DeepEqual(got.Waiting, waiting)
+			return limitOf(t, got) == 2 && got.Used == used && reflect.DeepEqual(got.Waiting, waiting)
 		})
 		p.AwaitText(row+` [data-field=slots]`, fmt.Sprintf("%d / 2 slots", used))
 		p.Await("check wait count", `document.querySelectorAll('`+row+` [data-field=waiting]').length === `+fmt.Sprint(len(waiting)))

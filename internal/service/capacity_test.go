@@ -63,15 +63,15 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	// mason waits for mason-1's mason slot. The committee's turns run in shed
 	// rounds and never wait here.
 	want := &CapacityStatus{PerWorkstream: 2, Roles: []RoleCapacity{
-		{Role: masonRole, Used: 1, Limit: 1, Waiting: []SlotWait{
+		{Role: masonRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{
 			{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
 			{Workstream: stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
 			{Workstream: stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
-		{Role: reviewerRole, Used: 1, Limit: 1, Waiting: []SlotWait{}},
-		{Role: committeeRole, Used: 0, Limit: 3, Waiting: []SlotWait{}},
-		{Role: architectRole, Waiting: []SlotWait{}},
-		{Role: librarianRole, Waiting: []SlotWait{}},
-		{Role: checksRole, Limit: s.CheckSlots().Limit, Waiting: []SlotWait{}},
+		{Role: reviewerRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{}},
+		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
+		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
+		fixturekit.Unbounded(librarianRole, 0, []SlotWait{}),
+		{Role: checksRole, Limit: fixturekit.Limit(s.CheckSlots().Limit), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
@@ -142,12 +142,12 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 	s.cfg = s.cfg.WithoutProject()
 	got := s.statusList()
 	want := &CapacityStatus{PerWorkstream: s.cfg.Capacity.PerWorkstream, Roles: []RoleCapacity{
-		{Role: masonRole, Limit: s.cfg.Capacity.Masons, Waiting: []SlotWait{}},
-		{Role: reviewerRole, Limit: s.cfg.Capacity.Reviewers, Waiting: []SlotWait{}},
-		{Role: committeeRole, Limit: s.cfg.Capacity.Committee, Waiting: []SlotWait{}},
-		{Role: architectRole, Waiting: []SlotWait{}},
-		{Role: librarianRole, Waiting: []SlotWait{}},
-		{Role: checksRole, Limit: s.cfg.Capacity.Checks, Waiting: []SlotWait{}},
+		{Role: masonRole, Limit: fixturekit.Limit(s.cfg.Capacity.Masons), Waiting: []SlotWait{}},
+		{Role: reviewerRole, Limit: fixturekit.Limit(s.cfg.Capacity.Reviewers), Waiting: []SlotWait{}},
+		{Role: committeeRole, Limit: fixturekit.Limit(s.cfg.Capacity.Committee), Waiting: []SlotWait{}},
+		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
+		fixturekit.Unbounded(librarianRole, 0, []SlotWait{}),
+		{Role: checksRole, Limit: fixturekit.Limit(s.cfg.Capacity.Checks), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity without a project %+v, want %+v", got.Capacity, want)

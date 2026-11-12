@@ -1015,6 +1015,16 @@
     }));
   }
 
+  // A pool is bounded when the service reports a numeric factory-wide limit.
+  // The architect and librarian pools report none (unbounded: at most one
+  // turn per workstream), which is not a limit of 0.
+  function boundedPool(r) {
+    return typeof r.limit === 'number';
+  }
+  function poolUse(r) {
+    return boundedPool(r) ? r.used + ' of ' + r.limit + ' slots' : r.used + ' active (unbounded; 1 per workstream)';
+  }
+
   function renderCapacity() {
     const box = byId('capacity');
     if (!views.status) {
@@ -1030,7 +1040,8 @@
       ...capacity.roles.map((r) => el('div', { class: 'role', 'data-role': r.role },
         el('div', { class: 'line' },
           el('strong', {}, r.role),
-          el('span', { 'data-field': 'slots' }, r.limit > 0 ? r.used + ' / ' + r.limit + ' slots' : r.used + ' active (1 per workstream)')),
+          el('span', { 'data-field': 'slots' }, boundedPool(r) ? r.used + ' / ' + r.limit + ' slots' : r.used + ' active (unbounded; 1 per workstream)')),
+        boundedPool(r) ? null : el('div', { class: 'meta', 'data-field': 'note' }, r.note || 'No factory-wide limit; at most one turn per workstream; no configuration setting.'),
         r.waiting.length === 0
           ? el('div', { class: 'meta' }, 'Nothing waits.')
           : el('ul', { class: 'waiting' }, ...r.waiting.map((w) => el('li', { 'data-field': 'waiting' },
@@ -2779,14 +2790,14 @@
       meters.replaceChildren();
       byId('meter-total').textContent = '';
     } else {
-      const used = capacity.roles.filter((r) => r.limit > 0).reduce((n, r) => n + r.used, 0);
-      const limit = capacity.roles.reduce((n, r) => n + r.limit, 0);
-      const local = capacity.roles.filter((r) => r.limit === 0).reduce((n, r) => n + r.used, 0);
+      const used = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.used, 0);
+      const limit = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.limit, 0);
+      const local = capacity.roles.filter((r) => !boundedPool(r)).reduce((n, r) => n + r.used, 0);
       meters.replaceChildren(...capacity.roles.map((r) => {
         const fill = el('span', { class: 'fill' });
-        fill.style.height = (r.limit > 0 ? Math.min(100, Math.round(100 * r.used / r.limit)) : r.used > 0 ? 100 : 0) + '%';
-        return el('span', { class: 'meter', 'data-meter': r.role, 'data-full': String(r.limit > 0 && r.used >= r.limit), 'data-waiting': String(r.waiting.length > 0),
-          title: r.role + ': ' + (r.limit > 0 ? r.used + ' of ' + r.limit + ' slots' : r.used + ' active (1 per workstream)') + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
+        fill.style.height = (boundedPool(r) && r.limit > 0 ? Math.min(100, Math.round(100 * r.used / r.limit)) : r.used > 0 ? 100 : 0) + '%';
+        return el('span', { class: 'meter', 'data-meter': r.role, 'data-full': String(boundedPool(r) && r.used >= r.limit), 'data-waiting': String(r.waiting.length > 0),
+          title: r.role + ': ' + poolUse(r) + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
       }));
       byId('meter-total').textContent = used + '/' + limit;
       byId('capacity-button').title = used + ' of ' + limit + ' slots in use' + (local > 0 ? '; ' + local + ' architect/librarian sessions' : '');

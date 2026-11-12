@@ -61,7 +61,7 @@ func TestArchitectDraftRunsBesidePassAndOtherWorkstreams(t *testing.T) {
 	if slots := InspectForTest(f.s).Pool().Slots(nil); slots.Used[architectRole] != 1 {
 		t.Fatalf("held architect draft missing from capacity: %+v", slots)
 	}
-	if got := roleCapacity(t, f.s.capacityStatus(nil), architectRole); got.Used != 1 || got.Limit != 0 {
+	if got := roleCapacity(t, f.s.capacityStatus(nil), architectRole); got.Used != 1 || got.Limit != nil || !got.Unbounded {
 		t.Fatalf("architect capacity view: %+v", got)
 	}
 	if state, err := f.repository().Workflow(first, trace.FeatureSubject); err != nil || state.Value != HandedState {

@@ -55,6 +55,7 @@ var passingChecks = fixturekit.PassingChecks
 type replier = intake.Replier
 
 var roleCapacity = fixturekit.RoleCapacityEntry
+var limitOf = fixturekit.LimitOf
 
 var roundTurnID = intake.RoundTurnID
 var sealingActor = intake.SealingActor
