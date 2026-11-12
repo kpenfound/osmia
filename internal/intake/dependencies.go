@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
@@ -68,6 +69,7 @@ type Dependencies struct {
 	RefreshRuntime           func() error
 	RemoteFileTool           func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
 	Repository               func(id config.ProjectID) (*trace.Repository, error)
+	ProjectCreation          ProjectCreation
 	ResolveBase              func(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error)
 	ResumeGroupApproval      func(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError)
 	RoleExecution            func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
@@ -84,6 +86,24 @@ type Dependencies struct {
 	TrackTurn                func(config.WorkstreamID, context.CancelFunc) func()
 	Options                  Execution
 }
+
+// ProjectCreation is the service's project creation as a design start uses
+// it. GitHub and git work stay in the service; a start only reserves an
+// identity, asks for the checks, runs the creation step under that identity
+// and reads where it stands.
+type ProjectCreation struct {
+	// Check refuses, writing nothing, a creation that could not start.
+	Check func(ctx context.Context, req api.ProjectCreateRequest) *APIError
+	// Reserve returns a creation identity without recording anything.
+	Reserve func() (config.ProjectID, error)
+	// State reports where the creation under an identity stands.
+	State func(id config.ProjectID) (api.ProjectCreationState, *APIError)
+	// Create runs the creation under req.ID, or finishes the one begun.
+	Create func(ctx context.Context, req api.ProjectCreateRequest) (api.ProjectResponse, *APIError)
+	// Stuck reports the creation that waits for the owner, if any.
+	Stuck func() (state api.ProjectCreationState, at time.Time, stuck bool, err error)
+}
+
 type Execution struct {
 	Architect *Architect
 	Committee *Committee

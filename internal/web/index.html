@@ -269,6 +269,8 @@
       <div class="view-head"><h2 id="design-add-title">Open a design session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <form id="design-add-form" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
+        <label><input type="checkbox" name="new_project"> New project</label>
+        <p class="meta">New project designs a project that does not exist yet; Start creates its repository. The session lives in the project chosen above, or in the first active project when none is chosen.</p>
         <p class="meta">The agent reads the project's charter and every repo's knowledge base, read-only. It cannot write, use version control, or start any work itself.</p>
         <div class="actions"><button type="submit">Open a design session</button></div>
         <p class="result" role="status"></p>

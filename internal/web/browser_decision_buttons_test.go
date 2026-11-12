@@ -243,3 +243,25 @@ func TestBrowserDecisionButtonsRefreshWhilePendingPreservesNoteAndBlocksNewChoic
 	f.p.await("all refreshed choices available and note kept", `[...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)].every(b => !b.disabled) && document.querySelector(`+quote(card+`[name=note]`)+`).value === 'Keep this draft.'`)
 	assertDecisionRequest(t, f, "/v1/shed/redraft/w_000", map[string]any{"note": "Keep this draft."})
 }
+
+// A creation that cannot finish waits on the project pane, from a start or
+// not, and offers only a retry, which sends the creation's identity to the
+// create route.
+func TestBrowserStuckProjectCreationOffersOnlyRetry(t *testing.T) {
+	const id = "p_0123456789abcdef0123456789abcdef"
+	for _, workstream := range []string{"", "w_000"} {
+		t.Run("workstream "+workstream, func(t *testing.T) {
+			entry := fmt.Sprintf(`{"kind":"project-creation","project":"","workstream":%q,"number":0,"question":"Creating the project for owner/gadget stopped at step repository_created: cannot clone it. The host's git credential is the likely cause.","options":["retry"],"asked":[],"answer":{"method":"POST","path":"/v1/projects/create","body":{"id":%q}}}`, workstream, id)
+			f := newDecisionButtonFixture(t, entry)
+			f.p.click("#project-home")
+			card := `[data-decision][data-kind="project-creation"] `
+			f.p.awaitText(card+"[data-field=kind]", "Project creation stuck")
+			f.p.awaitText(card+"[data-field=question]", "git credential")
+			assertDecisionButtons(f.p, card, map[string]string{"retry": "Retry"})
+			f.p.click(card + `[data-decision-choice="retry"]`)
+			f.p.awaitGone("the retried card", card)
+			f.p.await("the recorded outcome", `document.querySelector('#inbox-result').dataset.outcome === 'ok'`)
+			assertDecisionRequest(t, f, "/v1/projects/create", map[string]any{"id": id})
+		})
+	}
+}

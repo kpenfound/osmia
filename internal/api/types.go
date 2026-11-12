@@ -315,9 +315,30 @@ type HandInResponse struct {
 }
 
 // DesignOpenRequest opens a design session in a project. The project may be
-// left out while exactly one project is active.
+// left out while exactly one project is active. NewProject opens the session
+// to design a project that does not exist yet: it is still hosted in an
+// existing project, the named one or else the first active project.
 type DesignOpenRequest struct {
-	Project config.ProjectID `json:"project"`
+	Project    config.ProjectID `json:"project"`
+	NewProject bool             `json:"new_project,omitempty"`
+}
+
+// Repository visibilities of a new project.
+const (
+	VisibilityPrivate = "private"
+	VisibilityPublic  = "public"
+)
+
+// NewProject is the project a design brief asks Start to create: its display
+// name, its repository name under the owner's GitHub account, the repository's
+// visibility (private unless the brief says public), its description and its
+// first charter.
+type NewProject struct {
+	Name        string `json:"name"`
+	Repo        string `json:"repo"`
+	Visibility  string `json:"visibility"`
+	Description string `json:"description,omitempty"`
+	Charter     string `json:"charter"`
 }
 
 // DesignView is a design session and its latest brief, revision and ordered
@@ -330,6 +351,8 @@ type DesignView struct {
 	BriefRevision int                 `json:"brief_revision"`
 	Brief         string              `json:"brief"`
 	Projects      []config.ProjectID  `json:"projects"`
+	// NewProject is the project the latest brief asks Start to create, if any.
+	NewProject *NewProject `json:"new_project,omitempty"`
 }
 
 // DesignResponse answers opening or reading one design session.
@@ -523,6 +546,87 @@ type ProjectAddRequest struct {
 	Fork       string `json:"fork,omitempty"`
 	Clone      string `json:"clone"`
 	BaseBranch string `json:"base_branch,omitempty"`
+}
+
+// ProjectCreateRequest creates a project: its GitHub repository under the
+// configured account, a clone in the configured clone directory, and the
+// project's registration. ID is the creation identity, obtained from the
+// identity route; leaving it empty reserves one. Repeating a request with the
+// same ID finishes the same creation, and a request that carries only the ID
+// finishes a creation already planned under it. Visibility is private unless
+// it is "public". Charter is recorded as the project's first charter
+// revision.
+type ProjectCreateRequest struct {
+	ID          config.ProjectID `json:"id,omitempty"`
+	Name        string           `json:"name"`
+	Repo        string           `json:"repo"`
+	Description string           `json:"description,omitempty"`
+	Visibility  string           `json:"visibility,omitempty"`
+	Charter     string           `json:"charter"`
+}
+
+// ProjectCreationIdentity is a reserved creation identity: the ID the
+// project will have. Nothing is recorded or created under it until a create
+// request carries it.
+type ProjectCreationIdentity struct {
+	ID config.ProjectID `json:"id"`
+}
+
+// Creation states.
+const (
+	CreationNotStarted = "not_started"
+	CreationPending    = "pending"
+	CreationComplete   = "complete"
+)
+
+// Why a pending creation is stuck. Retrying never adopts a repository: it
+// reuses only the repository this creation recorded.
+const (
+	// StuckOwnership: a repository of that name exists and the saved plan
+	// holds no evidence that this creation made it, or GitHub refused the
+	// create because the name is taken, or the recorded repository is no
+	// longer found under the name.
+	StuckOwnership = "ownership_not_established"
+	// StuckMismatch: GitHub's create answer named a repository other than
+	// the planned one.
+	StuckMismatch = "repository_mismatch"
+	// StuckRefused: GitHub refused the create; no repository was made.
+	StuckRefused = "create_refused"
+	// StuckClone: the clone failed after the repository exists.
+	StuckClone = "clone_failed"
+	// StuckBranch: the repository could not be given a main branch.
+	StuckBranch = "main_branch_failed"
+	// StuckUnknown: the create call's outcome is unknown, as after a
+	// transport error, a timeout or a server error. A retry sends the create
+	// again only when no repository of that name exists.
+	StuckUnknown = "create_outcome_unknown"
+)
+
+// Steps a pending creation has reached.
+const (
+	CreationPlanned    = "planned"
+	CreationRepository = "repository_created"
+	CreationCloned     = "cloned"
+	CreationMain       = "main_ready"
+)
+
+// ProjectCreationStuck says why a pending creation cannot go on without the
+// owner.
+type ProjectCreationStuck struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+}
+
+// ProjectCreationState is where the creation under one identity stands.
+// Pending reports the last step reached and, when the creation cannot go on
+// without the owner, why. Complete reports the registered project.
+type ProjectCreationState struct {
+	ID         config.ProjectID      `json:"id"`
+	State      string                `json:"state"`
+	Step       string                `json:"step,omitempty"`
+	Repository string                `json:"repository,omitempty"`
+	Stuck      *ProjectCreationStuck `json:"stuck,omitempty"`
+	Project    *ProjectView          `json:"project,omitempty"`
 }
 
 type ProjectRemoveRequest struct {
@@ -958,6 +1062,10 @@ const (
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
 	InboxBase         = "base"
+	// InboxProjectCreation reports a project creation that cannot finish
+	// without the owner. Its answer retries the creation; it never adopts or
+	// deletes a repository.
+	InboxProjectCreation = "project-creation"
 )
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it

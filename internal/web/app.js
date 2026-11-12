@@ -1070,7 +1070,7 @@
 
   function groupInbox(id) {
     const members = new Set(groupMembers(id).map(w => w.workstream));
-    return (views.inbox?.entries || []).filter(e => (e.workgroup === id || (!e.workgroup && members.has(e.workstream))) && !dismissed.has(decisionKey(e)));
+    return (views.inbox?.entries || []).filter(e => e.kind !== 'project-creation' && (e.workgroup === id || (!e.workgroup && members.has(e.workstream))) && !dismissed.has(decisionKey(e)));
   }
 
   function groupProposals(id) {
@@ -1226,7 +1226,8 @@
   function inboxOf(id) {
     const w = streams().find(w => w.workstream === id);
     const group = w?.workgroup?.id;
-    return views.inbox ? views.inbox.entries.filter((e) => (isMultiMember(w) ? !e.workgroup && e.kind !== 'escalation' && !e.answer?.body?.project_spec_revision && e.workstream === id : (e.workstream === id || (group && e.workgroup === group))) && !dismissed.has(decisionKey(e))) : [];
+    // A stuck project creation waits on the project pane, not on a workstream.
+    return views.inbox ? views.inbox.entries.filter((e) => e.kind !== 'project-creation' && (isMultiMember(w) ? !e.workgroup && e.kind !== 'escalation' && !e.answer?.body?.project_spec_revision && e.workstream === id : (e.workstream === id || (group && e.workgroup === group))) && !dismissed.has(decisionKey(e))) : [];
   }
 
   function proposalsOf(id) {
@@ -1562,7 +1563,10 @@
       }
       return row.node;
     });
-    place(byId('project-pane'), projectNodes);
+    // A creation that cannot finish waits for the owner here, whether a start,
+    // the CLI or the API began it.
+    const creations = (views.inbox ? views.inbox.entries : []).filter((e) => e.kind === 'project-creation' && !dismissed.has(decisionKey(e))).map(renderDecision);
+    place(byId('project-pane'), [...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes]);
     if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
     for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
@@ -2727,9 +2731,21 @@
       el('p', { class: 'meta', 'data-field': 'home' }, 'Home project: ' + projectName(design.project)),
       el('ul', { 'data-field': 'projects' }, ...design.projects.map(id =>
         el('li', { 'data-project': id }, projectName(id) + (id === design.project ? ' (home)' : '')))),
+      ...(design.new_project ? [renderDraftedNewProject(design.new_project)] : []),
       design.brief_revision > 0
         ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
         : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
+  }
+
+  // renderDraftedNewProject shows the project the brief asks Start to
+  // create, with the visibility its repository will have.
+  function renderDraftedNewProject(np) {
+    return el('div', { 'data-field': 'new-project' },
+      el('h4', {}, 'New project: ' + np.name),
+      el('p', { 'data-field': 'new-project-repo' }, 'Repository: ' + np.repo),
+      el('p', { 'data-field': 'new-project-visibility' }, 'Visibility: ' + np.visibility),
+      np.description ? el('p', { 'data-field': 'new-project-description' }, 'Description: ' + np.description) : null,
+      el('details', {}, el('summary', {}, 'First charter'), renderMarkdown(np.charter)));
   }
 
   function renderDesignView() {
@@ -2938,6 +2954,7 @@
     notices: 'Notices held',
     loop: 'Loop guard',
     base: 'Base parked',
+    'project-creation': 'Project creation stuck',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -2962,6 +2979,7 @@
     round: 'Debate another round',
     overrule: 'Overrule the objections',
     upstream: 'Continue from upstream',
+    retry: 'Retry',
   };
 
   function workstreamName(id) {
@@ -3157,6 +3175,12 @@
         }
         send(entry.answer.method, endpoint(entry), { ...body, decision },
           () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.', decisionKey(entry));
+        return;
+      case 'project-creation':
+        // The retry finishes the creation under its identity, reusing only the
+        // repository that creation made.
+        send(entry.answer.method, endpoint(entry), body,
+          () => 'The project was created and registered.', decisionKey(entry));
         return;
       case 'base':
         send(entry.answer.method, endpoint(entry), body,
@@ -3407,6 +3431,8 @@
         // base was abandoned.
         if (entry.kind === 'base') {
           d.form.hidden = entry.options.length === 0;
+          d.note.parentElement.hidden = true;
+        } else if (entry.kind === 'project-creation') {
           d.note.parentElement.hidden = true;
         }
     }
@@ -4344,9 +4370,17 @@
   // setupDesignForms wires design creation, chat, workgroup start and destroy.
   function setupDesignForms() {
     const add = byId('design-add-form');
+    // A new-project session lives in the chosen project or, with none chosen,
+    // in the first active project, so the project choice is optional then.
+    const syncNewProject = () => {
+      add.elements.project.required = !add.elements.new_project.checked;
+    };
+    add.elements.new_project.addEventListener('change', syncNewProject);
+    add.addEventListener('reset', () => setTimeout(syncNewProject));
     add.addEventListener('submit', (event) => {
       event.preventDefault();
-      formAction(add, event.submitter, () => request('POST', '/design', { project: add.elements.project.value }), (out) => {
+      const newProject = add.elements.new_project.checked;
+      formAction(add, event.submitter, () => request('POST', '/design', { project: add.elements.project.value, new_project: newProject }), (out) => {
         designIds.set(out.design.workstream, out.design);
         select(out.design.workstream);
         return 'Opened design session ' + out.design.workstream + '.';

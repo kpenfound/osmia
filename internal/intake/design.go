@@ -15,7 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
@@ -31,6 +33,8 @@ const (
 	DesignReadRepoToolName  = "read_repo"
 	DesignDraftDocument     = "design-draft"
 	DesignDraftPath         = "tools/design-brief.json"
+	DesignModeDocument      = "design-mode"
+	DesignModePath          = "tools/design-mode.json"
 	DesignOpenTransition    = "design-open"
 	DesignStartTransition   = "design-start"
 	DesignBriefPath         = "handed/design-brief.md"
@@ -54,21 +58,43 @@ const DesignOpenValue = "open"
 
 const DesignClosedValue = "started"
 
+// DesignBriefRecord is one revision of a design session's drafted brief. A
+// nil Projects means the agent never set the list; an empty one is a recorded
+// choice of no existing project. NewProject is the project the brief asks
+// Start to create, if any.
 type DesignBriefRecord struct {
-	Content  string             `json:"content"`
-	Projects []config.ProjectID `json:"projects,omitempty"`
+	Content    string             `json:"content"`
+	Projects   []config.ProjectID `json:"projects"`
+	NewProject *api.NewProject    `json:"new_project,omitempty"`
 }
 
-// LatestDesignBrief resolves the legacy default without changing its revision.
+// designMode is the record a new-project design session carries from the
+// moment it opens.
+type designMode struct {
+	NewProject bool `json:"new_project"`
+}
+
+// LatestDesignBrief resolves the default project list without changing the
+// brief's revision. A session that was not opened to design a new project
+// defaults to its host project; a new-project session defaults to no existing
+// project, so the host project is never in the list unless the brief names it.
 func LatestDesignBrief(repository *trace.Repository, stream config.WorkstreamID) (DesignBriefRecord, int, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return DesignBriefRecord{}, 0, err
 	}
 	var latest trace.Document
+	newProject := false
 	for _, d := range docs {
 		if d.ID == DesignDraftDocument && d.Revision > latest.Revision {
 			latest = d
+		}
+		if d.ID == DesignModeDocument {
+			var mode designMode
+			if err := json.Unmarshal([]byte(d.Content), &mode); err != nil {
+				return DesignBriefRecord{}, 0, err
+			}
+			newProject = mode.NewProject
 		}
 	}
 	brief := DesignBriefRecord{}
@@ -78,15 +104,63 @@ func LatestDesignBrief(repository *trace.Repository, stream config.WorkstreamID)
 		}
 	}
 	if brief.Projects == nil {
-		brief.Projects = []config.ProjectID{repository.Project()}
+		if newProject {
+			brief.Projects = []config.ProjectID{}
+		} else {
+			brief.Projects = []config.ProjectID{repository.Project()}
+		}
 	}
 	return brief, latest.Revision, nil
 }
 
 func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView, error) {
 	brief, revision, err := LatestDesignBrief(repository, view.Workstream)
-	view.BriefRevision, view.Brief, view.Projects = revision, brief.Content, brief.Projects
+	view.BriefRevision, view.Brief, view.Projects, view.NewProject = revision, brief.Content, brief.Projects, brief.NewProject
 	return view, err
+}
+
+// maxRepoDescription is GitHub's longest repository description.
+const maxRepoDescription = 350
+
+// NormalizeNewProject validates a drafted new project and returns it with
+// surrounding whitespace removed and the visibility defaulted to private.
+func NormalizeNewProject(in api.NewProject) (api.NewProject, error) {
+	out := api.NewProject{Name: strings.TrimSpace(in.Name), Repo: strings.TrimSpace(in.Repo),
+		Visibility: strings.ToLower(strings.TrimSpace(in.Visibility)), Description: strings.TrimSpace(in.Description),
+		Charter: strings.TrimSpace(in.Charter)}
+	if out.Name == "" {
+		return out, errors.New("new_project.name must not be empty")
+	}
+	if !ValidRepoName(out.Repo) {
+		return out, fmt.Errorf("new_project.repo %q is not a repository name GitHub accepts: use 1 to 100 letters, digits, hyphens, underscores or dots, not . or .. and not ending in .git", out.Repo)
+	}
+	switch out.Visibility {
+	case "":
+		out.Visibility = api.VisibilityPrivate
+	case api.VisibilityPrivate, api.VisibilityPublic:
+	default:
+		return out, fmt.Errorf("new_project.visibility must be %q or %q", api.VisibilityPrivate, api.VisibilityPublic)
+	}
+	if utf8.RuneCountInString(out.Description) > maxRepoDescription {
+		return out, fmt.Errorf("new_project.description must be at most %d characters", maxRepoDescription)
+	}
+	if out.Charter == "" {
+		return out, errors.New("new_project.charter must not be empty")
+	}
+	return out, nil
+}
+
+// ValidRepoName reports whether name is a repository name GitHub accepts.
+func ValidRepoName(name string) bool {
+	if name == "" || len(name) > 100 || name == "." || name == ".." || strings.HasSuffix(strings.ToLower(name), ".git") {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // IsDesignWorkstream reports whether stream is a design session: a
@@ -111,9 +185,18 @@ func RenderDesignView(project config.ProjectID, w trace.WorkstreamStatus) Design
 // plan and no units, and the owner's conversation with it never reaches the
 // tools or the context an ordinary chief of staff has.
 func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (DesignView, *APIError) {
-	project, api := s.ProjectFor(req.Project)
-	if api != nil {
-		return DesignView{}, api
+	if req.NewProject && req.Project == "" {
+		// A new project has no records yet, so the conversation lives in the
+		// first active project.
+		ids := s.Current().ProjectIDs()
+		if len(ids) == 0 {
+			return DesignView{}, &APIError{Code: NoProject, Message: "a new-project design session lives in an existing project, and no project is active; add one with osmia project add first"}
+		}
+		req.Project = ids[0]
+	}
+	project, apiErr := s.ProjectFor(req.Project)
+	if apiErr != nil {
+		return DesignView{}, apiErr
 	}
 	repository, err := s.Repository(project)
 	if err != nil {
@@ -139,7 +222,20 @@ func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (Des
 	}
 	openHeader := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DesignOpenTransition, Revision: 1,
 		Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignOpenTransition}
-	if _, err := repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: openHeader, Subject: DesignSessionSubject, To: DesignOpenValue, Reason: "the owner opened a design session"}}); err != nil {
+	open := trace.Transaction{Transition: trace.Transition{Header: openHeader, Subject: DesignSessionSubject, To: DesignOpenValue, Reason: "the owner opened a design session"}}
+	if req.NewProject {
+		// The mode and the marker commit together: a session is never open
+		// without the record of what it designs.
+		mode, err := json.Marshal(designMode{NewProject: true})
+		if err != nil {
+			return DesignView{}, &APIError{Code: Internal, Message: err.Error()}
+		}
+		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignModeDocument, Revision: 1,
+			Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignOpenTransition}
+		if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{{Header: h, Path: DesignModePath, Content: string(mode)}}, open); err != nil {
+			return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the design session marker of %s; check the trace repository", stream)}
+		}
+	} else if _, err := repository.Transact(ctx, open); err != nil {
 		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the design session marker of %s; check the trace repository", stream)}
 	}
 	if err := s.RefreshRuntime(); err != nil {
@@ -299,6 +395,13 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"An owner request to add or remove a project is confirmation of that list change. If you infer a project change, " +
 	"raise it as a readiness question with a recommendation and apply it only after the owner agrees. " +
 	"Use draft_brief projects to record the confirmed ordered project list; omitting projects keeps the current list.\n\n" +
+	"A brief may also describe a brand-new project through draft_brief new_project: its display name, repo name, visibility, " +
+	"description and first charter. Omitting new_project keeps the current one. The new project's repo is created at Start, " +
+	"initialised with only a README, so it has no code, no build and no checks yet: the new project's first unit must set up " +
+	"`dagger check`, and you plan the work that way. Visibility stays private unless the owner confirms public in this session, " +
+	"because a public repo is published the moment it is created; set public only after that confirmation. A new project may " +
+	"stand alone or sit alongside existing projects. You create nothing and hold no credential: the repo is created by the " +
+	"service when the owner presses Start, never by you.\n\n" +
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
 	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes; only its " +
 	"latest call is used. The owner starts the workgroup once satisfied; you never start it yourself, and nothing you say " +
@@ -312,6 +415,10 @@ func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.R
 	}
 	var b strings.Builder
 	b.WriteString(DesignRolePrompt)
+	if brief.NewProject != nil {
+		fmt.Fprintf(&b, "\n\n## New project in the current brief\nName: %s\nRepo: %s\nVisibility: %s\nDescription: %s\n\nCharter:\n%s\n",
+			brief.NewProject.Name, brief.NewProject.Repo, brief.NewProject.Visibility, brief.NewProject.Description, brief.NewProject.Charter)
+	}
 	b.WriteString("\n\n## Active project catalog\nProject | Name | Upstream | In brief | Reference files\n--- | --- | --- | --- | ---\n")
 	for _, project := range s.Current().Projects {
 		references := "inline below"
@@ -439,15 +546,16 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 // reads; nothing before the latest call is used.
 func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftBriefToolName, Effect: coreadapter.ToolMemory,
-		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}}},"required":["content"],"additionalProperties":false}`),
+		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner. new_project is an optional new project for the owner to create at Start: name (display name), repo (the GitHub repository name), visibility (private by default; public only after the owner confirms it), description and charter (its first charter). Omitting new_project keeps the current one, a new object replaces it and null removes it. A brief needs at least one existing project or a new project.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}},"new_project":{"type":["object","null"],"properties":{"name":{"type":"string"},"repo":{"type":"string"},"visibility":{"type":"string"},"description":{"type":"string"},"charter":{"type":"string"}},"required":["name","repo","charter"],"additionalProperties":false}},"required":["content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := repository.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
 			var in struct {
-				Content  string          `json:"content"`
-				Projects json.RawMessage `json:"projects"`
+				Content    string          `json:"content"`
+				Projects   json.RawMessage `json:"projects"`
+				NewProject json.RawMessage `json:"new_project"`
 			}
 			d := json.NewDecoder(bytes.NewReader(raw))
 			d.DisallowUnknownFields()
@@ -478,8 +586,30 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 					return RefuseReport("projects must be an ordered project list")
 				}
 			}
-			if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
-				return RefuseReport("%s", api.Message)
+			if in.NewProject != nil {
+				if string(bytes.TrimSpace(in.NewProject)) == "null" {
+					brief.NewProject = nil
+				} else {
+					var drafted api.NewProject
+					nd := json.NewDecoder(bytes.NewReader(in.NewProject))
+					nd.DisallowUnknownFields()
+					if err := nd.Decode(&drafted); err != nil {
+						return RefuseReport("new_project must be an object with name, repo, visibility, description and charter: %v", err)
+					}
+					normal, err := NormalizeNewProject(drafted)
+					if err != nil {
+						return RefuseReport("%s", err.Error())
+					}
+					brief.NewProject = &normal
+				}
+			}
+			if len(brief.Projects) > 0 || brief.NewProject == nil {
+				if apiErr := s.ValidateProjects(ctx, brief.Projects); apiErr != nil {
+					if len(brief.Projects) == 0 {
+						return RefuseReport("select at least one project or describe a new_project")
+					}
+					return RefuseReport("%s", apiErr.Message)
+				}
 			}
 			brief.Content = content
 			k := revision + 1
@@ -724,8 +854,22 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 				brief.Projects = append(brief.Projects, member.Repo)
 			}
 		}
-		if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
-			return DesignStartResponse{}, api
+		if len(brief.Projects) > 0 || brief.NewProject == nil {
+			if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
+				return DesignStartResponse{}, api
+			}
+		}
+		var creation config.ProjectID
+		if brief.NewProject != nil {
+			// Refused here, before any intent is recorded, nothing has been
+			// created on GitHub.
+			if api := s.CheckDesignNewProject(ctx, brief.NewProject); api != nil {
+				return DesignStartResponse{}, api
+			}
+			creation, err = s.ProjectCreation.Reserve()
+			if err != nil {
+				return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
+			}
 		}
 		transcript, err := DesignTranscript(repository, stream)
 		if err != nil {
@@ -736,6 +880,10 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 			Content: strings.TrimRight(brief.Content, "\n") + "\n" + DesignTranscriptHeading + transcript, Source: "design:" + string(stream)}
 		handed.Schema = "osmia.trace.document"
 		intent = DesignStartIntent{BriefRevision: latest, Projects: brief.Projects, Handed: handed}
+		if brief.NewProject != nil {
+			pinned := *brief.NewProject
+			intent.NewProject, intent.Creation = &pinned, creation
+		}
 		data, err := json.Marshal(intent)
 		if err != nil {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}

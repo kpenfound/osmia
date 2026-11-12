@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -18,12 +19,41 @@ const DesignSelectionPath = "owner/projects.json"
 
 const DesignStartIntentDocument = "design-start-intent"
 
+// NewProjectHandedLine is the fixed line that opens the handed input of the
+// member for a project the start created.
+const NewProjectHandedLine = "This project's repository is new and holds only a README. Its first unit must set up `dagger check`."
+
 // DesignStartIntent binds the owner-started text, revision and ordered list
 // before any handed input, owner decision or member allocation is recorded.
+// Projects holds the existing projects of the pinned brief. NewProject is the
+// project that brief asks the start to create, and Creation is the identity of
+// that creation: the ID the new project will have, recorded before anything is
+// written on GitHub.
 type DesignStartIntent struct {
 	BriefRevision int                `json:"brief_revision"`
 	Projects      []config.ProjectID `json:"projects"`
+	NewProject    *api.NewProject    `json:"new_project,omitempty"`
+	Creation      config.ProjectID   `json:"creation,omitempty"`
 	Handed        trace.Document     `json:"handed"`
+}
+
+// Selected is the ordered project list the start allocates: the brief's
+// existing projects, then the project the start created.
+func (i DesignStartIntent) Selected() []config.ProjectID {
+	selected := slices.Clone(i.Projects)
+	if i.NewProject != nil {
+		selected = append(selected, i.Creation)
+	}
+	return selected
+}
+
+// MemberHanded is the handed input of one member: the pinned input, opened by
+// the fixed line for the member that is the new project.
+func (i DesignStartIntent) MemberHanded(handed trace.Document, member config.ProjectID) trace.Document {
+	if i.NewProject != nil && member == i.Creation {
+		handed.Content = NewProjectHandedLine + "\n\n" + handed.Content
+	}
+	return handed
 }
 
 func DesignStartIntentOf(r *trace.Repository, stream config.WorkstreamID) (DesignStartIntent, bool, error) {
@@ -64,8 +94,12 @@ func (s *Controller) PreparePinnedDesignStart(ctx context.Context, r *trace.Repo
 			return err
 		}
 	}
-	if api := s.RecordOwnerProjects(ctx, r, stream, intent.Projects, ""); api != nil {
-		return fmt.Errorf("%s", api.Message)
+	if intent.NewProject != nil {
+		// The selection waits for the creation, which reconcile runs.
+		return nil
+	}
+	if refusal := s.RecordOwnerProjects(ctx, r, stream, intent.Projects, ""); refusal != nil {
+		return fmt.Errorf("%s", refusal.Message)
 	}
 	return nil
 }
@@ -191,11 +225,22 @@ func (s *Controller) DesignStartState(ctx context.Context, r *trace.Repository, 
 }
 
 func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Repository, stream config.WorkstreamID) error {
-	if intent, found, err := DesignStartIntentOf(r, stream); err != nil {
+	intent, hasIntent, err := DesignStartIntentOf(r, stream)
+	if err != nil {
 		return err
-	} else if found {
+	}
+	if hasIntent {
 		if err := s.PreparePinnedDesignStart(ctx, r, stream, intent); err != nil {
 			return err
+		}
+		if intent.NewProject != nil {
+			ready, err := s.EnsureDesignProject(ctx, r, stream, intent)
+			if err != nil || !ready {
+				return err
+			}
+			if refusal := s.RecordOwnerProjects(ctx, r, stream, intent.Selected(), ""); refusal != nil {
+				return fmt.Errorf("%s", refusal.Message)
+			}
 		}
 	}
 	selected, found, err := DesignSelectionOf(r, stream)
@@ -256,17 +301,18 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		if err != nil {
 			return err
 		}
+		memberHanded := intent.MemberHanded(handed, member.Repo)
 		copied := false
 		for _, doc := range docs {
 			if doc.ID == HandedDocument {
-				if doc.Content != handed.Content || doc.Source != handed.Source || doc.Path != handed.Path {
+				if doc.Content != memberHanded.Content || doc.Source != memberHanded.Source || doc.Path != memberHanded.Path {
 					return trace.ErrConflict
 				}
 				copied = true
 			}
 		}
 		if !copied {
-			doc := handed
+			doc := memberHanded
 			doc.Project, doc.Workstream = member.Repo, member.Workstream
 			if err := repo.Append(ctx, doc); err != nil {
 				return err

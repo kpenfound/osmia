@@ -230,6 +230,30 @@ func (c *Client) AddProject(ctx context.Context, req api.ProjectAddRequest) (api
 	err := c.do(ctx, "POST", api.Prefix+"/projects", req, &v, c.addProjectTimeout)
 	return v, err
 }
+
+// CreateProject creates a project and registers it, or finishes the creation
+// begun under req.ID. The service may clone over the network, so it waits
+// longer than a default call.
+func (c *Client) CreateProject(ctx context.Context, req api.ProjectCreateRequest) (api.ProjectResponse, error) {
+	var v api.ProjectResponse
+	err := c.do(ctx, "POST", api.Prefix+"/projects/create", req, &v, createProjectTimeout+10*time.Second)
+	return v, err
+}
+
+// ReserveProjectCreation asks the service for a creation identity to record
+// before the create request is sent.
+func (c *Client) ReserveProjectCreation(ctx context.Context) (config.ProjectID, error) {
+	var v api.ProjectCreationIdentity
+	err := c.Do(ctx, "POST", api.Prefix+"/projects/create/identity", nil, &v)
+	return v.ID, err
+}
+
+// ProjectCreation reports where the creation under id stands.
+func (c *Client) ProjectCreation(ctx context.Context, id config.ProjectID) (api.ProjectCreationState, error) {
+	var v api.ProjectCreationState
+	err := c.Do(ctx, "GET", api.Prefix+"/projects/create/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
 func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (api.ProjectResponse, error) {
 	var v api.ProjectResponse
 	err := c.Do(ctx, "DELETE", api.Prefix+"/projects", api.ProjectRemoveRequest{Project: id}, &v)
@@ -270,6 +294,15 @@ func (c *Client) HandIn(ctx context.Context, req api.HandInRequest) (api.HandInR
 func (c *Client) OpenDesign(ctx context.Context, project config.ProjectID) (api.DesignResponse, error) {
 	var v api.DesignResponse
 	err := c.Do(ctx, "POST", api.Prefix+"/design", api.DesignOpenRequest{Project: project}, &v)
+	return v, err
+}
+
+// OpenNewProjectDesign opens a design session for a project that does not
+// exist yet. It is hosted in project, or in the first active project when
+// project is empty.
+func (c *Client) OpenNewProjectDesign(ctx context.Context, project config.ProjectID) (api.DesignResponse, error) {
+	var v api.DesignResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/design", api.DesignOpenRequest{Project: project, NewProject: true}, &v)
 	return v, err
 }
 

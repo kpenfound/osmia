@@ -26,6 +26,7 @@ osmia trace w_0123456789abcdef0123456789abcdef criterion spec#1
 osmia trace w_0123456789abcdef0123456789abcdef unit parser
 osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789abcdef01234567
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
+osmia project create "New project" --repo new-project --charter-file charter.md --description "What it is for"
 osmia project memory p_0123456789abcdef0123456789abcdef
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
@@ -691,6 +692,73 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   project while others are active is supported with a separate clone. Repeating
   an active project's exact registration returns it again.
 
+
+- `project create <name> --repo NAME --charter-file PATH|- [--description TEXT]
+  [--public] [--id PROJECT-ID]` creates a project from nothing: a new GitHub
+  repository under `[projects] repo_owner`, cloned into `[projects] clone_dir`
+  as `<clone_dir>/<repo>` and registered like `project add`. `<name>` is the
+  project's display name, `--repo` the repository name, `--description` its
+  one-line description (at most 350 characters) and `--charter-file` the
+  charter, read from a file or from standard input with `-`, which becomes the
+  project's first charter revision. The repository is private unless `--public`
+  is given, and it is initialised with only GitHub's README.
+
+  Before anything is recorded or created the command refuses, with a message
+  that names the cause, when creation is off (`projects.repo_owner` or
+  `projects.clone_dir` is not set), `GITHUB_TOKEN` is not set in the service's
+  environment, the token's account is not `repo_owner` (case-insensitive), the
+  repository name is invalid or already exists under `repo_owner`, or
+  `<clone_dir>/<repo>` already exists.
+
+  The command first asks the service for a creation identity, which is the
+  project ID the project will have, and sends it with the request. The service
+  saves the creation plan under that identity in the registration journal
+  (`project-add.json`) before it writes to GitHub, then creates the repository
+  with `POST /user/repos`, records the repository's identity as soon as GitHub
+  answers, clones it from the SSH URL GitHub returned, makes sure `main`
+  holds the README commit and is the repository's default branch, registers the
+  project and removes the journal. When GitHub initialised the repository on
+  another branch, the README commit is pushed to `main` and `main` is made the
+  repository's default branch; the account's own default-branch preference is
+  not changed, and the original branch is left in place. The clone's
+  `main` tracks `origin/main`.
+
+  Clone and push use the host's own git and SSH configuration, with
+  `GITHUB_TOKEN` removed from the environment of every git command the
+  creation runs; the token is used only for GitHub's API. Nothing deletes a
+  repository.
+
+  An interrupted creation is finished by running the command again with
+  `--id <project-id>`: the service finishes the same creation, reusing the
+  repository only when the saved plan records the repository identity GitHub
+  returned for this creation's own create call, and never sending a second
+  create for one plan. The error of an unfinished creation names the identity.
+  A creation that cannot go on without the owner reports why:
+
+  - a clone failure names the host git credential as the likely cause; fix it
+    and run the command again with `--id`;
+  - when a repository named `<repo_owner>/<repo>` exists and the plan holds no
+    evidence that this creation made it (it appeared before the create was
+    sent, GitHub refused the create because the name is taken, the create's
+    outcome is unknown, or its identity differs from the recorded one), or
+    GitHub's answer named another repository, the creation stops because the
+    repository's ownership could not be established. Nothing is cloned,
+    registered or adopted. Rename or remove the other repository on GitHub,
+    then run the command again with `--id`.
+
+  `project create --id PROJECT-ID` alone finishes the creation already planned
+  under that identity, reusing only the repository that creation made; it is
+  also what an inbox entry for a stuck creation asks you to run, whether a
+  design Start, the CLI or the API began it, and a Start goes on to allocate
+  its workgroup once the creation completes.
+
+  While a creation is pending, `project add` and other creations are refused
+  and name it. The API is `POST /v1/projects/create` with `POST
+  /v1/projects/create/identity` to reserve the identity and `GET
+  /v1/projects/create/{id}` to read it back: not started, pending with the
+  step reached (`planned`, `repository_created`, `cloned`, `main_ready`) and
+  why it is stuck, or complete with the registered project, which stays
+  complete after the journal is removed.
 
 - `project extract <repo-id>` starts a new
   knowledge-base extraction of the active

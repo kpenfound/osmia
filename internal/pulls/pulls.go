@@ -258,7 +258,7 @@ func (g GitHub) request(ctx context.Context, method, path string, in any, want i
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("request failed")
+		return 0, errTransport
 	}
 	defer resp.Body.Close()
 	status = resp.StatusCode
@@ -267,13 +267,29 @@ func (g GitHub) request(ctx context.Context, method, path string, in any, want i
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
 	if err != nil || len(data) > MaxResponse {
-		return status, fmt.Errorf("unreadable or oversized response")
+		return status, &ResponseError{Status: status, Message: "unreadable or oversized response"}
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		return status, fmt.Errorf("invalid response")
+		return status, &ResponseError{Status: status, Message: "invalid response"}
 	}
 	return status, nil
 }
+
+// errTransport is a request that got no answer: the connection failed or
+// timed out.
+var errTransport = errors.New("request failed")
+
+// ResponseError is an answer the client could not use: GitHub's status with
+// the text that describes it. A request that got no answer at all is a plain
+// error instead, so errors.As finds a ResponseError only when GitHub spoke.
+type ResponseError struct {
+	Status  int
+	Message string
+	// Details are GitHub's per-field validation messages, when it sent any.
+	Details []string
+}
+
+func (e *ResponseError) Error() string { return e.Message }
 
 // maxErrorBody bounds the error response statusError reads, and
 // maxErrorText each value it keeps from it.
@@ -286,13 +302,22 @@ const (
 // and documentation link, the token permissions GitHub says the request
 // needs, and the rate limit when it is exhausted or GitHub asks to retry
 // later.
-func statusError(resp *http.Response) error {
+func statusError(resp *http.Response) *ResponseError {
 	var body struct {
 		Message          string `json:"message"`
 		DocumentationURL string `json:"documentation_url"`
+		Errors           []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 	_ = json.Unmarshal(data, &body)
+	var details []string
+	for _, e := range body.Errors {
+		if m := errorText(e.Message); m != "" {
+			details = append(details, m)
+		}
+	}
 	text := fmt.Sprintf("GitHub answered %d", resp.StatusCode)
 	if message := errorText(body.Message); message != "" {
 		text += ": " + message
@@ -312,7 +337,7 @@ func statusError(resp *http.Response) error {
 	if doc := errorText(body.DocumentationURL); doc != "" {
 		text += "; see " + doc
 	}
-	return errors.New(text)
+	return &ResponseError{Status: resp.StatusCode, Message: text, Details: details}
 }
 
 // errorText is one value of an error response, on one line and bounded.

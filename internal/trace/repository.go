@@ -556,7 +556,7 @@ func latestCharter(records []Record) (Document, bool) {
 // Create initializes a project's trace database in an existing configuration
 // directory or a new project directory. It refuses any existing trace.
 func Create(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor) (*Repository, error) {
-	return createTrace(ctx, root, project, at, actor, nil)
+	return createTrace(ctx, root, project, at, actor, nil, CharterTemplate)
 }
 
 // CreateSeeded is Create with entities, already validated by the caller, as
@@ -565,10 +565,22 @@ func CreateSeeded(ctx context.Context, root config.Root, project config.Project,
 	if len(entities) == 0 {
 		return nil, fmt.Errorf("entity map seed required")
 	}
-	return createTrace(ctx, root, project, at, actor, entities)
+	return createTrace(ctx, root, project, at, actor, entities, CharterTemplate)
 }
 
-func createTrace(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor, entities []byte) (*Repository, error) {
+// CreateSeededWithCharter is CreateSeeded with charter, already written by
+// the owner, as the first charter revision in place of the template.
+func CreateSeededWithCharter(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor, entities []byte, charter string) (*Repository, error) {
+	if len(entities) == 0 {
+		return nil, fmt.Errorf("entity map seed required")
+	}
+	if strings.TrimSpace(charter) == "" {
+		return nil, fmt.Errorf("charter required")
+	}
+	return createTrace(ctx, root, project, at, actor, entities, charter)
+}
+
+func createTrace(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor, entities []byte, charter string) (*Repository, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -580,7 +592,7 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 		return nil, err
 	}
 	var records []Record
-	records = append(records, charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
+	records = append(records, charterRevision(project.ID, at, actor, "project-create", 1, charter))
 	if entities != nil {
 		d := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: project.ID, At: at, Actor: actor, Cause: "project-create"}, Path: EntitiesPath, Content: string(entities)}
 		if err := validate(d); err != nil {
