@@ -23,6 +23,44 @@ const DesignStartIntentDocument = "design-start-intent"
 // member for a project the start created.
 const NewProjectHandedLine = "This project's repository is new and holds only a README. Its first unit must set up `dagger check`."
 
+// DesignHandoffTitleSubject is the workflow subject of the one request that
+// asks the chief of staff to title the work a design start began. Its
+// transition is recorded with the request's outbox notice, so a repeated
+// start records neither again.
+const DesignHandoffTitleSubject = "design-handoff-title"
+
+// DesignHandoffTitleTransition identifies the transition that records the
+// hand-off title request of a workstream.
+const DesignHandoffTitleTransition = "design-handoff-title"
+
+// HandoffTitleOpening opens the body of every hand-off title request.
+const HandoffTitleOpening = "The owner started work from the design brief handed in at " + DesignBriefPath + "."
+
+// HandoffTitleBody is the body of the notice that asks the chief of staff to
+// title the started work: a single workstream when workgroup is false,
+// otherwise the workgroup the brief was handed to every member of. The title
+// is the status goal, set with the status tool under its usual rules.
+func HandoffTitleBody(workgroup bool) string {
+	subject := "this workstream"
+	if workgroup {
+		subject = "this workgroup, handed to every member"
+	}
+	return HandoffTitleOpening + " Title the started work for " + subject + ": call set_status now with a goal that is its title, one sentence written for the owner from the brief, and the rest of the status as its rules require."
+}
+
+// RequestHandoffTitle records, in the trace of stream, the notice that asks
+// the chief of staff for the started work's title, once. The transition
+// carries the handed brief's timestamp, so a retry of the start repeats the
+// committed transition and records nothing more. stream is the workstream
+// whose chief-of-staff thread continues the conversation.
+func (s *Controller) RequestHandoffTitle(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, handed trace.Document, workgroup bool) error {
+	h := OwnerHeader(DesignHandoffTitleTransition, r.Project(), stream, DesignStartTransition, handed.At)
+	_, err := r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: DesignHandoffTitleSubject, To: "requested",
+		Reason: "the owner started work from the design brief; the chief of staff titles it through its status"},
+		Events: []trace.Event{trace.Notice(h.ID, "title", HandoffTitleBody(workgroup))}})
+	return err
+}
+
 // DesignStartIntent binds the owner-started text, revision and ordered list
 // before any handed input, owner decision or member allocation is recorded.
 // Projects holds the existing projects of the pinned brief. NewProject is the
@@ -261,7 +299,17 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 			return err
 		}
 	}
+	fromDesign := handed.Source == "design:"+string(stream)
 	if len(selected.Members) == 1 && selected.Members[0].Workstream == stream {
+		// The session is the member and keeps its own chief-of-staff thread.
+		if fromDesign {
+			if err := s.RequestHandoffTitle(ctx, r, stream, handed, false); err != nil {
+				return err
+			}
+			if err := s.Step("design-handoff-title-requested"); err != nil {
+				return err
+			}
+		}
 		if err := s.DesignStartState(ctx, r, stream, "single"); err != nil {
 			return err
 		}
@@ -412,6 +460,17 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 			return err
 		}
 		if err := s.Step("design-member-handed"); err != nil {
+			return err
+		}
+	}
+	if fromDesign && len(members) > 0 {
+		// The conversation is adopted into the workgroup's shared chief of
+		// staff thread, which every member's events reach; the first member
+		// carries the request so that thread receives it once.
+		if err := s.RequestHandoffTitle(ctx, members[0].Project, members[0].Workstream, handed, len(members) > 1); err != nil {
+			return err
+		}
+		if err := s.Step("design-handoff-title-requested"); err != nil {
 			return err
 		}
 	}

@@ -293,3 +293,30 @@ func TestToolAttentionFollowsEscalatedInboxEntry(t *testing.T) {
 		t.Fatalf("invented: %s", got)
 	}
 }
+
+func TestCheckTitleAppliesTheStatusGoalRules(t *testing.T) {
+	for _, title := range []string{"Plan the billing export", "Add read/write caching to the client", strings.Repeat("a", MaxTitle), "  Plan the export  "} {
+		if err := CheckTitle(title, nil); err != nil {
+			t.Errorf("title %q refused: %v", title, err)
+		}
+	}
+	known := []string{"thread_session_01"}
+	for name, title := range map[string]string{
+		"empty":      " \t ",
+		"multi-line": "Plan the export\nand retries",
+		"carriage":   "Plan the export\rand retries",
+		"too long":   strings.Repeat("a", MaxTitle+1),
+		"osmia id":   "Plan w_00112233445566778899aabbccddeeff",
+		"hash":       "Plan the change 3f2a9c1d7b",
+		"model":      "Plan with claude-opus-4",
+		"url":        "Plan https://example.com/export",
+		"path":       "Plan /etc/export",
+		"branch":     "Plan feature/export",
+		"file":       "Plan export.go",
+		"known":      "Plan thread_session_01",
+	} {
+		if err := CheckTitle(title, known); err == nil {
+			t.Errorf("%s title %q accepted", name, title)
+		}
+	}
+}

@@ -66,7 +66,7 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		if want := []string{"draft_brief", "file_read", "read_repo"}; !slices.Equal(names, want) {
+		if want := []string{"draft_brief", "file_read", "read_repo", "set_title"}; !slices.Equal(names, want) {
 			return nil, fmt.Errorf("design tools %v, want %v", names, want)
 		}
 		call := func(input map[string]any) (string, error) {

@@ -84,3 +84,24 @@ func TestDesignReadAndStartPinBriefRevision(t *testing.T) {
 		})
 	}
 }
+
+func TestDesignReadPrintsTheTitleOnlyWhenSet(t *testing.T) {
+	for _, title := range []string{"", "Plan the billing export"} {
+		design := wire.DesignView{Workstream: config.WorkstreamID(stream), Project: "p_11111111111111111111111111111111", BriefRevision: 1, Brief: "Decisions and intent", Title: title}
+		root, socket := ratifyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method + " " + r.URL.Path {
+			case "GET /v1/design/" + stream:
+				json.NewEncoder(w).Encode(wire.DesignResponse{Design: design})
+			case "GET /v1/design/" + stream + "/conversation":
+				json.NewEncoder(w).Encode(wire.ConversationResponse{Workstream: config.WorkstreamID(stream)})
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				http.NotFound(w, r)
+			}
+		}))
+		read := successful(t, root, "design", "read", stream, "--socket", socket)
+		if got := strings.Contains(read, "Title: "); got != (title != "") || (title != "" && !strings.Contains(read, "Title: "+title+"\n")) {
+			t.Fatalf("title %q printed as: %s", title, read)
+		}
+	}
+}

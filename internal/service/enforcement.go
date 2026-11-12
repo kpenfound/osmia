@@ -51,20 +51,20 @@ func CoreEnforcement(root config.Root) Enforcement {
 // chiefGrant is what a chief-of-staff thread turn may call: file_read over
 // its read-only view of the workstream's documents, status, runtime controls,
 // owner decisions, objection decisions, unit moves, drift handbacks,
-// question tools and shared project context. It names every tool chiefTools makes, plus the two tools
-// a design session's agent may reach (draft_brief, read_repo): Select narrows
+// question tools and shared project context. It names every tool chiefTools makes, plus the three tools
+// a design session's agent may reach (draft_brief, read_repo, set_title): Select narrows
 // an ordinary
 // chief-of-staff turn's grant down to chiefOrdinaryTools, which excludes
 // them, and a design session's turn down to designOnlyTools, which excludes
 // everything else, so the ceiling here is never itself the enforced set. It
 // holds the Web permission, which both narrowings set explicitly because a
 // narrowing intersects it.
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
 
-// chiefOrdinaryTools is chiefGrant's tool list without the two design-only
+// chiefOrdinaryTools is chiefGrant's tool list without the three design-only
 // tools, so an ordinary chief-of-staff turn never reaches them.
 var chiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
-	return name == draftBriefToolName || name == designReadRepoToolName
+	return name == draftBriefToolName || name == designReadRepoToolName || name == designTitleToolName
 })
 
 // chiefOrdinaryNarrow is what Select narrows an ordinary chief-of-staff turn
@@ -73,9 +73,9 @@ var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: chiefOrdinaryTools, We
 
 // designOnlyTools is the entire toolset a design session's turn may reach:
 // read-only file access to its staged view, read-only cross-repo code
-// access, and recording its drafted brief. No write, version-control,
+// access, recording its drafted brief and setting its title. No write, version-control,
 // credential or owner-gate tool of chiefGrant is reachable through it.
-var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName}
+var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}
 
 // designNarrow is what Select narrows a design session's turn to:
 // designOnlyTools, and the Web permission. The backend's own web tools are
@@ -273,9 +273,9 @@ func Enforce(opts Options, e Enforcement) Options {
 				if err != nil {
 					return nil, err
 				}
-				// Both tools are registered unconditionally; Select's Narrow
-				// decides, per turn, whether either is actually reachable.
-				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope)), nil
+				// The design tools are registered unconditionally; Select's Narrow
+				// decides, per turn, whether any is actually reachable.
+				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope), designTitleTool(r, scope, now)), nil
 			},
 			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
 				if scope.Role == sessionRole && scope.Project == project {

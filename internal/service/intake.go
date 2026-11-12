@@ -174,6 +174,8 @@ const draftBriefToolName = intake.DraftBriefToolName
 
 const designReadRepoToolName = intake.DesignReadRepoToolName
 
+const designTitleToolName = intake.DesignTitleToolName
+
 var designLock = intake.DesignLock
 
 var isDesignWorkstream = intake.IsDesignWorkstream
@@ -193,6 +195,8 @@ func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessa
 }
 
 var designReadRepoTool = intake.DesignReadRepoTool
+
+var designTitleTool = intake.DesignTitleTool
 
 func (s *Service) startDesignWorkgroup(ctx context.Context, raw string, req ...DesignStartRequest) (DesignStartResponse, *APIError) {
 	return s.intake().StartDesignWorkgroup(ctx, raw, req...)

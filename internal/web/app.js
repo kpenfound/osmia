@@ -1383,7 +1383,7 @@
       if (w.kind === 'design' && !startedDesignIds.has(w.workstream)) {
         designIds.set(w.workstream, w);
       }
-      const label = w.kind === 'session' ? (w.title || w.workstream) : w.kind === 'design' ? w.workstream : isMultiMember(w) ? repoLabel(w.project) : goal(w);
+      const label = w.kind === 'session' || w.kind === 'design' ? (w.title || w.workstream) : isMultiMember(w) ? repoLabel(w.project) : goal(w);
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
@@ -1482,7 +1482,7 @@
         row.node = el('li', { 'data-pane-workstream': w.workstream }, row.button, row.wait, row.needs, row.archive);
         paneEntries.set(w.workstream, row);
       }
-      row.title.textContent = w.kind === 'session' ? (w.title || w.workstream) : goal(w);
+      row.title.textContent = w.kind === 'session' || w.kind === 'design' ? (w.title || w.workstream) : goal(w);
       row.repo.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
       row.state.textContent = w.display_state || w.state || w.kind || 'planning';
       row.button.disabled = !!w.archived;
@@ -2770,7 +2770,10 @@
       block(byId('design-destroy'), true);
       return;
     }
-    byId('design-title').textContent = w.workstream;
+    // The design read is the freshest title once it has loaded; until then the
+    // status entry's title stands. An untitled session shows its ID.
+    const read = views['design/' + w.workstream]?.design;
+    byId('design-title').textContent = (read ? read.title : w.title) || w.workstream;
     block(byId('design-destroy'), false);
     byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream);
     renderDesignFeed(w.workstream);

@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	ToolName     = "set_status"
+	ToolName = "set_status"
+	// MaxTitle bounds a design session's title as maxGoal bounds a status goal.
+	MaxTitle     = maxGoal
 	maxGoal      = 200
 	maxAttention = 400
 	maxNote      = 1200
@@ -99,6 +101,20 @@ func Check(c trace.StatusContent, known []string, gates []trace.OwnerGate) error
 		}
 	}
 	return nil
+}
+
+// CheckTitle returns why title cannot be a design session's title, or nil. A
+// title is one non-empty line of at most MaxTitle characters under the same
+// identifier rules as a status goal, with known naming the identifiers of the
+// session it titles.
+func CheckTitle(title string, known []string) error {
+	if strings.TrimSpace(title) == "" {
+		return errors.New("title is required: a short line naming what the session is about")
+	}
+	if err := line("title", strings.TrimSpace(title), MaxTitle); err != nil {
+		return err
+	}
+	return identifiers("title", title, known)
 }
 
 func line(field, s string, limit int) error {
