@@ -349,7 +349,7 @@ func newDesignEnforcementFixture(t *testing.T, web ...bool) (*Service, *Client, 
 
 // TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools covers
 // spec#6, checked through production enforcement: a design session's turn
-// is scoped to file_read, read_repo and draft_brief alone, with no write,
+// is scoped to file_read, read_repo, draft_brief and set_title alone, with no write,
 // version-control, credential or owner-gate tool reachable, whatever the
 // chief-of-staff role's full grant otherwise allows.
 func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T) {
@@ -447,7 +447,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		if err != nil {
 			return nil, err
 		}
-		if want := []string{"draft_brief", "file_read", "read_repo"}; !slices.Equal(names, want) {
+		if want := []string{"draft_brief", "file_read", "read_repo", "set_title"}; !slices.Equal(names, want) {
 			fail("design session's MCP tools %v, want %v", names, want)
 		}
 		g := req.Grants

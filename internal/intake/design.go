@@ -21,15 +21,20 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Design session tool and document names. file_read, draft_brief and read_repo
-// are the only tools a design session's agent may ever reach; every other tool a
-// chief-of-staff turn can hold, including every write, version-control,
-// credential or owner-gate tool, is narrowed away for it (enforcement.go).
+// Design session tool and document names. file_read, draft_brief, read_repo and
+// set_title are the only tools a design session's agent may ever reach; every
+// other tool a chief-of-staff turn can hold, including every write,
+// version-control, credential or owner-gate tool, is narrowed away for it
+// (enforcement.go).
 const (
 	DraftBriefToolName      = "draft_brief"
+	DesignTitleToolName     = "set_title"
+	DesignTitleDocument     = "design-title"
+	DesignTitlePath         = "tools/design-title.json"
 	DesignReadRepoToolName  = "read_repo"
 	DesignDraftDocument     = "design-draft"
 	DesignDraftPath         = "tools/design-brief.json"
@@ -113,9 +118,43 @@ func LatestDesignBrief(repository *trace.Repository, stream config.WorkstreamID)
 	return brief, latest.Revision, nil
 }
 
+// designTitleRecord is one revision of a design session's title.
+type designTitleRecord struct {
+	Title string `json:"title"`
+}
+
+// LatestDesignTitle returns the title the design session's agent set last, and
+// its revision. A session that was never titled has the empty title and
+// revision 0.
+func LatestDesignTitle(repository *trace.Repository, stream config.WorkstreamID) (string, int, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return "", 0, err
+	}
+	var latest trace.Document
+	for _, d := range docs {
+		if d.ID == DesignTitleDocument && d.Revision > latest.Revision {
+			latest = d
+		}
+	}
+	if latest.Revision == 0 {
+		return "", 0, nil
+	}
+	var record designTitleRecord
+	if err := json.Unmarshal([]byte(latest.Content), &record); err != nil {
+		return "", 0, err
+	}
+	return record.Title, latest.Revision, nil
+}
+
+// DesignBriefView adds the session's latest brief and title to view.
 func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView, error) {
 	brief, revision, err := LatestDesignBrief(repository, view.Workstream)
+	if err != nil {
+		return view, err
+	}
 	view.BriefRevision, view.Brief, view.Projects, view.NewProject = revision, brief.Content, brief.Projects, brief.NewProject
+	view.Title, _, err = LatestDesignTitle(repository, view.Workstream)
 	return view, err
 }
 
@@ -405,7 +444,10 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
 	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes; only its " +
 	"latest call is used. The owner starts the workgroup once satisfied; you never start it yourself, and nothing you say " +
-	"or record causes any work to begin."
+	"or record causes any work to begin.\n\n" +
+	"Give the session a title with " + DesignTitleToolName + " once its context is clear, which may be after the first few messages rather than the first. " +
+	"Write one short line for the owner naming what the session is about, in words: no identifiers, hashes, model names, URLs, file paths or branch names. " +
+	"Call it again to replace the title when the subject of the session changes materially. A title only names the session: it starts no work and does not change the brief."
 
 // DesignSystemPrompt includes the active catalog and only brief projects' full context.
 func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (string, error) {
@@ -629,6 +671,71 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 				Revision int    `json:"revision"`
 				Next     string `json:"next"`
 			}{true, k, "Recorded. The owner can now start a workgroup from this brief, or you can call " + DraftBriefToolName + " again to revise it."})
+		}}
+}
+
+// DesignTitleTool records the title of the design session its turn belongs to.
+// It is reachable only while the session's marker is open, and it writes
+// nothing but the title: the brief, its revision and the session's state are
+// untouched. A title the status goal rules refuse is an ordinary result that
+// records nothing, so the turn continues.
+func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
+	return coreadapter.Tool{Name: DesignTitleToolName, Effect: coreadapter.ToolMemory,
+		Description: "Set the title of this design session for the owner: one non-empty line of at most 200 characters naming what the session is about. Call it once the session's context is clear and again when its subject changes materially; the latest title is the one shown. A title starts no work and does not change the brief. Write in words: no commit hashes, branch names, file paths, URLs, session IDs, Osmia IDs or model names.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}`),
+		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+			if err := repository.ActiveTurn(scope); err != nil {
+				return nil, err
+			}
+			var in struct {
+				Title string `json:"title"`
+			}
+			d := json.NewDecoder(bytes.NewReader(raw))
+			d.DisallowUnknownFields()
+			if err := d.Decode(&in); err != nil {
+				return nil, fmt.Errorf("tool input: %w", err)
+			}
+			stream := config.WorkstreamID(scope.Workstream)
+			if open, err := IsDesignWorkstream(repository, stream); err != nil {
+				return nil, err
+			} else if !open {
+				return nil, fmt.Errorf("%s sets the title of an open design session only", DesignTitleToolName)
+			}
+			known := []string{string(repository.Project()), string(stream)}
+			if th, err := repository.ChiefOfStaffThread(stream); err == nil {
+				known = append(known, th.Identity.ThreadID, th.Session.ID)
+				for _, turn := range th.Turns {
+					known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
+					if turn.Response != nil {
+						known = append(known, turn.Response.Result.Session.ID)
+					}
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			if err := status.CheckTitle(in.Title, known); err != nil {
+				return RefuseReport("%s", err.Error())
+			}
+			title := strings.TrimSpace(in.Title)
+			_, revision, err := LatestDesignTitle(repository, stream)
+			if err != nil {
+				return nil, err
+			}
+			k := revision + 1
+			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignTitleDocument, Revision: k,
+				Project: repository.Project(), Workstream: stream, At: now(), Actor: ChiefActor, Cause: DesignTitleToolName}
+			data, err := json.Marshal(designTitleRecord{Title: title})
+			if err != nil {
+				return nil, err
+			}
+			if err := repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: DesignTitlePath, Content: string(data)}}); err != nil {
+				return nil, err
+			}
+			return json.Marshal(struct {
+				Recorded bool   `json:"recorded"`
+				Revision int    `json:"revision"`
+				Next     string `json:"next"`
+			}{true, k, "Recorded. Call " + DesignTitleToolName + " again if the subject of the session changes materially."})
 		}}
 }
 

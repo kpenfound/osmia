@@ -90,7 +90,7 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 					t.Errorf("service tool %s looks like a web tool", name)
 				}
 			}
-			if slices.Contains(names, draftBriefToolName) || slices.Contains(names, designReadRepoToolName) {
+			if slices.Contains(names, draftBriefToolName) || slices.Contains(names, designReadRepoToolName) || slices.Contains(names, designTitleToolName) {
 				t.Errorf("an ordinary chief reaches a design tool: %v", names)
 			}
 			if !got.Capabilities.Web || got.Capabilities.WriteFiles || got.Capabilities.Execute || got.Capabilities.Network {
@@ -108,7 +108,7 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 
 // The grants and narrowings that decide web access for the roles whose turns
 // need a workstream's design or a session's worktree to run: a design session
-// is narrowed to its three service tools and keeps Web; an ordinary chief and
+// is narrowed to its file tool and three service tools and keeps Web; an ordinary chief and
 // the exploratory session keep Web too. Their turns run end to end in the
 // design and session journeys.
 func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
@@ -118,7 +118,7 @@ func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	if !turns.Grants[trace.ChiefOfStaff].Web || !chiefOrdinaryNarrow.Web || !designNarrow.Web {
 		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.ChiefOfStaff], chiefOrdinaryNarrow, designNarrow)
 	}
-	if want := []string{"file_read", draftBriefToolName, designReadRepoToolName}; !slices.Equal(designNarrow.Tools, want) {
+	if want := []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}; !slices.Equal(designNarrow.Tools, want) {
 		t.Fatalf("design narrowing tools %v, want %v", designNarrow.Tools, want)
 	}
 	if grant := turns.Grants[sessionRole]; !grant.Web || !grant.WriteFiles || !grant.Execute || grant.Network {

@@ -5462,6 +5462,9 @@
               "null"
             ]
           },
+          "title": {
+            "type": "string"
+          },
           "workstream": {
             "type": "string"
           }

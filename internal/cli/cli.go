@@ -1316,7 +1316,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, list)
 		}
 		for _, d := range list.Designs {
-			fmt.Fprintf(stdout, "%s  project %s  opened %s\n", d.Workstream, d.Project, d.CreatedAt.Format(time.RFC3339))
+			fmt.Fprintf(stdout, "%s  project %s  opened %s", d.Workstream, d.Project, d.CreatedAt.Format(time.RFC3339))
+			if d.Title != "" {
+				fmt.Fprintf(stdout, "  %s", d.Title)
+			}
+			fmt.Fprintln(stdout)
 		}
 		return 0
 	}
@@ -1350,6 +1354,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 					wire.ConversationResponse
 					Design wire.DesignView `json:"design"`
 				}{list, brief.Design})
+			}
+			if brief.Design.Title != "" {
+				fmt.Fprintf(stdout, "Title: %s\n", brief.Design.Title)
 			}
 			showDesignBrief(stdout, brief.Design)
 			if brief.Design.Brief != "" {

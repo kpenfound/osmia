@@ -351,6 +351,9 @@ type DesignView struct {
 	BriefRevision int                 `json:"brief_revision"`
 	Brief         string              `json:"brief"`
 	Projects      []config.ProjectID  `json:"projects"`
+	// Title is the latest title the design session's agent set; it is omitted
+	// for a session that has none.
+	Title string `json:"title,omitempty"`
 	// NewProject is the project the latest brief asks Start to create, if any.
 	NewProject *NewProject `json:"new_project,omitempty"`
 }
@@ -864,7 +867,8 @@ type WorkstreamStatus struct {
 	// Kind is "session" for a session workstream, "design" for a design
 	// session that has not yet started a workgroup, omitted for an ordinary
 	// one. Profile, Base and Branch are set only for a session: its fixed
-	// profile, base commit and branch. Title is a session's optional title.
+	// profile, base commit and branch. Title is a session's optional title and
+	// a design session's latest title.
 	Kind          string            `json:"kind,omitempty"`
 	Profile       string            `json:"profile,omitempty"`
 	Base          string            `json:"base,omitempty"`

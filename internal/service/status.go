@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -208,6 +209,12 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			continue
 		}
 		view := statusView(active.id, mode, w, design)
+		if design {
+			view.Title, _, err = intake.LatestDesignTitle(active.repository, w.Workstream)
+			if err != nil {
+				return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the title of design session %s; check the trace repository", w.Workstream)}
+			}
+		}
 		approval, accepted, err := active.repository.GroupApprovalOf(w.Workstream)
 		if err != nil {
 			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
