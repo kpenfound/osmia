@@ -5276,6 +5276,9 @@
           "draft_hash": {
             "type": "string"
           },
+          "draft_pull_request": {
+            "type": "boolean"
+          },
           "maintenance": {
             "type": "boolean"
           },

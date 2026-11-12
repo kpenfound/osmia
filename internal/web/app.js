@@ -3257,14 +3257,16 @@
       return;
     }
     if (entry.kind === 'delivery') {
-      body.messages = d.messages.map((m) => ({ commit: m.commit, message: m.input.value }));
-      body.description = d.text.value;
+      // The body is the entry's pinned identity alone: the service then
+      // publishes the text the card previews.
+      d.pending = true;
+      block(d.submit, true);
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), body,
         (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.',
-        // The next render then treats the drafted description and commit
-        // messages as unedited, so it fills them with whatever the delivery
-        // presents next rather than leaving the reset, blank fields stuck.
-        () => { d.draft = ''; d.messages = []; }, decisionKey(entry));
+        undefined, decisionKey(entry)).finally(() => {
+        d.pending = false;
+        block(d.submit, !presented(d.entry, detailOf(d.entry)));
+      });
       return;
     }
     // A form submit from the note field makes no choice.
@@ -3348,7 +3350,7 @@
       head: el('div', { class: 'summary' }),
       detail: el('div', { 'data-field': 'detail' }),
       actions: el('div', { class: 'actions' }),
-      submit: el('button', { type: 'submit' }, { escalation: 'Answer', delivery: 'Approve' }[entry.kind] || 'Decide'),
+      submit: el('button', { type: 'submit' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
       shown: null,
     };
     const fields = [];
@@ -3361,13 +3363,11 @@
       d.text = el('textarea', { name: 'projects', rows: '2', required: true });
       fields.push(el('label', {}, 'Project IDs in order, separated by spaces or commas', d.text));
     } else if (entry.kind === 'delivery') {
-      d.text = el('textarea', { name: 'description', rows: '8' });
-      d.draft = '';
-      d.messages = [];
-      d.messageFields = el('div');
-      fields.push(d.messageFields);
-      fields.push(el('label', {}, 'Pull request description', d.text));
-      fields.push(el('p', { class: 'meta' }, 'Approving authorizes publication with your Git identity, signature and sign-off. Agent co-author trailers are removed.'));
+      // The preview is one node kept across renders, so it stays open or
+      // collapsed as the owner left it.
+      d.preview = el('details', { 'data-field': 'preview' }, el('summary', {}, 'What will be published'));
+      fields.push(d.preview);
+      fields.push(el('p', { class: 'meta', 'data-field': 'authorization' }, 'Approving authorizes publication with your Git identity, signature and sign-off. Agent co-author trailers are removed.'));
     } else {
       d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
       fields.push(el('label', {}, 'Note', d.note));
@@ -3429,18 +3429,18 @@
   }
 
   // renderDelivery shows the final report and the draft the entry pins.
-  // Approve waits until they are shown, so an approval never pins a draft
+  // The button waits until they are shown, so an approval never pins a draft
   // the page does not show.
   function renderDelivery(d, name) {
     const view = presented(d.entry, name);
-    block(d.submit, !view);
+    block(d.submit, !view || !!d.pending);
+    d.preview.hidden = !view;
     if (!view) {
       d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
       return;
     }
-    // The title is not owner-editable; it is shown alongside the draft body
-    // the owner can edit, and keeps the title an already-approved delivery
-    // records even if the workstream's title changes later.
+    // The title is the one an already-approved delivery records, even if the
+    // workstream's title changes later.
     const title = view.approval ? (view.approval.title || view.title) : view.title;
     const findings = view.report.findings || [];
     d.detail.replaceChildren(...[
@@ -3453,22 +3453,31 @@
         el('strong', {}, c.criterion), ' ', c.text,
         el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))),
     ].filter((node) => node !== null));
-    const previous = new Map(d.messages.map((m) => [m.commit, m]));
-    d.messages = (view.approval ? view.approval.messages : (view.messages || [])).map((m) => {
-      const old = previous.get(m.commit);
-      const input = old ? old.input : el('textarea', { name: 'commit-message', rows: '4' });
-      if (!old || input.value === old.draft) input.value = m.message;
-      return { commit: m.commit, draft: m.message, input };
-    });
-    d.messageFields.replaceChildren(...d.messages.map((m, i) => el('label', {}, 'Commit message' + (d.messages.length > 1 ? ' ' + (i + 1) : ''), m.input)));
-    // The draft replaces the description until the owner edits it.
-    const draft = view.approval ? view.approval.description : view.draft;
-    if (draft !== d.draft) {
-      if (d.text.value === d.draft) {
-        d.text.value = draft;
-      }
-      d.draft = draft;
+    // What ApproveDelivery publishes when the page sends no text: the text
+    // of the approval the presentation carries, and the draft otherwise.
+    const description = view.approval ? view.approval.description : view.draft;
+    const messages = view.approval ? view.approval.messages : (view.messages || []);
+    d.preview.replaceChildren(
+      d.preview.querySelector('summary'),
+      el('div', { class: 'meta' }, 'Pull request description'),
+      el('pre', { 'data-field': 'description' }, description),
+      ...messages.flatMap((m, i) => [
+        el('div', { class: 'meta' }, 'Commit message' + (messages.length > 1 ? ' ' + (i + 1) : '')),
+        el('pre', { 'data-field': 'commit-message' }, m.message)]));
+    d.submit.textContent = deliveryLabel(d.entry, view);
+  }
+
+  // deliveryLabel names what approving the entry's delivery does: it updates
+  // the pull request of a delivered workstream being maintained, opens a
+  // draft pull request while a merge-order dependency has not merged, and
+  // opens a pull request otherwise. Accepting the final review's blocking
+  // findings comes first in the label.
+  function deliveryLabel(entry, view) {
+    const action = view && view.maintenance ? 'update pull request' : view && view.draft_pull_request ? 'open draft pull request' : 'open pull request';
+    if (entry.answer.body.accept_blocking) {
+      return 'Accept findings and ' + action;
     }
+    return action.charAt(0).toUpperCase() + action.slice(1);
   }
 
   function decisionButtons(d, options) {

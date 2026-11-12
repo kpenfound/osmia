@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	context "context"
+	json "encoding/json"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
 	os "os"
@@ -67,6 +68,12 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if api != nil {
 		t.Fatal(api)
 	}
+	if !presented.DraftPullRequest || !strings.Contains(presented.Draft, "opens as a draft") {
+		t.Fatalf("a pending merge-order dependency must present a draft pull request that the description states: %v, %s", presented.DraftPullRequest, presented.Draft)
+	}
+	if encoded, err := json.Marshal(presented); err != nil || !strings.Contains(string(encoded), `"draft_pull_request":true`) {
+		t.Fatalf("presentation omits the draft pull request signal: %s, %v", encoded, err)
+	}
 	missingDependency := "Implement the dependent interface."
 	_, api = f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &missingDependency})
 	if api == nil || api.Code != Validation || !strings.Contains(api.Message, "description must state the dependency on owner/other#77") {
@@ -90,5 +97,24 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	}
 	if pr := pull.Prs[1]; !pr.Draft || pr.Body != approval.Description {
 		t.Fatalf("published PR must be a draft with the approved dependency text: %+v", pr)
+	}
+}
+
+func TestDeliveryPresentationOmitsDraftPullRequestWithoutPendingDependency(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	presented, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
+	if api != nil {
+		t.Fatal(api)
+	}
+	if presented.DraftPullRequest || strings.Contains(presented.Draft, "opens as a draft") {
+		t.Fatalf("a workstream without a pending dependency presents a draft pull request: %v, %s", presented.DraftPullRequest, presented.Draft)
+	}
+	encoded, err := json.Marshal(presented)
+	must(t, err)
+	var fields map[string]json.RawMessage
+	must(t, json.Unmarshal(encoded, &fields))
+	if _, present := fields["draft_pull_request"]; present {
+		t.Fatalf("presentation serializes draft_pull_request without a pending dependency: %s", encoded)
 	}
 }

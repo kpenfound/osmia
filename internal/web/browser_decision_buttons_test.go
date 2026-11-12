@@ -25,11 +25,21 @@ type decisionButtonFixture struct {
 	mu       sync.Mutex
 	requests []decisionRequest
 	packet   string
+	// delivery is the JSON of the /delivery/<stream> presentation, and
+	// deliveryReads counts the reads of it.
+	delivery      string
+	deliveryReads int
 }
 
-func newDecisionButtonFixture(t *testing.T, entry string) *decisionButtonFixture {
+// newDecisionButtonFixture opens the page on a fake API whose inbox holds
+// entry. A delivery entry needs the presentation the page reads for it, given
+// as delivery.
+func newDecisionButtonFixture(t *testing.T, entry string, delivery ...string) *decisionButtonFixture {
 	t.Helper()
 	f := &decisionButtonFixture{api: newFakeAPI(1), packet: `{"packet":{"revision":{"spec":1,"plan":1},"dissent":[]}}`}
+	if len(delivery) > 0 {
+		f.delivery = delivery[0]
+	}
 	f.api.setInbox(entry)
 	base := f.api.handler()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +51,18 @@ func newDecisionButtonFixture(t *testing.T, entry string) *decisionButtonFixture
 			f.mu.Lock()
 			f.requests = append(f.requests, decisionRequest{Path: r.URL.Path, Method: r.Method, Body: body})
 			f.mu.Unlock()
-			f.action.serve(w, r, `{"detail":"Decision recorded.","upstream":{"remote":"upstream","branch":"main"}}`)
+			ok := `{"detail":"Decision recorded.","upstream":{"remote":"upstream","branch":"main"}}`
+			if strings.HasPrefix(r.URL.Path, "/v1/delivery/") {
+				// An approved delivery answers with the final review it published.
+				ok = fmt.Sprintf(`{"review":%d,"commit":%q}`, testPins.review, testPins.commit)
+			}
+			f.action.serve(w, r, ok)
+		} else if strings.HasPrefix(r.URL.Path, "/v1/delivery/") {
+			f.mu.Lock()
+			delivery := f.delivery
+			f.deliveryReads++
+			f.mu.Unlock()
+			writeJSON(w, delivery)
 		} else if strings.HasPrefix(r.URL.Path, "/v1/packet/") {
 			f.mu.Lock()
 			packet := f.packet
@@ -263,5 +284,229 @@ func TestBrowserStuckProjectCreationOffersOnlyRetry(t *testing.T) {
 			f.p.await("the recorded outcome", `document.querySelector('#inbox-result').dataset.outcome === 'ok'`)
 			assertDecisionRequest(t, f, "/v1/projects/create", map[string]any{"id": id})
 		})
+	}
+}
+
+// deliveryPins is the identity a delivery inbox entry pins and the
+// presentation it is shown with must match.
+type deliveryPins struct {
+	review, revision int
+	commit, hash     string
+}
+
+var testPins = deliveryPins{review: 1, revision: 2, commit: "abc123def456", hash: "hash-one"}
+
+// deliveryEntryJSON is a delivery inbox entry pinning pins, accepting the
+// blocking findings when accept is set.
+func deliveryEntryJSON(pins deliveryPins, accept bool) string {
+	body := fmt.Sprintf(`{"review":%d,"review_revision":%d,"commit":%q,"draft_hash":%q`, pins.review, pins.revision, pins.commit, pins.hash)
+	if accept {
+		body += `,"accept_blocking":true`
+	}
+	body += "}"
+	return `{"kind":"delivery","project":"p_fake","workstream":"w_000","number":0,"revision":1,"question":"Deliver X?","options":["approve"],"opened_at":"2026-01-01T00:00:00Z","asked":[],"answer":{"method":"POST","path":"/v1/delivery/w_000","body":` + body + `}}`
+}
+
+// deliveryPresentationJSON is the /delivery/<stream> presentation of pins
+// with the draft text and, when approval is non-empty, a recorded approval's
+// description with one commit message; extra is more members of the object.
+func deliveryPresentationJSON(pins deliveryPins, draft, approval, extra string) string {
+	message := func(text string) string {
+		return fmt.Sprintf(`[{"commit":%q,"message":%s}]`, pins.commit, mustJSON(text))
+	}
+	out := fmt.Sprintf(`{"project":"p_fake","workstream":"w_000","report":{"review":%d,"commit":%q,"summary":"Done.","criteria":[]},"review_revision":%d,"title":"Resumable uploads","draft":%s,"draft_hash":%q,"messages":%s,"style":"plain"`,
+		pins.review, pins.commit, pins.revision, mustJSON("Drafted body of "+draft), pins.hash, message("Drafted message of "+draft))
+	if approval != "" {
+		out += fmt.Sprintf(`,"approval":{"title":"Approved title","description":%s,"messages":%s}`, mustJSON("Approved body of "+approval), message("Approved message of "+approval))
+	}
+	if extra != "" {
+		out += "," + extra
+	}
+	return out + "}"
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+const deliveryCard = `[data-decision][data-kind="delivery"] `
+
+// newDeliveryFixture serves a delivery entry and its presentation.
+func newDeliveryFixture(t *testing.T, accept bool, presentation string) *decisionButtonFixture {
+	t.Helper()
+	return newDecisionButtonFixture(t, deliveryEntryJSON(testPins, accept), presentation)
+}
+
+// setDelivery replaces the presentation served for reads of the delivery.
+func (f *decisionButtonFixture) setDelivery(presentation string) {
+	f.mu.Lock()
+	f.delivery = presentation
+	f.mu.Unlock()
+}
+
+func (f *decisionButtonFixture) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deliveryReads
+}
+
+// A delivery card has no editor: the preview and the label are all it
+// offers besides the button, and the label says what approving does.
+func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		accept      bool
+		label       string
+	}{
+		{"open", "", false, "Open pull request"},
+		{"draft", `"draft_pull_request":true`, false, "Open draft pull request"},
+		{"update", `"maintenance":true`, false, "Update pull request"},
+		{"update wins over draft", `"maintenance":true,"draft_pull_request":true`, false, "Update pull request"},
+		{"accept open", "", true, "Accept findings and open pull request"},
+		{"accept draft", `"draft_pull_request":true`, true, "Accept findings and open draft pull request"},
+		{"accept update", `"maintenance":true`, true, "Accept findings and update pull request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDeliveryFixture(t, tc.accept, deliveryPresentationJSON(testPins, "one", "", tc.extra))
+			submit := deliveryCard + "button[type=submit]"
+			f.p.await("the label "+tc.label, `document.querySelector(`+quote(submit)+`)?.textContent === `+quote(tc.label)+` && !document.querySelector(`+quote(submit)+`).disabled`)
+			var shown struct {
+				Editors  int
+				Preview  string
+				Open     bool
+				Title    string
+				Note     bool
+				SameForm bool
+			}
+			f.p.eval(`(() => {
+  const card = document.querySelector(`+quote(deliveryCard)+`);
+  const preview = card.querySelector('[data-field=preview]');
+  return {
+    Editors: card.querySelectorAll('textarea, input').length,
+    Preview: preview.querySelector('summary').textContent,
+    Open: preview.open,
+    Title: card.querySelector('[data-field=title]').textContent,
+    Note: card.querySelector('[data-field=authorization]').textContent.startsWith('Approving authorizes publication'),
+    SameForm: card.querySelector('form').contains(card.querySelector('button[type=submit]')) &&
+      card.querySelector('form').contains(card.querySelector('[data-field=authorization]')),
+  };
+})()`, &shown)
+			if shown.Editors != 0 || shown.Preview != "What will be published" || shown.Open || shown.Title != "Pull request title: Resumable uploads" || !shown.Note || !shown.SameForm {
+				t.Fatalf("the delivery card: %+v", shown)
+			}
+			f.p.eval(`window.confirms = 0; window.confirm = () => { window.confirms++; return true; }; window.alert = window.confirm`, nil)
+			f.p.click(submit)
+			f.p.awaitGone("the approved delivery", deliveryCard)
+			f.p.awaitOutcome("Approved the delivery of final review 1")
+			body := map[string]any{"review": float64(1), "review_revision": float64(2), "commit": testPins.commit, "draft_hash": testPins.hash}
+			if tc.accept {
+				body["accept_blocking"] = true
+			}
+			assertDecisionRequest(t, f, "/v1/delivery/w_000", body)
+			var confirms int
+			f.p.eval(`window.confirms`, &confirms)
+			if confirms != 0 {
+				t.Fatalf("the approval asked for confirmation %d times", confirms)
+			}
+		})
+	}
+}
+
+// The preview shows the text ApproveDelivery publishes when no text is sent:
+// the earlier approval's when the presentation carries one, even when it
+// differs from the draft, and the draft otherwise. It is plain text.
+func TestBrowserDeliveryPreviewShowsTheApprovalTextOverTheDraft(t *testing.T) {
+	for _, tc := range []struct {
+		name, approval, description, message string
+	}{
+		{"draft", "", "Drafted body of <b>one</b>", "Drafted message of <b>one</b>"},
+		{"approval", "<b>edited</b>", "Approved body of <b>edited</b>", "Approved message of <b>edited</b>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "<b>one</b>", tc.approval, ""))
+			f.p.await("the preview", `document.querySelector(`+quote(deliveryCard+"[data-field=preview] [data-field=description]")+`)`)
+			var shown struct {
+				Description, Message, Title string
+				Markup, Editable, Open      bool
+			}
+			f.p.eval(`(() => {
+  const preview = document.querySelector(`+quote(deliveryCard+"[data-field=preview]")+`);
+  const description = preview.querySelector('[data-field=description]');
+  const messages = preview.querySelectorAll('[data-field=commit-message]');
+  return {
+    Description: description.textContent,
+    Message: [...messages].map(m => m.textContent).join('|'),
+    Title: document.querySelector(`+quote(deliveryCard+"[data-field=title]")+`).textContent,
+    Markup: preview.querySelector('b') !== null,
+    Editable: preview.querySelector('textarea, input, [contenteditable]') !== null,
+    Open: preview.open,
+  };
+})()`, &shown)
+			title := "Pull request title: Resumable uploads"
+			if tc.approval != "" {
+				title = "Pull request title: Approved title"
+			}
+			if shown.Description != tc.description || shown.Message != tc.message || shown.Title != title || shown.Markup || shown.Editable || shown.Open {
+				t.Fatalf("the preview: %+v, want %q and %q under %q", shown, tc.description, tc.message, title)
+			}
+		})
+	}
+}
+
+// The button stays locked from the click until the answer, across the
+// repaints a refreshed inbox causes, and the card is restored with the
+// button available when the service refuses.
+func TestBrowserDeliveryButtonStaysLockedWhileTheApprovalIsPending(t *testing.T) {
+	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
+	submit := deliveryCard + "button[type=submit]"
+	f.p.await("the enabled button", `document.querySelector(`+quote(submit)+`)?.disabled === false`)
+	release := sync.OnceFunc(f.action.holdResponse())
+	t.Cleanup(release)
+	f.action.failNext("The service is busy.")
+	f.p.eval(`window.submitButton = document.querySelector(`+quote(submit)+`)`, nil)
+	f.p.click(submit)
+	f.p.awaitGone("the pending delivery", deliveryCard)
+	f.p.await("the button locked", `window.submitButton.disabled`)
+	f.api.pushEvent("inbox")
+	f.p.settle()
+	f.p.await("the button still locked after the repaint", `window.submitButton.disabled`)
+	release()
+	f.p.awaitText("#inbox-result", "The service is busy.")
+	f.p.awaitVisible("the restored card", deliveryCard)
+	f.p.await("the button available again", `document.querySelector(`+quote(submit)+`).disabled === false`)
+	if got := f.got(); len(got) != 1 {
+		t.Fatalf("requests: %+v", got)
+	}
+}
+
+// A refusal because the draft changed makes the card read the presentation
+// again, and the card then shows the new draft, pinned by the new entry.
+func TestBrowserDeliveryStaleDraftConflictReadsThePresentationAgain(t *testing.T) {
+	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
+	submit := deliveryCard + "button[type=submit]"
+	f.p.await("the enabled button", `document.querySelector(`+quote(submit)+`)?.disabled === false`)
+	before := f.reads()
+	changed := testPins
+	changed.hash = "hash-two"
+	f.setDelivery(deliveryPresentationJSON(changed, "two", "", ""))
+	f.api.setInbox(strings.Replace(deliveryEntryJSON(changed, false), `"revision":1`, `"revision":2`, 1))
+	f.action.failNext("The draft changed: read the current presentation.")
+	f.p.click(submit)
+	f.p.awaitText("#inbox-result", "read the current presentation")
+	f.p.awaitText(deliveryCard+"[data-field=preview] [data-field=description]", "Drafted body of two")
+	f.p.await("the new draft ready to approve", `document.querySelector(`+quote(submit)+`)?.disabled === false`)
+	if f.reads() <= before {
+		t.Fatalf("the presentation was read %d times, %d before the conflict", f.reads(), before)
+	}
+	f.action.failNext("")
+	f.p.click(submit)
+	f.p.awaitGone("the approved delivery", deliveryCard)
+	got := f.got()
+	if len(got) != 2 || got[1].Body["draft_hash"] != "hash-two" {
+		t.Fatalf("requests: %+v", got)
 	}
 }

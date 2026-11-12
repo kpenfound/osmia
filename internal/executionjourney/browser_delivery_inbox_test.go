@@ -12,6 +12,7 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	os "os"
 	filepath "path/filepath"
+	reflect "reflect"
 	sync "sync"
 	testing "testing"
 	time "time"
@@ -26,12 +27,12 @@ var decisionCard = intakefixture.DecisionCard
 var entriesOf = intakefixture.EntriesOf
 
 // The page shows a delivery with its final report's criteria and the drafted
-// description, and offers Approve only while the report and draft the
-// entry pins are the ones it shows: not before the presentation is read,
-// not while a read of it fails, and not while a newer report's read is
-// pending. A draft left as it is is approved as drafted, and an edited one
-// with the description the owner wrote, as osmia approve with and without a
-// description file records them; each approval takes the entry out.
+// description in a read-only preview, and offers the approval only while the
+// report and draft the entry pins are the ones it shows: not before the
+// presentation is read, not while a read of it fails, and not while a newer
+// report's read is pending. The page sends only the identity the entry pins,
+// so each approval records the draft as presented, as osmia approve without
+// a description file does; each approval takes the entry out.
 func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	t.Parallel()
 	f, ws, repository, report := deliveryFixtureWith(t, listenWeb)
@@ -105,22 +106,22 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Fatalf("delivery entries %+v", entries)
 	}
 	card := decisionCard(entries[0])
-	description := card + `textarea[name="description"]`
+	preview := card + "[data-field=preview] [data-field=description]"
 	approve := card + "button[type=submit]"
 	pins := func(revision int, presented DeliveryPresentation) string {
 		return fmt.Sprintf("final review 1 · report revision %d · commit %s · draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
 	}
 	drafted := func(presented DeliveryPresentation) {
 		t.Helper()
-		p.Await("the drafted description", `document.querySelector(`+quote(description)+`).value === `+quote(presented.Draft))
-		p.Await("Approve enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
+		p.Await("the drafted description", `document.querySelector(`+quote(preview)+`)?.textContent === `+quote(presented.Draft))
+		p.Await("the approval enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
 	}
 	disabled := func() {
 		t.Helper()
 		var off bool
 		p.Eval(`document.querySelector(`+quote(approve)+`).disabled`, &off)
 		if !off {
-			t.Fatal("Approve is offered while the page does not show the draft it pins")
+			t.Fatal("The approval is offered while the page does not show the draft it pins")
 		}
 	}
 	// resync reconnects the page, whose new stream reads the inbox again.
@@ -193,7 +194,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()
 	var shown string
-	p.Eval(`document.querySelector(`+quote(description)+`).value`, &shown)
+	p.Eval(`document.querySelector(`+quote(preview)+`).textContent`, &shown)
 	if shown != first.Draft {
 		t.Fatalf("the description changed without a read of the new draft: %q", shown)
 	}
@@ -201,16 +202,20 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	resync()
 	drafted(second)
 
-	// The draft as it stands is approved as drafted.
+	// The draft as it stands is approved as drafted, and the page sends
+	// the pinned identity alone.
 	p.Click(approve)
 	p.AwaitOutcome("Approved the delivery of final review 1")
 	p.AwaitGone("the approved delivery", card)
-	if body := sent(); body["description"] != second.Draft || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
+	pinned := func(revision int, presented DeliveryPresentation) map[string]any {
+		return map[string]any{"review": 1.0, "review_revision": float64(revision), "commit": report.Commit, "draft_hash": presented.DraftHash}
+	}
+	if body := sent(); !reflect.DeepEqual(body, pinned(2, second)) {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
 	after, err := f.c.Delivery(ctx, ws)
 	must(t, err)
-	if after.Approval == nil || after.Approval.Description != second.Draft || after.Approval.ReviewRevision != 2 || after.Approval.DraftHash != second.DraftHash {
+	if after.Approval == nil || after.Approval.Description != second.Draft || !reflect.DeepEqual(after.Approval.Messages, second.Messages) || after.Approval.ReviewRevision != 2 || after.Approval.DraftHash != second.DraftHash {
 		t.Fatalf("the approval of the draft %+v", after.Approval)
 	}
 
@@ -223,23 +228,21 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	eventMu.Lock()
 	deliveryEvents = nil
 	eventMu.Unlock()
-	// A newer report asks for approval again; the owner edits its draft.
+	// A newer report asks for approval again and is approved as drafted
+	// too.
 	third := recordReport(3)
 	p.AwaitText(card+"[data-field=pins]", pins(3, third))
 	drafted(third)
-	edited := third.Draft + "\nReviewed on the phone.\n"
-	p.SetValue(description, edited)
-	p.SetValue(card+`textarea[name="commit-message"]`, "Owner edited commit message")
 	p.Click(approve)
 	p.AwaitOutcomes("Approved the delivery of final review 1", 2)
 	p.AwaitGone("the approved delivery", card)
-	if body := sent(); body["description"] != edited || body["review_revision"] != 3.0 {
-		t.Fatalf("the edited approval the page sent: %v", body)
+	if body := sent(); !reflect.DeepEqual(body, pinned(3, third)) {
+		t.Fatalf("the approval the page sent: %v", body)
 	}
 	after, err = f.c.Delivery(ctx, ws)
 	must(t, err)
-	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Messages[0].Message != "Owner edited commit message" || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
-		t.Fatalf("the edited approval %+v", after.Approval)
+	if after.Approval == nil || after.Approval.Description != third.Draft || !reflect.DeepEqual(after.Approval.Messages, third.Messages) || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
+		t.Fatalf("the approval %+v", after.Approval)
 	}
 	p.Await("the same document", `window.notReloaded === true`)
 }
