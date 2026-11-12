@@ -203,7 +203,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 
 	// The draft as it stands is approved as drafted.
 	p.Click(approve)
-	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved the delivery of final review 1")
 	p.AwaitGone("the approved delivery", card)
 	if body := sent(); body["description"] != second.Draft || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
 		t.Fatalf("the approval the page sent: %v", body)
@@ -231,7 +231,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.SetValue(description, edited)
 	p.SetValue(card+`textarea[name="commit-message"]`, "Owner edited commit message")
 	p.Click(approve)
-	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitOutcomes("Approved the delivery of final review 1", 2)
 	p.AwaitGone("the approved delivery", card)
 	if body := sent(); body["description"] != edited || body["review_revision"] != 3.0 {
 		t.Fatalf("the edited approval the page sent: %v", body)

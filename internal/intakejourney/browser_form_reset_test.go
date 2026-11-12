@@ -116,7 +116,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	// showing.
 	p.TypeInto(escalation+"textarea", "State lives in the upload log.")
 	p.Click(escalation + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Answered inbox entry")
+	p.AwaitOutcome("Answered inbox entry")
 	p.AwaitCleared(escalation + "textarea")
 
 	// The contested unit's ruling clears once it is recorded, and the same
@@ -124,7 +124,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	noteField := contested + `input[name=note]`
 	p.TypeInto(noteField, "The reviewer's sandbox failed; review it again.")
 	p.Click(contested + `[data-decision-choice="review"]`)
-	p.AwaitText("#inbox-result", "Ruled review on unit index.")
+	p.AwaitOutcome("Ruled review on unit index.")
 	p.AwaitCleared(noteField)
 	p.AwaitGone("the ruled unit", contested)
 	// Optimistic removal alone does not clear the dismissal. The server
@@ -152,7 +152,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	amendmentNote := amendment + `input[name=note]`
 	p.TypeInto(amendmentNote, "Keep the acknowledged-chunk contract.")
 	p.Click(amendment + `[data-decision-choice="reject"]`)
-	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
+	p.AwaitOutcome("Decided reject on amendment 1.")
 	p.AwaitCleared(amendmentNote)
 }
 
@@ -190,7 +190,7 @@ func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *test
 
 	p.TypeInto(noteField, "I accept the risk.")
 	p.Click(card + `[data-decision-choice="overrule ` + veto + `"]`)
-	p.AwaitText("#inbox-result", "I accept the risk.")
+	p.AwaitOutcome("I accept the risk.")
 	p.AwaitCleared(noteField)
 
 	// The same card, reused for the next objection, still shows no value

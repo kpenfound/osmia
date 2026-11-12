@@ -174,7 +174,7 @@ func TestBrowserFeedDismissesAContestedRulingBeforeTheServerResponds(t *testing.
 	// The card is gone before the held response is released.
 	p.awaitGone("the contested unit", card)
 	release()
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
+	p.awaitOutcome("Ruled review on unit index.")
 }
 
 // Ratifying a proposal removes its item from the feed at once, before the
@@ -189,7 +189,7 @@ func TestBrowserFeedDismissesARatificationBeforeTheServerResponds(t *testing.T) 
 
 	p.awaitGone("the ratification packet", card)
 	release()
-	p.awaitText("#inbox-result", "the owner ratified the packet.")
+	p.awaitOutcome("the owner ratified the packet.")
 }
 
 // Once a submission is acknowledged, the dismissed item stays hidden
@@ -204,13 +204,13 @@ func TestBrowserFeedDismissedItemStaysHiddenUntilARefreshDropsItThenShowsAgain(t
 	p.typeInto(card+`input[name=note]`, "Review it again.")
 	p.click(card + `[data-decision-choice="review"]`)
 	p.awaitGone("the contested unit", card)
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
+	p.awaitOutcome("Ruled review on unit index.")
 
 	// The backend has not actually processed the ruling yet: a refresh
 	// that still lists the same entry leaves it hidden.
 	api.pushEvent("inbox")
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
 	p.awaitGone("the contested unit", card)
+	p.assertOutcomes("#workstreams", "Ruled review on unit index.")
 
 	// Once a refreshed inbox no longer lists it, the dismissal clears. If
 	// the unit is then contested again under the same identity, the page
@@ -243,7 +243,7 @@ func TestBrowserFeedDismissalExpiresAfter120SecondsIfStillListed(t *testing.T) {
 	p.typeInto(card+`input[name=note]`, "Review it again.")
 	p.click(card + `[data-decision-choice="review"]`)
 	p.awaitGone("the contested unit", card)
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
+	p.awaitOutcome("Ruled review on unit index.")
 
 	// The backend is still listing the same entry, so without the 120s
 	// bound it would stay hidden forever.
@@ -304,6 +304,6 @@ func TestBrowserFeedDismissingOneItemLeavesOthersUnaffected(t *testing.T) {
 	}
 
 	release()
-	p.awaitText("#inbox-result", "Ruled review on unit index.")
+	p.awaitOutcome("Ruled review on unit index.")
 	p.awaitVisible("the ratification packet, still there", ratification)
 }

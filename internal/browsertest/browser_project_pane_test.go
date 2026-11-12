@@ -126,6 +126,9 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		if result.Outcome != "" || result.Text != "" {
 			t.Fatalf("selecting the project did not clear the previous answer result: %+v", result)
 		}
+		if texts := p.OutcomeTexts("#workstreams"); len(texts) != 0 {
+			t.Fatalf("selecting the project showed the previous project's outcome entries: %q", texts)
+		}
 		p.TypeInto(card+"textarea", "Keep this project's contract stable.")
 		p.Click(card + "button[type=submit]")
 		p.AwaitGone("the answered project decision", card)
@@ -133,11 +136,15 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		// confirms that the durable inbox can be checked.
 		p.Await("the server confirms this project's answer", `(() => {
 				const result = document.querySelector('#inbox-result');
-				return ['ok', 'error', 'unavailable'].includes(result.dataset.outcome);
+				return ['error', 'unavailable'].includes(result.dataset.outcome) ||
+					document.querySelector('#workstreams `+OutcomeEntries+`') !== null;
 			})()`)
 		p.Eval(`({Outcome: document.querySelector('#inbox-result').dataset.outcome, Text: document.querySelector('#inbox-result').textContent})`, &result)
-		if result.Outcome != "ok" || result.Text != fmt.Sprintf("Answered inbox entry %d.", entry.Number) {
+		if result.Outcome != "" || result.Text != "" {
 			t.Fatalf("project decision answer %s: %s", result.Outcome, result.Text)
+		}
+		if texts := p.OutcomeTexts("#workstreams"); len(texts) != 1 || texts[0] != fmt.Sprintf("Answered inbox entry %d.", entry.Number) {
+			t.Fatalf("project decision outcome entries: %q", texts)
 		}
 		remaining := entriesOf(t, c, InboxEscalation)
 		if len(remaining) != 1-i || i == 0 && remaining[0].Project != entries[1].Project {

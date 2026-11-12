@@ -166,7 +166,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	card := decisionCard(entry(InboxRatification))
 	p.AwaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
 	p.Click(card + `[data-decision-choice="ratify"]`)
-	p.AwaitText("#inbox-result", "the owner ratified spec.md revision 1 and plan.json revision 1")
+	p.AwaitOutcome("the owner ratified spec.md revision 1 and plan.json revision 1")
 	p.AwaitGone("the ratified packet", card)
 	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 {
 		t.Fatalf("the recorded ratification %+v", record)
@@ -183,7 +183,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.AwaitText(card+"[data-field=question]", "Is the store durable across restarts?")
 	p.TypeInto(card+"textarea", ownerRuling)
 	p.Click(card + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Answered inbox entry")
+	p.AwaitOutcome("Answered inbox entry")
 	p.AwaitGone("the answered question", card)
 	// f.question's Ruling is the newest revision: by the time the page has
 	// cleared the card, the fake chief of staff's relay may already have
@@ -209,7 +209,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.AwaitText(card+"[data-field=question]", "Change: Resume from a durable checkpoint")
 	p.TypeInto(card+"input[name=note]", "Keep the acknowledged-chunk contract.")
 	p.Click(card + `[data-decision-choice="` + AmendmentReject + `"]`)
-	p.AwaitText("#inbox-result", "Decided reject on amendment 1.")
+	p.AwaitOutcome("Decided reject on amendment 1.")
 	p.AwaitGone("the decided amendment", card)
 	f.awaitAmendment(t, stream, amendmentRuled)
 	var decided AmendmentDecision
@@ -231,7 +231,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.AwaitText(card+"[data-field=options]", "revise")
 	p.TypeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
 	p.Click(card + `[data-decision-choice="revise"]`)
-	p.AwaitText("#inbox-result", "Ruled revise on unit dedupe.")
+	p.AwaitOutcome("Ruled revise on unit dedupe.")
 	p.AwaitGone("the contested unit", card)
 	transitions := slices.DeleteFunc(f.transitions(t, stream), func(tr trace.Transition) bool {
 		return tr.Subject != trace.UnitSubject("dedupe") || tr.From != UnitContested
@@ -273,7 +273,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.Await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
 	p.Await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
 	p.Click(card + "button[type=submit]")
-	p.AwaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved the delivery of final review 1")
 	p.AwaitGone("the approved delivery", card)
 	var approval DeliveryApproval
 	must(t, json.Unmarshal([]byte(ownerDocument(deliveryDocument).Content), &approval))

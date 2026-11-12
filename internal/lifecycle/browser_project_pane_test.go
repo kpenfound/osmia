@@ -308,7 +308,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		if result.Outcome == "error" || result.Outcome == "unavailable" {
 			t.Fatalf("shared decision answer %s: %s", result.Outcome, result.Text)
 		}
-		return result.Outcome == "ok"
+		return len(p.OutcomeTexts("#workgroup-content")) == 1 && result.Text == ""
 	})
 	f.wait(t, "the shared decision leaves the API inbox", func() bool {
 		inbox, err := f.c.Inbox(context.Background())
