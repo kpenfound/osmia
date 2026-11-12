@@ -7260,12 +7260,27 @@
       "RoleCapacity": {
         "properties": {
           "limit": {
-            "description": "Configured slot limit.",
-            "type": "integer"
+            "description": "Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0.",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "note": {
+            "description": "Plain-words explanation of an unbounded pool: no factory-wide limit, at most one turn per workstream, no configuration setting. Absent for bounded pools.",
+            "type": "string"
           },
           "role": {
             "description": "Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams.",
             "type": "string"
+          },
+          "scope": {
+            "description": "How an unbounded pool is bounded instead: per_workstream means at most one turn runs per workstream. Absent for bounded pools.",
+            "type": "string"
+          },
+          "unbounded": {
+            "description": "True when the pool has no factory-wide limit (architect, librarian). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise.",
+            "type": "boolean"
           },
           "used": {
             "description": "Number of slots currently in use.",

@@ -189,7 +189,12 @@ The member view is laid out like a chat client:
   why. Check slots appear alongside mason, reviewer and committee slots: the
   factory shares `capacity.checks` (default 2) across every project's unit,
   final-review and session checks. Waiting entries name the workstream and unit,
-  final review number or session. Counts and waits update as runs start and
+  final review number or session. The architect and librarian pools have no
+  factory-wide limit: they show as unbounded (`<n> active (unbounded; 1 per
+  workstream)`) with a note that no configuration setting controls them, never
+  as zero slots, and the header's slot total (`used/limit`) counts only the
+  pools with a numeric limit while its tooltip still counts the architect and
+  librarian sessions in use. Counts and waits update as runs start and
   finish. Check slots are separate from agent and per-workstream limits;
   waiting does not consume the check timeout. Reload applies a changed limit to
   new admissions while checks already running finish. The pauses open to every

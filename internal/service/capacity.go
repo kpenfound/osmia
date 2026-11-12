@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
@@ -35,11 +36,11 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
 	}
 	out := &CapacityStatus{PerWorkstream: limits.PerWorkstream, Roles: []RoleCapacity{
-		{Role: masonRole, Limit: limits.Masons, Waiting: []SlotWait{}},
-		{Role: reviewerRole, Limit: limits.Reviewers, Waiting: []SlotWait{}},
-		{Role: committeeRole, Limit: limits.Committee, Waiting: []SlotWait{}},
-		{Role: architectRole, Waiting: []SlotWait{}},
-		{Role: librarianRole, Waiting: []SlotWait{}},
+		{Role: masonRole, Limit: &limits.Masons, Waiting: []SlotWait{}},
+		{Role: reviewerRole, Limit: &limits.Reviewers, Waiting: []SlotWait{}},
+		{Role: committeeRole, Limit: &limits.Committee, Waiting: []SlotWait{}},
+		unboundedCapacity(architectRole),
+		unboundedCapacity(librarianRole),
 	}}
 	slots := s.pool.Slots(cfg.ProjectIDs())
 	state, _ := s.effective()
@@ -66,12 +67,18 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		}
 	}
 	checks := s.CheckSlots()
-	role := RoleCapacity{Role: checksRole, Limit: checks.Limit, Used: checks.Used, Waiting: []SlotWait{}}
+	role := RoleCapacity{Role: checksRole, Limit: &checks.Limit, Used: checks.Used, Waiting: []SlotWait{}}
 	for _, w := range checks.Waiting {
 		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Preview: w.Preview, Reason: DeferCapacity})
 	}
 	out.Roles = append(out.Roles, role)
 	return out
+}
+
+// unboundedCapacity is the entry of a pool with no factory-wide limit: it
+// carries no numeric limit, so it cannot be read as zero slots.
+func unboundedCapacity(role string) RoleCapacity {
+	return RoleCapacity{Role: role, Unbounded: true, Scope: api.UnboundedScope, Note: api.UnboundedNote, Waiting: []SlotWait{}}
 }
 
 // providerUsage reports today's known spend by provider, the provider of the
@@ -203,7 +210,7 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 
 // capacity exposes the shared slot accounting without handing scheduling to a model.
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. Limits are configured through config.toml and reload.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks) is its configured factory-wide limit: it comes from config.toml and applies on reload. A pool with no limit field and unbounded true (architect, librarian) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err

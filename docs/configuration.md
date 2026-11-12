@@ -373,6 +373,14 @@ further rounds the owner may ask for after a
 conclusion; from the first such request the rounds the owner asked for replace
 the cap as the debate's round limit.
 
+The architect and librarian pools have no factory-wide limit and no
+`capacity.*` key: each runs at most one turn per workstream. The capacity view
+(the status API's `capacity` and the chief of staff's `capacity` tool) shows
+them as unbounded, with no numeric `limit`, and a note saying so; only the
+mason, reviewer, committee and checks pools report a numeric `limit`, which
+comes from `config.toml` and applies on reload. An unbounded pool is not zero
+capacity and has no setting to raise.
+
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that
 enters the shed for debate gets that many committee

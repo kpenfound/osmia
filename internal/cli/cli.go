@@ -1778,14 +1778,19 @@ func showProviderUsage(w io.Writer, u *wire.ProviderUsageStatus) {
 }
 
 // showCapacity prints the slots used of each shared role kind and the work
-// waiting for one.
+// waiting for one. A pool without a factory-wide limit shows as unbounded,
+// never as a number of slots.
 func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 	if c == nil {
 		return
 	}
 	fmt.Fprintf(w, "Capacity (per workstream %d):\n", c.PerWorkstream)
 	for _, r := range c.Roles {
-		fmt.Fprintf(w, "  %s: %d of %d slot(s) in use\n", r.Role, r.Used, r.Limit)
+		if r.Limit == nil {
+			fmt.Fprintf(w, "  %s: %d in use, unbounded (no factory-wide limit; at most one turn per workstream)\n", r.Role, r.Used)
+		} else {
+			fmt.Fprintf(w, "  %s: %d of %d slot(s) in use\n", r.Role, r.Used, *r.Limit)
+		}
 		for _, wait := range r.Waiting {
 			what := "unit " + wait.Unit
 			if wait.Turn != "" {
