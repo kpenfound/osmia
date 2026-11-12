@@ -29,6 +29,10 @@ type DeliveryPresentation struct {
 	Merge       *DeliveryMerge       `json:"merge,omitempty"`
 	Delivered   bool                 `json:"delivered,omitempty"`
 	Maintenance bool                 `json:"maintenance,omitempty"`
+	// DraftPullRequest is true when the drafted description says the pull
+	// request opens as a draft because an upstream merge-order dependency has
+	// not merged. It informs the owner and changes no approval rule.
+	DraftPullRequest bool `json:"draft_pull_request,omitempty"`
 }
 
 // DeliveryApproval preserves the exact title and text and reviewed identity

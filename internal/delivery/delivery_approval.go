@@ -169,9 +169,17 @@ func ClosingReference(handed trace.Document, targetRepo string) string {
 // it comes from documents already in the trace, so presenting the same
 // recorded trace twice produces the same draft, and no agent is called.
 func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, err error) {
+	title, body, _, err = s.draftDelivery(cfg, repository, stream, report)
+	return title, body, err
+}
+
+// draftDelivery drafts the title and body as DraftDelivery does and also
+// reports whether the body says the pull request opens as a draft, which is
+// whether PendingMergeOrderReferences returned a reference for it.
+func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, opensAsDraft bool, err error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	var spec, handed trace.Document
 	for _, d := range docs {
@@ -184,7 +192,7 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 	}
 	title, err = WorkstreamTitle(repository, stream, spec, handed)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	summary := SpecSummary(spec.Content)
 	if summary == "" {
@@ -203,13 +211,14 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 	// as part of the one delivery approval, so marking it ready later needs
 	// no separate owner prompt (spec#12).
 	if references, err := s.PendingMergeOrderReferences(repository, stream); err != nil {
-		return "", "", err
+		return "", "", false, err
 	} else if len(references) > 0 {
+		opensAsDraft = true
 		body += fmt.Sprintf("\nThis depends on %s, which must merge first. This pull request opens as a draft. After updating to the merged dependencies, checks, final review and a fresh owner delivery approval are required before marking it ready.\n", strings.Join(references, ", "))
 	}
 	assumptions, err := trace.Assumptions(repository, stream)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	if len(assumptions) > 0 {
 		body += "\nAssumptions:\n"
@@ -217,7 +226,7 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 			body += "- " + strings.TrimSpace(a.Text) + "\n"
 		}
 	}
-	return withoutCheckTraces(title), withoutCheckTraces(body) + "\n", nil
+	return withoutCheckTraces(title), withoutCheckTraces(body) + "\n", opensAsDraft, nil
 }
 
 func (s *Controller) DeliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
@@ -303,7 +312,7 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 		}
 		return 1
 	})
-	title, draft, err := s.DraftDelivery(s.About(repository), repository, stream, report)
+	title, draft, opensAsDraft, err := s.draftDelivery(s.About(repository), repository, stream, report)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot draft the title and description from trace records"}
 	}
@@ -321,7 +330,7 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 		Style       string
 		Messages    []workspace.DeliveryMessage
 	}{title, draft, style, messages})
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft}, nil
 }
 
 func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
