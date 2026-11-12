@@ -324,7 +324,7 @@ is how long an event of routine progress waits instead: a unit starting,
 passing its checks, being approved or sent back, or landing, or the workstream
 changing state. It goes out sooner with any other event. It must be no shorter
 than `events.window`, and defaults to the longer of `15m` and `events.window`.
-While an event turn of a workstream is queued or running, its new events wait
+The notice that asks the chief of staff to title work started from a design is not routine progress: it waits `events.window`. While an event turn of a workstream is queued or running, its new events wait
 for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 

@@ -17,6 +17,7 @@ import (
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intake "github.com/kpenfound/osmia/internal/intake"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -320,14 +321,24 @@ var recordDesignDraft2 = intakefixture.RecordDesignDraft2
 // to confine a session at all, which not every kernel has.
 func newDesignEnforcementFixture(t *testing.T, web ...bool) (*Service, *Client, config.ProjectID, *demoEngine) {
 	t.Helper()
+	extra := ""
+	if len(web) > 0 && web[0] {
+		extra = listenWeb
+	}
+	return newDesignEnforcementFixtureWith(t, extra, "")
+}
+
+// newDesignEnforcementFixtureWith is newDesignEnforcementFixture with before
+// appended to the root's config.toml ahead of the chief-of-staff role table
+// and after appended behind it.
+func newDesignEnforcementFixtureWith(t *testing.T, before, after string) (*Service, *Client, config.ProjectID, *demoEngine) {
+	t.Helper()
 	opts, clone := projectFixture(t)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
-	if len(web) > 0 && web[0] {
-		_, err = configFile.WriteString(listenWeb)
-		must(t, err)
-	}
-	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
+	_, err = configFile.WriteString(before)
+	must(t, err)
+	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n" + after)
 	must(t, errors.Join(err, configFile.Close()))
 	home := filepath.Dir(clone)
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
@@ -666,6 +677,15 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		defer mu.Unlock()
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
+	// fatalf fails the test with the tool problems collected so far, so a
+	// failure names its cause.
+	fatalf := func(format string, args ...any) {
+		t.Helper()
+		mu.Lock()
+		collected := strings.Join(problems, "; ")
+		mu.Unlock()
+		t.Fatalf("%s; tool problems: [%s]", fmt.Sprintf(format, args...), collected)
+	}
 	turnSummary := func(th trace.Thread) string {
 		var turns []string
 		for _, q := range th.Turns {
@@ -769,27 +789,20 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		t.Fatalf("handed brief: got %q at %s, want drafted brief followed by transcript at %s", handed.Content, handed.Path, designBriefPath)
 	}
 
-	now := clock.Now()
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: designWorkerAgent, Project: project, Workstream: stream, At: now, Actor: ownerActor, Cause: "workstream_created"}
-	must(t, repository.CreateThread(ctx, trace.Agent{Header: h, Role: designWorkerRole, ThreadID: designWorkerThread}))
-	h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_ask", "message_ask", 1
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: designWorkerAgent, ThreadID: designWorkerThread, TurnID: "ask",
-		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: ask"})
-	must(t, err)
-
 	const question = "May the module be renamed?"
 	const statusGoal = "Scoping the rename."
 	const escalationQuestion = "Should the module be renamed?"
 
 	engine.Mu.Lock()
-	engine.Turns["ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question}); err != nil || !strings.Contains(out, `"recorded":true`) {
-			problem("ask: %s %v", out, err)
-		}
-		return questionResult(req, "session-ask", "Asked"), nil
-	}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.Prompt, "asked by the mason: "+question) {
+		// A replayed turn carries earlier exchanges ahead of its own prompt, so
+		// only the turn's own events say what it asks.
+		prompt := ownPrompt(req.Prompt)
+		if strings.Contains(prompt, intake.HandoffTitleOpening) && !strings.Contains(prompt, "asked by the mason: "+question) {
+			// The start's hand-off turn asks for the started work's title.
+			return questionResult(req, "session-chief", "Titled."), nil
+		}
+		if !strings.Contains(prompt, "asked by the mason: "+question) {
 			problem("unexpected chief-of-staff turn: %s", req.Prompt)
 			return questionResult(req, "session-chief", "Nothing to do"), nil
 		}
@@ -819,68 +832,97 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}
 	engine.Mu.Unlock()
 
+	// The hand-off title request is due once the short event window has
+	// passed, and is delivered on its own before the worker exists.
+	clock.Advance(time.Minute)
+	waitCompleted("hand-off title", 2, 0, "")
+	titled, err := repository.ChiefOfStaffThread(stream)
+	must(t, err)
+	if len(titled.Turns) != 2 || !strings.Contains(titled.Turns[1].Request.Prompt, intake.HandoffTitleOpening) {
+		t.Fatalf("the start's hand-off turn is not the second chief turn: %s", turnSummary(titled))
+	}
+
+	now := clock.Now()
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: designWorkerAgent, Project: project, Workstream: stream, At: now, Actor: ownerActor, Cause: "workstream_created"}
+	must(t, repository.CreateThread(ctx, trace.Agent{Header: h, Role: designWorkerRole, ThreadID: designWorkerThread}))
+	h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_ask", "message_ask", 1
+	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: designWorkerAgent, ThreadID: designWorkerThread, TurnID: "ask",
+		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: ask"})
+	must(t, err)
+
+	engine.Mu.Lock()
+	engine.Turns["ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question}); err != nil || !strings.Contains(out, `"recorded":true`) {
+			problem("ask: %s %v", out, err)
+		}
+		return questionResult(req, "session-ask", "Asked"), nil
+	}
+	engine.Mu.Unlock()
+
 	settle()
 	clock.Advance(time.Minute)
-	waitCompleted("worker ask and chief escalation", 2, 1, "waiting")
+	waitCompleted("worker ask and chief escalation", 3, 1, "waiting")
 
 	mu.Lock()
 	ranChief := acted
 	mu.Unlock()
 	if !ranChief {
-		t.Fatal("the chief-of-staff turn that answers the worker's question never ran")
+		chief, err := repository.ChiefOfStaffThread(stream)
+		must(t, err)
+		fatalf("the chief-of-staff turn that answers the worker's question never ran; chief %s", turnSummary(chief))
 	}
 
 	after, err := repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
-		t.Fatalf("the started workgroup's chief of staff is not the design session's own thread: before %+v after %+v", before.Identity, after.Identity)
+		fatalf("the started workgroup's chief of staff is not the design session's own thread: before %+v after %+v", before.Identity, after.Identity)
 	}
 	if len(after.Turns) <= len(before.Turns) {
-		t.Fatalf("no later turn landed on the continued thread: before %d turns, after %+v", len(before.Turns), after.Turns)
+		fatalf("no later turn landed on the continued thread: before %d turns, after %+v", len(before.Turns), after.Turns)
 	}
 	originalTurns, err := json.Marshal(before.Turns)
 	must(t, err)
 	continuedTurns, err := json.Marshal(after.Turns[:len(before.Turns)])
 	must(t, err)
 	if string(originalTurns) != string(continuedTurns) {
-		t.Fatal("continuation changed the design turn's request, response or recovery state")
+		fatalf("continuation changed the design turn's request, response or recovery state")
 	}
 
 	st, err := c.Status(ctx, stream)
 	must(t, err)
 	if st.Status == nil || st.Status.Goal != statusGoal {
-		t.Fatalf("a later status did not appear on the continued thread: %+v", st.Status)
+		fatalf("a later status did not appear on the continued thread: %+v", st.Status)
 	}
 
 	inbox, err := c.Inbox(ctx)
 	must(t, err)
 	if len(inbox.Entries) != 1 || inbox.Entries[0].Workstream != stream || inbox.Entries[0].Question != escalationQuestion {
-		t.Fatalf("a later escalation did not appear on the continued thread's inbox: %+v", inbox.Entries)
+		fatalf("a later escalation did not appear on the continued thread's inbox: %+v", inbox.Entries)
 	}
 	conversation, err := c.Conversation(ctx, stream)
 	must(t, err)
 	if len(conversation.Entries) < len(designConversation.Entries) {
-		t.Fatalf("continuation lost the design exchange: %+v", conversation.Entries)
+		fatalf("continuation lost the design exchange: %+v", conversation.Entries)
 	}
 	originalEntries, err := json.Marshal(designConversation.Entries)
 	must(t, err)
 	continuedEntries, err := json.Marshal(conversation.Entries[:len(designConversation.Entries)])
 	must(t, err)
 	if string(originalEntries) != string(continuedEntries) {
-		t.Fatalf("continuation changed the original chat entries: %+v", conversation.Entries)
+		fatalf("continuation changed the original chat entries: %+v", conversation.Entries)
 	}
 	wantEscalation := ConversationEntry{Turn: inbox.Entries[0].Batch, Kind: "action", Text: "Question for you: " + escalationQuestion + "\nBlocked: The worker's work.\nOptions: Rename; Keep\nRecommendation: Keep.", At: clock.Now(), State: TurnDone}
 	if len(conversation.Entries) != 3 || conversation.Entries[2] != wantEscalation {
-		t.Fatalf("continued chat: want original exchange then exactly one escalation %+v; actual %+v; chief %s", wantEscalation, conversation.Entries, turnSummary(after))
+		fatalf("continued chat: want original exchange then exactly one escalation %+v; actual %+v; chief %s", wantEscalation, conversation.Entries, turnSummary(after))
 	}
 	feed, api := s.feedList(string(stream))
 	if api != nil {
-		t.Fatal(api)
+		fatalf("%v", api)
 	}
 	if !slices.ContainsFunc(feed.Entries, func(entry FeedEntry) bool {
 		return entry.Kind == "status" && entry.Status != nil && entry.Status.Goal == statusGoal
 	}) {
-		t.Fatalf("the later status is absent from the continued chat's feed: %+v", feed.Entries)
+		fatalf("the later status is absent from the continued chat's feed: %+v", feed.Entries)
 	}
 
 	restart := func() {
@@ -906,7 +948,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		continuedJSON, err := json.Marshal(continued)
 		must(t, err)
 		if string(previousJSON) != string(continuedJSON) {
-			t.Fatalf("restart changed conversation: want %s; actual %s", previousJSON, continuedJSON)
+			fatalf("restart changed conversation: want %s; actual %s", previousJSON, continuedJSON)
 		}
 		recoveredChief, err := repository.ChiefOfStaffThread(stream)
 		must(t, err)
@@ -915,7 +957,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		recoveredJSON, err := json.Marshal(recoveredChief)
 		must(t, err)
 		if string(chiefJSON) != string(recoveredJSON) {
-			t.Fatalf("restart changed chief records: want %s; actual %s", turnSummary(chief), turnSummary(recoveredChief))
+			fatalf("restart changed chief records: want %s; actual %s", turnSummary(chief), turnSummary(recoveredChief))
 		}
 		recoveredWorker, err := repository.Thread(stream, designWorkerAgent)
 		must(t, err)
@@ -924,7 +966,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		recoveredWorkerJSON, err := json.Marshal(recoveredWorker)
 		must(t, err)
 		if string(workerJSON) != string(recoveredWorkerJSON) {
-			t.Fatalf("restart changed worker records: want %s; actual %s", turnSummary(worker), turnSummary(recoveredWorker))
+			fatalf("restart changed worker records: want %s; actual %s", turnSummary(worker), turnSummary(recoveredWorker))
 		}
 		recoveredBrief, err := trace.Get[trace.Document](repository, stream, handed.ID, 1)
 		must(t, err)
@@ -933,14 +975,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		recoveredBriefJSON, err := json.Marshal(recoveredBrief)
 		must(t, err)
 		if string(briefJSON) != string(recoveredBriefJSON) {
-			t.Fatalf("restart changed immutable handed brief: got %+v, want %+v", recoveredBrief, handed)
+			fatalf("restart changed immutable handed brief: got %+v, want %+v", recoveredBrief, handed)
 		}
 	}
 	restart()
 	recoveredInbox, err := c.Inbox(ctx)
 	must(t, err)
 	if len(recoveredInbox.Entries) != 1 || recoveredInbox.Entries[0].Question != escalationQuestion {
-		t.Fatalf("continued design escalation after restart: %+v", recoveredInbox.Entries)
+		fatalf("continued design escalation after restart: %+v", recoveredInbox.Entries)
 	}
 	const ownerRuling = "Keep the module name stable."
 	var resumed int
@@ -970,19 +1012,19 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	ownerConversation, err := c.Conversation(ctx, stream)
 	must(t, err)
 	if !slices.Equal(ownerConversation.Entries, wantEntries) {
-		t.Fatalf("owner answer before relay: want %+v; actual %+v", wantEntries, ownerConversation.Entries)
+		fatalf("owner answer before relay: want %+v; actual %+v", wantEntries, ownerConversation.Entries)
 	}
 	clock.Advance(time.Minute)
 	waitCompleted("owner ruling relay and worker continuation", len(after.Turns)+1, 2, "idle")
 	worker, err := repository.Thread(stream, designWorkerAgent)
 	must(t, err)
 	if worker.Parked() || len(worker.Turns) != 2 || worker.Turns[1].Request.TurnID != "answer_1" || worker.Turns[1].Response == nil || worker.Turns[1].Status() != "idle" || worker.Turns[1].CompletedAt.IsZero() {
-		t.Fatalf("ruling: want exactly one completed answer_1 on asking worker; actual %s", turnSummary(worker))
+		fatalf("ruling: want exactly one completed answer_1 on asking worker; actual %s", turnSummary(worker))
 	}
 	answeredInbox, err := c.Inbox(ctx)
 	must(t, err)
 	if len(answeredInbox.Entries) != 0 {
-		t.Fatalf("answered escalation remains in the inbox: %+v", answeredInbox.Entries)
+		fatalf("answered escalation remains in the inbox: %+v", answeredInbox.Entries)
 	}
 	ruledConversation, err := c.Conversation(ctx, stream)
 	must(t, err)
@@ -993,15 +1035,15 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	if ruling.ReturnedAnswer != ownerRuling || ruling.OwnerResponse != ownerRuling || !slices.ContainsFunc(ruledChief.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.ID == ruling.Cause && q.Status() == "idle" && !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.FinalResponse == ownerRuling
 	}) {
-		t.Fatalf("relay: want ruling linked to a completed chief turn on the actual design thread; ruling %+v; chief %s", ruling, turnSummary(ruledChief))
+		fatalf("relay: want ruling linked to a completed chief turn on the actual design thread; ruling %+v; chief %s", ruling, turnSummary(ruledChief))
 	}
 	continuedTurns, err = json.Marshal(ruledChief.Turns[:len(before.Turns)])
 	must(t, err)
 	if string(originalTurns) != string(continuedTurns) {
-		t.Fatal("owner ruling changed the original design request, response or recovery state")
+		fatalf("owner ruling changed the original design request, response or recovery state")
 	}
 	if !slices.Equal(ruledConversation.Entries, wantEntries) {
-		t.Fatalf("owner ruling chat: want %+v; actual %+v; chief %s; worker %s", wantEntries, ruledConversation.Entries, turnSummary(ruledChief), turnSummary(worker))
+		fatalf("owner ruling chat: want %+v; actual %+v; chief %s; worker %s", wantEntries, ruledConversation.Entries, turnSummary(ruledChief), turnSummary(worker))
 	}
 	restart()
 	mu.Lock()
