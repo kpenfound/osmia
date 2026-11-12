@@ -830,3 +830,75 @@ func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
 	t.Helper()
 	f.sharedDesign().LifecycleAdvanceScheduled(t)
 }
+
+// A cancelled member archived before its workgroup was ever approved keeps no
+// history after cleanup. Its archive record alone locates it, so the inbox,
+// the shared conversation and the surviving member stay readable.
+func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
+	ctx := context.Background()
+	f, cleanupGate := newLifecycleDesignFixture(t)
+	defer func() { f.stop(t) }()
+	f.startOwner(t)
+	f.awaitPacket(t)
+	repo, err := f.s.repository(f.project)
+	must(t, err)
+	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
+	must(t, err)
+	change, api := f.s.requestChange(ctx, string(f.origin), ChangeRequest{Key: "cancel-unapproved", Kind: "cancel", Scope: "workgroup", Change: "Cancel the whole workgroup before ratification"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	wt, g, _, closeGroup, err := f.s.changeContext(ctx, string(f.origin))
+	must(t, err)
+	current := func(state string) func() bool {
+		return func() bool {
+			must(t, f.s.advanceChanges(ctx, wt, g))
+			changes, err := readChanges(wt, g.Members[0])
+			must(t, err)
+			for _, recorded := range changes {
+				if recorded.ID == change.ID {
+					change = recorded
+				}
+			}
+			return change.State == state
+		}
+	}
+	lifecycleAwait(t, f, "cancellation presented", current("presented"))
+	change, api = f.s.decideChange(ctx, string(f.origin), change.ID, ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "close"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	lifecycleAwait(t, f, "cancellation applied", current("applied"))
+	closeGroup()
+	_, err = f.c.Archive(ctx, f.stream1)
+	must(t, err)
+	cleanupGate.await(t, f)
+	cleanupGate.release()
+	lifecycleAwait(t, f, "unapproved member cleanup", func() bool {
+		a, ok := archiveRecord(t, f.s.store, f.stream1)
+		return ok && a.Workgroup == group && a.Resolved && !a.CleanedAt.IsZero()
+	})
+	readable := func(t *testing.T) {
+		t.Helper()
+		survivor, err := f.s.repository(f.project2)
+		must(t, err)
+		_, g, found, err := survivor.CrossRepoProjectSpec(group)
+		must(t, err)
+		if !found {
+			t.Fatal("the workgroup trace is missing")
+		}
+		members, err := f.s.crossRepoMemberRepos(ctx, g)
+		must(t, err)
+		if len(members) != 2 || !slices.ContainsFunc(members, func(m trace.CrossRepoMember) bool { return m.Workstream == f.stream1 && m.Project.Project() == f.project }) {
+			t.Fatalf("the archived member is not bound to its project: %+v", members)
+		}
+		_, err = f.c.Inbox(ctx)
+		must(t, err)
+		_, err = f.c.Conversation(ctx, f.stream2)
+		must(t, err)
+	}
+	readable(t)
+	f.stop(t)
+	f.start(t)
+	readable(t)
+}
