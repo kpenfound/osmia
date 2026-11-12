@@ -305,10 +305,24 @@ From the page you can:
 - Answer an escalation, accept its quick reply, or pick one of its options.
 - Ratify a plan, sustain or overrule an objection, or ask for a redraft.
 - Decide a contested unit, an amendment or a charter proposal.
-- Accept the final review and approve each workstream's delivery, seeing its
-  PR title and editing its description and commit message. Draft publication,
-  updates and marking ready each require that member's own fresh approval and
-  service-owned signing; there is no group-wide publication approval.
+- Accept the final review and approve each workstream's delivery with one
+  click. The delivery card shows the PR title and a collapsed **What will be
+  published** section with the description and each commit message as plain,
+  read-only text, and one button that says what approving does: **Open pull
+  request**, **Open draft pull request** while an upstream merge-order
+  dependency has not merged, or **Update pull request** when a delivered
+  workstream is refreshed after its dependencies merged. When the final review
+  has blocking findings the label starts with **Accept findings and**, because
+  approving accepts them as they are. The note beside the button says approval
+  authorizes publication with your Git identity, signature and sign-off, and
+  there is no confirmation dialog. The page offers no editor. To change what
+  is published, amend the commits or edit the pull request afterwards. The API
+  and CLI still accept an edited description and commit messages. A delivery
+  offered again after a refused publication previews, and publishes when you
+  approve it again, the text of its earlier approval, including any text
+  edited that way. Draft publication, updates and marking ready each require
+  that member's own fresh approval and service-owned signing; there is no
+  group-wide publication approval.
 - Opening a workgroup, workstream, design or exploratory conversation shows
   its newest entry, including direct links and returning to Feed. New entries
   scroll the shown conversation to its end even while reading older history.

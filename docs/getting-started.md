@@ -302,13 +302,14 @@ move a stuck unit yourself with
 
 When every unit has landed and the final review is done, the workstream's
 delivery entry opens. Read the final report's findings and the drafted pull
-request description; on the page you can edit the description before
-approving. Approving a report with blocking findings accepts them as they are;
-otherwise the chief of staff plans the work that resolves them and a new final
-review follows. Approve
-it on the page, or with `osmia approve <workstream-id> [description-file]`. The
+request description under **What will be published**, which is read only.
+Approving a report with blocking findings accepts them as they are (the button
+then starts with **Accept findings and**); otherwise the chief of staff plans
+the work that resolves them and a new final review follows. Approve it with one
+click on the page, or with `osmia approve <workstream-id> [description-file]`,
+which can still supply an edited description. The
 service then pushes the branch to your repository or fork and opens the pull request against
-the upstream itself, with your description; no agent pushes. `osmia delivery
+the upstream itself, with the approved description; no agent pushes. `osmia delivery
 <workstream-id>` shows the pull request it was delivered as, and the workstream
 records workflow state `delivered`. The project pane shows **PR open** until
 a detected or owner-recorded merge, then **delivered (merged)**. The owner

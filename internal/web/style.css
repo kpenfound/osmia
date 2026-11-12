@@ -1200,6 +1200,16 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.decision [data-field="preview"] summary {
+  cursor: pointer;
+}
+
+.decision [data-field="preview"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.25rem 0 0.75rem;
+}
+
 .choices {
   display: flex;
   flex-direction: column;

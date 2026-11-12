@@ -270,8 +270,8 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// waits for the pause, and runs once the owner resumes the workstream.
 	p.ClosePopovers()
 	p.AwaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
-	p.Await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
-	p.Await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
+	p.Await("the drafted description", `document.querySelector(`+quote(card+"[data-field=preview] [data-field=description]")+`)?.textContent === `+quote(presented.Draft))
+	p.Await("the approval enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
 	p.Click(card + "button[type=submit]")
 	p.AwaitOutcome("Approved the delivery of final review 1")
 	p.AwaitGone("the approved delivery", card)
