@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -44,6 +45,10 @@ func ReadGroupApproval(r *Repository, host config.WorkstreamID) (GroupApproval, 
 	}
 	if err != nil {
 		return GroupApproval{}, Document{}, false, err
+	}
+	r.approvalDecodes.Add(1)
+	if r.shared != nil {
+		r.shared.approvalDecodes.Add(1)
 	}
 	var decision GroupApproval
 	err = json.Unmarshal([]byte(d.Content), &decision)
@@ -108,8 +113,11 @@ func (r *Repository) GroupApprovalRequired(stream config.WorkstreamID) (bool, er
 }
 
 func (r *Repository) groupApproved(id config.WorkgroupID) (bool, error) {
-	decision, found, required, err := r.groupApprovalState(id)
-	return !required || found && decision.Complete, err
+	snap, err := r.groupApprovalSnapshot(id)
+	if err != nil {
+		return false, err
+	}
+	return !snap.required || snap.found && snap.decision.Complete, nil
 }
 
 func (r *Repository) groupApproval(id config.WorkgroupID) (GroupApproval, bool, error) {
@@ -117,33 +125,45 @@ func (r *Repository) groupApproval(id config.WorkgroupID) (GroupApproval, bool, 
 	return decision, found, err
 }
 
+// groupApprovalState returns the workgroup's approval, whether one is
+// recorded, and whether group approval is required. The approval belongs to
+// the caller.
 func (r *Repository) groupApprovalState(id config.WorkgroupID) (GroupApproval, bool, bool, error) {
-	project := r
-	if r.parent != nil {
-		project = r.parent
-	}
-	var wt *Repository
-	var err error
-	if project.Project() == crossRepoProject(id) {
-		wt = project
-	} else {
-		wt, err = openSharedWorkgroupTrace(r.root, id, nil)
-		if wt != nil {
-			defer wt.Close()
-		}
-		if err != nil {
-			return GroupApproval{}, false, true, err
-		}
-	}
-	groups, _, err := Workgroups(wt)
+	snap, err := r.groupApprovalSnapshot(id)
 	if err != nil {
 		return GroupApproval{}, false, true, err
 	}
-	for _, g := range groups {
-		if g.ID == id && len(g.Members) > 0 {
-			decision, _, found, err := ReadGroupApproval(wt, g.Members[0])
-			return decision, found, !(g.Conversation != nil && len(g.Members) == 2), err
-		}
+	if !snap.found {
+		return GroupApproval{}, false, snap.required, nil
 	}
-	return GroupApproval{}, false, true, fmt.Errorf("workgroup %s has no authority", id)
+	return cloneGroupApproval(*snap.decision), true, snap.required, nil
+}
+
+// cloneGroupApproval returns a copy of a that shares no mutable data with it.
+func cloneGroupApproval(a GroupApproval) GroupApproval {
+	a.ProjectSpec = cloneProjectSpec(a.ProjectSpec)
+	if a.Members != nil {
+		members := make([]GroupMemberApproval, len(a.Members))
+		for i, m := range a.Members {
+			m.Record = slices.Clone(m.Record)
+			members[i] = m
+		}
+		a.Members = members
+	}
+	return a
+}
+
+// cloneProjectSpec returns a copy of spec that shares no mutable data with it.
+func cloneProjectSpec(spec ProjectSpec) ProjectSpec {
+	spec.Contracts = slices.Clone(spec.Contracts)
+	spec.Graph = slices.Clone(spec.Graph)
+	if spec.Slices != nil {
+		slicesCopy := make([]Slice, len(spec.Slices))
+		for i, s := range spec.Slices {
+			s.ContractCriteria = slices.Clone(s.ContractCriteria)
+			slicesCopy[i] = s
+		}
+		spec.Slices = slicesCopy
+	}
+	return spec
 }

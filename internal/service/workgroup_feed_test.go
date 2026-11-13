@@ -313,6 +313,11 @@ func TestWorkgroupMemberArchiveSummaryUsesPinnedIdentity(t *testing.T) {
 func assertWorkgroupHandleReleased(t *testing.T, s *Service, g trace.Workgroup, chief *trace.Repository) {
 	t.Helper()
 	must(t, chief.Close())
+	// Member repositories keep one reference for approval reads; an endpoint
+	// that leaked its own still holds the trace once those are given back.
+	for _, p := range s.projects {
+		must(t, p.repository.ReleaseWorkgroupTraces())
+	}
 	dir, err := s.cfg.Root.WorkgroupTrace(g.ID)
 	must(t, err)
 	lock, err := os.OpenFile(filepath.Join(dir, "osmia.lock"), os.O_RDWR, 0600)

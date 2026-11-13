@@ -219,6 +219,11 @@ type sharedWorkgroupTrace struct {
 	resolved         atomic.Bool
 	opens            atomic.Uint64
 	projectSpecReads atomic.Uint64
+	// approvalDecodes counts approval document decodes on the shared trace.
+	approvalDecodes atomic.Uint64
+	// approval is the decoded approval answer, dropped when the last holder
+	// closes.
+	approval approvalCache
 }
 
 // workgroupTraces holds one *sharedWorkgroupTrace per workgroup ID this
