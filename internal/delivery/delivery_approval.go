@@ -225,7 +225,7 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 	// final review (number, revision and commit) enter the body; a stale brief
 	// or one without items leaves it untouched.
 	if brief, found, err := BriefForReport(repository, stream, report, reviewRevision); err != nil {
-		return "", "", err
+		return "", "", false, err
 	} else if found && len(brief.BeforeYouShip) > 0 {
 		body += "\nBefore you ship:\n"
 		for _, item := range brief.BeforeYouShip {
