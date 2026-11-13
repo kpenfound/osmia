@@ -675,6 +675,27 @@ svg {
   object-fit: contain;
 }
 
+.brief-screenshots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.brief-screenshots .image-thumbnail {
+  width: min(16rem, 100%);
+  height: 10rem;
+}
+
+.before-you-ship {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--line);
+  border-left-width: 0.3rem;
+  border-radius: 0.5rem;
+  background: var(--attention-bg);
+}
+
 .entry .markdown {
   white-space: normal;
   line-height: 1.5;

@@ -600,7 +600,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	}
 	reviewed := streamDocuments(t, repository, assembled, finalReportDocument)[0]
 	delivery := InboxEntry{Kind: InboxDelivery, Workstream: assembled, Revision: 1, OpenedAt: reviewed.At, Options: []string{"approve"}, Asked: []InboxQuestion{},
-		Question: fmt.Sprintf("Deliver Resumable uploads? Final review 1 of commit %s found nothing blocking.", report.Commit), Blocked: "Publishing the pull request.",
+		Question: fmt.Sprintf("Deliver Resumable uploads? Final review 1 of commit %s found nothing blocking. No brief was recorded for this review.", report.Commit), Blocked: "Publishing the pull request.",
 		Answer: answer("delivery/"+string(assembled), "review", 1, "review_revision", 1, "commit", report.Commit, "draft_hash", presented.DraftHash)}
 	escalation := InboxEntry{Kind: InboxEscalation, Workstream: escalating, Number: 1, Batch: "escalation_1", Question: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"},
 		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1", "project", string(repository.Project()))}
@@ -677,7 +677,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	report.Criteria[1].Evidence, report.Criteria[1].Gap = "", "No duplicate test"
 	recordReport(3, tick(6))
 	delivery.Revision = 3
-	delivery.Question = fmt.Sprintf("Deliver Resumable uploads as it is? Final review 1 of commit %s has blocking findings: spec#2: No duplicate test. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows.", report.Commit)
+	delivery.Question = fmt.Sprintf("Deliver Resumable uploads as it is? Final review 1 of commit %s has blocking findings: spec#2: No duplicate test. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows. No brief was recorded for this review.", report.Commit)
 	delivery.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 3, "commit", report.Commit, "draft_hash", presented.DraftHash, "accept_blocking", true)
 	expect("final report with something blocking", ratification, skipped, gaveUp, delivery)
 	if _, api := f.s.approveDelivery(ctx, string(assembled), DeliveryDecision{Review: 1, ReviewRevision: 3, Commit: report.Commit, DraftHash: presented.DraftHash, AcceptBlocking: true}); api != nil {

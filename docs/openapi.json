@@ -1426,7 +1426,7 @@
     "/v1/feed/{workstream}": {
       "get": {
         "summary": "List member sessions, state changes, unit, final and session checks and final reviews; shared chief entries and turns are included only for single-member workgroups",
-        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. session_checks summarizes each completed exploratory session check run.\nUnit, final and session check entries carry trace_url when the CLI reported a\nDagger Cloud trace. Captured check output remains in the trace.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
+        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. session_checks summarizes each completed exploratory session check run.\nUnit, final and session check entries carry trace_url when the CLI reported a\nDagger Cloud trace. Captured check output remains in the trace.\n\nbrief is the delivery brief the chief of staff recorded for a final review: its\ntext, before_you_ship items and screenshots. It appears once per review and\nshows the latest brief when it was replaced.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
         "operationId": "getFeedByWorkstream",
         "parameters": [
           {
@@ -5216,6 +5216,38 @@
         },
         "type": "object"
       },
+      "DeliveryBrief": {
+        "properties": {
+          "before_you_ship": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          },
+          "screenshots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryDecision": {
         "properties": {
           "accept_blocking": {
@@ -5266,6 +5298,9 @@
         "properties": {
           "approval": {
             "$ref": "#/components/schemas/DeliveryApproval"
+          },
+          "brief": {
+            "$ref": "#/components/schemas/DeliveryBrief"
           },
           "delivered": {
             "type": "boolean"
@@ -5695,6 +5730,35 @@
         },
         "type": "object"
       },
+      "FeedBrief": {
+        "properties": {
+          "before_you_ship": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          },
+          "screenshots": {
+            "items": {
+              "$ref": "#/components/schemas/FeedImage"
+            },
+            "type": "array"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "FeedCheckSelection": {
         "properties": {
           "description": {
@@ -5737,6 +5801,9 @@
           "at": {
             "format": "date-time",
             "type": "string"
+          },
+          "brief": {
+            "$ref": "#/components/schemas/FeedBrief"
           },
           "final_checks": {
             "$ref": "#/components/schemas/FeedFinalChecks"

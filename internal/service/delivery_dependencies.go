@@ -38,6 +38,6 @@ func (s *Service) deliveryWithChecks(checks, cloud ReviewChecks) *delivery.Contr
 		DependentBaseChanged: dependentBaseChanged, BranchBase: branchBase, DriftRebaseNotes: driftRebaseNotes,
 		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: pendingMergeOrderReferences,
 		EdgePublicationWait: edgePublicationWait, UnresolvedMergeOrderEdge: unresolvedMergeOrderEdge,
-		CanonicalPublication: canonicalPublication,
+		CanonicalPublication: canonicalPublication, ChiefThread: s.chiefThread,
 	})
 }

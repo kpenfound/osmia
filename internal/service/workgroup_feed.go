@@ -255,6 +255,15 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 			if _, err := chiefActionsWithIdentity(a.chief, m.Workstream, emit); err != nil {
 				return WorkgroupFeedResponse{}, err
 			}
+			// Each member's delivery briefs are its own, labelled with it.
+			briefs, err := briefEntries(m.Project, m.Workstream)
+			if err != nil {
+				return WorkgroupFeedResponse{}, err
+			}
+			for _, b := range briefs {
+				b.Workstream, b.Repo = m.Workstream, m.Project.Project()
+				entries = append(entries, b)
+			}
 		}
 		refs, err := trace.Read[trace.ImageReference](a.chief, a.host)
 		if err != nil {

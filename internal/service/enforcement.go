@@ -59,7 +59,7 @@ func CoreEnforcement(root config.Root) Enforcement {
 // everything else, so the ceiling here is never itself the enforced set. It
 // holds the Web permission, which both narrowings set explicitly because a
 // narrowing intersects it.
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
 
 // chiefOrdinaryTools is chiefGrant's tool list without the three design-only
 // tools, so an ordinary chief-of-staff turn never reaches them.
@@ -89,7 +89,7 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 		return nil, err
 	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
+	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in

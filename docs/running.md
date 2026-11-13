@@ -241,8 +241,16 @@ The member view is laid out like a chat client:
   of staff's recommendation. A ratification also shows the objections the
   chief of staff escalated and your own, with the ones it dismissed and why
   folded below them; a
-  delivery shows the final report's findings and the units serving each
-  criterion.
+  delivery shows the chief of staff's delivery brief first (its text,
+  screenshot thumbnails that open the full image, and, when the change needs
+  something done to deploy it, a separate **Before you ship** list that is
+  always visible), then the final report's findings and the units serving each
+  criterion. Without a brief it says "No brief was recorded for this review".
+  The delivery entry waits for the brief while the chief of staff's turn for
+  that final review runs and appears when the brief is recorded or that turn
+  ends without one. The brief is also its own entry in the feed, so you can
+  reply to the chief of staff right under it; a workgroup's conversation
+  shows each member's brief labelled with the member.
   The Documents tab reads and edits the draft spec and plan before
   ratification, each save a new revision as with `osmia edit`, the dependency,
   and the debate actions; the Trace tab walks the workstream's record. The

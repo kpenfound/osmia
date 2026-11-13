@@ -52,6 +52,10 @@ sessions. session_checks summarizes each completed exploratory session check run
 Unit, final and session check entries carry trace_url when the CLI reported a
 Dagger Cloud trace. Captured check output remains in the trace.
 
+brief is the delivery brief the chief of staff recorded for a final review: its
+text, before_you_ship items and screenshots. It appears once per review and
+shows the latest brief when it was replaced.
+
 A started entry keeps its original place when its result arrives. Unfinished
 starts survive restart without implying success or failure. Workstream events
 on /v1/events tell an open client to read this feed again.`

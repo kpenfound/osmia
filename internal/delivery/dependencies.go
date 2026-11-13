@@ -64,6 +64,10 @@ type Dependencies struct {
 	EdgePublicationWait         func(*trace.Repository, config.WorkstreamID) (string, error)
 	UnresolvedMergeOrderEdge    func(*trace.Repository, config.WorkstreamID) (string, bool, error)
 	CanonicalPublication        func(api.DeliveryPublication, *config.Config) bool
+	// ChiefThread returns the chief-of-staff thread that carries the
+	// workstream's notices and whether a chief turn can run at all. It is nil
+	// when none can.
+	ChiefThread func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error)
 }
 
 type Controller struct{ Dependencies }

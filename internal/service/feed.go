@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -31,10 +34,10 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 
 // feedEntries merges the workstream's records into one feed ordered by time.
 // Entries recorded at the same time keep the conversation first, then
-// statuses, transitions, sessions, check/review entries and images. chief is the repository the
-// workstream's chief-of-staff conversation is read from: repository itself,
-// unless stream belongs to a cross-repo workgroup, whose shared thread
-// lives only in that workgroup's own trace.
+// statuses, transitions, sessions, check/review entries, images and delivery
+// briefs. chief is the repository the workstream's chief-of-staff conversation
+// is read from: repository itself, unless stream belongs to a cross-repo
+// workgroup, whose shared thread lives only in that workgroup's own trace.
 func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	group, err := paneWorkgroup(repository, stream)
 	if err != nil {
@@ -80,7 +83,41 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	out = append(out, images...)
+	briefs, err := briefEntries(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, briefs...)
 	slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
+	return out, nil
+}
+
+// briefEntries is one feed entry per final review the workstream has a
+// delivery brief for: the latest brief of that review, placed where its first
+// brief was recorded. A screenshot whose image is gone has a placeholder.
+func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+	briefs, err := delivery.Briefs(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FeedEntry, 0, len(briefs))
+	for _, b := range briefs {
+		brief := &FeedBrief{Review: b.Review, ReviewRevision: b.ReviewRevision, Commit: b.Commit, Text: b.Text, BeforeYouShip: b.BeforeYouShip}
+		for _, id := range b.Screenshots {
+			image := FeedImage{ID: id}
+			v, err := repository.StoredImage(stream, id)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				image.Placeholder = "image " + id + " is no longer stored"
+			case err != nil:
+				return nil, err
+			default:
+				image.URL, image.ContentType = imageURL(stream, id), v.ContentType
+			}
+			brief.Screenshots = append(brief.Screenshots, image)
+		}
+		out = append(out, FeedEntry{Kind: "brief", At: b.At, Brief: brief})
+	}
 	return out, nil
 }
 

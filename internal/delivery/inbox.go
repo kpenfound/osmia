@@ -108,6 +108,10 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	case p.Delivered && !p.Maintenance:
 		return InboxEntry{}, false, nil
 	}
+	// The entry waits for the chief of staff's brief on this review.
+	if p.Brief != nil && p.Brief.State == BriefWaiting {
+		return InboxEntry{}, false, nil
+	}
 	blocking := ReportBlocking(p.Report)
 	review, prior, _, err := DeliveryDocuments(repository, stream)
 	if err != nil {
@@ -131,6 +135,9 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	e.Question = fmt.Sprintf("Deliver %s? Final review %d of commit %s found nothing blocking.", title, p.Report.Review, p.Report.Commit)
 	if len(blocking) > 0 {
 		e.Question = fmt.Sprintf("Deliver %s as it is? Final review %d of commit %s has blocking findings: %s. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows.", title, p.Report.Review, p.Report.Commit, strings.Join(blocking, "; "))
+	}
+	if p.Brief != nil && p.Brief.State == BriefNoneRecorded {
+		e.Question += " " + NoBriefRecorded + "."
 	}
 	e.Blocked = "Publishing the pull request."
 	e.Options = []string{"approve"}

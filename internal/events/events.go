@@ -416,6 +416,26 @@ func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
 	return last.Add(delay)
 }
 
+// Handled reports whether a chief-of-staff turn that delivered e has ended in
+// any status, completed or failed, or e is acknowledged. It is false while
+// such a turn is queued or running, including a recovery continuation of one,
+// and while no turn has claimed e yet.
+func Handled(e trace.OutboxEntry, chief trace.Thread) bool {
+	if e.Acknowledged {
+		return true
+	}
+	states := turnStates(chief)
+	for _, a := range e.History {
+		if a.Kind != "claim" {
+			continue
+		}
+		if state := states[TurnID(a.Token)]; state == turnDone || state == turnFailed {
+			return true
+		}
+	}
+	return false
+}
+
 // settle acknowledges an event whose turn completed. It uses the claim of
 // this repository session that still holds the event, or a fresh one.
 func (d *Deliverer) settle(ctx context.Context, stream config.WorkstreamID, e trace.OutboxEntry) error {
