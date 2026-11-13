@@ -499,12 +499,41 @@ From the Osmia checkout, run:
 ```
 
 The script requires a working `sbx` installation and the Dagger CLI on the
-host's `PATH`. It pulls the latest Codex template, which ships Codex, installs
-the latest Claude Code with its native installer and the Dagger CLI release
-reported by the host's `dagger version`, verifies the tools, and saves the local
-template as `osmia:latest`. Tags such as `:latest` are supported for templates.
-Each run refreshes both agents and replaces that local tag. The temporary build
-sandbox has no workspace mounts and is removed when the script exits.
+host's `PATH`. It pulls the latest Codex template, which ships Codex, removes
+Docker Engine and the Docker CLI from it, installs the latest Claude Code with
+its native installer and the Dagger CLI release reported by the host's
+`dagger version`, verifies the tools, and saves the local template as
+`osmia:latest`. Tags such as `:latest` are supported for templates. Each run
+refreshes both agents and replaces that local tag. The temporary build sandbox
+has no workspace mounts and is removed when the script exits, including when it
+refuses to save.
+
+The template has no Docker Engine: no `dockerd` or `containerd` runs in a
+sandbox made from it, and it has no Docker CLI. There is one template for every
+role and no Docker variant. Masons validate only through Dagger, which reaches
+the Dagger engine over TCP through agentcore's host forward for the
+sandbox, not through a Docker daemon in the guest. A guest Docker stack would
+only cost host memory in every sandbox. Masons use this template; a mason
+`image` that carries Docker is the owner's own choice, outside what Osmia builds
+or supports.
+
+Before saving, the script proves inside the build sandbox, as root and as the
+agent user, that the template is Docker-free, and otherwise it exits non-zero
+without saving, names what it found and still removes the build sandbox. It
+refuses when:
+
+- a `dockerd`, `containerd` or containerd shim process runs;
+- a `docker`, `dockerd`, `containerd` or related executable remains;
+- a Docker daemon answers `/_ping` at the default sockets, the `DOCKER_HOST`
+  address, an address in a Docker context, `127.0.0.1:2375` or any
+  docker- or containerd-named socket in the guest; or
+- a probe cannot run or cannot tell. Only a connection that cannot be made
+  counts as absence; an unreadable `/proc`, a socket that answers something
+  else or an address scheme the probe cannot ask is a refusal.
+
+The reachability probe asks each socket or address directly with `curl`. It
+does not use the Docker CLI, whose absence would prove nothing. The script also
+keeps its version checks for Codex, Claude Code and the host's Dagger release.
 
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
