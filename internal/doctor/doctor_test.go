@@ -107,8 +107,9 @@ func fixture(t *testing.T) (Options, string) {
 	return Options{
 		Root: root, LookPath: h.lookPath, Command: h.command,
 		CheckJJ:   func(context.Context) (string, error) { return "0.45.1", nil },
-		Token:     "good",
-		GitHubAPI: github(t, "acme/widgets"),
+		Token:       "good",
+		TotalMemory: func() (uint64, error) { return 16 << 30, nil },
+		GitHubAPI:   github(t, "acme/widgets"),
 	}, dir
 }
 

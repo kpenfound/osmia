@@ -455,6 +455,8 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | `profile` | `default` | Must reference an existing named profile |
 | `sandbox` | `none` | `none` (host execution), `claude`, `container` or `sbx` (Docker Sandboxes) |
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
+| `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
+| `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `dagger` | unset | Mason only, with `sbx`: the Dagger CLI `version` and host `engine` given to implementation turns; see [Dagger for masons](#dagger-for-masons) |
 | `skills` | `[]` | Skills by git reference, given to the role's Claude turns; see [Role skills](#role-skills) |
 
@@ -489,6 +491,66 @@ An omitted `image` lets each fallback profile select its agent's default templat
 A custom template must support every agent in that role's fallback chain. The
 classifier uses the mason's sandbox and template with its own configured profile.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
+
+### Sandbox size
+
+`cpus` and `memory` in `[roles.<role>]` size each sandbox the role creates. They
+are valid only with `sandbox = "sbx"`: with `none`, `claude` or `container`,
+loading fails with an error naming `roles.<role>.cpus` or
+`roles.<role>.memory`. `cpus` is a positive integer. `memory` is a positive
+integer followed by `m` or `g`, such as `512m` or `4g`. A value in any other
+form fails the load, naming the field. Osmia checks the format only; `sbx`
+enforces its own limits, such as its 512 MiB minimum, when it creates the
+sandbox and reports a refusal as the turn's failure.
+
+```toml
+[roles.mason]
+sandbox = "sbx"
+cpus = 2
+memory = "4g"
+```
+
+The values apply to every turn of the role, fallback profiles included. A reload
+applies changed values to sandboxes created afterwards; a turn already running
+keeps the sandbox it has.
+
+**Osmia sets no defaults.** A role without `cpus` or `memory` gets exactly the
+`sbx create` command line it would get without these keys, so `sbx` chooses its
+own size: for memory, half the host's memory, between 512 MiB and 32 GiB. Every
+sandbox of a role holds that much, and the mason, reviewer and committee pools
+can run several at once, so an unsized setup can ask for more than the host has.
+`osmia doctor` warns about that; see
+[Doctor](cli.md#doctor).
+
+Starting values for a 16 GB host whose Dagger engine is remote, to adjust to
+your capacity settings and workload:
+
+```toml
+[roles.mason]
+sandbox = "sbx"
+cpus = 2
+memory = "4g"
+
+# The read-only roles: architect, reviewer, committee, librarian,
+# chief_of_staff and foreman.
+[roles.reviewer]
+sandbox = "sbx"
+cpus = 2
+memory = "2g"
+```
+
+That is `2g` for read-only roles, `4g` for masons and `cpus = 2`. With the
+default capacity, the four masons, two reviewers, three committee members and
+one architect and librarian hold 16 + 4 + 6 + 4 = 30 GiB at most, more than
+such a host has, so lower `capacity.masons`, `capacity.reviewers` and
+`capacity.committee` or the values to fit; doctor shows the total. These are
+not defaults, only a place to start: Osmia applies none of them.
+
+A local Dagger engine needs room of its own. It runs on the host beside the
+sandboxes, and its cache and the builds it runs take memory the sandboxes do not
+leave, so size the sandboxes smaller or use a remote engine. If a mason turn
+fails because its guest ran out of memory, raise the mason's `memory` (and
+reduce `capacity.masons` if the host cannot hold more).
 
 **Building the Osmia template**
 
