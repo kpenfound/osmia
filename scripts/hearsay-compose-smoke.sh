@@ -30,7 +30,7 @@
 #   download modules; the Compose network needs no proxy.
 set -euo pipefail
 
-readonly DEFAULT_HEARSAY_REF=44082baf6c736d511e4ff3cc14751b1455c039d9
+readonly DEFAULT_HEARSAY_REF=2cdfc18d68675be0dfbf06d7e3265166ff35fc7d
 hearsay_ref=${HEARSAY_REF:-$DEFAULT_HEARSAY_REF}
 
 [[ -f go.mod && -d internal/service && -d deploy/hearsay-smoke ]] || { echo "run this from the Osmia repository root" >&2; exit 2; }
