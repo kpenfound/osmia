@@ -154,9 +154,17 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 // holding is the controller's Hold: it holds every reconciler operation that
 // runs architect or committee turns while held holds its workstream, and
 // every publication while the service has no credential to open its pull
-// request, so nothing is pushed or asked of GitHub.
+// request, so nothing is pushed or asked of GitHub. A drift rebase of an
+// abandoned workstream is never held: it ends as skipped without touching
+// the clone, so it cannot stay pending and defer the workstream's archive
+// cleanup behind a gate that abandonment leaves closed.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		if op.Action == DriftAction {
+			if gone, err := abandoned(repository, stream); err == nil && gone {
+				return false
+			}
+		}
 		if role := modelOperationRole(op); role != "" && !s.admitRole(role) {
 			return true
 		}
