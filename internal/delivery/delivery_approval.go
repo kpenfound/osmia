@@ -165,7 +165,9 @@ func ClosingReference(handed trace.Document, targetRepo string) string {
 // (see WorkstreamTitle) and a short prose summary of the sealed spec,
 // closing the issue the workstream was handed in from when one is recorded
 // and its repository can be compared with the one the pull request would
-// target, and the workstream's logged assumptions, when it has any. All of
+// target, the "Before you ship" items of the delivery brief recorded for the
+// presented final review, when it has any, and the workstream's logged
+// assumptions, when it has any. All of
 // it comes from documents already in the trace, so presenting the same
 // recorded trace twice produces the same draft, and no agent is called.
 func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, err error) {
@@ -182,12 +184,15 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 		return "", "", false, err
 	}
 	var spec, handed trace.Document
+	reviewRevision := 0
 	for _, d := range docs {
 		switch {
 		case d.ID == plan.SpecDocument && d.Revision == report.Spec:
 			spec = d
 		case d.ID == handedDocument:
 			handed = d
+		case d.ID == FinalReportDocument && d.Revision > reviewRevision:
+			reviewRevision = d.Revision
 		}
 	}
 	title, err = WorkstreamTitle(repository, stream, spec, handed)
@@ -215,6 +220,17 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 	} else if len(references) > 0 {
 		opensAsDraft = true
 		body += fmt.Sprintf("\nThis depends on %s, which must merge first. This pull request opens as a draft. After updating to the merged dependencies, checks, final review and a fresh owner delivery approval are required before marking it ready.\n", strings.Join(references, ", "))
+	}
+	// Only the "Before you ship" items of the brief recorded for this same
+	// final review (number, revision and commit) enter the body; a stale brief
+	// or one without items leaves it untouched.
+	if brief, found, err := BriefForReport(repository, stream, report, reviewRevision); err != nil {
+		return "", "", err
+	} else if found && len(brief.BeforeYouShip) > 0 {
+		body += "\nBefore you ship:\n"
+		for _, item := range brief.BeforeYouShip {
+			body += "- " + strings.TrimSpace(item) + "\n"
+		}
 	}
 	assumptions, err := trace.Assumptions(repository, stream)
 	if err != nil {
