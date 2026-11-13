@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -48,7 +50,16 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	var logs bytes.Buffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	files := configFiles(t, opts)
-	files.write(t, files.topText+hearsayTables, files.projectText)
+	// The hooks endpoint is a local fake: the running project publishes to it.
+	hooks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			t.Errorf("a post did not carry the publisher's token")
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer hooks.Close()
+	tables := strings.Replace(hearsayTables, "https://hooks.example", hooks.URL, 1)
+	files.write(t, files.topText+tables, files.projectText)
 	s, c := start(t, opts)
 	ctx := context.Background()
 
@@ -68,7 +79,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 
 	// A reload that fails on the publish table, even one whose value spells the
 	// token, names the field and none of the value.
-	bad := strings.Replace(files.topText+hearsayTables, `hooks_url = "https://hooks.example"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
+	bad := strings.Replace(files.topText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
 	files.write(t, bad, files.projectText)
 	_, err = c.Reload(ctx)
 	if err == nil || !strings.Contains(err.Error(), "hearsay.publish.hooks_url") || strings.Contains(err.Error(), token) {

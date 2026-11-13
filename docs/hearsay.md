@@ -136,6 +136,38 @@ same artifact has the same id after a service restart and on a repost, and a
 reposted identical record has no effect in Hearsay. The ids are a contract:
 Hearsay keeps a changed repost as a new revision of the same record, so a
 document's revisions and a decision's supersession depend on them not changing.
+The project and each workstream use their own Osmia ids. The charter is the
+document `charter`, a workstream's sealed spec is `<workstream id>-spec` (one
+revision per seal), and a workgroup's project spec is
+`<workgroup id>-project-spec`, posted on each member project. A record's
+`created_at` is when its artifact first existed in the trace and its
+`updated_at` when it last changed there, always later than the previous post of
+the same record, so a newer revision is not mistaken for a stale one.
+
+**Cadence.** Each project runs a reconcile pass every 15 seconds. After a pass
+that could not reach Hearsay or was refused, the next waits a minute. The
+digests are kept in the project's trace beside the watch cursor and are never
+posted. A pass posts the project, then its workstreams, then documents, and does
+not attempt a record whose parent was refused.
+
+**Eligible workstreams** are the project's feature workstreams. Exploratory
+sessions, design sessions and the librarian's own workstream post nothing.
+
+**Core states.** A workstream's `status` is Osmia's own state; its `state` is
+one of Hearsay's core states:
+
+| Osmia state | Core state |
+|---|---|
+| no state yet (posted as `new`), `handed`, `sketched`, `in-shed` | `proposed` |
+| `ratified`, `building`, `assembled` | `started` |
+| any state other than `delivered` and `abandoned` while the workstream has an open owner gate | `blocked` |
+| `delivered` | `completed` |
+| `abandoned` | `abandoned` |
+
+The project is posted with the owner principal (`hearsay.principal`) as
+`author`; workstreams carry no `author`. Charter revisions, sealed specs and the
+workgroup project spec are posted to the owner source with the owner as
+`author`.
 
 ## Privacy and read access
 
@@ -147,7 +179,9 @@ follows the source. Documents and decisions on both sources follow their
 project's current access.
 
 A project can opt in to declaring its GitHub repo on its Hearsay project
-(`hearsay_declare_repo` in its `config.toml`, off by default). Its records then
+(`hearsay_declare_repo` in its `config.toml`, off by default). With the project's
+`upstream` set, its Hearsay project then declares
+`{"source": "github", "project": "<upstream>"}` in `repos`. Its records then
 become visible to everyone who can read that repository in Hearsay, which for a
 public repository is everyone Hearsay knows. The opt-in is never needed to read
 a private project, and Osmia does not use it, or the publisher's token, to work

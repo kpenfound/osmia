@@ -1056,6 +1056,13 @@ func (s *Service) launch(active *activeProject) {
 			}
 			watchDone <- err
 		}()
+		// Publishing to Hearsay reads the committed trace and never blocks
+		// or fails the project: it stops with the project's runtime.
+		publishDone := make(chan struct{})
+		go func() {
+			defer close(publishDone)
+			_ = s.publishHearsay(ctx, active.repository)
+		}()
 		conversationDone := make(chan error, 1)
 		go func() {
 			err := active.conversations.run(ctx)
@@ -1080,6 +1087,7 @@ func (s *Service) launch(active *activeProject) {
 			err = conversationErr
 		}
 		cancel()
+		<-publishDone
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
 		}
