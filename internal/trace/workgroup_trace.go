@@ -216,8 +216,11 @@ type sharedWorkgroupTrace struct {
 	repo *Repository
 	refs int
 	// resolved survives handle closure and is cleared by resolution-invalidating writes.
-	resolved         atomic.Bool
-	opens            atomic.Uint64
+	resolved atomic.Bool
+	opens    atomic.Uint64
+	// diskOpens counts opens that acquired the directory and scanned it,
+	// rather than reusing an instance another holder had open.
+	diskOpens        atomic.Uint64
 	projectSpecReads atomic.Uint64
 	// approvalDecodes counts approval document decodes on the shared trace.
 	approvalDecodes atomic.Uint64
@@ -309,6 +312,7 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 	}
 	r.shared = shared
 	shared.repo, shared.refs = r, 1
+	shared.diskOpens.Add(1)
 	return r, nil
 }
 

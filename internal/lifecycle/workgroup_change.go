@@ -739,11 +739,11 @@ func (s *Controller) MemberRemovalGate(ctx context.Context, raw string) *APIErro
 	if id == "" {
 		return nil
 	}
-	approval, found, err := repo.GroupApprovalOf(stream)
+	status, err := repo.GroupApprovalStatusOf(id)
 	if err != nil {
 		return &APIError{Code: Internal, Message: err.Error()}
 	}
-	if found && approval.Complete {
+	if status.Complete {
 		return nil
 	}
 	wt, g, _, close, err := s.ChangeContext(ctx, raw)

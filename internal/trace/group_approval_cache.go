@@ -17,6 +17,9 @@ type approvalSnapshot struct {
 	required bool
 	found    bool
 	decision *GroupApproval
+	// seq is the stored sequence of the approval document's latest revision,
+	// 0 when none is recorded or the answer was read without the cache.
+	seq int64
 }
 
 // approvalCache holds the decoded approval answer of one workgroup, keyed by
@@ -139,7 +142,7 @@ func (wt *Repository) approvalSnapshotOf(id config.WorkgroupID) (approvalSnapsho
 		}
 		c.approvalValid, c.approvalHost, c.approvalSeq, c.approvalFound, c.decision = true, c.host, approvalSeq, approvalFound, decision
 	}
-	return approvalSnapshot{required: c.required, found: c.approvalFound, decision: c.decision}, nil
+	return approvalSnapshot{required: c.required, found: c.approvalFound, decision: c.decision, seq: c.approvalSeq}, nil
 }
 
 // uncachedApprovalSnapshot reads the answer from the trace without keeping
@@ -158,6 +161,65 @@ func (wt *Repository) uncachedApprovalSnapshot(id config.WorkgroupID) (approvalS
 		snap.decision = &decision
 	}
 	return snap, nil
+}
+
+// GroupApprovalStatus is the approval answer of one workgroup without the
+// approval itself: whether a decision is recorded, whether it is complete and
+// whether group approval is required.
+type GroupApprovalStatus struct {
+	Found    bool
+	Complete bool
+	Required bool
+	// Revision identifies the recorded approval: it differs between any two
+	// recorded revisions of the approval document, so a changed value means a
+	// changed decision. It is 0 when none is recorded.
+	Revision int64
+}
+
+// GroupApprovalStatusOf answers from the state GroupApproved reads, decoding
+// each document at most once per revision and copying nothing.
+func (r *Repository) GroupApprovalStatusOf(id config.WorkgroupID) (GroupApprovalStatus, error) {
+	snap, err := r.groupApprovalSnapshot(id)
+	if err != nil {
+		return GroupApprovalStatus{Required: true}, err
+	}
+	return GroupApprovalStatus{Found: snap.found, Complete: snap.found && snap.decision.Complete, Required: snap.required, Revision: snap.seq}, nil
+}
+
+// MemberGroupApprovalStatus is GroupApprovalStatusOf for the workgroup stream
+// points to: the zero status when it points to none.
+func (r *Repository) MemberGroupApprovalStatus(stream config.WorkstreamID) (GroupApprovalStatus, error) {
+	id, err := r.CrossRepoWorkgroupOf(stream)
+	if err != nil || id == "" {
+		return GroupApprovalStatus{}, err
+	}
+	return r.GroupApprovalStatusOf(id)
+}
+
+// ApprovedMembersOf is ReadGroupApproval followed by ApprovedWorkgroupMembers
+// for workgroup g: the project each member was approved under, and whether an
+// approval is recorded. r is the workgroup's own trace or a project instance.
+// The approval is read from the revision-keyed state and not copied.
+func (r *Repository) ApprovedMembersOf(g Workgroup) (map[config.WorkstreamID]config.ProjectID, bool, error) {
+	snap, err := r.groupApprovalSnapshot(g.ID)
+	if err != nil || !snap.found {
+		return nil, false, err
+	}
+	project := r
+	if r.parent != nil {
+		project = r.parent
+	}
+	wt := project
+	if project.Project() != crossRepoProject(g.ID) {
+		var release func()
+		wt, release, err = project.workgroupTraceHandle(g.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		defer release()
+	}
+	members, err := ApprovedWorkgroupMembers(wt, g, *snap.decision)
+	return members, err == nil, err
 }
 
 // workgroupTraceHandle returns a handle on workgroup id's own trace for

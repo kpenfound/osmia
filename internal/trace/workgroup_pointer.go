@@ -167,29 +167,48 @@ func (r *Repository) CrossRepoWorkgroupOf(stream config.WorkstreamID) (config.Wo
 // and retains its handle for related journal reads. The caller must Close a
 // non-nil handle exactly once. A missing trace returns a nil handle and no error.
 func (r *Repository) OpenCrossRepoProjectSpec(id config.WorkgroupID) (*Repository, ProjectSpec, Workgroup, bool, error) {
+	wt, snap, err := r.openCrossRepoSnapshot(id)
+	if err != nil || wt == nil {
+		return nil, ProjectSpec{}, Workgroup{}, false, err
+	}
+	return wt, cloneProjectSpec(snap.spec), cloneWorkgroup(snap.group), snap.found, nil
+}
+
+// OpenCrossRepoWorkgroup is OpenCrossRepoProjectSpec for a caller that needs
+// only the workgroup record and whether a project spec is recorded: it copies
+// no part of the spec. The caller must Close a non-nil handle exactly once.
+func (r *Repository) OpenCrossRepoWorkgroup(id config.WorkgroupID) (*Repository, Workgroup, bool, error) {
+	wt, snap, err := r.openCrossRepoSnapshot(id)
+	if err != nil || wt == nil {
+		return nil, Workgroup{}, false, err
+	}
+	return wt, cloneWorkgroup(snap.group), snap.found, nil
+}
+
+func (r *Repository) openCrossRepoSnapshot(id config.WorkgroupID) (*Repository, *projectSpecSnapshot, error) {
 	sharedWorkgroupTraceFor(id).projectSpecReads.Add(1)
 	directory, err := r.root.WorkgroupTrace(id)
 	if err != nil {
-		return nil, ProjectSpec{}, Workgroup{}, false, err
+		return nil, nil, err
 	}
 	if _, err := os.Lstat(directory); os.IsNotExist(err) {
-		return nil, ProjectSpec{}, Workgroup{}, false, nil
+		return nil, nil, nil
 	} else if err != nil {
-		return nil, ProjectSpec{}, Workgroup{}, false, err
+		return nil, nil, err
 	}
 	wt, err := openSharedWorkgroupTrace(r.root, id, nil)
 	if wt != nil && err != nil {
 		wt.Close()
 	}
 	if err != nil {
-		return nil, ProjectSpec{}, Workgroup{}, false, err
+		return nil, nil, err
 	}
 	snap, err := wt.projectSpecSnapshotOf(id)
 	if err != nil {
 		wt.Close()
-		return nil, ProjectSpec{}, Workgroup{}, false, err
+		return nil, nil, err
 	}
-	return wt, cloneProjectSpec(snap.spec), cloneWorkgroup(snap.group), snap.found, nil
+	return wt, snap, nil
 }
 
 // workgroupProjectSpec reads the effective project spec from the trace

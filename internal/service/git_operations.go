@@ -18,7 +18,7 @@ func (s *Service) gitWorkgroupJoining(repository *trace.Repository, stream confi
 	if err != nil || id == "" {
 		return false, err
 	}
-	_, group, _, err := repository.CrossRepoProjectSpec(id)
+	group, _, err := repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		return true, err
 	}

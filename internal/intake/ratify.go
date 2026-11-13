@@ -131,7 +131,7 @@ func (s *Controller) Packet(raw string) (PacketResponse, *APIError) {
 			}
 			if found {
 				out.ProjectSpec, out.ProjectSpecRevision = &spec, revision
-				_, g, _, err := repository.CrossRepoProjectSpec(id)
+				g, _, err := repository.CrossRepoWorkgroup(id)
 				if err != nil {
 					return PacketResponse{}, &APIError{Code: Internal, Message: err.Error()}
 				}

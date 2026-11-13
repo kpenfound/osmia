@@ -238,6 +238,19 @@ func (r *Repository) CrossRepoProjectSpec(id config.WorkgroupID) (ProjectSpec, W
 	return cloneProjectSpec(snap.spec), cloneWorkgroup(snap.group), snap.found, nil
 }
 
+// CrossRepoWorkgroup is CrossRepoProjectSpec for a caller that needs only the
+// workgroup record and whether a project spec is recorded: it copies no part
+// of the spec. The record belongs to the caller. It reports the same errors,
+// including those of a damaged latest record, and a zero Workgroup when no
+// trace exists yet for id.
+func (r *Repository) CrossRepoWorkgroup(id config.WorkgroupID) (Workgroup, bool, error) {
+	snap, exists, err := r.crossRepoProjectSpecSnapshot(id)
+	if err != nil || !exists {
+		return Workgroup{}, false, err
+	}
+	return cloneWorkgroup(snap.group), snap.found, nil
+}
+
 // IncomingEdgesOf returns the graph edges of the given types (every type when
 // none is named) that point at stream, in graph order, from the effective
 // project spec of the workgroup stream belongs to. found is false when stream

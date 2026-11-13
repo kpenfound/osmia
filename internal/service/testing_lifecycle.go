@@ -132,3 +132,23 @@ func ThreadWorkspaceAcquireForTest(ctx context.Context, cfg *config.Config, r *t
 }
 func (a TestAccess) SetFixtureStore(store *runtime.Store) { a.s.store = store }
 func (a TestAccess) SetFixtureLogger(logger *slog.Logger) { a.s.logger = logger }
+
+// ConversationDiscovery returns the discovery step the conversation path runs
+// on every scan of repository, and the release of the shared conversation
+// targets it found. The targets persist across calls, as they do in the path.
+func (a TestAccess) ConversationDiscovery(repository *trace.Repository) (discover func(context.Context) error, release func()) {
+	p := &conversationPath{s: a.s, repository: repository, drain: make(chan struct{})}
+	targets := map[config.WorkgroupID]*conversationTarget{}
+	return func(ctx context.Context) error { return p.discover(ctx, targets) }, func() {
+		p.Drain()
+		for _, t := range targets {
+			t.controller.Drain()
+		}
+		for _, t := range targets {
+			t.controller.Wait()
+			if t.close != nil {
+				t.close()
+			}
+		}
+	}
+}

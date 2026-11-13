@@ -73,28 +73,45 @@ func EdgeObservationAt(repo *trace.Repository, stream config.WorkstreamID) (Edge
 	return EdgeObservation{}, 0, time.Time{}, nil
 }
 
+// terminalInResolvedWorkgroup reports whether stream is a terminal member
+// (abandoned, or delivered and merged) of a cross-repo workgroup recorded
+// resolved. It answers from the process's resolution hint and the member's own
+// feature state, so it reads neither the group's approval nor its project spec.
+// The hint is false until a resolution pass has read the group's record in
+// this process, and again after the group is reopened or gains a member, so a
+// member that is not known to be terminal keeps being read as before.
+func terminalInResolvedWorkgroup(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	id, err := repo.CrossRepoWorkgroupOf(stream)
+	if err != nil || id == "" || !trace.WorkgroupResolutionCurrent(id) {
+		return false, err
+	}
+	state, err := repo.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return false, err
+	}
+	return state.Value == AbandonedState || state.Value == DeliveredState, nil
+}
+
 // IncomingMergeEdges returns stream's incoming hard_block and merge_order
 // edges from the ratified project spec of the workgroup it belongs to, or
 // none while it belongs to no workgroup or that workgroup's graph names
 // none. A contract edge is never returned: it resolves the moment the
 // Project spec that carries it is ratified, which is already true by the
 // time any caller can read it, so it never needs to wait or be observed.
+// A terminal member of a workgroup recorded resolved has none, and its
+// workgroup's approval and project spec are not read. For any other member
+// the edges are read in place from the revision-keyed project spec state,
+// without copying the spec.
 func IncomingMergeEdges(repo *trace.Repository, stream config.WorkstreamID) ([]trace.Edge, error) {
+	if terminal, err := terminalInResolvedWorkgroup(repo, stream); err != nil || terminal {
+		return nil, err
+	}
 	approved, err := repo.GroupApproved(stream)
 	if err != nil || !approved {
 		return nil, err
 	}
-	spec, _, found, err := repo.ProjectSpecOf(stream)
-	if err != nil || !found {
-		return nil, err
-	}
-	var out []trace.Edge
-	for _, e := range spec.Graph {
-		if e.To == stream && (e.Type == trace.EdgeHardBlock || e.Type == trace.EdgeMergeOrder) {
-			out = append(out, e)
-		}
-	}
-	return out, nil
+	edges, _, err := repo.IncomingEdgesOf(stream, trace.EdgeHardBlock, trace.EdgeMergeOrder)
+	return edges, err
 }
 
 // EdgesOfType filters edges to those of one type.
@@ -141,6 +158,9 @@ func EdgeWaitMessage(reference string) string {
 // hard_block edge: the only edge type that stops a dependent from starting
 // any unit before its upstream merges (spec#11).
 func EdgeWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	if terminal, err := terminalInResolvedWorkgroup(repo, stream); err != nil || terminal {
+		return false, err
+	}
 	approved, err := repo.GroupApproved(stream)
 	if err != nil || !approved {
 		return true, err
@@ -149,8 +169,12 @@ func EdgeWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, erro
 	if err != nil {
 		return true, err
 	}
+	blocking := EdgesOfType(edges, trace.EdgeHardBlock)
+	if len(blocking) == 0 {
+		return false, nil
+	}
 	observed, _, _, err := EdgeObservationAt(repo, stream)
-	_, waiting := FirstUnresolvedEdge(EdgesOfType(edges, trace.EdgeHardBlock), observed)
+	_, waiting := FirstUnresolvedEdge(blocking, observed)
 	return waiting, err
 }
 
@@ -179,7 +203,7 @@ func EdgeWaitDisplay(repo *trace.Repository, stream config.WorkstreamID) (string
 // show the owner for the first one found.
 func PendingMergeOrderReferences(repo *trace.Repository, stream config.WorkstreamID) ([]string, error) {
 	edges, err := IncomingMergeEdges(repo, stream)
-	if err != nil {
+	if err != nil || len(EdgesOfType(edges, trace.EdgeMergeOrder)) == 0 {
 		return nil, err
 	}
 	observed, _, _, err := EdgeObservationAt(repo, stream)
@@ -234,7 +258,7 @@ func UnresolvedMergeOrderEdge(repo *trace.Repository, stream config.WorkstreamID
 // whose edges are all still unresolved, is never treated as edge-dependent.
 func WorkgroupMergeOrderResolved(repo *trace.Repository, stream config.WorkstreamID) (string, error) {
 	edges, err := IncomingMergeEdges(repo, stream)
-	if err != nil {
+	if err != nil || len(EdgesOfType(edges, trace.EdgeMergeOrder)) == 0 {
 		return "", err
 	}
 	observed, _, _, err := EdgeObservationAt(repo, stream)
@@ -545,9 +569,11 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 				return err
 			}
 			blocking := EdgesOfType(edges, trace.EdgeHardBlock)
-			observed, _, _, err := EdgeObservationAt(repo, stream)
-			if err != nil {
-				return err
+			var observed EdgeObservation
+			if len(blocking) > 0 {
+				if observed, _, _, err = EdgeObservationAt(repo, stream); err != nil {
+					return err
+				}
 			}
 			reason := ""
 			if reference, found := FirstUnresolvedEdge(blocking, observed); found {

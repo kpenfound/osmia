@@ -208,6 +208,9 @@ func TestColdRestartRebuildsApprovalStateFromTheTrace(t *testing.T) {
 	}
 	probe.Close()
 
+	// Reopening validates the member bindings against the approval, so the
+	// rebuild may happen there or on the first read; it happens once.
+	decodes := GroupApprovalDecodeCount(f.g.ID)
 	r1, err := Open(f.root, f.p1)
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +232,6 @@ func TestColdRestartRebuildsApprovalStateFromTheTrace(t *testing.T) {
 	if wt.members[crossMember1].Project != r1 || wt.members[crossMember2].Project != r2 {
 		t.Fatal("reopened trace kept stale member bindings")
 	}
-	decodes := GroupApprovalDecodeCount(f.g.ID)
 	got, found, required, err := r1.groupApprovalState(f.g.ID)
 	if err != nil || found != wantFound || required != wantRequired || !reflect.DeepEqual(got, want) {
 		t.Fatalf("after restart: %+v %v %v %v", got, found, required, err)
