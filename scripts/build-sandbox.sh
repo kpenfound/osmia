@@ -60,8 +60,19 @@ for dir in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin /opt/doc
         rm -f "${dir:?}/${name:?}"
     done
 done
-rm -rf /usr/libexec/docker /usr/lib/docker /usr/local/lib/docker /var/lib/docker /var/lib/containerd \
-    /run/docker /run/containerd /var/run/docker /var/run/containerd
+# sbx attaches a data disk at /var/lib/docker. A mount point cannot be removed,
+# so it is emptied and left in place.
+is_mount_point() {
+    awk -v p="$1" '$5 == p { found = 1 } END { exit !found }' /proc/self/mountinfo
+}
+for path in /usr/libexec/docker /usr/lib/docker /usr/local/lib/docker /var/lib/docker /var/lib/containerd \
+    /run/docker /run/containerd /var/run/docker /var/run/containerd; do
+    if is_mount_point "$path"; then
+        find "$path" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    else
+        rm -rf "$path"
+    fi
+done
 rm -f /run/docker.sock /var/run/docker.sock /etc/init.d/docker /etc/init.d/containerd \
     /etc/supervisor/conf.d/*docker* /etc/supervisor/conf.d/*containerd* \
     /lib/systemd/system/docker.* /lib/systemd/system/containerd.service \
