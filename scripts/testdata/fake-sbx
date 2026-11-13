@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# A stand-in for sbx that plays the build sandbox for scripts/build-sandbox.sh.
+# Every call is appended to $FAKE_SBX_LOG. The guest is the directory
+# $FAKE_GUEST_ROOT: the real guest probe script runs against it with
+# PROBE_ROOT/PROBE_PROC and sees $FAKE_GUEST_DOCKER_HOST as its DOCKER_HOST.
+# FAKE_SBX_PROBE selects a probe failure: fail (sbx exec exits non-zero),
+# silent (no output) or truncated (no "done" line).
+set -u
+printf '%s\n' "$*" >>"${FAKE_SBX_LOG:?}"
+
+case "${1:-}" in
+create | stop) exit 0 ;;
+rm) exit "${FAKE_SBX_RM_STATUS:-0}" ;;
+template) exit 0 ;;
+exec) ;;
+*) echo "fake sbx: unexpected command: $*" >&2; exit 2 ;;
+esac
+
+shift
+user=agent
+while [[ ${1:-} == -* ]]; do
+    case "$1" in
+    -u) user=$2; shift 2 ;;
+    *) shift ;;
+    esac
+done
+shift # the sandbox name
+
+case "$*" in
+*osmia-docker-probe*)
+    case "${FAKE_SBX_PROBE:-}" in
+    fail) cat >/dev/null; exit 1 ;;
+    silent) cat >/dev/null; exit 0 ;;
+    truncated) cat >/dev/null; echo "ok processes"; exit 0 ;;
+    esac
+    home=/home/agent
+    [[ $user == root ]] && home=/root
+    env -u DOCKER_HOST -u XDG_RUNTIME_DIR \
+        ${FAKE_GUEST_DOCKER_HOST:+DOCKER_HOST="$FAKE_GUEST_DOCKER_HOST"} \
+        HOME="$home" PROBE_ROOT="${FAKE_GUEST_ROOT:?}" PROBE_PROC="$FAKE_GUEST_ROOT/proc" \
+        bash -s osmia-docker-probe
+    ;;
+*osmia-docker-removal*) cat >/dev/null ;;
+"codex --version") echo "codex-cli 1.0.0" ;;
+"claude --version") [[ -z ${FAKE_SBX_NO_CLAUDE:-} ]] || exit 127; echo "2.0.0 (Claude Code)" ;;
+"dagger version") echo "version:     ${FAKE_SBX_DAGGER_VERSION:-v0.19.0}" ;;
+*) cat >/dev/null ;; # installer scripts piped on stdin
+esac

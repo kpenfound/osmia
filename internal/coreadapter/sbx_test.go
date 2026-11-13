@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -279,5 +280,122 @@ func TestSbxRequestCannotChangePreparedHostPort(t *testing.T) {
 	}
 	if len(engine.Prepared) != 1 || len(engine.Requests) != 1 {
 		t.Fatal("changed endpoint reached preparation")
+	}
+}
+
+// A turn's sandbox size reaches the profile of its request, and a turn that
+// sets none leaves the profile's size unset.
+func TestSandboxSizeReachesTheProfile(t *testing.T) {
+	for name, c := range map[string]struct {
+		cpus   int
+		memory string
+	}{
+		"unset":  {},
+		"cpus":   {cpus: 2},
+		"memory": {memory: "512m"},
+		"both":   {cpus: 4, memory: "4g"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			turn := toolTurn(t, "sbx")
+			turn.Execution.CPUs, turn.Execution.Memory = c.cpus, c.memory
+			engine := &adaptertest.Engine{}
+			if _, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn); err != nil {
+				t.Fatal(err)
+			}
+			if len(engine.Requests) != 1 || engine.Requests[0].Profile.SandboxCPUs != c.cpus || engine.Requests[0].Profile.SandboxMemory != c.memory {
+				t.Fatalf("requests %+v", engine.Requests)
+			}
+		})
+	}
+}
+
+// A size that is not one a sandbox can be created with, or a size for a
+// sandbox that is not sbx, never reaches a session.
+func TestSandboxSizeIsRefusedWhereItCannotApply(t *testing.T) {
+	for name, mutate := range map[string]func(*a.PreparedTurn){
+		"negative cpus":       func(turn *a.PreparedTurn) { turn.Execution.CPUs = -1 },
+		"memory with options": func(turn *a.PreparedTurn) { turn.Execution.Memory = "4g --privileged" },
+		"memory without unit": func(turn *a.PreparedTurn) { turn.Execution.Memory = "4096" },
+		"cpus in a container": func(turn *a.PreparedTurn) {
+			turn.Execution.Mode, turn.Execution.Image, turn.Execution.CPUs = "container", "fixture-image", 2
+		},
+		"memory on the host": func(turn *a.PreparedTurn) { turn.Execution.Mode, turn.Execution.Memory = "none", "4g" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			turn := toolTurn(t, "sbx")
+			mutate(&turn)
+			engine := &adaptertest.Engine{}
+			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+			if !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 || len(engine.Prepared) != 0 {
+				t.Fatalf("err=%v prepared=%d launches=%d", err, len(engine.Prepared), len(engine.Requests))
+			}
+		})
+	}
+}
+
+// A request whose size differs from the role's settings widens the service
+// boundary and is refused.
+func TestSandboxSizeCannotBeChangedAfterPreparation(t *testing.T) {
+	turn := toolTurn(t, "sbx")
+	turn.Execution.CPUs, turn.Execution.Memory = 2, "4g"
+	engine := &adaptertest.Engine{}
+	executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+	if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*agent.Profile){
+		"cpus":   func(p *agent.Profile) { p.SandboxCPUs = 64 },
+		"memory": func(p *agent.Profile) { p.SandboxMemory = "32g" },
+		"unset":  func(p *agent.Profile) { p.SandboxCPUs, p.SandboxMemory = 0, "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := engine.Requests[0]
+			req.Workspace = vcs.Directory(turn.Sandbox.Verified.Workspace.Directory)
+			mutate(&req.Profile)
+			if _, err := executor.Run(context.Background(), req, turn.Execution); !errors.Is(err, a.ErrUnsupported) {
+				t.Fatalf("changed size: %v", err)
+			}
+		})
+	}
+}
+
+// A turn's size becomes sbx create's --cpus and --memory among its options,
+// before the agent, and a turn without one has the command line it always had.
+func TestSbxCreateReceivesTheSandboxSize(t *testing.T) {
+	for name, c := range map[string]struct {
+		cpus   int
+		memory string
+		extra  []string
+	}{
+		"unset":  {},
+		"cpus":   {cpus: 2, extra: []string{"--cpus", "2"}},
+		"memory": {memory: "512m", extra: []string{"--memory", "512m"}},
+		"both":   {cpus: 4, memory: "4g", extra: []string{"--cpus", "4", "--memory", "4g"}},
+	} {
+		for _, image := range []string{"", "example/template:1"} {
+			t.Run(name+"/"+image, func(t *testing.T) {
+				turn := toolTurn(t, "sbx")
+				turn.Execution.Image, turn.Execution.CPUs, turn.Execution.Memory = image, c.cpus, c.memory
+				turn.Profile.Timeout = time.Minute
+				turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
+				runner := sbxRunner(t, agenttest.Session(t, agent.AgentClaude, agenttest.Turn{ResultText: "boxed"}).Bin)
+				result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
+				if err != nil || result.IsError {
+					t.Fatalf("result %+v: %v", result, err)
+				}
+				args := strings.Split(strings.TrimSuffix(readSbxFile(t, filepath.Join(filepath.Dir(runner.SbxBin), "sbx-create.txt")), "\n"), "\n")
+				want := []string{"create", "--no-progress", "--name", args[3], "--skills", "off"}
+				if image != "" {
+					want = append(want, "--template", image)
+				}
+				want = append(append(want, c.extra...), agent.AgentClaude)
+				if len(args) <= len(want) || !slices.Equal(args[:len(want)], want) {
+					t.Fatalf("sbx create arguments:\n%q\nwant the prefix\n%q", args, want)
+				}
+				if c.cpus == 0 && slices.Contains(args, "--cpus") || c.memory == "" && slices.Contains(args, "--memory") {
+					t.Fatalf("a size nothing set: %q", args)
+				}
+			})
+		}
 	}
 }

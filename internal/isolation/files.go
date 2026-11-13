@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -169,6 +170,50 @@ func (v Views) Create(ctx context.Context, source coreadapter.Workspace, paths [
 		return nil, err
 	}
 	return view, nil
+}
+
+// CreateFor creates a view as Create does and, when the turn's execution
+// settings carry Dagger, gives it an empty Git repository at its root. Dagger
+// finds a project's dagger.toml at the enclosing Git root, and a view lies
+// outside any repository. The repository exists before CreateFor returns, so
+// before any sandbox or marker built on the view. A view for settings without
+// Dagger has no repository.
+//
+// The repository is the one place a view holds VCS metadata. It is empty: it
+// has no commit, remote, hook or file from the project's clone or the host's
+// Git configuration. The file tools never expose it and no capture copies it,
+// because VCSMetadata names are skipped everywhere a view is read back.
+func (v Views) CreateFor(ctx context.Context, source coreadapter.Workspace, paths []string, execution coreadapter.ExecutionSettings) (*FileView, error) {
+	view, err := v.Create(ctx, source, paths)
+	if err != nil {
+		return nil, err
+	}
+	if execution.Dagger != nil {
+		if err := InitRepository(ctx, view.workspace.Directory); err != nil {
+			return nil, errors.Join(err, view.Release(context.WithoutCancel(ctx)))
+		}
+	}
+	return view, nil
+}
+
+// InitRepository runs `git init --quiet --template=` in dir on the host, with
+// an environment that carries no inherited Git variables and no host Git
+// configuration, so the repository holds only what git itself writes for an
+// empty one.
+func InitRepository(ctx context.Context, dir string) error {
+	home, err := os.MkdirTemp("", "osmia-view-git-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(home)
+	initialise := exec.CommandContext(ctx, "git", "init", "--quiet", "--template=")
+	initialise.Dir = dir
+	initialise.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_CONFIG_HOME=" + home,
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"}
+	if out, err := initialise.CombinedOutput(); err != nil {
+		return fmt.Errorf("initialise view repository: %w: %s", err, out)
+	}
+	return nil
 }
 
 func within(root, path string) bool {

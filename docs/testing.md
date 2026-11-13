@@ -32,6 +32,29 @@ selection flags described in [AGENTS.md](../AGENTS.md#validation), such as
 `dagger check --go-test=TestA`. Host `gofmt`, `go build` and `go vet ./...` are
 allowed; they do not execute tests.
 
+## Validate as a mason
+
+A mason with Dagger validates only through Dagger, from its view root. The
+view of a Dagger-enabled turn holds an empty Git repository at its root, which
+the Dagger CLI needs to find `dagger.toml`; the repository has no commits,
+remote or hooks and is never captured, and the turn still has no version
+control. Plain `dagger check`, its listing (`dagger check -l`), the Go check's
+`--go-package`, `--go-test` and `--env` flags and `dagger generate` all work
+from the view root, with no workspace flag, no copy of the tree and no `.git`
+of the mason's own:
+
+```sh
+dagger check --progress=report
+dagger check --progress=report --go-package=internal/config --go-test=TestA
+dagger check --progress=report 'dag+check://?check=lint&staticcheck-project=.'
+```
+
+The lint link runs staticcheck over the project. There is no other route:
+masons do not validate with Docker or Compose, a copy of the tree made into a
+Git root, or a toolchain installed in the guest. The Osmia sandbox template has
+no Docker Engine, and the guest reaches the engine only through the host's
+forward ([Dagger for masons](configuration.md#dagger-for-masons)).
+
 ## What the suite covers
 
 | Boundary | Representative tests | What they establish |

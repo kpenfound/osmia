@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,8 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/isolation"
 )
 
 // realCLIWorkspace writes a Dagger workspace of Go packages using the project's
@@ -369,4 +373,159 @@ func TestRealDaggerCLIServiceID(t *testing.T) {
 	if !previewServiceID(response.Container.WithDefaultArgs.AsService.ID) {
 		t.Fatalf("real CLI Service ID refused: %s", output)
 	}
+}
+
+// viewCLI runs the real Dagger CLI from the root of the view at root, with the
+// arguments given and nothing that names a workspace, and returns its output
+// and exit status. A nested Dagger client takes its working directory from
+// the container it runs in, never from its process, so the CLI runs in a
+// container of its own whose working directory is the view root: the view is
+// that container's directory /view, repository included, and the CLI is this
+// test's own.
+func viewCLI(ctx context.Context, t *testing.T, root string, args ...string) (string, int) {
+	t.Helper()
+	cli, err := exec.LookPath("dagger")
+	must(t, err)
+	if head, err := os.ReadFile(cli); err != nil || bytes.HasPrefix(head, []byte("#!")) {
+		t.Fatalf("%s is a wrapper, not the Dagger CLI: %v", cli, err)
+	}
+	for _, arg := range args {
+		if arg == "-W" || strings.HasPrefix(arg, "--workspace") || strings.HasPrefix(arg, "-W=") {
+			t.Fatalf("dagger %v names a workspace", args)
+		}
+	}
+	core := func(last ...string) (string, error) {
+		argv := append([]string{"core", "container", "from", "--address=golang:1.26-bookworm",
+			"with-file", "--path=/usr/local/bin/dagger", "--source=" + cli, "--permissions=493",
+			"with-directory", "--path=/view", "--source=" + root,
+			"with-workdir", "--path=/view",
+			"with-exec", "--args=" + strings.Join(append([]string{"dagger"}, args...), ","), "--experimental-privileged-nesting", "--expect=ANY"}, last...)
+		cmd := exec.CommandContext(ctx, cli, argv...)
+		for _, kv := range os.Environ() {
+			if name, _, _ := strings.Cut(kv, "="); !strings.HasPrefix(name, "GIT_") && name != "DAGGER_WORKSPACE" {
+				cmd.Env = append(cmd.Env, kv)
+			}
+		}
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("%w: %s", err, stderr.String())
+		}
+		return stdout.String(), nil
+	}
+	status, err := core("exit-code")
+	must(t, err)
+	var exit int
+	_, err = fmt.Sscanf(strings.TrimSpace(status), "%d", &exit)
+	must(t, err)
+	output, err := core("combined-output")
+	must(t, err)
+	return output, exit
+}
+
+// enclosingRepository reports a directory above dir, or dir itself, that holds
+// Git metadata.
+func enclosingRepository(dir string) string {
+	for ; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		if filepath.Dir(dir) == dir {
+			return ""
+		}
+	}
+}
+
+// A mason's view, built by Osmia's view code, is a Dagger workspace of its own
+// at the view root: plain dagger commands there find the project's modules with
+// no workspace flag, no copy and no repository the test made. The same project
+// in a view without the repository is not found, so the difference is the
+// view's repository and not an enclosing one.
+// serial: the nested session is the process's own.
+func TestRealDaggerCLIViewRepository(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	defer cancel()
+	project := realCLIWorkspace(t)
+	toml, err := os.OpenFile(filepath.Join(project, "dagger.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	must(t, err)
+	_, err = toml.WriteString("\n[env.flake.modules.go.settings]\ngoflags = \"-count=2\"\n")
+	must(t, errors.Join(err, toml.Close()))
+	entries, err := os.ReadDir(project)
+	must(t, err)
+	var paths []string
+	for _, entry := range entries {
+		paths = append(paths, entry.Name())
+	}
+	storage := t.TempDir()
+	if enclosing := enclosingRepository(storage); enclosing != "" {
+		t.Fatalf("view storage %s is inside the Git repository at %s", storage, enclosing)
+	}
+	build := func(t *testing.T, settings coreadapter.ExecutionSettings) string {
+		t.Helper()
+		view, err := (isolation.Views{Directory: storage}).CreateFor(ctx, coreadapter.Workspace{Directory: project, Access: coreadapter.ReadWrite}, paths, settings)
+		must(t, err)
+		t.Cleanup(func() { view.Release(context.WithoutCancel(ctx)) })
+		return view.Workspace().Directory
+	}
+	// What a mason's execution settings carry; only Dagger differs.
+	mason := coreadapter.ExecutionSettings{Mode: agent.SandboxSbx, Dagger: &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}}
+	// listsChecks reports the "MODULE CHECK" rows of a dagger check -l table.
+	listsChecks := func(output string) (rows []string) {
+		for _, line := range strings.Split(output, "\n") {
+			if fields := strings.Fields(line); len(fields) >= 2 && !strings.HasPrefix(line, "#") && fields[0] != "MODULE" {
+				rows = append(rows, fields[0]+"/"+fields[1])
+			}
+		}
+		return rows
+	}
+
+	t.Run("a view without the repository does not find the project", func(t *testing.T) {
+		root := build(t, coreadapter.ExecutionSettings{Mode: agent.SandboxSbx})
+		if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
+			t.Fatal("the control view holds .git")
+		}
+		if _, err := os.Lstat(filepath.Join(root, "dagger.toml")); err != nil {
+			t.Fatalf("the control view lacks the project: %v", err)
+		}
+		output, exit := viewCLI(ctx, t, root, "check", "-l")
+		t.Logf("dagger check -l without the repository: exit %d\n%s", exit, output)
+		if rows := listsChecks(output); len(rows) != 0 {
+			t.Fatalf("checks %q are listed without the view's repository:\n%s", rows, output)
+		}
+	})
+
+	root := build(t, mason)
+	if _, err := os.Lstat(filepath.Join(root, ".git", "HEAD")); err != nil {
+		t.Fatalf("the mason view holds no repository: %v", err)
+	}
+	if enclosing := enclosingRepository(filepath.Dir(root)); enclosing != "" {
+		t.Fatalf("the view is inside the Git repository at %s", enclosing)
+	}
+	t.Run("dagger check lists the project's checks from the view root", func(t *testing.T) {
+		output, exit := viewCLI(ctx, t, root, "check", "-l")
+		t.Logf("dagger check -l: exit %d\n%s", exit, output)
+		if exit != 0 {
+			t.Fatalf("dagger check -l exited %d", exit)
+		}
+		rows := listsChecks(output)
+		for _, want := range []string{"go/test", "go/stale", "fixture/standalone", "dang-sdk/stale"} {
+			if !slices.Contains(rows, want) {
+				t.Fatalf("dagger check -l lists %q, lacking %s:\n%s", rows, want, output)
+			}
+		}
+	})
+	t.Run("dagger check accepts the Go check's flags", func(t *testing.T) {
+		output, exit := viewCLI(ctx, t, root, "check", "--progress=report", "--go-package=a", "--go-test=TestOne", "--env=flake")
+		t.Logf("dagger check --go-package --go-test --env: exit %d\n%s", exit, output)
+		if exit != 0 || !strings.Contains(output, "go-test=TestOne") || strings.Contains(output, "TestTwo") {
+			t.Fatalf("dagger check with the Go check's flags exited %d:\n%s", exit, output)
+		}
+	})
+	t.Run("dagger generate runs", func(t *testing.T) {
+		output, exit := viewCLI(ctx, t, root, "generate", "--progress=report")
+		t.Logf("dagger generate: exit %d\n%s", exit, output)
+		if exit != 0 {
+			t.Fatalf("dagger generate exited %d", exit)
+		}
+	})
 }

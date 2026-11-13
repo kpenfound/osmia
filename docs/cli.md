@@ -1054,7 +1054,7 @@ the root and the configuration directly, the way `serve` does.
 | Group | Checks |
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
-| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound. |
+| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
 | `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
@@ -1070,6 +1070,20 @@ expose it. Doctor names the Docker host for managed and explicit container
 engines, omitting URL user information, or reports a conflict between
 `DOCKER_HOST` and a named `DOCKER_CONTEXT`. Doctor probes engines without
 restarting or pruning them.
+
+When a role uses `sandbox = "sbx"`, doctor adds a `sandbox memory` check. It
+estimates the memory the sandboxes could hold at once: each of the mason,
+reviewer and committee pools counts `capacity.masons`, `capacity.reviewers` or
+`capacity.committee` sandboxes of its role's `memory`, and the architect and
+librarian count once each, since they have no factory-wide limit and run one
+turn per workstream (the chief of staff and foreman count once each too, when
+they use `sbx`). A role without `memory` counts at `sbx`'s default, half the
+host's memory between 512 MiB and 32 GiB. Only `sbx` roles count. When the
+total exceeds the host's memory the check is a warning, never a failure, whose
+detail states the estimate and these assumptions and whose fix is to set
+`memory` in `[roles.<role>]` or lower the capacity; otherwise it passes. See
+[Sandbox size](configuration.md#sandbox-size). The check is a warning too
+when doctor cannot read the host's memory.
 
 Checks that need something an earlier check found missing are left out: with
 no root only the toolchain and GitHub checks run, and with a configuration

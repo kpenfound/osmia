@@ -501,6 +501,20 @@ also refused; their existing abandon/archive controls still apply. Wait for
 busy work to finish before retrying. An unknown or already destroyed ID reports
 not found. The CLI prints the service's refusal message and exits non-zero.
 
+## Sandbox memory
+
+Every turn of a role with `sandbox = "sbx"` runs in its own Docker Sandbox
+virtual machine, and the mason, reviewer and committee pools can hold several at
+once. Before `osmia serve`, `osmia doctor` estimates the memory they could hold
+at once, from each pool's capacity and each role's `memory` (or `sbx`'s default,
+half the host's memory between 512 MiB and 32 GiB, when it is unset), with the
+architect and librarian counted once each. It warns, without failing, when the
+estimate exceeds the host's memory. Set `cpus` and `memory` in
+`[roles.<role>]` to bring it down; the keys, a starting point for a 16 GB host
+and what to do when a mason runs out of memory are in
+[Sandbox size](configuration.md#sandbox-size). Osmia sets no `cpus` or `memory`
+of its own.
+
 ## Reload
 
 `osmia reload` (or the page's reload control) reads the top-level
@@ -512,7 +526,9 @@ configuration stays in force and the error names the file, the field and why.
 When every file passes, the new configuration replaces the loaded one in one
 step. Profiles, role bindings and sandboxes, capacity, budgets, shed and mason
 limits, the webhook and project settings apply to what the service decides
-next. A turn already running finishes on the configuration it started with.
+next. A turn already running finishes on the configuration it started with, so
+a changed `cpus` or `memory` of an `sbx` role applies to sandboxes created
+afterwards.
 Projects added to `active_projects` start; projects removed from it stop
 taking new work and drain what is in flight before the reload returns.
 

@@ -75,6 +75,9 @@ type Options struct {
 	EngineCommand engine.Command
 	// CheckJJ checks the jj on PATH.
 	CheckJJ func(context.Context) (string, error)
+	// TotalMemory returns the host's total memory in bytes, which the
+	// sandbox memory estimate is compared with; nil reads the host's.
+	TotalMemory func() (uint64, error)
 	// Token is the GitHub token the service reads from GITHUB_TOKEN.
 	Token string
 	// Getenv reads the environment the service would start with, such as
@@ -112,6 +115,9 @@ func Run(ctx context.Context, o Options) []Check {
 	if o.CheckJJ == nil {
 		o.CheckJJ = func(ctx context.Context) (string, error) { return workspace.CheckJJ(ctx, "") }
 	}
+	if o.TotalMemory == nil {
+		o.TotalMemory = hostMemory
+	}
 	if o.Getenv == nil {
 		o.Getenv = os.Getenv
 	}
@@ -131,6 +137,7 @@ func Run(ctx context.Context, o Options) []Check {
 	if cfg != nil {
 		r.engine(ctx, cfg)
 	}
+	r.sandboxMemory(cfg)
 	r.socket(cfg)
 	r.web(cfg)
 	r.jev(cfg)

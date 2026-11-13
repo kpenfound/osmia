@@ -4901,6 +4901,9 @@
       },
       "ConfigRole": {
         "properties": {
+          "cpus": {
+            "type": "integer"
+          },
           "dagger": {
             "$ref": "#/components/schemas/ConfigDagger"
           },
@@ -4908,6 +4911,9 @@
             "type": "string"
           },
           "image": {
+            "type": "string"
+          },
+          "memory": {
             "type": "string"
           },
           "profile": {

@@ -115,7 +115,7 @@ var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questi
 // and image with the role's skills, and for a mason with the Dagger engine the
 // role configures.
 func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
-	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Skills: slices.Clone(r.Skills)}
+	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Skills: slices.Clone(r.Skills)}
 	if role == masonRole {
 		execution.Dagger = r.Dagger.Settings()
 	}
@@ -188,7 +188,7 @@ func Enforce(opts Options, e Enforcement) Options {
 						return isolation.Selection{}, err
 					}
 					role := cfg.Roles[masonRole]
-					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}}, nil
+					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image, CPUs: role.CPUs, Memory: role.Memory}}, nil
 				}
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, threadExecution(masonRole, cfg.Roles[masonRole]))

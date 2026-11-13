@@ -285,6 +285,103 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 	}
 }
 
+// A Dagger-enabled mason turn works in a view that holds an empty Git
+// repository. Whatever the turn leaves under it never reaches the unit's
+// workspace or the candidate snapshotted from it; the turn's file edits do.
+func TestDaggerMasonTurnLeavesItsViewRepositoryBehind(t *testing.T) {
+	ctx := context.Background()
+	f := newUnitsFixture(t)
+	units := f.units()
+	w, _, err := units.open(ctx, stream, "u1")
+	must(t, err)
+	clone := f.cfg.Project.Clone
+	dotgit := filepath.Join(w.Path, ".git")
+	pointer, err := os.ReadFile(dotgit)
+	must(t, err)
+	var problems []string
+	mason := func(_ context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+		view := turn.Request.Workspace.Directory()
+		if _, err := os.Lstat(filepath.Join(view, ".git", "HEAD")); err != nil {
+			problems = append(problems, "the view holds no repository: "+err.Error())
+		}
+		if turn.Request.Workspace.VCS() != nil || turn.Request.Profile.VCSAccess || turn.Policy.VCS {
+			problems = append(problems, "the turn holds VCS")
+		}
+		problem := func(what string, err error) {
+			if err != nil {
+				problems = append(problems, what+": "+err.Error())
+			}
+		}
+		problem("writing the view", turn.WriteFile(filepath.Join(view, "README"), []byte("widgets, built\n")))
+		problem("planting a hook", os.MkdirAll(filepath.Join(view, ".git", "hooks"), 0700))
+		problem("planting a hook", os.WriteFile(filepath.Join(view, ".git", "hooks", "pre-commit"), []byte("#!/bin/sh\n"), 0700))
+		problem("planting a ref", os.WriteFile(filepath.Join(view, ".git", "planted"), []byte("planted\n"), 0600))
+		return &agent.Result{ResultText: "built"}, nil
+	}
+	execution := coreadapter.ExecutionSettings{Mode: agent.SandboxSbx, Dagger: &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}}
+	result, err := f.masonTurn(ctx, t, units, execution, mason)
+	if err != nil || result.FinalResponse != "built" {
+		t.Fatalf("the mason turn: %+v %v", result, err)
+	}
+	if len(problems) != 0 {
+		t.Fatalf("the mason turn:\n%s", strings.Join(problems, "\n"))
+	}
+	if after, err := os.ReadFile(dotgit); err != nil || string(after) != string(pointer) {
+		t.Fatalf("the workspace's .git after the turn: %q %v", after, err)
+	}
+	must(t, filepath.WalkDir(w.Path, func(name string, entry fs.DirEntry, err error) error {
+		if err == nil && (entry.Name() == "planted" || entry.Name() == "pre-commit") {
+			t.Errorf("%s in the workspace after the turn", name)
+		}
+		return err
+	}))
+	_, _, candidate, err := units.snapshot(ctx, stream, "u1")
+	must(t, err)
+	if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", "--no-renames", f.base, candidate)); got != "M\tREADME" {
+		t.Fatalf("the candidate after the turn:\n%s", got)
+	}
+}
+
+// The mason a configuration gives Dagger is the turn whose view holds the
+// repository; the roles it does not give Dagger run in views with none, and
+// Dagger on any other role is a configuration error.
+func TestConfiguredMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	options := fixturekit.ConfigAt(t, home)
+	file := filepath.Join(options.Root, "config.toml")
+	base, err := os.ReadFile(file)
+	must(t, err)
+	const dagger = "[roles.mason.dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n"
+	must(t, os.WriteFile(file, append(base, []byte("[roles.mason]\nsandbox = 'sbx'\n"+dagger)...), 0600))
+	cfg, err := config.Load(options)
+	must(t, err)
+	source := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("widgets\n"), 0600))
+	views := isolation.Views{Directory: t.TempDir()}
+	for role, wantRepository := range map[string]bool{"mason": true, "reviewer": false, "committee": false, "architect": false, "librarian": false} {
+		t.Run(role, func(t *testing.T) {
+			_, settings, err := cfg.Execution(role, "default")
+			must(t, err)
+			if (settings.Dagger != nil) != wantRepository {
+				t.Fatalf("execution settings %+v", settings)
+			}
+			view, err := views.CreateFor(ctx, coreadapter.Workspace{Directory: source, Access: coreadapter.ReadWrite}, []string{"README"}, settings)
+			must(t, err)
+			defer view.Release(ctx)
+			_, err = os.Lstat(filepath.Join(view.Workspace().Directory, ".git", "HEAD"))
+			if (err == nil) != wantRepository {
+				t.Fatalf("the %s view's repository: %v", role, err)
+			}
+		})
+	}
+	reviewer := append(base, []byte("[roles.reviewer]\nsandbox = 'sbx'\n"+strings.Replace(dagger, "mason", "reviewer", 1))...)
+	must(t, os.WriteFile(file, reviewer, 0600))
+	if _, err := config.Load(options); err == nil {
+		t.Fatal("Dagger on the reviewer loaded")
+	}
+}
+
 // A unit workspace is lent to a mason turn of a unit whose workspace exists,
 // and to no other turn.
 func TestUnitWorkspaceIsLentToItsMasonAlone(t *testing.T) {

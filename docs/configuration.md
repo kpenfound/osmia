@@ -455,6 +455,8 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | `profile` | `default` | Must reference an existing named profile |
 | `sandbox` | `none` | `none` (host execution), `claude`, `container` or `sbx` (Docker Sandboxes) |
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
+| `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
+| `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `dagger` | unset | Mason only, with `sbx`: the Dagger CLI `version` and host `engine` given to implementation turns; see [Dagger for masons](#dagger-for-masons) |
 | `skills` | `[]` | Skills by git reference, given to the role's Claude turns; see [Role skills](#role-skills) |
 
@@ -490,6 +492,66 @@ A custom template must support every agent in that role's fallback chain. The
 classifier uses the mason's sandbox and template with its own configured profile.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
 
+### Sandbox size
+
+`cpus` and `memory` in `[roles.<role>]` size each sandbox the role creates. They
+are valid only with `sandbox = "sbx"`: with `none`, `claude` or `container`,
+loading fails with an error naming `roles.<role>.cpus` or
+`roles.<role>.memory`. `cpus` is a positive integer. `memory` is a positive
+integer followed by `m` or `g`, such as `512m` or `4g`. A value in any other
+form fails the load, naming the field. Osmia checks the format only; `sbx`
+enforces its own limits, such as its 512 MiB minimum, when it creates the
+sandbox and reports a refusal as the turn's failure.
+
+```toml
+[roles.mason]
+sandbox = "sbx"
+cpus = 2
+memory = "4g"
+```
+
+The values apply to every turn of the role, fallback profiles included. A reload
+applies changed values to sandboxes created afterwards; a turn already running
+keeps the sandbox it has.
+
+**Osmia sets no defaults.** A role without `cpus` or `memory` gets exactly the
+`sbx create` command line it would get without these keys, so `sbx` chooses its
+own size: for memory, half the host's memory, between 512 MiB and 32 GiB. Every
+sandbox of a role holds that much, and the mason, reviewer and committee pools
+can run several at once, so an unsized setup can ask for more than the host has.
+`osmia doctor` warns about that; see
+[Doctor](cli.md#doctor).
+
+Starting values for a 16 GB host whose Dagger engine is remote, to adjust to
+your capacity settings and workload:
+
+```toml
+[roles.mason]
+sandbox = "sbx"
+cpus = 2
+memory = "4g"
+
+# The read-only roles: architect, reviewer, committee, librarian,
+# chief_of_staff and foreman.
+[roles.reviewer]
+sandbox = "sbx"
+cpus = 2
+memory = "2g"
+```
+
+That is `2g` for read-only roles, `4g` for masons and `cpus = 2`. With the
+default capacity, the four masons, two reviewers, three committee members and
+one architect and librarian hold 16 + 4 + 6 + 4 = 30 GiB at most, more than
+such a host has, so lower `capacity.masons`, `capacity.reviewers` and
+`capacity.committee` or the values to fit; doctor shows the total. These are
+not defaults, only a place to start: Osmia applies none of them.
+
+A local Dagger engine needs room of its own. It runs on the host beside the
+sandboxes, and its cache and the builds it runs take memory the sandboxes do not
+leave, so size the sandboxes smaller or use a remote engine. If a mason turn
+fails because its guest ran out of memory, raise the mason's `memory` (and
+reduce `capacity.masons` if the host cannot hold more).
+
 **Building the Osmia template**
 
 From the Osmia checkout, run:
@@ -499,12 +561,41 @@ From the Osmia checkout, run:
 ```
 
 The script requires a working `sbx` installation and the Dagger CLI on the
-host's `PATH`. It pulls the latest Codex template, which ships Codex, installs
-the latest Claude Code with its native installer and the Dagger CLI release
-reported by the host's `dagger version`, verifies the tools, and saves the local
-template as `osmia:latest`. Tags such as `:latest` are supported for templates.
-Each run refreshes both agents and replaces that local tag. The temporary build
-sandbox has no workspace mounts and is removed when the script exits.
+host's `PATH`. It pulls the latest Codex template, which ships Codex, removes
+Docker Engine and the Docker CLI from it, installs the latest Claude Code with
+its native installer and the Dagger CLI release reported by the host's
+`dagger version`, verifies the tools, and saves the local template as
+`osmia:latest`. Tags such as `:latest` are supported for templates. Each run
+refreshes both agents and replaces that local tag. The temporary build sandbox
+has no workspace mounts and is removed when the script exits, including when it
+refuses to save.
+
+The template has no Docker Engine: no `dockerd` or `containerd` runs in a
+sandbox made from it, and it has no Docker CLI. There is one template for every
+role and no Docker variant. Masons validate only through Dagger, which reaches
+the Dagger engine over TCP through agentcore's host forward for the
+sandbox, not through a Docker daemon in the guest. A guest Docker stack would
+only cost host memory in every sandbox. Masons use this template; a mason
+`image` that carries Docker is the owner's own choice, outside what Osmia builds
+or supports.
+
+Before saving, the script proves inside the build sandbox, as root and as the
+agent user, that the template is Docker-free, and otherwise it exits non-zero
+without saving, names what it found and still removes the build sandbox. It
+refuses when:
+
+- a `dockerd`, `containerd` or containerd shim process runs;
+- a `docker`, `dockerd`, `containerd` or related executable remains;
+- a Docker daemon answers `/_ping` at the default sockets, the `DOCKER_HOST`
+  address, an address in a Docker context, `127.0.0.1:2375` or any
+  docker- or containerd-named socket in the guest; or
+- a probe cannot run or cannot tell. Only a connection that cannot be made
+  counts as absence; an unreadable `/proc`, a socket that answers something
+  else or an address scheme the probe cannot ask is a refusal.
+
+The reachability probe asks each socket or address directly with `curl`. It
+does not use the Docker CLI, whose absence would prove nothing. The script also
+keeps its version checks for Codex, Claude Code and the host's Dagger release.
 
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
@@ -781,6 +872,14 @@ The mason receives Dagger only when its own `[roles.mason.dagger]` section is
 present. Its CLI `version` remains required and independent of the top-level
 engine version. With no top-level `[dagger]` section, the engine selection is
 `auto` and a mason must specify its engine.
+
+A Dagger-enabled mason's view holds an empty Git repository at its root, made
+on the host before the sandbox starts, so the CLI finds `dagger.toml` there. It
+has no commits, remote or hooks and is never captured. From the view root the
+mason runs plain `dagger check`, `dagger check -l`, the Go check's
+`--go-package`, `--go-test` and `--env` flags and `dagger generate`, and lints
+through the link `dag+check://?check=lint&staticcheck-project=.`. Dagger is the
+mason's only validation route.
 
 Each mason turn asks its sandbox for `dagger version`. A template that already
 has the configured release keeps it, so baking the CLI into the mason's `image`

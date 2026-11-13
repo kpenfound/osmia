@@ -272,10 +272,15 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			}
 			viewRoot := turnViews(f.s.cfg, f.project, stream, masonAgent("resume"), masonTurnID("resume"))
 			must(t, os.MkdirAll(viewRoot, 0700))
-			view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, selection.Paths)
+			// A Dagger-enabled mason's view holds an empty repository; the
+			// interrupted turn left a file in it.
+			view, err := (isolation.Views{Directory: viewRoot}).CreateFor(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, selection.Paths, coreadapter.ExecutionSettings{Dagger: &agent.Dagger{}})
 			must(t, err)
 			must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
 			must(t, writeEdits(view.Workspace().Directory))
+			const leftInRepository = "left in the view's repository"
+			must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "left-by-the-turn"), []byte(leftInRepository), 0600))
+			must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "hooks-left-by-the-turn"), []byte(leftInRepository), 0600))
 			_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume")), f.clock.Now())
 			must(t, err)
 			must(t, repo.Close())
@@ -298,6 +303,15 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			if !holdsEdits(inDirectory(w.Path)) {
 				t.Fatal("the interrupted turn's edits are not in the unit's workspace")
 			}
+			must(t, filepath.WalkDir(w.Path, func(name string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), "left-by-the-turn") {
+					t.Errorf("the unit's workspace holds %s from the view's repository", name)
+				}
+				return nil
+			}))
 		})
 	}
 }
