@@ -177,6 +177,11 @@ type Role struct {
 	EventsProfile string `toml:"events_profile" json:"events_profile,omitempty"`
 	Sandbox       string `toml:"sandbox" json:"sandbox"`
 	Image         string `toml:"image" json:"image"`
+	// CPUs and Memory size the role's sbx sandboxes: a positive number of
+	// CPUs and a memory limit such as 512m or 4g. Zero and empty leave the
+	// size to sbx. They apply only with the sbx sandbox.
+	CPUs   int    `toml:"cpus" json:"cpus,omitempty"`
+	Memory string `toml:"memory" json:"memory,omitempty"`
 	// Dagger gives the mason's sbx sandbox the Dagger CLI and an engine on
 	// the host; nil gives neither.
 	Dagger *Dagger `toml:"dagger" json:"dagger,omitempty"`
@@ -802,7 +807,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if key[0] == "profiles" {
 			return slices.Contains([]string{"agent", "model", "effort", "fallback", "timeout", "max_turns"}, key[2])
 		}
-		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "dagger", "skills"}, key[2])
+		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "dagger", "skills"}, key[2])
 	}
 	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
@@ -906,6 +911,22 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		if r.Sandbox != "container" && r.Sandbox != "sbx" && r.Image != "" {
 			return fieldError(path, prefix+".image", "image requires container or sbx sandbox")
 		}
+		if md.IsDefined("roles", name, "cpus") {
+			if r.Sandbox != "sbx" {
+				return fieldError(path, prefix+".cpus", "cpus requires the sbx sandbox")
+			}
+			if r.CPUs <= 0 {
+				return fieldError(path, prefix+".cpus", "must be a positive number of CPUs")
+			}
+		}
+		if md.IsDefined("roles", name, "memory") {
+			if r.Sandbox != "sbx" {
+				return fieldError(path, prefix+".memory", "memory requires the sbx sandbox")
+			}
+			if r.Memory == "" || agent.CheckSandboxMemory(r.Memory) != nil {
+				return fieldError(path, prefix+".memory", "must be a positive integer and the unit m or g, such as 512m or 4g")
+			}
+		}
 		if r.Dagger != nil {
 			if name != "mason" {
 				return fieldError(path, prefix+".dagger", "only the mason runs Dagger")
@@ -984,7 +1005,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Dagger: r.Dagger.Settings(), Skills: slices.Clone(r.Skills)}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Dagger: r.Dagger.Settings(), Skills: slices.Clone(r.Skills)}, err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

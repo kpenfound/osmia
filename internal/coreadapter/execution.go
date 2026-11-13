@@ -34,6 +34,11 @@ func unsupported(capability, reason string) error { return &UnsupportedError{cap
 type ExecutionSettings struct {
 	Mode, Image     string
 	Domains, Mounts []string
+	// CPUs and Memory size an sbx turn's sandbox: a CPU count and a limit
+	// such as 4g, passed to the sandbox's creation. Zero and empty leave the
+	// size to sbx.
+	CPUs   int
+	Memory string
 	// Agent is the resolved backend supplied by the executor when preparing a sandbox.
 	Agent string
 	// Dagger gives an sbx turn that may execute commands the Dagger CLI and
@@ -184,7 +189,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		Workspace: vcs.Directory(t.Sandbox.Verified.Workspace.Directory), Env: maps.Clone(t.Sandbox.Verified.Environment),
 		ValidOutcomes: append([]string{}, t.AllowedOutcomes...), CostCapUSD: p.CostLimitUSD,
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
-			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
+			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxCPUs: t.Execution.CPUs, SandboxMemory: t.Execution.Memory, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
 	}
 	if d := t.Execution.Dagger; d != nil {
 		req.Profile.Dagger = &agent.Dagger{Engine: d.Engine, Version: d.Version}

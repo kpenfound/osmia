@@ -280,7 +280,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	// runs under narrower ones.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
 		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || !slices.Equal(req.Profile.Skills, turnSkills(settings, req.Profile.Agent)) || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
-		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
+		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image || req.Profile.SandboxCPUs != settings.CPUs || req.Profile.SandboxMemory != settings.Memory ||
 		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, allowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools, len(req.Profile.Skills) != 0)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
 		return nil, unsupported("execution request", "request widens the service boundary")
