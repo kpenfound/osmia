@@ -203,14 +203,15 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			return result, err
 		}
 	}
-	view, err := views.Create(ctx, workspace.Workspace, selected.Paths)
+	view, err := views.CreateFor(ctx, workspace.Workspace, selected.Paths, selected.Execution)
 	if err != nil {
 		return result, err
 	}
 	defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
 	if r.PreserveMasonViews && input.Scope.Role == "mason" {
 		// A stopped copy must never replace a complete unit workspace. This
-		// marker is written only after the view has been fully populated.
+		// marker is written only after the view has been fully populated,
+		// its repository included.
 		if err := os.WriteFile(filepath.Join(views.Directory, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600); err != nil {
 			return result, err
 		}

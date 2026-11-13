@@ -155,7 +155,7 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	if err := PublicEnvironment(iso.Environment); err != nil {
 		return err
 	}
-	return validateFileTree(iso.Workspace.Directory)
+	return validateFileTree(iso.Workspace.Directory, settings.Dagger != nil)
 }
 
 // checkDagger admits a Dagger engine only for an sbx turn that may execute
@@ -196,7 +196,11 @@ func PublicEnvironment(env map[string]string) error {
 	return nil
 }
 
-func validateFileTree(dir string) error {
+// validateFileTree admits regular files and directories under dir, and no
+// VCS metadata. A Dagger turn's view alone may hold a Git repository at its
+// root, which the service created empty; it holds no symlinks or special files
+// either.
+func validateFileTree(dir string, repository bool) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return unsupported("workspace", "requires a canonical absolute directory")
 	}
@@ -214,11 +218,21 @@ func validateFileTree(dir string) error {
 	if !info.IsDir() {
 		return unsupported("workspace", "not a directory")
 	}
+	root := filepath.Join(dir, ".git")
 	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if path == dir {
+			return nil
+		}
+		if repository && (path == root || strings.HasPrefix(path, root+string(filepath.Separator))) {
+			if path == root && !entry.IsDir() {
+				return unsupported("workspace", "the view's repository is not a directory")
+			}
+			if !entry.IsDir() && !entry.Type().IsRegular() {
+				return unsupported("workspace", "symlinks and special files are not permitted")
+			}
 			return nil
 		}
 		switch strings.ToLower(entry.Name()) {
@@ -406,7 +420,8 @@ func viewLocation(view string) string {
 // access, the session directory read-only, a writable scratch directory inside
 // it when the view is read-only, each skill directory read-only, the service
 // environment, one MCP server grant per scoped endpoint and the settings'
-// Dagger engine, with role-selected native tools and no VCS. A turn with skill
+// Dagger engine, with role-selected native tools and no VCS. A Dagger turn's
+// view mount is marked as holding only an empty repository. A turn with skill
 // directories also holds the Skill tool.
 func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry, skillDirs []string) (agent.Grants, error) {
 	mode := settings.Mode
@@ -435,6 +450,10 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 	}
 	if settings.Dagger != nil {
 		grants.DaggerEngine = settings.Dagger.Engine
+		// The service created the view's root repository empty so the Dagger
+		// client finds its workspace; core checks it stays empty and admits the
+		// mount without granting VCS.
+		grants.Mounts[0].EmptyRepository = true
 	}
 	for _, server := range slices.Sorted(maps.Keys(servers)) {
 		grants.Tools = append(grants.Tools, "mcp__"+server)

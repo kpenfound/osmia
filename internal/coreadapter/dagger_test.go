@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,8 @@ import (
 )
 
 // daggerTurn is a mason turn in sbx that may execute commands and asks for
-// the Dagger CLI against an engine on the host's loopback.
+// the Dagger CLI against an engine on the host's loopback. Its view holds the
+// empty repository the service creates for such a turn.
 func daggerTurn(t *testing.T) a.PreparedTurn {
 	t.Helper()
 	turn := toolTurn(t, "sbx")
@@ -29,6 +31,7 @@ func daggerTurn(t *testing.T) a.PreparedTurn {
 	turn.Sandbox.Verified.Capabilities.WriteFiles = true
 	turn.Sandbox.Verified.Capabilities.Execute = true
 	turn.Execution.Dagger = &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}
+	emptyRepository(t, turn.Sandbox.Verified.Workspace.Directory)
 	return turn
 }
 
@@ -257,5 +260,137 @@ echo '{"type":"result","subtype":"success","result":"built"}'
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// A Dagger turn's view may hold a Git repository at its root, a directory of
+// regular files. Any other VCS metadata in it, and any repository in a view
+// for a turn without Dagger, is refused before a session is prepared.
+func TestBoundaryAdmitsOnlyADaggerViewsRootRepository(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		prepare func(t *testing.T, view string)
+		dagger  bool
+		allowed bool
+	}{
+		"empty repository": {dagger: true, allowed: true, prepare: emptyRepository},
+		"repository file": {dagger: true, prepare: func(t *testing.T, view string) {
+			mustWrite(t, filepath.Join(view, ".git"), "gitdir: /private")
+		}},
+		"repository link": {dagger: true, prepare: func(t *testing.T, view string) {
+			if err := os.Symlink(t.TempDir(), filepath.Join(view, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		"link inside the repository": {dagger: true, prepare: func(t *testing.T, view string) {
+			mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
+			if err := os.Symlink(t.TempDir(), filepath.Join(view, ".git", "hooks")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		"nested repository": {dagger: true, prepare: func(t *testing.T, view string) {
+			mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
+			mustWrite(t, filepath.Join(view, "sub", ".git", "HEAD"), "ref: refs/heads/main\n")
+		}},
+		"other metadata": {dagger: true, prepare: func(t *testing.T, view string) {
+			mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
+			mustWrite(t, filepath.Join(view, ".jj", "repo"), "x")
+		}},
+		"no Dagger": {prepare: func(t *testing.T, view string) {
+			mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			turn := daggerTurn(t)
+			if !c.dagger {
+				turn.Execution.Dagger = nil
+			}
+			view := turn.Sandbox.Verified.Workspace.Directory
+			if err := os.RemoveAll(filepath.Join(view, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			c.prepare(t, view)
+			engine := &adaptertest.Engine{}
+			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+			err := executor.Check(ctx, turn.Sandbox.Verified, turn.Execution)
+			if c.allowed {
+				if err != nil {
+					t.Fatalf("boundary check: %v", err)
+				}
+				if _, err := (&a.TurnRunner{Executor: executor}).Run(ctx, turn); err != nil || len(engine.Requests) != 1 {
+					t.Fatalf("turn: %v requests=%d", err, len(engine.Requests))
+				}
+				return
+			}
+			if !errors.Is(err, a.ErrUnsupported) {
+				t.Fatalf("boundary check: %v", err)
+			}
+			result, err := (&a.TurnRunner{Executor: executor}).Run(ctx, turn)
+			if !errors.Is(err, a.ErrUnsupported) || !result.IsError || len(engine.Prepared) != 0 {
+				t.Fatalf("err=%v result=%+v prepared=%d", err, result, len(engine.Prepared))
+			}
+		})
+	}
+}
+
+// emptyRepository leaves in view what `git init --quiet --template=` does.
+func emptyRepository(t *testing.T, view string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
+	mustWrite(t, filepath.Join(view, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n")
+	for _, dir := range []string{"objects/info", "objects/pack", "refs/heads", "refs/tags"} {
+		if err := os.MkdirAll(filepath.Join(view, ".git", dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A Dagger turn marks its view mount, and that mount alone, as holding only an
+// empty repository; core admits the writable mount without granting version
+// control. A turn without Dagger marks no mount.
+func TestDaggerTurnMarksOnlyItsViewMountAsAnEmptyRepository(t *testing.T) {
+	for name, dagger := range map[string]bool{"dagger": true, "no dagger": false} {
+		t.Run(name, func(t *testing.T) {
+			turn := daggerTurn(t)
+			if !dagger {
+				turn.Execution.Dagger = nil
+				if err := os.RemoveAll(filepath.Join(turn.Sandbox.Verified.Workspace.Directory, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			engine := &adaptertest.Engine{}
+			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+			if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); err != nil || len(engine.Requests) != 1 {
+				t.Fatalf("turn: %v requests=%d", err, len(engine.Requests))
+			}
+			grants := engine.Requests[0].Grants
+			if grants == nil || grants.VCS || len(grants.Mounts) < 2 {
+				t.Fatalf("grants %+v", grants)
+			}
+			for i, mount := range grants.Mounts {
+				if mount.EmptyRepository != (dagger && i == 0) {
+					t.Fatalf("mount %d %+v, dagger=%v", i, mount, dagger)
+				}
+			}
+			policy := engine.Prepared[0].Policy()
+			if policy.VCS || policy.Mounts[0].EmptyRepository != dagger {
+				t.Fatalf("policy VCS=%v mounts %+v", policy.VCS, policy.Mounts)
+			}
+			for _, name := range agent.VCSExecutables {
+				if !slices.Contains(policy.DeniedExecutables, name) {
+					t.Fatalf("VCS executable %s is not denied", name)
+				}
+			}
+		})
+	}
+}
+
+func mustWrite(t *testing.T, name, data string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

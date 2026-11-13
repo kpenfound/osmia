@@ -43,12 +43,18 @@ func (p *provider) Acquire(_ context.Context, req a.WorkspaceRequest) (a.Workspa
 type host struct {
 	requests []a.HostRequest
 	released int
+	// url is the endpoint hosted turns reach; empty means a service name.
+	url string
 }
 
 func (h *host) Host(_ context.Context, req a.HostRequest) (a.HostedMCP, error) {
 	h.requests = append(h.requests, req)
 	token := fmt.Sprintf("fixture-token-%d", len(h.requests))
-	return a.HostedMCP{Endpoint: a.Endpoint{URL: "http://service/mcp", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, Lease: leaseFunc(func(ctx context.Context) error { h.released++; return ctx.Err() })}, nil
+	url := h.url
+	if url == "" {
+		url = "http://service/mcp"
+	}
+	return a.HostedMCP{Endpoint: a.Endpoint{URL: url, BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, Lease: leaseFunc(func(ctx context.Context) error { h.released++; return ctx.Err() })}, nil
 }
 
 func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adaptertest.Engine, a.PreparedTurn) {
