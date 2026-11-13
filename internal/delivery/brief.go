@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -26,7 +29,7 @@ const (
 
 // NoBriefRecorded is what the delivery entry and card say when the chief of
 // staff's turn for a final review's notice ended without recording a brief.
-const NoBriefRecorded = "No brief was recorded for this review"
+const NoBriefRecorded = api.NoBriefRecorded
 
 // Brief is the delivery brief recorded for one final review. Review and
 // ReviewRevision are the final report's number and its document revision, and
@@ -74,6 +77,49 @@ func ReadBrief(repository *trace.Repository, stream config.WorkstreamID, review,
 		return Brief{}, false, nil
 	}
 	return b, true, nil
+}
+
+// RecordedBrief is the latest brief of one final review and when the first
+// brief for that review was recorded.
+type RecordedBrief struct {
+	Brief
+	At time.Time
+}
+
+// Briefs returns the latest brief of every final review the workstream has one
+// for, oldest review first, each with the time its review's first brief was
+// recorded.
+func Briefs(repository *trace.Repository, stream config.WorkstreamID) ([]RecordedBrief, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]trace.Document{}
+	first := map[string]time.Time{}
+	for _, d := range docs {
+		if !strings.HasPrefix(d.ID, "delivery-brief-") {
+			continue
+		}
+		if at, ok := first[d.ID]; !ok || d.At.Before(at) {
+			first[d.ID] = d.At
+		}
+		if d.Revision > latest[d.ID].Revision {
+			latest[d.ID] = d
+		}
+	}
+	out := make([]RecordedBrief, 0, len(latest))
+	for id, d := range latest {
+		var b Brief
+		if err := json.Unmarshal([]byte(d.Content), &b); err != nil {
+			return nil, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+		}
+		if d.ID != BriefDocument(b.Review) {
+			continue
+		}
+		out = append(out, RecordedBrief{Brief: b, At: first[id]})
+	}
+	slices.SortFunc(out, func(a, b RecordedBrief) int { return a.Review - b.Review })
+	return out, nil
 }
 
 // BriefForReport is ReadBrief for the final review report is, whose document

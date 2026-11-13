@@ -49,6 +49,10 @@ const (
 	BriefNoneRecorded = "none_recorded"
 )
 
+// NoBriefRecorded is what the delivery card and the CLI say for a final review
+// whose brief state is BriefNoneRecorded.
+const NoBriefRecorded = "No brief was recorded for this review"
+
 // DeliveryBrief is the short brief the chief of staff recorded for one final
 // review. Review, ReviewRevision and Commit identify the review it covers.
 // Screenshots are the IDs of images the preview tool captured at that commit,

@@ -10,7 +10,7 @@ import (
 )
 
 func imageURL(stream config.WorkstreamID, id string) string {
-	return api.Prefix + "/images/" + string(stream) + "/" + id
+	return api.ImagePath(stream, id)
 }
 
 func imageFeedEntry(v trace.Image) FeedEntry {

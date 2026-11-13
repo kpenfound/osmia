@@ -1169,7 +1169,7 @@
       const entries = (feed?.entries || []).filter(groupEntry);
       const latest = entries.findLastIndex(e => e.kind === 'status');
       c.entries.replaceChildren(...(feed ? [el('ol', {}, ...withOutcomes(entries, outcomes, (e, i) => {
-        const node = e.kind === 'status' ? renderStatus(e, i === latest) : renderConversationEntry(e);
+        const node = e.kind === 'status' ? renderStatus(e, i === latest) : e.kind === 'brief' ? renderBriefEntry(e) : renderConversationEntry(e);
         if (e.repo) node.prepend(el('span', { class: 'tag', 'data-field': 'repo' }, repoLabel(e.repo)));
         return node;
       }))] : [el('p', { class: 'meta' }, failures[groupFeed(id)] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
@@ -2032,6 +2032,50 @@
       el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
   }
 
+  // briefBody shows a recorded delivery brief: its text, its screenshots as
+  // thumbnails that open the full image, and, only when it has items, the
+  // "Before you ship" block, always visible and apart from the text.
+  // screenshots are feed images (id, url or placeholder).
+  function briefBody(text, items, screenshots) {
+    return [
+      el('div', { class: 'text', 'data-field': 'brief-text' }, renderMarkdown(text)),
+      screenshots.length === 0 ? null : el('div', { class: 'brief-screenshots', 'data-field': 'brief-screenshots' }, ...screenshots.map((image) => image.placeholder
+        ? el('p', { class: 'meta', 'data-field': 'placeholder' }, image.placeholder)
+        : el('a', { class: 'image-thumbnail', href: image.url, target: '_blank', rel: 'noopener noreferrer', 'data-field': 'image-link', 'data-image': image.id, 'aria-label': 'Open full-size screenshot ' + image.id },
+          el('img', { src: image.url, alt: 'Screenshot ' + image.id, 'data-field': 'image' })))),
+      items.length === 0 ? null : el('section', { class: 'before-you-ship', 'data-field': 'before-you-ship', 'aria-label': 'Before you ship' },
+        el('strong', { 'data-field': 'before-you-ship-label' }, 'Before you ship'),
+        el('ul', { class: 'notes' }, ...items.map((item) => el('li', { 'data-field': 'before-you-ship-item' }, item)))),
+    ].filter((node) => node !== null);
+  }
+
+  // renderBriefEntry shows the delivery brief the chief of staff recorded for
+  // a final review as an entry of its own, so the owner can answer it in the
+  // conversation right under it.
+  function renderBriefEntry(e) {
+    const b = e.brief;
+    return el('li', { class: 'entry', 'data-kind': 'brief', 'data-review': b.review, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
+      el('div', { class: 'meta' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
+        el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' · ',
+        el('span', { 'data-ann': 'when' }, when(e.at))),
+      el('div', { class: 'card', 'data-field': 'brief' }, ...briefBody(b.text, b.before_you_ship || [], b.screenshots || [])));
+  }
+
+  // renderDeliveryBrief is the brief block of a delivery card, kept apart from
+  // the rest of the card: the recorded brief, or why there is none.
+  function renderDeliveryBrief(view) {
+    const b = view.brief;
+    if (!b) return null;
+    const state = { 'data-field': 'brief', 'data-brief-state': b.state };
+    if (b.state === 'recorded') {
+      const shots = (b.screenshots || []).map((id) => ({ id, url: api + '/images/' + view.workstream + '/' + id }));
+      return el('section', { class: 'delivery-brief', ...state }, ...briefBody(b.text || '', b.before_you_ship || [], shots));
+    }
+    return el('section', { class: 'delivery-brief', ...state },
+      el('p', { 'data-field': 'brief-state' }, b.state === 'waiting' ? 'Waiting for the chief of staff to write the brief for this review' : 'No brief was recorded for this review'));
+  }
+
   function renderImage(e, agentLabel) {
     const image = e.image;
     return el('li', { id: 'feed-image-' + image.id, class: 'entry', 'data-kind': 'image', 'data-image': image.id, 'data-turn': e.turn, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
@@ -2206,6 +2250,8 @@
           return renderChecks(e);
         case 'final_review':
           return renderFinalReview(e);
+        case 'brief':
+          return renderBriefEntry(e);
         default:
           return renderConversationEntry(e);
       }
@@ -2224,7 +2270,7 @@
   // groupEntry reports whether a workgroup feed entry is part of its
   // conversation view.
   function groupEntry(e) {
-    return conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status';
+    return conversationKinds.has(e.kind) || e.kind === 'image' || e.kind === 'status' || e.kind === 'brief';
   }
 
   // ownerOutcomes holds, per displayed instance (a workstream ID, or
@@ -2245,7 +2291,8 @@
       e.unit_checks ? [e.unit_checks.unit, e.unit_checks.run] : '',
       e.session_checks ? [e.session_checks.run, e.session_checks.kind] : '',
       e.final_checks ? [e.final_checks.review, e.final_checks.attempt] : '',
-      e.final_review ? e.final_review.review : '']);
+      e.final_review ? e.final_review.review : '',
+      e.brief ? e.brief.review : '']);
   }
 
   // shownEntries lists the feed entries the instance's feed shows now, or
@@ -3444,6 +3491,7 @@
     const title = view.approval ? (view.approval.title || view.title) : view.title;
     const findings = view.report.findings || [];
     d.detail.replaceChildren(...[
+      renderDeliveryBrief(view),
       el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
       view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
       findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },

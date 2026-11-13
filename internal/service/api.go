@@ -448,6 +448,8 @@ type FeedResponse = api.FeedResponse
 
 type FeedImage = api.FeedImage
 
+type FeedBrief = api.FeedBrief
+
 type FeedEntry = api.FeedEntry
 
 type FeedSession = api.FeedSession

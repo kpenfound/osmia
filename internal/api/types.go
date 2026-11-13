@@ -1241,8 +1241,10 @@ type FeedImage struct {
 // workflow state change, with Transition. Kind "unit_checks" summarizes a
 // unit check run, "final_checks" a final check attempt, and "final_review"
 // a final review outcome. Kind "image" carries attachment metadata in Image,
-// with a URL or an archived-member placeholder. At is when the entry first became observable;
-// sessions and final check attempts use their recorded start time.
+// with a URL or an archived-member placeholder. Kind "brief" is the delivery
+// brief the chief of staff recorded for a final review, with Brief. At is when
+// the entry first became observable; sessions and final check attempts use
+// their recorded start time.
 type FeedEntry struct {
 	Image         *FeedImage          `json:"image,omitempty"`
 	Workstream    config.WorkstreamID `json:"workstream,omitempty"`
@@ -1260,6 +1262,24 @@ type FeedEntry struct {
 	UnitChecks    *FeedUnitChecks     `json:"unit_checks,omitempty"`
 	FinalChecks   *FeedFinalChecks    `json:"final_checks,omitempty"`
 	FinalReview   *FeedFinalReview    `json:"final_review,omitempty"`
+	Brief         *FeedBrief          `json:"brief,omitempty"`
+}
+
+// ImagePath is the path of the stored image id of workstream stream.
+func ImagePath(stream config.WorkstreamID, id string) string {
+	return Prefix + "/images/" + string(stream) + "/" + id
+}
+
+// FeedBrief is the delivery brief recorded for one final review, the latest
+// one when it was replaced. Review, ReviewRevision and Commit identify the
+// review it covers. Screenshots are the preview images it names.
+type FeedBrief struct {
+	Review         int         `json:"review"`
+	ReviewRevision int         `json:"review_revision"`
+	Commit         string      `json:"commit"`
+	Text           string      `json:"text"`
+	BeforeYouShip  []string    `json:"before_you_ship,omitempty"`
+	Screenshots    []FeedImage `json:"screenshots,omitempty"`
 }
 
 // FeedSession is one agent turn. State is running, done, waiting (the turn

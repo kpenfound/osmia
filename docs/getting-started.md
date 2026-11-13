@@ -300,8 +300,25 @@ your behalf, such as resolving a contested unit or moving a stuck one. You can
 move a stuck unit yourself with
 `osmia move <workstream-id> <unit> <state> "note"`.
 
-When every unit has landed and the final review is done, the workstream's
-delivery entry opens. Read the final report's findings and the drafted pull
+When every unit has landed and the final review is done, the chief of staff
+writes a short **delivery brief** for that review, and the workstream's
+delivery entry opens once it is recorded. The brief answers one question:
+does what was built match what you asked for? It says how the approved intent
+shows up in the product, at most one line on how it was built and anything
+that departs from or only partly covers the intent, with up to three
+screenshots of the reviewed commit when the change is visible. It never lists
+tests, files or commits. When the change needs something done to deploy it
+(a new secret or setting, a migration, a manual step, a breaking change for
+callers), the brief also carries a separate **Before you ship** list, and
+those items go into the pull request description too. The delivery entry waits
+for the brief only while the chief of staff's turn for the review is still
+running; if that turn ends without one, the entry opens anyway and says "No
+brief was recorded for this review", and the chief of staff can still record
+the brief until you approve. Reply in the workstream's conversation to push
+back: the chief of staff sends the work back to building, and after the new
+final review it writes a new brief.
+
+Read the brief, the final report's findings and the drafted pull
 request description under **What will be published**, which is read only.
 Approving a report with blocking findings accepts them as they are (the button
 then starts with **Accept findings and**); otherwise the chief of staff plans

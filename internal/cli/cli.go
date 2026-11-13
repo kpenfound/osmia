@@ -867,6 +867,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if o.json {
 				return output(stdout, stderr, presentation)
 			}
+			showBrief(stdout, id, presentation.Report.Review, presentation.Brief)
 			fmt.Fprintf(stdout, "Final review %d of %s at %s:\n", presentation.Report.Review, id, presentation.Report.Commit)
 			if summary := strings.TrimSpace(presentation.Report.Summary); summary != "" {
 				fmt.Fprintf(stdout, "%s\n", summary)
@@ -2208,6 +2209,49 @@ func showEngine(w io.Writer, s wire.EngineStatus) {
 	}
 }
 
+// showBrief prints the delivery brief of final review of stream: its text,
+// its "Before you ship" items and the path of each screenshot, or why there is
+// no brief. A presentation with no brief field prints nothing.
+func showBrief(w io.Writer, stream config.WorkstreamID, review int, b *wire.DeliveryBrief) {
+	if b == nil {
+		return
+	}
+	switch b.State {
+	case wire.BriefRecorded:
+		fmt.Fprintf(w, "Delivery brief for final review %d of %s:\n", review, stream)
+		fmt.Fprintf(w, "%s\n", strings.TrimSpace(b.Text))
+		if len(b.BeforeYouShip) > 0 {
+			fmt.Fprintln(w, "Before you ship:")
+			for _, item := range b.BeforeYouShip {
+				fmt.Fprintf(w, "  - %s\n", item)
+			}
+		}
+		for _, id := range b.Screenshots {
+			fmt.Fprintf(w, "Screenshot: %s\n", wire.ImagePath(stream, id))
+		}
+	case wire.BriefWaiting:
+		fmt.Fprintf(w, "Delivery brief for final review %d of %s: the chief of staff is still writing it.\n", review, stream)
+	default:
+		fmt.Fprintf(w, "%s (final review %d of %s).\n", wire.NoBriefRecorded, review, stream)
+	}
+	fmt.Fprintln(w)
+}
+
+// showBriefEntry prints the delivery brief a feed entry carries.
+func showBriefEntry(w io.Writer, b *wire.FeedBrief) {
+	fmt.Fprintf(w, "  Delivery brief for final review %d:\n  %s\n", b.Review, strings.TrimSpace(b.Text))
+	for _, item := range b.BeforeYouShip {
+		fmt.Fprintf(w, "  Before you ship: %s\n", item)
+	}
+	for _, s := range b.Screenshots {
+		if s.Placeholder != "" {
+			fmt.Fprintf(w, "  %s\n", s.Placeholder)
+		} else {
+			fmt.Fprintf(w, "  [image: %s]\n", s.URL)
+		}
+	}
+}
+
 // showFeed renders attachments without downloading their bytes.
 func showFeed(w io.Writer, entries []wire.FeedEntry) {
 	for _, e := range entries {
@@ -2222,6 +2266,8 @@ func showFeed(w io.Writer, entries []wire.FeedEntry) {
 			} else {
 				fmt.Fprintf(w, "  [image: %s]\n", e.Image.URL)
 			}
+		} else if e.Kind == "brief" && e.Brief != nil {
+			showBriefEntry(w, e.Brief)
 		} else if e.Text != "" {
 			fmt.Fprintf(w, "  %s\n", e.Text)
 		}

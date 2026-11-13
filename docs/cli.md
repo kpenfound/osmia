@@ -621,8 +621,14 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   documents and survives restarts without another decision or ruling.
   Approval and overrule of a stale request are refused. An upstream base
   move alone retires nothing; current-seal options and gates stay in force.
-- `delivery <workstream-id>` shows an assembled workstream's final report,
-  its summary, blocking then advisory findings, and every criterion with the
+- `delivery <workstream-id>` shows an assembled workstream's final report.
+  It starts with the chief of staff's delivery brief for that review: the
+  brief's text, each **Before you ship** item and a link (the image's path on
+  the service) per screenshot, or "No brief was recorded for this review", or a
+  line saying the chief of staff is still writing it. The `brief` field of
+  `--json` carries the same with a `state` of `waiting`, `recorded` or
+  `none_recorded`, and `feed` lists the brief as its own `brief` entry. Then it
+  shows the report's summary, blocking then advisory findings, and every criterion with the
   merged units that serve it, unserved first, and the drafted pull request
   description, then any
   approved description and the state of its publication. For a delivered
