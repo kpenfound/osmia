@@ -1,0 +1,7 @@
+# A configured person who is neither the owner nor acting for the owner. The
+# smoke run reads the project's work: entity as this principal, directly and
+# through each class agent acting for this principal, and expects the answer an
+# unknown scope gets.
+- id: smoke-outsider
+  kind: human
+  token_env: HEARSAY_SMOKE_OUTSIDER_TOKEN

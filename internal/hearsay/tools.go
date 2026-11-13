@@ -23,7 +23,7 @@ func (c Client) Tools(role, defaultScope string, check func() error) []coreadapt
 		{"get_l1", `"id":{"type":"string"}`, []string{"id"}},
 		{"get_l0", `"id":{"type":"string"}`, []string{"id"}},
 		{"search", `"query":{"type":"string"},"scope":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}`, []string{"query"}},
-		{"traverse", `"start":{"type":"object"},"steps":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object"}},"limit":{"type":"integer","minimum":1,"maximum":200}`, []string{"start", "steps"}},
+		{"traverse", `"start":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"object"}},"steps":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object"}},"limit":{"type":"integer","minimum":1,"maximum":200}`, []string{"start", "steps"}},
 	}
 	if Class(role) != "observer" {
 		definitions = append(definitions, struct {

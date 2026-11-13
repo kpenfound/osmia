@@ -404,3 +404,11 @@ sources in one process: Hearsay's id checks across the pair rely on a lock
 shared in that process. Point `[hearsay]` at the API and `[hearsay.publish]` at
 the connectors listener in Osmia, and reload. See
 [configuration](configuration.md#optional-hearsay-context).
+
+## Checking the whole path
+
+`scripts/hearsay-compose-smoke.sh` runs Hearsay under Compose with the
+configuration `osmia project memory` generates, lets the publisher post a
+sealed spec, an owner ruling and a chief logged assumption for a project
+without the repo opt-in, and reads them back as each class agent acting for the
+owner and as an outsider. See [the Compose smoke run](hearsay-compose-smoke.md).

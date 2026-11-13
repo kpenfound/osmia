@@ -1,0 +1,101 @@
+# Hearsay in the shape of its own deploy/compose recipe (Postgres with
+# pgvector, a one-shot `hearsay migrate up`, then connectors, distiller,
+# assert-worker and api as four containers of one image), plus a local stub in
+# place of the model provider. scripts/hearsay-compose-smoke.sh builds the
+# image from the Hearsay tree under test, writes ./config (the fragments
+# `osmia project memory` generates, with the files beside this one) and ./.env
+# (random tokens), and runs everything. Nothing here is a deployment: it
+# publishes no port to the host and its secrets exist for one run.
+name: osmia-hearsay-smoke
+
+x-service: &service
+  image: ${HEARSAY_IMAGE:?set HEARSAY_IMAGE to the image the script built}
+  env_file: [.env]
+  environment:
+    HEARSAY_CONFIG: /etc/hearsay
+    HEARSAY_DISTILL_QUIET: "0"
+  volumes:
+    - type: bind
+      source: ./config
+      target: /etc/hearsay
+      read_only: true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+    modelstub:
+      condition: service_healthy
+  restart: "no"
+
+x-healthcheck: &healthcheck
+  interval: 3s
+  timeout: 5s
+  retries: 20
+  start_period: 5s
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: hearsay
+      POSTGRES_DB: hearsay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "hearsay", "-d", "hearsay"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  modelstub:
+    image: python:3-alpine
+    command: ["python", "/modelstub.py", "8090"]
+    volumes:
+      - type: bind
+        source: ./modelstub.py
+        target: /modelstub.py
+        read_only: true
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/"]
+
+  migrate:
+    image: ${HEARSAY_IMAGE:?set HEARSAY_IMAGE to the image the script built}
+    command: ["migrate", "up"]
+    environment:
+      HEARSAY_DATABASE_URL: ${HEARSAY_DATABASE_URL:?set HEARSAY_DATABASE_URL in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Webhooks under /hooks/<source id>: the address [hearsay.publish] hooks_url
+  # names. Separate from the API.
+  connectors:
+    <<: *service
+    command: ["connectors"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/readyz"]
+
+  distiller:
+    <<: *service
+    command: ["distiller"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/readyz"]
+
+  assert-worker:
+    <<: *service
+    command: ["assert-worker"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/readyz"]
+
+  # HTTP (/v1/<call>): the address [hearsay] url names.
+  api:
+    <<: *service
+    command: ["api"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]

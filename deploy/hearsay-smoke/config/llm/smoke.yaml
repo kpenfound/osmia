@@ -1,0 +1,16 @@
+# The model tiers answer from the local stub (modelstub.py) instead of a
+# provider. Decisions and documents posted by the publisher need no model call
+# to be placed; the tiers only have to exist and answer.
+tiers:
+  distill:
+    provider: anthropic
+    model: model-stub
+    base_url: http://modelstub:8090
+    api_key_env: HEARSAY_SMOKE_MODEL_KEY
+    max_retries: -1
+  assert:
+    provider: anthropic
+    model: model-stub
+    base_url: http://modelstub:8090
+    api_key_env: HEARSAY_SMOKE_MODEL_KEY
+    max_retries: -1

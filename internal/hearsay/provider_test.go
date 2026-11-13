@@ -236,7 +236,7 @@ func TestTraverseUsesTheRolesClassCredentialsNotThePublishers(t *testing.T) {
 	}))
 	defer server.Close()
 	c := Client{Config: publishing(settings(server.URL)), LookupEnv: secret}
-	input := json.RawMessage(`{"start":{"type":"entity","ids":["work:osmia-work:p"]},"steps":[{"edge":"documents"}]}`)
+	input := json.RawMessage(`{"start":[{"type":"entity","id":"work:osmia-work:p"}],"steps":[{"edge":"documents"}]}`)
 	for role, agent := range map[string]string{"mason": "worker", "chief_of_staff": "orchestrator", "librarian": "observer", "session": "observer"} {
 		var tool *coreadapter.Tool
 		for _, candidate := range c.Tools(role, "work:osmia-work:p", func() error { return nil }) {
@@ -284,4 +284,28 @@ func TestEveryRoleWithReadToolsGetsTraverseAndOnlyWorkersAndTheChiefAssert(t *te
 			t.Errorf("%s: write tools %v", role, names)
 		}
 	}
+}
+
+// Hearsay's traverse takes its start nodes as a list of {type, id} references
+// and refuses a single object, so the tool schema must offer the list.
+func TestTraverseSchemaOffersStartAsAList(t *testing.T) {
+	c := Client{Config: settings("https://memory.example")}
+	for _, tool := range c.Tools("mason", "work:s:p", nil) {
+		if tool.Name != "traverse" {
+			continue
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Type string `json:"type"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if schema.Properties["start"].Type != "array" || schema.Properties["steps"].Type != "array" {
+			t.Fatalf("traverse schema: %s", tool.InputSchema)
+		}
+		return
+	}
+	t.Fatal("no traverse tool")
 }
