@@ -312,6 +312,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
+	registerHearsaySecrets(cfg.Hearsay)
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	if err := s.ensureEngine(ctx, cfg); err != nil {
 		return nil, err

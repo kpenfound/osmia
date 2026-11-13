@@ -187,13 +187,13 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
 
 	f.p.SetValue(settingInput("checks_timeout"), "30m")
 	f.p.SetValue(settingInput("capacity.git_operations"), "5")
-	f.p.SetValue(settingInput("hearsay_scope"), "shop")
-	f.p.SetValue(settingInput("hearsay_entities"), "cart = cart-scope")
+	f.p.SetValue(settingInput("hearsay_scope"), "work:main:shop")
+	f.p.SetValue(settingInput("hearsay_entities"), "cart = code:shop:cart")
 	f.p.Click("#project-config [type=submit]")
 	managementOutcome(f.p, settingsResult(), "ok")
 
 	disk := f.disk()
-	for _, want := range []string{`checks_timeout = "30m"`, "git_operations = 5", `hearsay_scope = "shop"`, `cart = "cart-scope"`} {
+	for _, want := range []string{`checks_timeout = "30m"`, "git_operations = 5", `hearsay_scope = "work:main:shop"`, `cart = "code:shop:cart"`} {
 		if !strings.Contains(disk, want) {
 			t.Fatalf("%s is not in the file:\n%s", want, disk)
 		}
@@ -206,7 +206,7 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
 	}
 	// No Reload was pressed: the service already runs the saved values.
 	p := f.effective()
-	if p.ChecksTimeout != "30m" || p.Capacity.GitOperations != 5 || p.HearsayScope != "shop" || p.HearsayEntities["cart"] != "cart-scope" {
+	if p.ChecksTimeout != "30m" || p.Capacity.GitOperations != 5 || p.HearsayScope != "work:main:shop" || p.HearsayEntities["cart"] != "code:shop:cart" {
 		t.Fatalf("in effect: %+v", p)
 	}
 	if state := f.drift(); state != api.ConfigUnchanged {

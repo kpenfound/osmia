@@ -4672,6 +4672,9 @@
           "principal": {
             "type": "string"
           },
+          "publish": {
+            "$ref": "#/components/schemas/ConfigHearsayPublish"
+          },
           "token_env": {
             "type": "string"
           },
@@ -4687,6 +4690,26 @@
             "type": "string"
           },
           "token_env": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigHearsayPublish": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "hooks_url": {
+            "type": "string"
+          },
+          "owner_source": {
+            "type": "string"
+          },
+          "token_env": {
+            "type": "string"
+          },
+          "work_source": {
             "type": "string"
           }
         },
@@ -4802,6 +4825,9 @@
           },
           "fork": {
             "type": "string"
+          },
+          "hearsay_declare_repo": {
+            "type": "boolean"
           },
           "hearsay_entities": {
             "additionalProperties": {
@@ -6763,7 +6789,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -6771,7 +6797,7 @@
             "type": "boolean"
           },
           "value": {
-            "description": "The file's value, or the value it would take: a string, an integer, or for hearsay_entities an object of entity to scope."
+            "description": "The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo, or for hearsay_entities an object of local entity ID to Hearsay entity id."
           }
         },
         "type": "object"
@@ -6820,14 +6846,22 @@
               "string"
             ]
           },
+          "hearsay_declare_repo": {
+            "description": "True posts the project to Hearsay with its GitHub repo declared, which makes its records visible to that repository's readers. Default false.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "hearsay_entities": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Entries to set, by local entity ID.",
+            "description": "Entries to set, by local entity ID, each a Hearsay entity id.",
             "type": "object"
           },
           "hearsay_scope": {
+            "description": "A Hearsay entity id, such as work:\u003csource\u003e:\u003cproject\u003e, that replaces the project's default read entity.",
             "type": [
               "null",
               "string"

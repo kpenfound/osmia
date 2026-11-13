@@ -3,7 +3,6 @@ package hearsay
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"sync"
 	"time"
 
@@ -27,7 +26,8 @@ func key(cfg *config.Config, id config.ProjectID) string {
 	data, _ := json.Marshal(struct {
 		H config.Hearsay
 		P config.Project
-	}{cfg.Hearsay, cfg.For(id).Project})
+		S string
+	}{cfg.Hearsay, cfg.For(id).Project, cfg.For(id).HearsayScope()})
 	return string(data)
 }
 func (h *Health) get(k string) bundle.Mode {
@@ -56,7 +56,7 @@ type Provider struct {
 
 func (p Provider) Mode(id config.ProjectID) bundle.Mode {
 	cfg := p.Config()
-	if cfg.Hearsay.URL == "" || cfg.For(id).Project.HearsayScope == "" {
+	if cfg.Hearsay.URL == "" || cfg.For(id).HearsayScope() == "" {
 		return bundle.ModeFile
 	}
 	if p.Health == nil {
@@ -73,22 +73,13 @@ func (p Provider) Assemble(ctx context.Context, id config.ProjectID, scope bundl
 		return out, err
 	}
 	cfg := p.Config()
-	project := cfg.For(id).Project
-	if cfg.Hearsay.URL == "" || project.HearsayScope == "" {
+	scopes := cfg.For(id).HearsayReads(scope.Entities, scope.Workstream)
+	if len(scopes) == 0 {
 		return out, nil
 	}
 	client := Client{Config: cfg.Hearsay}
 	if p.Client != nil {
 		client = p.Client(cfg.Hearsay)
-	}
-	scopes := []string{}
-	for _, entity := range scope.Entities {
-		if mapped := project.HearsayEntities[entity]; mapped != "" && !slices.Contains(scopes, mapped) {
-			scopes = append(scopes, mapped)
-		}
-	}
-	if len(scopes) == 0 {
-		scopes = append(scopes, project.HearsayScope)
 	}
 	// One deadline bounds the whole assembly, including multi-entity footprints.
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

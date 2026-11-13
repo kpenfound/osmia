@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"slices"
 	"time"
 
@@ -10,11 +11,13 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // memoryTurns adds authenticated context tools to the existing role boundary.
 // Narrowed turns retain their narrower grants, and classifiers receive none.
+// Exploratory sessions receive only the read tools, at the observer class.
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
 	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
 		assignment, err := assignmentContext(repo, scope)
@@ -25,18 +28,21 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	}
 
 	client := hearsay.Client{Config: cfg.Hearsay}
-	external := cfg.Hearsay.URL != "" && cfg.Project.HearsayScope != ""
+	defaultScope := cfg.HearsayScope()
+	external := cfg.Hearsay.URL != "" && defaultScope != ""
 	for role, grant := range turns.Grants {
-		if role == "classifier" || role == sessionRole {
+		if role == "classifier" {
 			continue
 		}
 		grant.Tools = slices.Clone(grant.Tools)
-		if !slices.Contains(grant.Tools, projectContextTool) {
+		if role != sessionRole && !slices.Contains(grant.Tools, projectContextTool) {
 			grant.Tools = append(grant.Tools, projectContextTool)
 		}
 		if external {
-			for _, tool := range client.Tools(role, cfg.Project.HearsayScope, nil) {
-				grant.Tools = append(grant.Tools, tool.Name)
+			for _, tool := range client.Tools(role, defaultScope, nil) {
+				if !slices.Contains(grant.Tools, tool.Name) {
+					grant.Tools = append(grant.Tools, tool.Name)
+				}
 			}
 		}
 		turns.Grants[role] = grant
@@ -51,16 +57,30 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 				return nil, err
 			}
 		}
-		if scope.Role == "classifier" || scope.Role == sessionRole {
+		if scope.Role == "classifier" {
 			return tools, nil
 		}
-		if !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
+		if scope.Role != sessionRole && !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
 			tools = append(tools, projectContext(repo, scope))
 		}
 		if external {
-			tools = append(tools, client.Tools(scope.Role, cfg.Project.HearsayScope, func() error { return repo.ActiveTurn(scope) })...)
+			tools = append(tools, client.Tools(scope.Role, defaultScope, func() error { return repo.ActiveTurn(scope) })...)
 		}
 		return tools, nil
 	}
 	return turns
+}
+
+// registerHearsaySecrets registers the credential values the configuration
+// references, so they are redacted from logs and errors from the moment the
+// configuration is loaded.
+func registerHearsaySecrets(h config.Hearsay) {
+	if h.URL == "" {
+		return
+	}
+	redact.Register(os.Getenv(h.TokenEnv))
+	for _, agent := range h.Agents {
+		redact.Register(os.Getenv(agent.TokenEnv))
+	}
+	hearsay.PublisherToken(h, nil)
 }

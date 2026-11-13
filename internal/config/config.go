@@ -212,6 +212,10 @@ type Project struct {
 	Classifier      string            `toml:"classifier" json:"classifier"`
 	HearsayScope    string            `toml:"hearsay_scope" json:"hearsay_scope,omitempty"`
 	HearsayEntities map[string]string `toml:"hearsay_entities" json:"hearsay_entities,omitempty"`
+	// HearsayDeclareRepo posts the project to Hearsay with its GitHub repo
+	// declared, which makes its records visible to the repository's readers.
+	// Off, the project is posted without repos.
+	HearsayDeclareRepo bool `toml:"hearsay_declare_repo" json:"hearsay_declare_repo,omitempty"`
 	// UpstreamRebase is the Go duration between a workstream's scheduled
 	// drift rebases; zero disables them.
 	UpstreamRebase string `toml:"upstream_rebase" json:"upstream_rebase"`
@@ -766,7 +770,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
 		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env", "check_fallback"}, key[1])
@@ -785,7 +789,10 @@ func knownKey(key toml.Key, project bool) bool {
 			return true
 		}
 		if len(key) == 2 {
-			return slices.Contains([]string{"url", "principal", "token_env", "agents"}, key[1])
+			return slices.Contains([]string{"url", "principal", "token_env", "agents", "publish"}, key[1])
+		}
+		if key[1] == "publish" {
+			return len(key) == 3 && slices.Contains([]string{"work_source", "owner_source", "hooks_url", "agent", "token_env"}, key[2])
 		}
 		return key[1] == "agents" && (len(key) == 3 || len(key) == 4 && (key[3] == "id" || key[3] == "token_env"))
 	}

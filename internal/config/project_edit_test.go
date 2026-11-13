@@ -143,6 +143,9 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 		{"bad poll", str("pull_request_poll", "1m"), "pull_request_poll"},
 		{"bad rebase", str("upstream_rebase", "30s"), "upstream_rebase"},
 		{"bad scope", str("hearsay_scope", "Not A Scope"), "hearsay_scope"},
+		{"old scope name", str("hearsay_scope", "osmia-ab12"), "hearsay_scope"},
+		{"old scope name as entity", ProjectEdit{Entities: map[string]string{"shop": "osmia-ab12"}}, "hearsay_entities"},
+		{"not a flag", ProjectEdit{Bools: map[string]bool{"landing": true}}, "landing"},
 		{"bad capacity", ProjectEdit{Ints: map[string]int{"capacity.per_workstream": 0}}, "capacity.per_workstream"},
 		{"bad git operations", ProjectEdit{Ints: map[string]int{"capacity.git_operations": -1}}, "capacity.git_operations"},
 		{"bad entity", ProjectEdit{Entities: map[string]string{"shop": "BAD"}}, "hearsay_entities"},
@@ -181,7 +184,7 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 }
 
 func TestEditProjectClearsKeysToTheirDefaults(t *testing.T) {
-	text := projectConfig + "classifier = \"other\"\nchecks_timeout = \"30m\"\nhearsay_scope = \"shop\"\nname = \"Shop\"\n[capacity]\nper_workstream = 7\n[hearsay_entities]\na = \"x\"\nb = \"y\"\n"
+	text := projectConfig + "classifier = \"other\"\nchecks_timeout = \"30m\"\nhearsay_scope = \"work:main:shop\"\nname = \"Shop\"\n[capacity]\nper_workstream = 7\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
 	c, opts := projectEditFixture(t, text)
 	if c.Project.Capacity.PerWorkstream != 7 {
 		t.Fatalf("fixture: %+v", c.Project)
@@ -194,12 +197,12 @@ func TestEditProjectClearsKeysToTheirDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := projectConfig + "[capacity]\n[hearsay_entities]\nb = \"y\"\n"
+	want := projectConfig + "[capacity]\n[hearsay_entities]\nb = \"code:b\"\n"
 	if string(edited) != want {
 		t.Fatalf("edited:\n%s\nwant:\n%s", edited, want)
 	}
 	p := file.Project
-	if p.Classifier != "" || p.ChecksTimeout != DefaultChecksTimeout || p.Capacity.PerWorkstream != c.Capacity.PerWorkstream || p.HearsayScope != "" || p.Name != "" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "y"}) {
+	if p.Classifier != "" || p.ChecksTimeout != DefaultChecksTimeout || p.Capacity.PerWorkstream != c.Capacity.PerWorkstream || p.HearsayScope != "" || p.Name != "" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
 		t.Fatalf("defaults: %+v", p)
 	}
 	if file.Set("classifier") || file.Set("capacity.per_workstream") || !file.Set("hearsay_entities") {
@@ -225,5 +228,29 @@ func TestReplaceFileFailureLeavesNoTemporaryFile(t *testing.T) {
 	}
 	if err := ReplaceFile(path, []byte("version = 3\n")); err != nil || read(t, path) != "version = 3\n" {
 		t.Fatalf("replace: %v %q", err, read(t, path))
+	}
+}
+
+func TestEditProjectSetsAndClearsTheRepoOptIn(t *testing.T) {
+	c, opts := projectEditFixture(t, projectConfig)
+	if c.Project.HearsayDeclareRepo {
+		t.Fatal("the opt-in is not off by default")
+	}
+	edited, file, err := c.EditProject(pid, opts.Home, []byte(projectConfig), ProjectEdit{Bools: map[string]bool{"hearsay_declare_repo": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := projectConfig + "hearsay_declare_repo = true\n"; string(edited) != want {
+		t.Fatalf("edited:\n%s\nwant:\n%s", edited, want)
+	}
+	if !file.Project.HearsayDeclareRepo || !file.Set("hearsay_declare_repo") {
+		t.Fatalf("decoded: %+v", file)
+	}
+	back, file, err := c.EditProject(pid, opts.Home, edited, ProjectEdit{Clear: []string{"hearsay_declare_repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(back) != projectConfig || file.Project.HearsayDeclareRepo || file.Set("hearsay_declare_repo") {
+		t.Fatalf("cleared: %q %+v", back, file)
 	}
 }

@@ -1058,7 +1058,8 @@ request needs a `Host` naming the listener.
 current bytes once and returns, for each effective setting (`name`, `upstream`,
 `fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
-`capacity.git_operations`, `hearsay_scope`, `hearsay_entities`):
+`capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
+`hearsay_entities`):
 
 - `value`: what the file gives it, or would give it. A setting the file leaves
   out shows its default; `capacity.per_workstream` shows the loaded top-level
@@ -1081,7 +1082,8 @@ not load; fix it by hand.
 omitted setting is unchanged) and `clear`, the names of settings whose key is
 removed so the default or inherited value applies again.
 `set.hearsay_entities` sets entries by local entity ID and
-`clear_hearsay_entities` removes entries. An empty string for `name`, `fork`,
+`clear_hearsay_entities` removes entries. `set.hearsay_declare_repo` is a
+boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`,
 `classifier` or `hearsay_scope` clears it. `upstream` and `clone` are required
 and cannot be cleared. A save runs under the same lock as a reload and a
 project add or removal:
@@ -1214,20 +1216,102 @@ id = "osmia-observer"
 token_env = "HEARSAY_OBSERVER_TOKEN"
 ```
 
-Each enabled repo names its Hearsay scope in its repo `config.toml`:
+### Entity ids
+
+Reads name Hearsay entities by id: `<namespace>:<name>` with a lowercase
+namespace and no whitespace, such as `work:<work source>:<project-id>` or
+`code:<repository>:<entity>`. A bare scope name such as `osmia-ab12` is not an
+entity id.
+
+A project with a configured work source (`[hearsay.publish] work_source`) reads
+`work:<work source>:<project-id>` with no further setting, and a turn tied to a
+workstream also reads `work:<work source>:<project-id>#<workstream-id>`. Records
+the owner decided are served on the same work-source entity, so no separate
+owner-source entity is read. Without a work source and without an override
+below, a project stays in file mode.
+
+Two optional keys in the project's `config.toml` change which entities are read:
 
 ```toml
-hearsay_scope = "example"
+# Replaces the project's default entity.
+hearsay_scope = "work:osmia-work:p_0123456789abcdef0123456789abcdef"
 
+# Entities a unit footprint's local entity maps to, replacing the default
+# for turns whose footprint names them.
 [hearsay_entities]
-"internal.storage" = "example-storage"
+"internal.storage" = "code:example/repo:internal.storage"
 ```
 
-The optional entity mapping selects scope bundles for unit footprints; without
-mapped footprint entities, the project scope is used. An empty repo scope
-keeps that repo in file mode. Settings apply through reload. Hearsay must
-configure the named principals with the worker, orchestrator, and observer
-classes and grants intersected with the owner's access.
+- `hearsay_scope` is an entity id. When set, it replaces the project default.
+  A workstream-tied turn still also reads the workstream's entity on the
+  configured work source, if there is one.
+- `hearsay_entities` maps a local entity id to a Hearsay entity id. Without a
+  mapped footprint entity, the project entity is read.
+- A value in either key that is not an entity id, such as an old scope name,
+  fails at load with an error naming the field (`hearsay_scope` or
+  `hearsay_entities`). Osmia does not migrate old values; change them to entity
+  ids.
+
+Settings apply through reload. Hearsay must configure the named principals with
+the worker, orchestrator, and observer classes and grants intersected with the
+owner's access. Each role reads through its class agent acting for the owner
+principal (`hearsay.principal` and `hearsay.token_env`, plus the agent's own
+id and token). The publisher's token is never used for a read.
+
+### Publishing: `[hearsay.publish]`
+
+Omit `[hearsay.publish]` and Osmia sends nothing to Hearsay's connectors
+listener. Adding it names where the service posts project records and as whom.
+It needs the `[hearsay]` table above, whose `principal` is the owner the records
+name as their author.
+
+```toml
+[hearsay.publish]
+work_source = "osmia-work"            # the work source projects and workstreams are posted to
+owner_source = "osmia-owner"          # the paired source that holds what the owner decided
+hooks_url = "https://hooks.example"   # Hearsay's connectors listener, not the API url
+agent = "osmia-publisher"             # the dedicated publisher agent's id
+token_env = "HEARSAY_PUBLISHER_TOKEN" # the variable holding the publisher agent's token
+```
+
+All five keys are required. Each is checked at load, and a missing or invalid
+key, or one this table does not define, fails with an error naming it, for
+example `hearsay.publish.hooks_url`:
+
+- `work_source` and `owner_source` are Hearsay source ids of up to 64
+  lowercase letters, digits, hyphens or underscores, and they differ.
+- `hooks_url` is an HTTP(S) URL without credentials, query or fragment. It
+  differs in role from `hearsay.url`: Hearsay serves hooks on a separate
+  listener.
+- `agent` is the publisher agent's id. It is a dedicated agent: it differs from
+  `hearsay.principal` and from every `hearsay.agents.*.id`.
+- `token_env` names an environment variable, never a token value. It differs
+  from `hearsay.token_env` and from every `hearsay.agents.*.token_env`.
+
+The publisher's token value is registered for redaction when the configuration
+loads, so it does not appear in the service log, in a load or call error, or in
+a configuration response, which carries only the variable's name. The work
+source also supplies the default read entity described under
+[Entity ids](#entity-ids).
+
+#### Declaring a project's GitHub repo
+
+A project is posted to Hearsay without `repos`, with the owner named as its
+author: only the publisher and the owner can read its records. A project opts in
+to declaring its GitHub repo on its Hearsay project in its `config.toml`:
+
+```toml
+hearsay_declare_repo = true
+```
+
+The default is `false`; clear the key to return to it. With the opt-in, the
+project is posted with its `upstream` repository declared, and its records become
+visible to everyone who can read that repository in Hearsay. For a public
+repository that is everyone Hearsay knows, so leave it off for a project whose
+decisions should stay private. Roles read a private project through their class
+agents acting for the owner; opting in is not needed for that. The setting is
+validated like the other project settings: a value that is not `true` or
+`false` fails at load naming `hearsay_declare_repo`.
 
 Bundles preserve local charter, documents, entities and rulings. External
 context is separately labelled, limited to 8,000 bytes across scope bundles,
@@ -1237,13 +1321,17 @@ Status reports `file`, `hearsay`, or `degraded`; a configured service starts
 unverified (`degraded`) until a bundle succeeds. Credentials are not forwarded
 through HTTP redirects.
 
-The service exposes Hearsay read tools within role turns. Workers and the chief
-also receive `assert`, which proposes an agent learning and does not ratify an
-owner ruling. The endpoint, human token and agent tokens remain service-owned.
+The service exposes Hearsay read tools within role turns: `get_bundle`,
+`search`, `traverse`, `resolve`, `stance_history`, `get_l1` and `get_l0`.
+`traverse` follows Hearsay's typed graph edges from entities, so a role can
+reach the decision log and spec documents around a project or workstream entity.
+Exploratory sessions receive the same read tools at the observer class and no
+write tool; the classifier receives no tools. Workers and the chief also receive
+`assert`, which proposes an agent learning and does not ratify an owner ruling. The endpoint, human token and agent tokens remain service-owned.
 Live Hearsay sources, identities, authority policy, entities and anchors are
 configured by the operator in Hearsay.
 
-Hearsay watches use the orchestrator identity. Their opaque cursors, seen event
+Hearsay watches use the orchestrator identity and the project's default entity. Their opaque cursors, seen event
 identities and chief notices commit together in the local trace. Remote failures
 retain the last cursor and leave local work running. Changed connection or
 identity settings select a separate cursor; the first watch begins at Hearsay's

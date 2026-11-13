@@ -376,7 +376,7 @@ func removeTOMLKey(text string, path []string) (string, error) {
 	return text, nil
 }
 
-// keyEdit sets path to value (a string or int) or, when remove is true,
+// keyEdit sets path to value (a string, int or bool) or, when remove is true,
 // removes it.
 type keyEdit struct {
 	path   []string
@@ -404,6 +404,8 @@ func editTOML(text string, edits []keyEdit) (string, error) {
 			case string:
 				literal = tomlString(v)
 			case int:
+				literal = fmt.Sprint(v)
+			case bool:
 				literal = fmt.Sprint(v)
 			default:
 				return "", fmt.Errorf("unsupported value for %s", strings.Join(e.path, "."))

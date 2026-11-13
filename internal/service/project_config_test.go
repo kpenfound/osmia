@@ -14,6 +14,7 @@ import (
 
 func str(s string) *string { return &s }
 func num(n int) *int       { return &n }
+func yes(b bool) *bool     { return &b }
 
 // settingOf returns the named setting of a snapshot.
 func settingOf(t *testing.T, snapshot ProjectConfigResponse, name string) ProjectConfigSetting {
@@ -115,6 +116,7 @@ func TestProjectConfigReadReturnsTheFileSnapshot(t *testing.T) {
 		// The top-level value is inherited.
 		"capacity.per_workstream": {float64(s.current().Capacity.PerWorkstream), true},
 		"hearsay_scope":           {"", true},
+		"hearsay_declare_repo":    {false, true},
 		"hearsay_entities":        {map[string]any{}, true},
 	} {
 		setting := settingOf(t, got, name)
@@ -205,8 +207,9 @@ func TestProjectConfigSavePreservesUntouchedBytes(t *testing.T) {
 		v.Classifier = str("other")
 		v.CapacityPerWorkstream = num(5)
 		v.CapacityGitOperations = num(2)
-		v.HearsayScope = str("shop")
-		v.HearsayEntities = map[string]string{"cart": "cart-scope"}
+		v.HearsayScope = str("work:main:shop")
+		v.HearsayDeclareRepo = yes(true)
+		v.HearsayEntities = map[string]string{"cart": "code:shop:cart"}
 		v.Name = str("Shop")
 	})})
 	must(t, err)
@@ -219,8 +222,9 @@ fork = "owner/repo"
 clone = "` + settingOf(t, got, "clone").Value.(string) + `"
 checks_timeout = "45m" # the default, spelled out
 classifier = "other"
-hearsay_scope = "shop"
+hearsay_scope = "work:main:shop"
 name = "Shop"
+hearsay_declare_repo = true
 
 [preview]
 call = ["serve"]
@@ -232,7 +236,7 @@ git_operations = 2
 per_workstream = 5
 
 [hearsay_entities]
-cart = "cart-scope"
+cart = "code:shop:cart"
 `
 	// New root keys follow the last root key, so they sit before [preview].
 	disk := readFile(t, files.project)
@@ -240,7 +244,7 @@ cart = "cart-scope"
 		t.Fatalf("file:\n%s\nwant:\n%s\noutcome %+v", disk, want, saved)
 	}
 	p := s.current().For(project).Project
-	if p.ChecksTimeout != "45m" || p.Classifier != "other" || p.Capacity.PerWorkstream != 5 || p.Capacity.GitOperations != 2 || p.HearsayScope != "shop" || p.Name != "Shop" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"cart": "cart-scope"}) {
+	if p.ChecksTimeout != "45m" || p.Classifier != "other" || p.Capacity.PerWorkstream != 5 || p.Capacity.GitOperations != 2 || p.HearsayScope != "work:main:shop" || !p.HearsayDeclareRepo || p.Name != "Shop" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"cart": "code:shop:cart"}) {
 		t.Fatalf("in effect: %+v", p)
 	}
 	fresh, err := config.Load(opts.Config)
@@ -268,7 +272,7 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 	ctx := context.Background()
 	s, c, _, files := projectConfigFixture(t)
 	more := strings.Replace(files.projectText, "\n\n[preview]", "\nclassifier = \"other\"\nlanding = \"squash\"\n\n[preview]", 1)
-	more = strings.Replace(more, "[capacity]\n", "[capacity]\nper_workstream = 5\n", 1) + "\n[hearsay_entities]\na = \"x\"\nb = \"y\"\n"
+	more = strings.Replace(more, "[capacity]\n", "[capacity]\nper_workstream = 5\n", 1) + "\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
 	files.write(t, files.topText, more)
 	_, err := c.Reload(ctx)
 	must(t, err)
@@ -286,13 +290,13 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 			t.Fatalf("%s is still in the file:\n%s", gone, disk)
 		}
 	}
-	for _, kept := range []string{"# Keep this low.", "git_operations = 3", "[preview]", "b = \"y\""} {
+	for _, kept := range []string{"# Keep this low.", "git_operations = 3", "[preview]", "b = \"code:b\""} {
 		if !strings.Contains(disk, kept) {
 			t.Fatalf("%s is missing from the file:\n%s", kept, disk)
 		}
 	}
 	p := s.current().For(project).Project
-	if p.Classifier != "" || p.Landing != "commit-per-unit" || p.ChecksTimeout != "15m" || p.Capacity.PerWorkstream != s.current().Capacity.PerWorkstream || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "y"}) {
+	if p.Classifier != "" || p.Landing != "commit-per-unit" || p.ChecksTimeout != "15m" || p.Capacity.PerWorkstream != s.current().Capacity.PerWorkstream || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
 		t.Fatalf("defaults after clearing: %+v", p)
 	}
 	for _, name := range []string{"classifier", "landing", "checks_timeout", "capacity.per_workstream"} {
@@ -330,6 +334,8 @@ func TestProjectConfigSaveRefusesInvalidValues(t *testing.T) {
 		{"landing", "landing", func(v *ProjectConfigEditValues) { v.Landing = str("sideways") }},
 		{"capacity", "capacity.per_workstream", func(v *ProjectConfigEditValues) { v.CapacityPerWorkstream = num(0) }},
 		{"entity", "hearsay_entities", func(v *ProjectConfigEditValues) { v.HearsayEntities = map[string]string{"shop": "NOT VALID"} }},
+		{"old scope name as entity", "hearsay_entities", func(v *ProjectConfigEditValues) { v.HearsayEntities = map[string]string{"shop": "osmia-ab12"} }},
+		{"old scope name", "hearsay_scope", func(v *ProjectConfigEditValues) { v.HearsayScope = str("osmia-ab12") }},
 	} {
 		_, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(tc.set)})
 		failure := refused(t, err, Validation)
