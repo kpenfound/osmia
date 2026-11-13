@@ -251,6 +251,10 @@ type Service struct {
 	// with that snapshot, marked stale, instead of blocking past the
 	// bound (bounded_read.go, readview.Bounded).
 	statusViews readview.Cache[StatusResponse]
+	// removed is the state of the reconciliation of removed projects'
+	// Hearsay records, and removedDone closes when that loop has stopped.
+	removed     removedPublication
+	removedDone chan struct{}
 }
 
 // log returns s's structured logger, or a silent one when a test built s
@@ -526,6 +530,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
 	go s.notifier.run(s.lifetime)
+	// Removed projects have no runtime, so their pending Hearsay records are
+	// posted from here.
+	s.removedDone = make(chan struct{})
+	go func() {
+		defer close(s.removedDone)
+		s.publishRemoved(s.lifetime)
+	}()
 	go func() {
 		listeners := []net.Listener{listener}
 		if s.web != nil {
@@ -559,6 +570,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		stop()
 		s.cancel()
 		<-s.notifier.done
+		<-s.removedDone
 		if s.tailnet != nil {
 			<-s.tailnetDone
 		}

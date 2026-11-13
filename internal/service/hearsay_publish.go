@@ -158,7 +158,8 @@ func publishSummary(res hearsay.Result, err error) string {
 // whose content differs from what was last posted, and records the digest of
 // each successful post in the trace. The first pass is the backfill. A
 // refused or unreachable post leaves its digest as it was, so a later pass
-// posts it again.
+// posts it again. Records kept from a cleaned workstream or a removed project
+// join the pass when no live trace supplies them.
 func (s *Service) publishPass(ctx context.Context, repo *trace.Repository, cfg *config.Config) (hearsay.Result, error) {
 	token := hearsay.PublisherToken(cfg.Hearsay, nil)
 	if token == "" {
@@ -172,6 +173,15 @@ func (s *Service) publishPass(ctx context.Context, repo *trace.Repository, cfg *
 	for _, source := range publishSources {
 		records = append(records, source(in)...)
 	}
+	return s.postRecords(ctx, repo, cfg, token, records)
+}
+
+// postRecords reconciles records, and the records kept in the trace that none
+// of them supplies, against what was last posted, and keeps the outcome in
+// the trace. A kept record is released once its current content is posted.
+func (s *Service) postRecords(ctx context.Context, repo *trace.Repository, cfg *config.Config, token string, live []hearsay.Record) (hearsay.Result, error) {
+	kept, keptErr := keptRecords(repo, live)
+	records := append(slices.Clone(live), kept...)
 	stored, err := repo.HearsayPosted()
 	if err != nil {
 		return hearsay.Result{}, err
@@ -186,11 +196,15 @@ func (s *Service) publishPass(ctx context.Context, repo *trace.Repository, cfg *
 	var entries []trace.PostedRecord
 	for _, e := range res.Entries {
 		entries = append(entries, trace.PostedRecord{Source: e.Source, Key: e.Key, Digest: e.Digest, UpdatedAt: e.UpdatedAt})
+		posted[hearsay.Ref(e.Source, e.Key)] = e.Posted
 	}
 	if err := repo.RecordHearsayPosted(context.WithoutCancel(ctx), entries, s.now()); err != nil {
 		return res, fmt.Errorf("recording posted digests: %w", err)
 	}
-	return res, nil
+	if err := releaseKept(context.WithoutCancel(ctx), repo, kept, posted, s.now()); err != nil {
+		return res, fmt.Errorf("releasing kept records: %w", err)
+	}
+	return res, keptErr
 }
 
 // collectPublishInputs reads the project's eligible workstreams: not
@@ -228,31 +242,43 @@ func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *conf
 		if status.Kind == trace.SessionKind || id == librarian || !slices.Contains(eligible, id) || !hearsay.ValidID(string(id)) {
 			continue
 		}
-		stream := &publishStream{status: status}
-		if stream.documents, err = trace.Read[trace.Document](repo, id); err != nil {
+		stream, err := readPublishStream(repo, status)
+		if err != nil {
 			continue
 		}
-		if stream.transitions, err = trace.Read[trace.Transition](repo, id); err != nil {
-			continue
-		}
-		if stream.evidence, err = lifecycle.MemberEvidenceFrom(stream.documents); err != nil {
-			continue
-		}
-		if stream.approved, err = repo.GroupApproved(id); err != nil {
-			continue
-		}
-		if group, ok, err := repo.PublishedWorkgroupOf(id); err != nil {
-			continue
-		} else if ok {
-			stream.group = &group
-		}
-		// A workstream whose decisions cannot be read is still posted; its
-		// decisions wait for a later pass.
-		_ = stream.readDecisions(repo)
 		in.streams = append(in.streams, stream)
 	}
 	in.operations = librarianOperations(repo)
 	return in, nil
+}
+
+// readPublishStream reads the trace records one workstream's Hearsay records
+// are built from. It fails when a part of the workstream cannot be read. A
+// workstream whose decisions cannot be read is still returned, with
+// decisionsRead false: its decisions wait for a later pass.
+func readPublishStream(repo *trace.Repository, status trace.WorkstreamStatus) (*publishStream, error) {
+	id := status.Workstream
+	stream := &publishStream{status: status}
+	var err error
+	if stream.documents, err = trace.Read[trace.Document](repo, id); err != nil {
+		return nil, err
+	}
+	if stream.transitions, err = trace.Read[trace.Transition](repo, id); err != nil {
+		return nil, err
+	}
+	if stream.evidence, err = lifecycle.MemberEvidenceFrom(stream.documents); err != nil {
+		return nil, err
+	}
+	if stream.approved, err = repo.GroupApproved(id); err != nil {
+		return nil, err
+	}
+	if group, ok, err := repo.PublishedWorkgroupOf(id); err != nil {
+		return nil, err
+	} else if ok {
+		stream.group = &group
+	}
+	_ = stream.readDecisions(repo)
+	return stream, nil
 }
 
 // projectRef and workstreamRef name the work-source records every owner

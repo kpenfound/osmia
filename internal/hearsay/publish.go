@@ -100,11 +100,11 @@ func (w Wire) Digest() string {
 // After names records (by Ref) that must be held first: a record is not
 // posted in a pass in which one of them failed.
 type Record struct {
-	Source   string
-	Key      string
-	Tier     int
-	After    []string
-	Versions []Wire
+	Source   string   `json:"source"`
+	Key      string   `json:"key"`
+	Tier     int      `json:"tier"`
+	After    []string `json:"after,omitempty"`
+	Versions []Wire   `json:"versions"`
 }
 
 // Ref names a record across sources.
@@ -259,6 +259,27 @@ func Reconcile(ctx context.Context, poster Poster, records []Record, posted map[
 		}
 	}
 	return res
+}
+
+// Unposted narrows rec to the versions a pass would still post given what was
+// last posted for it. It reports false when the record's current content is
+// already posted, so nothing of it remains to keep.
+func Unposted(rec Record, posted Posted) (Record, bool) {
+	versions := pending(rec.Versions, posted.Digest)
+	if len(versions) == 0 {
+		return Record{}, false
+	}
+	rec.Versions = slices.Clone(versions)
+	return rec, true
+}
+
+// Current is the digest of the record's current revision, or empty for a
+// record with none.
+func (r Record) Current() string {
+	if len(r.Versions) == 0 {
+		return ""
+	}
+	return r.Versions[len(r.Versions)-1].Digest()
 }
 
 // pending selects the versions to post: those after the last one whose

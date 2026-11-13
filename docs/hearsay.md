@@ -48,7 +48,7 @@ attributing poster or the decider to decide a tier.
 
 | Record | Kind | Source |
 |---|---|---|
-| A registered project, with the owner as `author`; its removal | `project` | work |
+| A registered project, with the owner as `author`; its removal, as a repost of the project ([how a removal appears](#project-removal)) | `project` | work |
 | A workgroup's project spec (its cross-repo contract), on each member project | `document` | owner |
 | A project amendment to it, with the owner's ruling; posted once on each member project | `decision` | owner |
 | A subsystem added, removed, renamed or moved under a different `part_of` parent in `kb/entities.json`, naming the workstream that caused it | `update` | work |
@@ -161,7 +161,8 @@ owners, and `kb/sources.json`, change nothing posted.
 - Engineering answers that came from reading code.
 - The chief's fixes to a stuck workstream (`move_workstream` and similar).
 - Private role notes (`notes/`), CODEOWNERS handles, entity owners, runtime
-  settings and cursors, including the publisher's digests.
+  settings and cursors, including the publisher's digests. The records kept
+  across cleanup and removal hold only what the passes post.
 - Anything that came out of a Hearsay bundle. Nothing flows from Hearsay back
   into what Osmia posts, and Hearsay posts nothing to Osmia.
 
@@ -180,15 +181,79 @@ on a later pass.
 
 **Backfill.** The first pass after `[hearsay.publish]` is configured posts every
 eligible artifact already in the committed trace. The backfill covers what the
-trace holds at that moment: a workstream archived and cleaned before publishing
-was configured is not reconstructed, so its seals and decisions are not posted
-and the pass reports no error for it.
+trace holds at that moment. **The backfill boundary:** a workstream archived and
+cleaned before publishing was configured is not reconstructed. Its trace is
+gone, nothing was kept for it, and so its seals and decisions are not posted and
+the pass reports no error for it. Archive cleanup and project removal write
+nothing for Hearsay while publishing is off.
 
 **Outages.** When Hearsay is unreachable or refuses a post, the digest stays
 unrecorded, local work carries on unaffected and a later pass retries.
 Hearsay's refusal of a duplicated id (a 409 that says where the id is held) is
 treated the same way: nothing is marked posted. A Hearsay outage never stops,
 delays or changes local work, including archive cleanup and project removal.
+
+### Pending publication survives cleanup and removal
+
+Archive cleanup and project removal delete the traces the records are computed
+from. Publishing keeps what is still to be sent in the project's own trace,
+which outlives both. Neither step contacts Hearsay, so neither waits for it,
+fails because of it or changes in timing or outcome when it is down. Without
+`[hearsay.publish]` neither writes anything of the kind.
+
+**Archive cleanup.** Just before archive cleanup moves a workstream's trace
+aside (after a merge auto-archive, an owner archive, or the cancellation or
+abandonment of a workstream, workgroup members included), the service computes
+the workstream's records the way a pass does and keeps those that are not yet
+posted at their current content, as `hearsay-kept-*` documents under `hearsay/`
+in the project's trace:
+
+- its sealed spec revisions (only the revisions after the last one posted),
+- its decisions, and the workgroup's project spec and amendment rulings that
+  the member's trace carried, and
+- its final workstream state: merged with the pull request URL, or abandoned
+  with the reason.
+
+A kept record is the record exactly as it would be posted, with the same id,
+source and parents, so it holds only the content the passes post and nothing on
+the never-sent list. A record already posted at its current content is not
+kept. If the workstream's trace cannot be read, the cleanup waits for a later
+pass, as it does for any other local read; Hearsay is never the reason.
+
+**Reconciling kept records.** Every pass adds the kept records that no live
+trace supplies to the records it computes. They are posted under the usual
+digest rules, parents first, retried after an outage and after a service
+restart, and their digests are recorded in the trace as for any record. Once a
+kept record's current content is posted, its entry is released, so what the
+trace keeps is only what is still to be sent, and later passes send nothing more
+for the workstream.
+
+**Project removal.** `osmia project remove` and a configuration reload that
+drops a project both stop its runtime and close its trace. Before the trace
+closes, the service commits the removal and every record of the project still to
+be sent as kept records in that trace, which stays on disk. A single
+service-level loop, not the project's runtime, reconciles removed projects every
+15 seconds from startup: it finds the projects under the Osmia root that are no
+longer active, opens the trace of each with a removal still to send, and posts
+it, with the project's other pending records, under the same rules. It runs
+while the project is no longer active and after a restart, and it stops
+considering the project once everything is posted.
+
+#### Project removal
+
+A removed project is **reposted, not deleted.** It keeps its project id, name and
+owner `author`, and carries the terminal core state `abandoned` and the `status`
+`removed`, dated with the removal. The project is not deleted because Hearsay's
+deletion of a project retracts it but leaves the records under it behind, and
+those records copy the project's access: a deleted project would leave its
+decision log orphaned and unreadable. As a repost, the log stays readable under
+the project that produced it, and `status` tells a reader why the project's work
+stopped. `abandoned` is the closest of Hearsay's core states, which have no
+removal of their own; nothing about the project's own workstreams, documents or
+decisions changes. A project removed before its first post is posted once, as
+removed. Its repository declaration follows the project's opt-in as before.
+Adding the project again registers a new project under a new id, which Hearsay
+holds as a new project.
 
 **Stable record ids.** Each record's id is derived from Osmia ids (project,
 workstream, seal, question, amendment, discovery, follow-up and the like). The
@@ -207,7 +272,7 @@ the same record, so a newer revision is not mistaken for a stale one.
 **Cadence.** Each project runs a reconcile pass every 15 seconds. After a pass
 that could not reach Hearsay or was refused, the next waits a minute. The
 digests are kept in the project's trace beside the watch cursor and are never
-posted. A pass posts the project, then its workstreams, then documents, and does
+posted. The loop for removed projects keeps the same cadence. A pass posts the project, then its workstreams, then documents, and does
 not attempt a record whose parent was refused.
 
 **Eligible workstreams** are the project's feature workstreams. Exploratory

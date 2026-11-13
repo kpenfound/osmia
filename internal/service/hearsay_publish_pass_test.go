@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -42,10 +43,16 @@ type hooksFake struct {
 	status int
 }
 
-func newHooksFake(t *testing.T) *hooksFake {
+func newHooksFake(t *testing.T) *hooksFake { return newHooksFakeOn(t, "127.0.0.1:0") }
+
+// newHooksFakeOn starts a hooks fake listening on addr, so a fake that was
+// closed can come back at the address the publisher is configured with.
+func newHooksFakeOn(t *testing.T, addr string) *hooksFake {
 	t.Helper()
 	f := &hooksFake{status: http.StatusAccepted}
-	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	listener, err := net.Listen("tcp", addr)
+	must(t, err)
+	f.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		post := hooksPost{Source: strings.TrimPrefix(r.URL.Path, "/hooks/"), Auth: r.Header.Get("Authorization"), Raw: string(raw)}
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/hooks/") || json.Unmarshal(raw, &post.Body) != nil {
@@ -62,6 +69,9 @@ func newHooksFake(t *testing.T) *hooksFake {
 			_, _ = w.Write([]byte(`{"id":"evt:fake"}`))
 		}
 	}))
+	f.Server.Listener.Close()
+	f.Server.Listener = listener
+	f.Server.Start()
 	t.Cleanup(f.Close)
 	return f
 }

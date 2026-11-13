@@ -603,6 +603,13 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 
 func (s *Service) finishDraining(active *activeProject) error {
 	err := <-active.done
+	// The project's runtime has stopped and its trace is still open: commit its
+	// removal and its pending Hearsay records where the service reconciles them
+	// after the runtime is gone. Hearsay is not reached, and a failure here
+	// never keeps the project from being removed.
+	if kerr := s.keepForRemoval(context.Background(), active.repository); kerr != nil {
+		s.log().Warn("hearsay removal could not be kept", "project", string(active.id), "error", kerr.Error())
+	}
 	s.mu.Lock()
 	s.projects = slices.DeleteFunc(s.projects, func(p *activeProject) bool { return p == active })
 	s.mu.Unlock()

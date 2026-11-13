@@ -27,6 +27,11 @@ type Dependencies struct {
 	MemoryTurns           func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
 	UnresolvedWork        func(*trace.Repository, config.WorkstreamID) (bool, error)
 	LearningsIncorporated func(*trace.Repository, config.WorkstreamID) (bool, error)
+	// KeepForPublication carries what the workstream's trace holds of
+	// pending publication into the project's own trace, before archive
+	// cleanup removes it. Nil keeps nothing. It must not wait for any remote
+	// service; a failure leaves the cleanup for a later pass.
+	KeepForPublication func(context.Context, *trace.Repository, config.WorkstreamID) error
 
 	StartActivity     func(key string, kind ActivityKind, project config.ProjectID, stream config.WorkstreamID, phase string) *ActivityHandle
 	Abandon           func(ctx context.Context, raw string, req AbandonRequest) (AbandonResponse, *APIError)

@@ -788,6 +788,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   workstream's own trace repository and the clone are kept. Adding the same
   upstream again afterwards creates a new project ID and new trace
   repositories; see [configuration](configuration.md#project-registration).
+  With `[hearsay.publish]` configured, removal also commits the project's
+  removal and its pending Hearsay records in the retained trace without
+  contacting Hearsay, and the service posts them afterwards; see
+  [Hearsay integration](hearsay.md#project-removal).
 - `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file

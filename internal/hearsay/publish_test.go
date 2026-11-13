@@ -190,3 +190,19 @@ func TestDigestIgnoresOnlyTheUpdateTime(t *testing.T) {
 		t.Fatal("digest does not cover exactly the content")
 	}
 }
+
+func TestUnpostedKeepsOnlyWhatIsStillToPost(t *testing.T) {
+	rec := Record{Source: "owner", Key: "document/d", Tier: TierRecord, Versions: []Wire{version("a", "2026-01-02T00:00:00Z"), version("b", "2026-01-03T00:00:00Z"), version("c", "2026-01-04T00:00:00Z")}}
+	if got, ok := Unposted(rec, Posted{}); !ok || len(got.Versions) != 3 {
+		t.Fatalf("never posted: %+v %v", got, ok)
+	}
+	if got, ok := Unposted(rec, Posted{Digest: rec.Versions[0].Digest()}); !ok || len(got.Versions) != 2 || got.Versions[0].Body != "b" {
+		t.Fatalf("first posted: %+v %v", got, ok)
+	}
+	if got, ok := Unposted(rec, Posted{Digest: "unknown"}); !ok || len(got.Versions) != 1 || got.Versions[0].Body != "c" {
+		t.Fatalf("an unknown digest posts the current version: %+v %v", got, ok)
+	}
+	if _, ok := Unposted(rec, Posted{Digest: rec.Current()}); ok {
+		t.Fatal("a record posted at its current digest has nothing left")
+	}
+}

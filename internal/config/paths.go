@@ -174,6 +174,10 @@ func (r Root) ProjectTrace(id ProjectID) (string, error) {
 	}
 	return r.managed("projects", string(id))
 }
+
+// Projects is the directory holding every project's directory.
+func (r Root) Projects() (string, error) { return r.managed("projects") }
+
 func (r Root) ProjectConfig(id ProjectID) (string, error) {
 	if err := CheckProjectIDs(id); err != nil {
 		return "", err
