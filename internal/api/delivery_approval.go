@@ -33,6 +33,35 @@ type DeliveryPresentation struct {
 	// request opens as a draft because an upstream merge-order dependency has
 	// not merged. It informs the owner and changes no approval rule.
 	DraftPullRequest bool `json:"draft_pull_request,omitempty"`
+	// Brief is the delivery brief of the presented final review, and only of
+	// that review: a brief recorded for an earlier review is never shown. It
+	// is omitted for a delivered workstream with no brief recorded.
+	Brief *DeliveryBrief `json:"brief,omitempty"`
+}
+
+// The states of a delivery brief: BriefWaiting while the chief of staff's turn
+// for the final review's notice has not ended and no brief is recorded,
+// BriefRecorded once one is, and BriefNoneRecorded when that turn ended
+// without one, no chief turn can run, or delivery was approved without one.
+const (
+	BriefWaiting      = "waiting"
+	BriefRecorded     = "recorded"
+	BriefNoneRecorded = "none_recorded"
+)
+
+// DeliveryBrief is the short brief the chief of staff recorded for one final
+// review. Review, ReviewRevision and Commit identify the review it covers.
+// Screenshots are the IDs of images the preview tool captured at that commit,
+// readable at the images endpoint of the workstream they were captured for.
+// Text, BeforeYouShip and Screenshots are empty unless State is BriefRecorded.
+type DeliveryBrief struct {
+	State          string   `json:"state"`
+	Review         int      `json:"review"`
+	ReviewRevision int      `json:"review_revision"`
+	Commit         string   `json:"commit"`
+	Text           string   `json:"text,omitempty"`
+	BeforeYouShip  []string `json:"before_you_ship,omitempty"`
+	Screenshots    []string `json:"screenshots,omitempty"`
 }
 
 // DeliveryApproval preserves the exact title and text and reviewed identity

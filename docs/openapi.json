@@ -5216,6 +5216,38 @@
         },
         "type": "object"
       },
+      "DeliveryBrief": {
+        "properties": {
+          "before_you_ship": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          },
+          "screenshots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryDecision": {
         "properties": {
           "accept_blocking": {
@@ -5266,6 +5298,9 @@
         "properties": {
           "approval": {
             "$ref": "#/components/schemas/DeliveryApproval"
+          },
+          "brief": {
+            "$ref": "#/components/schemas/DeliveryBrief"
           },
           "delivered": {
             "type": "boolean"

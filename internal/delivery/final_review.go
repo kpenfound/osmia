@@ -1141,7 +1141,7 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 		if len(blocking) > 0 && !report.Maintenance {
 			rounds++
 		}
-		body = FinalReviewNotice(report, blocking, rounds, edgePending)
+		body = FinalReviewNotice(report, blocking, rounds, edgePending) + "\n" + BriefNotice(report, revision)
 	} else {
 		reason = fmt.Sprintf("final review %d failed: %s; report %s revision %d", report.Review, report.Failure, FinalReportPath, revision)
 		body = fmt.Sprintf("The final review of the assembled branch failed: %s. The failed review authorises nothing; a new review runs once the branch or its governing documents change, or once the workstream is moved to assembled with %s.", report.Failure, moveWorkstreamTool)
@@ -1231,6 +1231,22 @@ func FinalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 	default:
 		b.WriteString("\nTriage them: a finding that needs code is resolved by one plan revision, through route_amendment, that groups related findings into as few units as fit; a finding that is mistaken or not worth building is the owner's to accept at delivery, so tell the owner why.")
 	}
+	return b.String()
+}
+
+// BriefNotice is what the chief of staff is told, with a reviewed final
+// report, about recording its delivery brief: the review number and report
+// revision to name, the brief's content, proof, deployment checklist and
+// limits, and what to do when the owner pushes back. revision is the report
+// document's revision.
+func BriefNotice(report FinalReport, revision int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Delivery brief: the owner reads a short brief before deciding delivery, and the delivery card waits for it. Record it with %s, naming review %d and review_revision %d, which are the review you read here; name the workstream too when you share a chief of staff. The brief answers one question: does what was built match what the owner asked for? It is not a summary of the final review and does not point to it.", BriefToolName, report.Review, revision)
+	fmt.Fprintf(&b, "\nContent of text, in this order: (1) how the approved intent shows up in the product, as a user or API caller sees it, functional changes only; (2) at most one line on how it was implemented; (3) a short note on anything that departs from the intent or covers it only in part, if there is any. Never list tests, test names, files or commits. text is at most %d characters.", MaxBriefText)
+	fmt.Fprintf(&b, "\nProof: when the change is visible (a UI), take screenshots with preview of the exact commit this review read, %s, which is the feature branch head, so leave unit unset; pass at most %d of their image_id values in screenshots. Screenshots do not count toward the text limit. For API, CLI-only and other changes that cannot be seen, text alone is enough. When the app cannot be run for a screenshot, or a capture of a visible change fails, say so in one line of text.", report.Commit, MaxBriefScreenshots)
+	fmt.Fprintf(&b, "\nBefore you ship: on every delivery, check the changes at %s for what must be done to deploy them, and pass before_you_ship only when you find any of: new, renamed or removed secrets and environment variables; new required config keys, deprecated or removed keys, and changed defaults that change behaviour; data or state migrations, especially one-way ones that make rollback unsafe; new external services, ports or token permissions; manual steps such as a restart or a re-login; breaking changes for API or CLI callers. Optional new keys with safe defaults are left out unless they change default behaviour. Give one short line per item, at most %d characters in total, and omit before_you_ship when you find nothing.", report.Commit, MaxBriefItems)
+	b.WriteString("\nA brief over a limit is refused with the reason and records nothing; rewrite it shorter, nothing is ever cut off. A later call for this same review replaces the earlier brief until the owner approves delivery. A call naming an earlier review, or a review the owner already approved, is refused.")
+	b.WriteString("\nIf the owner pushes back on the brief, send the workstream back to building with your existing tools, " + moveWorkstreamTool + " and plan revisions through route_amendment, and order the changes; a change that alters the agreed spec goes through the usual amendment approval. After the workstream is reassembled and a new final review is recorded, write a new brief for that review with new screenshots; it may say what changed since the last brief.")
 	return b.String()
 }
 

@@ -24,7 +24,15 @@ const Conflict = api.Conflict
 
 const DeliveredState = intake.DeliveredState
 
+const BriefNoneRecorded = api.BriefNoneRecorded
+
+const BriefRecorded = api.BriefRecorded
+
+const BriefWaiting = api.BriefWaiting
+
 type DeliveryApproval = api.DeliveryApproval
+
+type DeliveryBrief = api.DeliveryBrief
 
 type DeliveryDecision = api.DeliveryDecision
 
@@ -63,6 +71,8 @@ const UnitReady = intake.UnitReady
 const Validation = api.Validation
 
 var abandonActor = intake.AbandonActor
+
+var chiefActor = intake.ChiefActor
 
 var abandoned = intake.Abandoned
 

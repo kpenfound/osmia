@@ -53,6 +53,7 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 }
 
 var finalReviewNotice = delivery.FinalReviewNotice
+var briefNotice = delivery.BriefNotice
 
 var latestFinalReport = delivery.LatestFinalReport
 

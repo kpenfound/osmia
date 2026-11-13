@@ -279,7 +279,13 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 		} else if merged {
 			merge = &m
 		}
-		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}, nil
+		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}
+		if brief, found, err := BriefForReport(repository, stream, report, review.Revision); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
+		} else if found {
+			presented.Brief = &DeliveryBrief{State: BriefRecorded, Review: brief.Review, ReviewRevision: brief.ReviewRevision, Commit: brief.Commit, Text: brief.Text, BeforeYouShip: brief.BeforeYouShip, Screenshots: brief.Screenshots}
+		}
+		return presented, nil
 	}
 	if feature.Value != AssembledState && !maintenance {
 		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: "the workstream is not assembled"}
@@ -330,7 +336,11 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 		Style       string
 		Messages    []workspace.DeliveryMessage
 	}{title, draft, style, messages})
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft}, nil
+	brief, err := s.presentBrief(ctx, repository, stream, report, review.Revision, approval != nil)
+	if err != nil {
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
+	}
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Brief: brief}, nil
 }
 
 func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
