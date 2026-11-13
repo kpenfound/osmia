@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -57,6 +59,9 @@ type publishInputs struct {
 	// documents are the project's document revisions.
 	documents []trace.Document
 	streams   []*publishStream
+	// operations are the librarian's recorded operations by ID, which tell
+	// what caused each revision of the entity map.
+	operations map[string]coreadapter.Operation
 }
 
 // publishStream is one eligible workstream with the trace records its
@@ -72,6 +77,16 @@ type publishStream struct {
 	// approved is false while a cross-repo workstream's seal awaits the
 	// workgroup's approval, which keeps its seals unposted.
 	approved bool
+
+	// The records the workstream's decisions are built from. They are read
+	// once per pass; decisionsRead is false when they could not be, and the
+	// workstream then posts no decision in that pass.
+	questions     []trace.QuestionState
+	rulings       []trace.Ruling
+	amendments    []trace.Amendment
+	assumptions   []trace.Assumption
+	followups     []followup.Unit
+	decisionsRead bool
 }
 
 func (s *publishStream) id() config.WorkstreamID { return s.status.Workstream }
@@ -81,7 +96,7 @@ func (s *publishStream) id() config.WorkstreamID { return s.status.Workstream }
 type publishSource func(*publishInputs) []hearsay.Record
 
 // publishSources are the record sources of a pass.
-var publishSources = []publishSource{projectRecords, workstreamRecords, charterRecords, sealedSpecRecords, workgroupSpecRecords}
+var publishSources = []publishSource{projectRecords, workstreamRecords, charterRecords, sealedSpecRecords, workgroupSpecRecords, decisionRecords, mapUpdateRecords}
 
 // publishHearsay joins the project runtime's lifetime. It reconciles the
 // project's Hearsay records on a cadence while publishing is configured and
@@ -231,8 +246,12 @@ func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *conf
 		} else if ok {
 			stream.group = &group
 		}
+		// A workstream whose decisions cannot be read is still posted; its
+		// decisions wait for a later pass.
+		_ = stream.readDecisions(repo)
 		in.streams = append(in.streams, stream)
 	}
+	in.operations = librarianOperations(repo)
 	return in, nil
 }
 

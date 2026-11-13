@@ -90,6 +90,66 @@ later ruling on the same question or a new amendment decision on the same
 subject, it names that decision in `supersedes`, and the earlier one is posted
 first.
 
+**How each decision is derived.** A decision is built from the committed trace
+only, by service code, and is posted under an id derived from the Osmia ids it is
+about (`<workstream id>-ruling-<question>`, `<workstream id>-answer-<question>`,
+`<workstream id>-amendment-<amendment>`, `<workstream id>-charter-<question>`,
+`<workstream id>-discovery-<discovery hash>-<revision>`,
+`<workstream id>-accepted-<review>-<finding hash>`,
+`<workstream id>-followup-<unit>`, `assumption-<hash>` and
+`<workgroup id>-change-<change>`). An id that would not fit Hearsay's grammar is
+replaced by a hash of the same inputs.
+
+- **Owner rulings.** Only the owner's own ruling, the first revision of the
+  question's ruling, is posted, on the owner source. The question is the chief
+  of staff's rephrasing the owner read, and the context carries the passage in
+  tension, the conflict, what was blocked and the options put to the owner. The
+  chief of staff's relay of the ruling to the askers is a later revision and is
+  never posted, as a ruling or in any other form.
+- **Chief answers.** An answer the chief of staff gave from the record is posted
+  on the work source with its citations. An answer that cites a recorded code
+  inspection (`inspection#…`) came from reading code and is not posted.
+- **Amendments.** Only a final decision on an amendment is posted: approved
+  (also when the owner overruled objections) or rejected. A request that is not
+  decided yet, a debate round and a service retirement are not. The owner's
+  decisions, including the chief of staff relaying one, go to the owner source;
+  a plan-only revision the chief of staff decided goes to the work source. A
+  later approved amendment citing the same criteria revisits the earlier one and
+  names it in `supersedes`.
+- **Project amendments.** The owner's ruling on an amendment to a workgroup's
+  project spec is posted on the owner source, at the project, once on each member
+  project under the same id.
+- **Charter proposals.** Once the owner ratifies or declines a proposal, it is
+  posted on the owner source at the project, with the rule the chief drew, the
+  owner's ruling it came from and the owner's note. Recording the ratified rule
+  in the charter posts nothing more.
+- **Scope calls.** A discovery the chief of staff declined, or kept as an
+  optional suggestion, is posted with its reason, one decision per revision. A
+  discovery the chief of staff later assigns or reopens revisits the earlier call
+  and names it in `supersedes`. A gap a final review found after the units
+  serving the criterion had merged, repaired by a follow-up unit instead of by
+  reopening them, is posted as the chief of staff's call. Follow-ups that an
+  amendment or a dependency update caused are not.
+- **Accepted findings.** Each blocking finding the owner accepted by approving
+  delivery is posted on the owner source, with the final review it came from.
+- **Logged assumptions.** Each is posted on the work source. One that affects
+  several members of a workgroup is about the project and is posted once on each
+  member project; one for a single workstream is about that workstream.
+
+A decision about a workstream links the workstream's spec document and its pull
+request URL when they exist. A decision is posted after the decision it
+supersedes, and not while that one was refused.
+
+**Subsystem map.** The service compares each committed revision of
+`kb/entities.json` with the one before it and posts one `update` on the project,
+on the work source and without an author, for every subsystem added, removed,
+renamed or moved under a different `part_of` parent. A subsystem is renamed when
+its name changed, or when its id is gone and its primary path now belongs to a
+new id. The update is dated with the revision, and names the workstream whose
+landed work the librarian folded in, or, for an extraction the owner requested or
+that registered the project, the extraction. Edits to notes, aliases, paths or
+owners, and `kb/sources.json`, change nothing posted.
+
 ### Never sent
 
 - Turn requests and responses, tool calls and conversations.

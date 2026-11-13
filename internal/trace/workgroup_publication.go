@@ -3,10 +3,15 @@ package trace
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
+
+// WorkgroupChangeDocumentPrefix starts the record ID of every workgroup
+// change journal.
+const WorkgroupChangeDocumentPrefix = "workgroup-change-"
 
 // PublishedWorkgroup is a workgroup of more than one member as seen from one
 // of its members: its ID, its real members, and its project spec once the
@@ -20,6 +25,10 @@ type PublishedWorkgroup struct {
 	Spec       *ProjectSpec
 	ApprovedAt time.Time
 	UpdatedAt  time.Time
+	// Changes are every recorded revision of the workgroup's change journals,
+	// the owner's requests to amend or cancel its project spec and what the
+	// owner ruled on them, oldest first.
+	Changes []Document
 }
 
 // PublishedWorkgroupOf reports the workgroup of more than one member that
@@ -74,6 +83,10 @@ func (p *PublishedWorkgroup) approve(host *Repository, g Workgroup) error {
 	}
 	var revision, approval *Document
 	for i, d := range docs {
+		if strings.HasPrefix(d.ID, WorkgroupChangeDocumentPrefix) {
+			p.Changes = append(p.Changes, d)
+			continue
+		}
 		switch d.ID {
 		case WorkgroupRevisionDocument:
 			revision = &docs[i]
