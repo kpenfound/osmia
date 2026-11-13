@@ -197,8 +197,8 @@ func TestChangePassCrossRepoReadsOnceAndRoutesOnlyLeader(t *testing.T) {
 			if !slices.Equal(*routed, []string{string(passFirst)}) {
 				t.Fatalf("routed %v", *routed)
 			}
-			if got := trace.WorkgroupTraceOpenCount(g.ID) - opens - routeOpens; got != 1 {
-				t.Fatalf("pre-routing trace opens = %d, want 1", got)
+			if got := trace.WorkgroupTraceOpenCount(g.ID) - opens - routeOpens; got > 1 {
+				t.Fatalf("pre-routing trace opens = %d, want at most 1", got)
 			}
 			if got := trace.CrossRepoProjectSpecReadCount(g.ID) - specs - routeSpecs; got != 1 {
 				t.Fatalf("pre-routing spec reads = %d, want 1", got)

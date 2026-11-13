@@ -163,25 +163,6 @@ func (r *Repository) CrossRepoWorkgroupOf(stream config.WorkstreamID) (config.Wo
 	return config.WorkgroupID(state.Value), nil
 }
 
-// CrossRepoProjectSpec reads the recorded Workgroup and project spec of a
-// cross-repo workgroup directly from its own trace, reusing this
-// process's own already open instance of it when one exists
-// (openSharedWorkgroupTrace), or opening and closing one transiently for
-// the read alone otherwise; either way it answers promptly even while a
-// long call such as a dispatched chief-of-staff turn holds that same
-// instance open elsewhere. It needs no real member's own repository open:
-// a project spec and a workgroup's membership list are both project-level
-// documents of the workgroup's own trace, never scoped to one workstream.
-// r is used only to resolve where the service root is; the read never
-// touches r's own trace. found is false when no trace exists yet for id.
-func (r *Repository) CrossRepoProjectSpec(id config.WorkgroupID) (ProjectSpec, Workgroup, bool, error) {
-	wt, spec, g, found, err := r.OpenCrossRepoProjectSpec(id)
-	if wt != nil {
-		wt.Close()
-	}
-	return spec, g, found, err
-}
-
 // OpenCrossRepoProjectSpec reads the same authority as CrossRepoProjectSpec
 // and retains its handle for related journal reads. The caller must Close a
 // non-nil handle exactly once. A missing trace returns a nil handle and no error.
@@ -203,14 +184,16 @@ func (r *Repository) OpenCrossRepoProjectSpec(id config.WorkgroupID) (*Repositor
 	if err != nil {
 		return nil, ProjectSpec{}, Workgroup{}, false, err
 	}
-	spec, g, found, err := wt.workgroupProjectSpec(id)
+	snap, err := wt.projectSpecSnapshotOf(id)
 	if err != nil {
 		wt.Close()
 		return nil, ProjectSpec{}, Workgroup{}, false, err
 	}
-	return wt, spec, g, found, nil
+	return wt, cloneProjectSpec(snap.spec), cloneWorkgroup(snap.group), snap.found, nil
 }
 
+// workgroupProjectSpec reads the effective project spec from the trace
+// without keeping it; projectSpecSnapshotOf is the cached read.
 func (wt *Repository) workgroupProjectSpec(id config.WorkgroupID) (ProjectSpec, Workgroup, bool, error) {
 	groups, _, err := Workgroups(wt)
 	if err != nil {

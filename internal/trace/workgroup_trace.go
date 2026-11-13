@@ -224,6 +224,12 @@ type sharedWorkgroupTrace struct {
 	// approval is the decoded approval answer, dropped when the last holder
 	// closes.
 	approval approvalCache
+	// projectSpecDecodes counts project spec and workgroup revision document
+	// decodes on the shared trace.
+	projectSpecDecodes atomic.Uint64
+	// projectSpec is the effective project spec, dropped with the approval
+	// when the last holder closes.
+	projectSpec projectSpecCache
 }
 
 // workgroupTraces holds one *sharedWorkgroupTrace per workgroup ID this

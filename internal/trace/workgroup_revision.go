@@ -29,6 +29,9 @@ func ApprovedWorkgroupRevision(r *Repository, host config.WorkstreamID) (Workgro
 	if err != nil {
 		return WorkgroupRevision{}, false, err
 	}
+	if r.shared != nil {
+		r.shared.projectSpecDecodes.Add(1)
+	}
 	return approvedWorkgroupRevision([]Document{d})
 }
 

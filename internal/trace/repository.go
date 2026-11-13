@@ -451,6 +451,7 @@ func (r *Repository) Close() error {
 		}
 		r.shared.repo = nil
 		r.shared.approval.reset()
+		r.shared.projectSpec.reset()
 		r.shared.Unlock()
 	}
 	r.workstreamsMu.Lock()
