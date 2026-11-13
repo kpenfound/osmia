@@ -26,6 +26,11 @@ Add `--env=race` to run them with the race detector when changing concurrent
 scheduling, recovery or shared state. [AGENTS.md](AGENTS.md#validation) covers
 listing tests and rerunning a failing check.
 
+Validate only through Dagger, from the view root or the repository root. The
+lint check is `dagger check --progress=report 'dag+check://?check=lint&staticcheck-project=.'`.
+Do not use Docker, Compose, a copy of the tree or a toolchain installed in a
+sandbox for validation.
+
 Never run `go test` on the host, including for a single test or a flaky test.
 Tests can leave processes behind on the machine that runs them. `gofmt`,
 `go build` and `go vet ./...` are safe on the host.

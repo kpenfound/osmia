@@ -811,6 +811,14 @@ present. Its CLI `version` remains required and independent of the top-level
 engine version. With no top-level `[dagger]` section, the engine selection is
 `auto` and a mason must specify its engine.
 
+A Dagger-enabled mason's view holds an empty Git repository at its root, made
+on the host before the sandbox starts, so the CLI finds `dagger.toml` there. It
+has no commits, remote or hooks and is never captured. From the view root the
+mason runs plain `dagger check`, `dagger check -l`, the Go check's
+`--go-package`, `--go-test` and `--env` flags and `dagger generate`, and lints
+through the link `dag+check://?check=lint&staticcheck-project=.`. Dagger is the
+mason's only validation route.
+
 Each mason turn asks its sandbox for `dagger version`. A template that already
 has the configured release keeps it, so baking the CLI into the mason's `image`
 saves an install per turn. Otherwise the turn installs that release with the
