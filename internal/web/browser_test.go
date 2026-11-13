@@ -195,7 +195,7 @@ type fakeAPI struct {
 	feeds   map[string][]string
 	state   string
 	charter string
-	events          chan string
+	events  chan string
 
 	// contested and ratify answer the inbox entries' own decision
 	// endpoints that browser_feed_dismiss_test.go's tests submit to.

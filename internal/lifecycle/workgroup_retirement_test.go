@@ -302,7 +302,9 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		read, err := f.c.Conversation(ctx, f.origin)
 		must(t, err)
 		for _, earlier := range shared.Entries {
-			if !slices.ContainsFunc(read.Entries, func(e ConversationEntry) bool { return e.Turn == earlier.Turn && e.Kind == earlier.Kind && e.Text == earlier.Text }) {
+			if !slices.ContainsFunc(read.Entries, func(e ConversationEntry) bool {
+				return e.Turn == earlier.Turn && e.Kind == earlier.Kind && e.Text == earlier.Text
+			}) {
 				t.Fatalf("the shared conversation lost %+v", earlier)
 			}
 		}

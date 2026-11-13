@@ -234,15 +234,20 @@ func (s *Controller) WorkgroupFullyRetired(ctx context.Context, g trace.Workgrou
 	return s.validateRetiredWorkgroup(ctx, authority, g)
 }
 
+// validateRetiredWorkgroup checks every member's archive evidence against its
+// project: the approved project once the group is ratified, or the project
+// its archive record names when every member retired before ratification.
 func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *trace.Repository, g trace.Workgroup) (bool, error) {
-	approval, _, approved, err := trace.ReadGroupApproval(authority, g.Members[0])
+	approval, _, found, err := trace.ReadGroupApproval(authority, g.Members[0])
 	if err != nil {
 		return false, err
 	}
-	if !approved {
-		return false, fmt.Errorf("workgroup %s retirement lacks approved member identities", g.ID)
+	var projects map[config.WorkstreamID]config.ProjectID
+	if found {
+		projects, err = trace.ApprovedWorkgroupMembers(authority, g, approval)
+	} else {
+		projects, err = s.archivedWorkgroupMembers(g)
 	}
-	projects, err := trace.ApprovedWorkgroupMembers(authority, g, approval)
 	if err != nil {
 		return false, err
 	}
@@ -261,6 +266,23 @@ func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *tr
 		}
 	}
 	return true, nil
+}
+
+// archivedWorkgroupMembers maps each real member of an unratified workgroup
+// to the project of its archive record for g. Without an approval the archive
+// record is the only durable identity a retired member keeps, so a member
+// lacking one is not retired.
+func (s *Controller) archivedWorkgroupMembers(g trace.Workgroup) (map[config.WorkstreamID]config.ProjectID, error) {
+	projects := map[config.WorkstreamID]config.ProjectID{}
+	archives := s.MemberArchives()
+	for _, stream := range g.Members[1:] {
+		i := slices.IndexFunc(archives, func(a runtime.Archive) bool { return a.Workstream == stream && a.Workgroup == g.ID })
+		if i < 0 {
+			return nil, fmt.Errorf("workgroup %s member %s lacks archive evidence", g.ID, stream)
+		}
+		projects[stream] = archives[i].Project
+	}
+	return projects, nil
 }
 
 // RecoverArchiveLifecycle captures missing retirement evidence before shared

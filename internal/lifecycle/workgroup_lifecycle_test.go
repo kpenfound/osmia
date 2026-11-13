@@ -889,7 +889,9 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 		}
 		members, err := f.s.crossRepoMemberRepos(ctx, g)
 		must(t, err)
-		if len(members) != 2 || !slices.ContainsFunc(members, func(m trace.CrossRepoMember) bool { return m.Workstream == f.stream1 && m.Project.Project() == f.project }) {
+		if len(members) != 2 || !slices.ContainsFunc(members, func(m trace.CrossRepoMember) bool {
+			return m.Workstream == f.stream1 && m.Project.Project() == f.project
+		}) {
 			t.Fatalf("the archived member is not bound to its project: %+v", members)
 		}
 		_, err = f.c.Inbox(ctx)

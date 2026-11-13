@@ -362,42 +362,61 @@ func TestChangePassFullyRetiredPendingDecisionsRemainHeld(t *testing.T) {
 	}
 }
 
-func TestChangePassRetirementRequiresApprovalAndArchiveIdentity(t *testing.T) {
-	for _, invalid := range []string{"missing-approval", "approved-project-mismatch"} {
-		t.Run(invalid, func(t *testing.T) {
-			f := newChangePassFixture(t)
-			wt, g := f.crossGroup(t, 3)
-			c := f.pending(t, wt, g)
-			f.retire(t, g)
-			want := "retirement lacks approved member identities"
-			if invalid == "approved-project-mismatch" {
-				approval := trace.GroupApproval{Workgroup: g.ID, Complete: true}
-				for _, stream := range g.Members[1:] {
-					project := f.local.Project()
-					if stream == otherStream || stream == passFirst {
-						project = f.remote.Project()
-					}
-					approval.Members = append(approval.Members, trace.GroupMemberApproval{Project: project, Workstream: stream, Record: json.RawMessage(`{}`)})
-				}
-				must(t, trace.RecordGroupApproval(context.Background(), wt, g.Members[0], approval, demoStart, ownerActor))
-				want = "identity does not match workgroup"
-			}
-			routed := routedPasses(f.controller)
-			opens, specs := trace.WorkgroupTraceOpenCount(g.ID), trace.CrossRepoProjectSpecReadCount(g.ID)
-			err := f.controller.ChangePass(context.Background(), f.local)
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("retirement validation = %v, want %q", err, want)
-			}
-			if len(*routed) != 0 {
-				t.Fatalf("invalid retirement routed %v", *routed)
-			}
-			if got := trace.WorkgroupTraceOpenCount(g.ID) - opens; got != 1 {
-				t.Fatalf("pre-routing trace opens = %d, want 1", got)
-			}
-			if got := trace.CrossRepoProjectSpecReadCount(g.ID) - specs; got != 1 {
-				t.Fatalf("pre-routing spec reads = %d, want 1", got)
-			}
-			assertPassChange(t, wt, c, c.State, c.Revision)
-		})
+func TestChangePassRetirementRequiresApprovedArchiveIdentity(t *testing.T) {
+	f := newChangePassFixture(t)
+	wt, g := f.crossGroup(t, 3)
+	c := f.pending(t, wt, g)
+	f.retire(t, g)
+	approval := trace.GroupApproval{Workgroup: g.ID, Complete: true}
+	for _, stream := range g.Members[1:] {
+		project := f.local.Project()
+		if stream == otherStream || stream == passFirst {
+			project = f.remote.Project()
+		}
+		approval.Members = append(approval.Members, trace.GroupMemberApproval{Project: project, Workstream: stream, Record: json.RawMessage(`{}`)})
+	}
+	must(t, trace.RecordGroupApproval(context.Background(), wt, g.Members[0], approval, demoStart, ownerActor))
+	routed := routedPasses(f.controller)
+	opens, specs := trace.WorkgroupTraceOpenCount(g.ID), trace.CrossRepoProjectSpecReadCount(g.ID)
+	err := f.controller.ChangePass(context.Background(), f.local)
+	if want := "identity does not match workgroup"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("retirement validation = %v, want %q", err, want)
+	}
+	if len(*routed) != 0 {
+		t.Fatalf("invalid retirement routed %v", *routed)
+	}
+	if got := trace.WorkgroupTraceOpenCount(g.ID) - opens; got != 1 {
+		t.Fatalf("pre-routing trace opens = %d, want 1", got)
+	}
+	if got := trace.CrossRepoProjectSpecReadCount(g.ID) - specs; got != 1 {
+		t.Fatalf("pre-routing spec reads = %d, want 1", got)
+	}
+	assertPassChange(t, wt, c, c.State, c.Revision)
+}
+
+// A workgroup whose members were all abandoned and archived before
+// ratification has no approval. It is retired on its archive records, and
+// the pass carries on instead of failing on every retry.
+func TestChangePassUnratifiedRetiredGroupRemainsHeld(t *testing.T) {
+	f := newChangePassFixture(t)
+	wt, g := f.crossGroup(t, 3)
+	c := f.pending(t, wt, g)
+	f.retire(t, g)
+	routed := routedPasses(f.controller)
+	for pass := range 2 {
+		f.logs.Reset()
+		must(t, f.controller.ChangePass(context.Background(), f.local))
+		if len(*routed) != 0 {
+			t.Fatalf("pass %d: retired group routed %v", pass+1, *routed)
+		}
+		if !strings.Contains(f.logs.String(), "workgroup changes remain held") || !strings.Contains(f.logs.String(), string(g.ID)) {
+			t.Fatalf("pass %d: missing held warning: %s", pass+1, &f.logs)
+		}
+		assertPassChange(t, wt, c, c.State, c.Revision)
+	}
+	retired, err := f.controller.WorkgroupFullyRetired(context.Background(), g)
+	must(t, err)
+	if !retired {
+		t.Fatal("unratified group with every member archived is not retired")
 	}
 }

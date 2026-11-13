@@ -52,19 +52,19 @@ func handoffTitleTurns(th trace.Thread) []trace.QueuedTurn {
 // handoffTitleFixture is a service whose fake chief of staff answers a
 // hand-off title turn with set_status.
 type handoffTitleFixture struct {
-	s       *Service
-	c       *Client
-	home    config.ProjectID
-	other   config.ProjectID
-	engine  *demoEngine
-	origin  config.WorkstreamID
-	window  string
+	s      *Service
+	c      *Client
+	home   config.ProjectID
+	other  config.ProjectID
+	engine *demoEngine
+	origin config.WorkstreamID
+	window string
 	// interrupt makes the start fail at the step that records the hand-off
 	// title request. It is read by the service's own goroutines.
 	interrupt atomic.Bool
 	mu        sync.Mutex
 	calls     []string
-	failure []string
+	failure   []string
 }
 
 func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {

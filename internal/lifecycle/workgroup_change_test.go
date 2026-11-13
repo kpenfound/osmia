@@ -261,12 +261,17 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 			_, err = callTool(ctx, tools, deltaReplyTool, map[string]any{"reply": "The unchanged local sections retain their implementation."})
 			return questionResult(req, "session-delta-answer", "Answered the delta debate."), err
 		}
-		if strings.Contains(req.Prompt, "Approve the offset impact") {
+		// Every chief turn replays the owned log, so only the owner's own
+		// message turn, whose prompt ends with that message, acts on it.
+		ownerSaid := func(message string) bool {
+			return strings.HasPrefix(req.Name, "message_") && strings.HasSuffix(strings.TrimSpace(req.Prompt), message)
+		}
+		if ownerSaid("Approve the offset impact summary.") {
 			approvals.Add(1)
 			_, err = callTool(ctx, tools, decideChangeTool, map[string]any{"id": key, "revision": int(approvedRevision.Load()), "decision": "approve"})
 			return questionResult(req, "session-owner-approval", "The approved impact will be applied."), err
 		}
-		if strings.Contains(req.Prompt, "Amend the offset contract to string") {
+		if ownerSaid("Amend the offset contract to string.") {
 			_, err = callTool(ctx, tools, requestChangeTool, toolMap(ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Offset is encoded as a string."}))
 			return questionResult(req, "session-owner-amend", "The committee will debate the delta."), err
 		}
