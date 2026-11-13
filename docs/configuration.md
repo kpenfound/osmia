@@ -1328,8 +1328,9 @@ reach the decision log and spec documents around a project or workstream entity.
 Exploratory sessions receive the same read tools at the observer class and no
 write tool; the classifier receives no tools. Workers and the chief also receive
 `assert`, which proposes an agent learning and does not ratify an owner ruling. The endpoint, human token and agent tokens remain service-owned.
-Live Hearsay sources, identities, authority policy, entities and anchors are
-configured by the operator in Hearsay.
+Live Hearsay sources, identities and authority policy are configured by the
+operator in Hearsay; `osmia project memory` generates them for a project (see
+[Hearsay integration](hearsay.md#prepare-hearsays-configuration)).
 
 Hearsay watches use the orchestrator identity and the project's default entity. Their opaque cursors, seen event
 identities and chief notices commit together in the local trace. Remote failures

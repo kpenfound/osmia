@@ -70,8 +70,6 @@ type UnitLanding = api.UnitLanding
 
 type MemorySetup = api.MemorySetup
 
-type MemoryAnchor = api.MemoryAnchor
-
 type DeliveryMerge = api.DeliveryMerge
 
 type OverlapAdvisory = api.OverlapAdvisory

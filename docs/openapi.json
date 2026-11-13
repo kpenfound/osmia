@@ -6465,31 +6465,8 @@
         },
         "type": "object"
       },
-      "MemoryAnchor": {
-        "properties": {
-          "artifact": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "MemorySetup": {
         "properties": {
-          "anchors": {
-            "items": {
-              "$ref": "#/components/schemas/MemoryAnchor"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
           "files": {
             "additionalProperties": {},
             "type": [
@@ -6497,16 +6474,19 @@
               "null"
             ]
           },
-          "hearsay_entities": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": [
-              "object",
-              "null"
-            ]
-          },
           "hearsay_scope": {
+            "type": "string"
+          },
+          "owner_source": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "work_source": {
             "type": "string"
           }
         },

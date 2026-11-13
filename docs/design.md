@@ -112,7 +112,7 @@ Keep factory settings out of it. Budgets, capacity and models are configuration.
 
 What a new contributor learns that the repository's documents do not say. It has three parts.
 
-- **Prose by subsystem.** `kb/<subsystem>.md`, a logical document path in the project's trace database: how the subsystem is built, how to run the tests that matter, what breaks when you touch what, and the decisions behind it. Turns receive references to these files and retrieve relevant sections through bounded project-context tools; they become pinned anchors when Hearsay is enabled. Hearsay caps anchors at four per scope, which is a useful pressure to keep them short.
+- **Prose by subsystem.** `kb/<subsystem>.md`, a logical document path in the project's trace database: how the subsystem is built, how to run the tests that matter, what breaks when you touch what, and the decisions behind it. Turns receive references to these files and retrieve relevant sections through bounded project-context tools; they stay in Osmia; Hearsay receives none of their prose.
 - **The entity map.** The map from how people talk about the code to where it is: entities with stable local identifiers, aliases, path patterns, owners and part-of edges, seeded from CODEOWNERS and repository structure. Its local record is the `kb/entities.json` document in the project's trace database; when Hearsay is enabled, these seeds are mapped into its code entity namespace. Footprints name these entities and remain resolvable without Hearsay.
 - **Decisions.** Constraints and choices about each subsystem, recorded as rulings and decisions in the trace with provenance. When Hearsay is enabled, it also represents them as stances. Local bundles include the relevant decisions without requiring an external service.
 
@@ -900,24 +900,17 @@ Hearsay is an optional external context and memory service. It is not an orchest
 
 ### 12.1 What lives there
 
-- **Decisions.** Every ruling you give is a ratified stance under your principal. Every committee contribution is a stance on the unit's topic; a send-back is a stance change. A mason's learnings at landing are asserted as proposals and arrive as inferred stances. You ratify from the interface.
-- **The entity map.** The knowledge base's map of subsystems, aliases, path patterns and owners is Hearsay's code entity namespace, seeded when a repo is added. Footprints name these entities.
-- **Anchors.** The charter, the knowledge base prose and the workstream's spec are pinned anchors in their scopes. A roadmap or design document you want every plan judged against is pinned the same way; there is no standing document for direction.
+Hearsay is the record of how decisions are made about each project Osmia runs. Factory internals stay in Osmia.
+
+- **Decisions.** The owner's rulings, charter revisions, sealed specs, charter-proposal outcomes and accepted final-review findings are ratified records, posted to an owner source. The chief of staff's logged assumptions, intent and scope answers, scope calls and plan-only amendments are inferred records, posted to the work source.
+- **The shape of the project.** Projects, workstreams with their states and pull request outcomes, workgroup contracts and structural changes to the subsystem map.
 - **The outside.** For a project like dagger, the scope also ingests the repository's GitHub activity and its Discord channels, so a mason on the engine gets what the maintainers said about the engine, not only what your factory learned.
 
 The role notes shrink to what is private to a role's craft. The chief of staff's memory of how you decide is your stance history.
 
-### 12.2 The connector
+### 12.2 Publishing
 
-Osmia is a Hearsay source. A connector plugin in Hearsay's process reads the trace databases under the root, events, message logs, documents and their revisions, and emits L0 events. Recording local state never depends on a Hearsay write. Optional immediate assertions are a separate fast path. Ids are derived from stable Osmia record and revision identifiers, and ingest is idempotent, so everything is replayable. Immediate assertions and later connector ingestion must identify the same ruling rather than create two decisions.
-
-| Osmia record | L0 kind |
-|---|---|
-| session start and end, each turn, each tool call | `agent_session`, `agent_turn`, `tool_call` |
-| shed round, question thread | `thread` with a `message` per contribution |
-| charter, spec, plan, knowledge-base prose | `document`, one revision per change |
-| unit merged, feature delivered | `commit`, then `pull_request` through the GitHub connector |
-| state transitions, rulings, seals | `osmia.transition`, `osmia.ruling` extension kinds |
+Osmia posts to Hearsay's `work` push source; Hearsay does not read Osmia's trace. Only deterministic service code posts, from lifecycle steps, the librarian's committed extraction and the owner's own gates. No model turn writes and no agent tool writes. Posts are reconciled from the committed trace by per-artifact digests: the first pass backfills, an unchanged artifact is not reposted, and an outage leaves digests unrecorded so a later pass retries without affecting local work. Record ids derive from Osmia ids and are stable. Authority comes from the source the record arrives on, not from its author: the owner's decisions go to the owner source with the owner named as author through the publisher agent, and everyone else's stay inferred on the work source. Projects are posted without `repos` unless a project opts in, so only the owner reads them. Turns, tool calls, costs, check output, plans, mason reports, subsystem notes and anything that came out of a Hearsay bundle are never posted. [Hearsay integration](hearsay.md) lists what is posted and where.
 
 ### 12.3 Bundles
 
@@ -931,7 +924,7 @@ The chief of staff watches the project scope. A Discord thread that decides some
 
 Osmia runs without it. The null provider uses the charter, knowledge-base prose, local entity map, spec, plan, questions, notices, trace decisions and private role notes. Footprint checks and scheduling still work. File-based context is a supported operating mode, not an error; status reports it explicitly. If Hearsay is configured but unavailable, status reports degraded memory and the same local path continues to work.
 
-The connector is the durable ruling path: a ruling is written locally and then ingested under the owner identity, so an outage loses nothing. Optional immediate assertions must reconcile to the connector identity before they can be enabled. Historical traces can be ingested when Hearsay becomes available. File-based context is the supported provider. Hearsay integration requires anchors, entity resolution, stance history, assert, agent classes, watch and replayable connector ingestion. Jujutsu and multi-project support must work without Hearsay.
+A ruling is written locally first and posted to Hearsay by the publisher afterwards, so an outage loses nothing: a later pass posts it. Workstreams archived before publishing was configured are not reconstructed. File-based context is the supported provider. Hearsay integration requires entity resolution, stance history, assert, agent classes, watch and the decision log. Jujutsu and multi-project support must work without Hearsay.
 
 ---
 
@@ -1076,7 +1069,7 @@ Every architect spec, plan, amendment or workgroup spec delivery returns the sam
 
 ### 14.3 First run
 
-Git worktrees and Jujutsu share the workspace interface. The service supports multiple projects and workstreams, with a web interface on the tailnet and file-based context. Cross-workstream bases and the optional Hearsay connector, bundles and watches are separate capabilities; neither is required for independent workstreams to run and deliver features.
+Git worktrees and Jujutsu share the workspace interface. The service supports multiple projects and workstreams, with a web interface on the tailnet and file-based context. Cross-workstream bases and the optional Hearsay publishing, bundles and watches are separate capabilities; neither is required for independent workstreams to run and deliver features.
 
 ---
 
@@ -1111,7 +1104,7 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 
 **Osmia owns the workflow.** Its Go controllers own feature and unit state, the plan, seals, footprints, scheduling policy, questions and fixed message routes, role notes, prompts, ratification and delivery gates. Durable threads wrap the core runner with an owned log and turn queue. The core's wakeup bus does not replace the durable outbox, and its workspace or VCS-access flags do not by themselves enforce the isolation required in sections 7 and 15. Adapters must verify those contracts explicitly.
 
-**Hearsay** is optional memory, reached through a provider boundary. Its connector executes in Hearsay's process and reads Osmia's trace. Bundles and watches augment the local record; Hearsay never becomes the workflow tracker, dispatcher or owner of the specification. Section 12 defines the integration and fallback contract.
+**Hearsay** is optional memory, reached through a provider boundary. Osmia's service posts decisions to it. Bundles and watches augment the local record; Hearsay never becomes the workflow tracker, dispatcher or owner of the specification. Section 12 defines the integration and fallback contract.
 
 **Jev** is an optional judgment provider, reached through a TypeSafe-compatible API. Osmia owns the questions, their interpretation, the thresholds and the fallbacks; Jev answers typed questions and never owns a decision, a transition or a gate. Section 9.6 defines the contract.
 
@@ -1130,7 +1123,7 @@ The workflow builds on durable local state, planning and owner ratification befo
 | Phone operation and notifications | Embedded web interface; tailnet access; notifications and the product's installation, release and first-run experience. | The full lifecycle and every owner decision are available from a phone, with local context. |
 | Jujutsu workspaces | Jujutsu provider; rebase and interruption recovery. | The complete lifecycle works with either workspace backend. |
 | Projects and workgroups | One-repo projects, per-project charters, cross-project workgroups, read-only design intake, briefs, shared chief, workgroup specs and protected slices; merge-only edges, amendments, cancel and two-level retention. | One owner start and ratification cover cross-repo work; each PR has its own delivery approval, and shared context lasts until all members resolve. |
-| Project memory through Hearsay | Replayable connector; scoped memory bundles; ruling reconciliation and watches. | Memory enriches the workflow while outages lose no decisions and local operation remains supported. |
+| Project memory through Hearsay | Reconciled decision publishing; scoped memory bundles; ruling reconciliation and watches. | Memory enriches the workflow while outages lose no decisions and local operation remains supported. |
 
 ---
 
