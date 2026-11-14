@@ -175,6 +175,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	}
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
 	s.capacity.Store(&next.Capacity)
+	reloadedAt := s.now()
 	s.checkSlots.resize(next.Capacity.Checks)
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
@@ -192,6 +193,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.launch(p)
 	}
 	s.mu.Unlock()
+	s.spans.reload(reloadedAt, poolsOf(next.Capacity))
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
 			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())

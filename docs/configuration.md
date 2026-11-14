@@ -87,6 +87,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
 <root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
+<root>/service-intervals.json                 the pool limit intervals and uptime of the running service, while [telemetry] is on
 <root>/projects/<repo-id>/config.toml
 <root>/projects/<repo-id>/trace.db             project charter, KB, entity map and role notes
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
@@ -1616,6 +1617,14 @@ header value. On shutdown the service flushes the queue, waiting at most five
 seconds. Spans carry identifiers, roles, models, states and outcomes only;
 prompts, replies, titles, reasons and check output are never attached to
 them.
+
+While telemetry is on, the running service keeps `service-intervals.json` in
+the root: the start of the run, the pool limit intervals it has open and the
+last time it recorded being alive (every 30 seconds). A clean shutdown sends
+those intervals' spans and removes the file. If the service stopped without
+shutting down, the next start sends the spans of that run's open pool limit
+intervals and its uptime, ended at the last time it was seen alive. With
+telemetry off the file is never written.
 
 ## Optional Jev boost
 

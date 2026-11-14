@@ -69,6 +69,9 @@ func TestServiceSendsWorkstreamSpansAndTheRootOnArchive(t *testing.T) {
 		t.Fatalf("root span %+v, archived at %v", root, archivedAt)
 	}
 	for _, s := range spans {
+		if factoryTrace := telemetry.FactoryTrace("service"); s.SpanContext.TraceID() == factoryTrace {
+			continue
+		}
 		if s.SpanContext.TraceID() != telemetry.WorkstreamTrace(stream) {
 			t.Errorf("span %s is not in the workstream's trace", s.Name)
 		}

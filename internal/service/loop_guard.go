@@ -125,6 +125,7 @@ func (g loopGuard) pause(ctx context.Context, stream config.WorkstreamID, guard 
 	} else if err != nil {
 		return err
 	}
+	g.s.spans.loopGuardTrip(g.cfg.Project.ID, stream, id, h.At)
 	err := g.s.store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: reason, Source: runtime.PauseLoopGuard, SetAt: h.At})
 	if errors.Is(err, runtime.ErrValidation) {
 		return nil

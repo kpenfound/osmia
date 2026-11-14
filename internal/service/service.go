@@ -211,6 +211,10 @@ type Service struct {
 	slots *slotspans.Recorder
 	// capacity is the pools' limits in force, readable without s.mu.
 	capacity atomic.Pointer[config.Capacity]
+	// spans sends the factory-level spans: pool limits, pauses, loop-guard
+	// trips, service start and uptime. Nil-safe; it sends nothing while
+	// telemetry is off.
+	spans *factorySpans
 	// pool is the role capacity the schedulers of every project draw on.
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
@@ -336,6 +340,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	s.telemetry = s.startTelemetry(cfg.Telemetry)
 	s.slots = s.startSlotSpans(cfg)
+	s.spans = newFactorySpans(s.telemetry, ledgerPath(root), s.now, logger)
 	defer func() {
 		if err != nil {
 			s.slots.Close()
@@ -408,6 +413,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	st.Observe(func() { s.hub.Publish(Event{Kind: EventRuntime}) })
+	st.ObservePauseEnd(func(p runtime.Pause, replaced bool) { s.spans.pauseEnded(p, s.now(), replaced) })
 	defer func() {
 		if err != nil {
 			st.Close()
@@ -551,6 +557,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: tailnet.ConnContext}
+	s.spans.begin(poolsOf(cfg.Capacity))
 	s.ready.Store(true)
 	for _, p := range projects {
 		s.launch(p)
@@ -620,6 +627,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// Spans the stopped projects emitted last are sent before the service ends,
 		// and the intervals still open are kept for the next start.
 		s.slots.Close()
+		// The run's pool limit intervals and uptime end with the shutdown, then
+		// the spans the stopped projects emitted last are sent before the service ends.
+		s.spans.end()
 		if e := s.telemetry.Close(); e != nil {
 			logger.Warn("telemetry spans were not all sent", "component", "telemetry", "error", e.Error())
 		}

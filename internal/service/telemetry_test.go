@@ -73,9 +73,9 @@ func TestTelemetryHookReceivesSpansAndShutdownFlushes(t *testing.T) {
 	}
 	s.telemetry.Emit(probe)
 	must(t, s.Close())
-	got := exporter.GetSpans()
-	if len(got) != 1 || got[0].Name != "osmia.probe" {
-		t.Fatalf("spans after shutdown: %+v", got)
+	got := namedFactorySpans(exporter, "osmia.probe")
+	if len(got) != 1 {
+		t.Fatalf("spans after shutdown: %+v", exporter.GetSpans())
 	}
 	attrs := map[string]string{}
 	for _, kv := range got[0].Resource.Attributes() {

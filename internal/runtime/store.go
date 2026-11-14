@@ -140,6 +140,8 @@ type Store struct {
 	ops   fileOps
 	// changed is called after a mutation changes the persisted state.
 	changed func()
+	// pauseEnded is called after a mutation removes or replaces a stored pause.
+	pauseEnded func(ended Pause, replaced bool)
 	// generation counts the mutations that have actually changed the
 	// persisted state, so a caller that reads the store more than once
 	// while assembling one response can tell whether a mutation landed
@@ -165,6 +167,27 @@ func (s *Store) Observe(f func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.changed = f
+}
+
+// ObservePauseEnd calls f for each stored pause a mutation removes, with
+// whether the same target was paused again by the same mutation. A pause that
+// is only rewritten with the same target, source and set time has not ended.
+// Set it before the store is shared. f runs while the store's lock is held, so
+// it must return promptly and must not call the store.
+func (s *Store) ObservePauseEnd(f func(ended Pause, replaced bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pauseEnded = f
+}
+
+// endedPauses lists the pauses of before that next no longer holds, in order.
+func endedPauses(before, next []Pause, f func(Pause, bool)) {
+	for _, p := range before {
+		if slices.ContainsFunc(next, func(n Pause) bool { return n.Target == p.Target && n.Source == p.Source && n.SetAt.Equal(p.SetAt) }) {
+			continue
+		}
+		f(p, slices.ContainsFunc(next, func(n Pause) bool { return n.Target == p.Target }))
+	}
 }
 
 // Open rejects malformed state. Well-formed stale references remain in Snapshot
@@ -647,10 +670,14 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 		return err
 	}
 	unchanged := bytes.Equal(data, s.disk)
+	before := s.state.Pauses
 	s.state = next
 	s.disk = data
 	if !unchanged {
 		s.generation.Add(1)
+		if s.pauseEnded != nil {
+			endedPauses(before, next.Pauses, s.pauseEnded)
+		}
 		if s.changed != nil {
 			s.changed()
 		}

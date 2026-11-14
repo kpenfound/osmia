@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,13 +149,13 @@ func TestCheckSlotHeldWhenTheServiceStopsIsSentInterruptedByTheNextRun(t *testin
 	if _, err := os.Stat(filepath.Join(opts.Config.Root, "slot-intervals.json")); err != nil {
 		t.Fatalf("the open interval was not kept: %v", err)
 	}
-	if got := exporter.GetSpans(); len(got) != 0 {
-		t.Fatalf("a stop sent %d spans for a slot still held", len(got))
+	if got := slotSpansOf(exporter); len(got) != 0 {
+		t.Fatalf("a stop sent %d slot spans for a slot still held", len(got))
 	}
 
 	s, _ = startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
 	must(t, s.Close())
-	got := exporter.GetSpans()
+	got := slotSpansOf(exporter)
 	if len(got) != 1 || got[0].Name != "osmia.slot.held" {
 		t.Fatalf("spans after the next run: %+v", got)
 	}
@@ -164,6 +165,18 @@ func TestCheckSlotHeldWhenTheServiceStopsIsSentInterruptedByTheNextRun(t *testin
 	if !got[0].EndTime.After(got[0].StartTime) {
 		t.Fatalf("interrupted span %s to %s", got[0].StartTime, got[0].EndTime)
 	}
+}
+
+// slotSpansOf lists the slot spans exported so far, leaving out the factory
+// spans a running service sends beside them.
+func slotSpansOf(exporter *tracetest.InMemoryExporter) tracetest.SpanStubs {
+	var out tracetest.SpanStubs
+	for _, sp := range exporter.GetSpans() {
+		if strings.HasPrefix(sp.Name, "osmia.slot.") {
+			out = append(out, sp)
+		}
+	}
+	return out
 }
 
 // With telemetry off nothing is tracked, so no ledger is written.
