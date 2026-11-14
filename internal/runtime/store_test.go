@@ -169,6 +169,30 @@ func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
 	}
 }
 
+// TestUnchangedMutationLeavesTheFileInPlace shows that a mutation that
+// changes nothing does not rewrite runtime.json, while still refusing a file
+// changed outside the store.
+func TestUnchangedMutationLeavesTheFileInPlace(t *testing.T) {
+	in := fixture(t)
+	s := open(t, in)
+	must(t, s.SetProfile("mason", "other"))
+	path := filepath.Join(in.Config.Root.String(), "runtime.json")
+	before, err := os.Stat(path)
+	must(t, err)
+
+	must(t, s.SetProfile("mason", "other"))
+	after, err := os.Stat(path)
+	must(t, err)
+	if !os.SameFile(before, after) {
+		t.Fatal("a mutation that changed nothing rewrote runtime.json")
+	}
+
+	must(t, os.WriteFile(path, []byte(`{"version":1}`+"\n"), 0600))
+	if err := s.SetProfile("mason", "other"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("an unchanged mutation over a changed file: got %v, want ErrConflict", err)
+	}
+}
+
 func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)

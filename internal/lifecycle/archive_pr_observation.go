@@ -17,7 +17,7 @@ func (b *BaseRefresher) ObserveArchivedPullRequests(ctx context.Context) error {
 		return nil
 	}
 	for _, a := range pollOrder(ctx, b.S, ArchivePoll, b.S.MemberArchives(), func(a runtime.Archive) config.WorkstreamID { return a.Workstream }) {
-		if a.Project != b.Repository.Project() {
+		if a.Project != b.Repository.Project() || !b.archivePollDue(a) {
 			continue
 		}
 		if err := b.S.PollTask(ctx, b.Repository, ArchivePoll, a.Workstream, func(ctx context.Context) error {
@@ -29,6 +29,19 @@ func (b *BaseRefresher) ObserveArchivedPullRequests(ctx context.Context) error {
 	return nil
 }
 
+// archivePollDue reports whether a's pull request lookup is due: a's
+// merge is still unobserved and its cadence has elapsed. It forgets the
+// cadence of an archive that needs no further lookup. It reads only memory,
+// so a scan spends no git permit on an archive with nothing to look up.
+func (b *BaseRefresher) archivePollDue(a runtime.Archive) bool {
+	if a.State != DeliveredState || ArchiveResolved(a) || a.Publication.PullRequest <= 0 {
+		b.S.Polls.Forget(b.Repository.Project(), a.Workstream, ArchivePoll)
+		return false
+	}
+	attempt, checked := b.S.Polls.Last(b.Repository.Project(), a.Workstream, ArchivePoll)
+	return !checked || b.S.Now().Sub(attempt.At) >= b.S.About(b.Repository).Project.PullRequestPollInterval()
+}
+
 func (b *BaseRefresher) observeArchivedPullRequest(ctx context.Context, a runtime.Archive) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -36,14 +49,10 @@ func (b *BaseRefresher) observeArchivedPullRequest(ctx context.Context, a runtim
 	if a.Project != b.Repository.Project() {
 		return nil
 	}
-	if a.State != DeliveredState || ArchiveResolved(a) || a.Publication.PullRequest <= 0 {
-		b.S.Polls.Forget(b.Repository.Project(), a.Workstream, ArchivePoll)
+	if !b.archivePollDue(a) {
 		return nil
 	}
 	now := b.S.Now()
-	if attempt, checked := b.S.Polls.Last(b.Repository.Project(), a.Workstream, ArchivePoll); checked && now.Sub(attempt.At) < b.S.About(b.Repository).Project.PullRequestPollInterval() {
-		return nil
-	}
 	b.S.Polls.Record(b.Repository.Project(), a.Workstream, ArchivePoll, PullRequestAttempt{At: now})
 	p := a.Publication
 	scope := ghlog.WithScope(ctx, ghlog.Scope{Project: string(a.Project), Workstream: string(a.Workstream)})

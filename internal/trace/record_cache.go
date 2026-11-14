@@ -130,6 +130,28 @@ func (r *Repository) records(keep func(Record) bool) ([]Record, error) {
 	return records, errors.Join(c.errs...)
 }
 
+// cachedDocument returns the latest valid revision of the document at path
+// in scope's documents, from the cache's index of document paths, without
+// copying any other record. It reports the diagnostics of every damaged row
+// as records does, and takes only the cache's lock.
+func (r *Repository) cachedDocument(scope config.WorkstreamID, path string) (Document, bool, error) {
+	c := &r.cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := r.refresh(); err != nil {
+		return Document{}, false, err
+	}
+	if err := errors.Join(c.errs...); err != nil {
+		return Document{}, false, err
+	}
+	id, ok := c.documents[scopePath(Header{Workstream: scope})+path]
+	if !ok {
+		return Document{}, false, nil
+	}
+	d, ok := c.latest[recordKey(Document{Header: Header{Workstream: scope, ID: id}})].(Document)
+	return d, ok, nil
+}
+
 // scan returns every valid record of this trace, in seq order, and the
 // workstreams it holds: a workstream instance holds its own, the project's
 // own instance none. A damaged row is reported in the error alongside the

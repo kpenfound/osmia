@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -149,36 +151,59 @@ func (s *Service) acquireReviewCheckSlot(ctx context.Context, run CheckSlotRun, 
 }
 
 func (s *Service) reserveModelOperation(repository *trace.Repository, op coreadapter.Operation, role string) (func(), bool) {
+	stream, ok := s.modelOperationStream(repository, op)
+	if !ok {
+		return nil, false
+	}
+	cfg := s.about(repository)
+	limits := cfg.Capacity
+	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
+	agent := architectAgent
+	if role == librarianRole {
+		agent = librarianAgent
+	} else if role == committeeRole {
+		agent = committeeAgent(1)
+	}
+	release, admitted, err := s.pool.TryReserve(repository, stream, role, agent, &limits)
+	if err != nil {
+		s.log().Error("model operation capacity", "project", repository.Project(), "workstream", stream, "operation", op.ID, "error", err)
+	}
+	return release, admitted
+}
+
+// modelOperationStream returns the workstream holding op. A later lookup of
+// the same operation, on each pass while it waits for capacity, reads only
+// the workstream an earlier lookup found it in, and reads every workstream
+// only when the operation is no longer there.
+func (s *Service) modelOperationStream(repository *trace.Repository, op coreadapter.Operation) (config.WorkstreamID, bool) {
+	key := string(repository.Project()) + "/" + op.ID
+	if found, ok := s.modelOperationStreams.Load(key); ok {
+		stream := found.(config.WorkstreamID)
+		if s.holdsOperation(repository, stream, op) {
+			return stream, true
+		}
+		s.modelOperationStreams.Delete(key)
+	}
 	streams, err := intake.NonSessionWorkstreams(repository)
 	if err != nil {
 		s.log().Error("model operation capacity", "operation", op.ID, "error", err)
-		return nil, false
+		return "", false
 	}
 	for _, stream := range streams {
-		records, err := repository.Operations(stream)
-		if err != nil {
-			s.log().Error("model operation capacity", "project", repository.Project(), "workstream", stream, "operation", op.ID, "error", err)
-			continue
-		}
-		for _, record := range records {
-			if record.Operation.ID != op.ID {
-				continue
-			}
-			cfg := s.about(repository)
-			limits := cfg.Capacity
-			limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-			agent := architectAgent
-			if role == librarianRole {
-				agent = librarianAgent
-			} else if role == committeeRole {
-				agent = committeeAgent(1)
-			}
-			release, admitted, err := s.pool.TryReserve(repository, stream, role, agent, &limits)
-			if err != nil {
-				s.log().Error("model operation capacity", "project", repository.Project(), "workstream", stream, "operation", op.ID, "error", err)
-			}
-			return release, admitted
+		if s.holdsOperation(repository, stream, op) {
+			s.modelOperationStreams.Store(key, stream)
+			return stream, true
 		}
 	}
-	return nil, false
+	return "", false
+}
+
+// holdsOperation reports whether stream's workflow records op.
+func (s *Service) holdsOperation(repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
+	records, err := repository.Operations(stream)
+	if err != nil {
+		s.log().Error("model operation capacity", "project", repository.Project(), "workstream", stream, "operation", op.ID, "error", err)
+		return false
+	}
+	return slices.ContainsFunc(records, func(record trace.OperationRecord) bool { return record.Operation.ID == op.ID })
 }

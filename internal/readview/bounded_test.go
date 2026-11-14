@@ -2,6 +2,7 @@ package readview
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -83,5 +84,74 @@ func TestBoundedViewWaitsForTheFirstReadRegardlessOfBound(t *testing.T) {
 	})
 	if stale || v != 7 {
 		t.Fatalf("expected the first read awaited in full, got %d stale=%v", v, stale)
+	}
+}
+
+// TestBoundedRunsOneRefreshAtATimeAndQueuesOneBehindIt shows that calls
+// made while a refresh is in flight share one refresh queued behind it
+// rather than each starting their own, and that the queued refresh begins
+// after those calls, so it reflects writes they made before calling.
+func TestBoundedRunsOneRefreshAtATimeAndQueuesOneBehindIt(t *testing.T) {
+	t.Parallel()
+	var cache Cache[int]
+	cache.Set(0)
+
+	var mu sync.Mutex
+	runs, concurrent, peak := 0, 0, 0
+	written := 0
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	fn := func() int {
+		mu.Lock()
+		runs++
+		concurrent++
+		peak = max(peak, concurrent)
+		v := written
+		mu.Unlock()
+		started <- struct{}{}
+		<-release
+		mu.Lock()
+		concurrent--
+		mu.Unlock()
+		return v
+	}
+
+	// The first call starts a refresh that reads written = 0 and blocks.
+	if v, stale := Bounded(context.Background(), &cache, 10*time.Millisecond, fn); !stale || v != 0 {
+		t.Fatalf("expected the cached value marked stale, got %d stale=%v", v, stale)
+	}
+	<-started
+	mu.Lock()
+	written = 1
+	mu.Unlock()
+
+	// Every call made while it runs joins the same queued refresh.
+	var joined []*refresh[int]
+	for range 8 {
+		cache.mu.Lock()
+		joined = append(joined, cache.join(fn))
+		running := cache.running
+		cache.mu.Unlock()
+		if joined[len(joined)-1] == running || joined[len(joined)-1] != joined[0] {
+			t.Fatal("a call made during a refresh did not join the one queued refresh")
+		}
+	}
+	close(release)
+	<-joined[0].done
+	if joined[0].value != 1 {
+		t.Fatalf("a call made after the write got a refresh begun before it: %d", joined[0].value)
+	}
+
+	// A call after both finish starts its own refresh again.
+	if v, stale := Bounded(context.Background(), &cache, time.Minute, fn); stale || v != 1 {
+		t.Fatalf("expected a fresh refresh, got %d stale=%v", v, stale)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != 3 {
+		t.Fatalf("expected the in-flight, the queued and the later refresh, got %d runs", runs)
+	}
+	if peak != 1 {
+		t.Fatalf("expected one refresh at a time, got %d at once", peak)
 	}
 }

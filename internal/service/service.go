@@ -222,6 +222,9 @@ type Service struct {
 	// reviewSlots keeps each admitted review's committee reservation reachable
 	// while its workflow operation waits for check capacity.
 	reviewSlots sync.Map // operation ID -> *reviewReservation
+	// modelOperationStreams remembers the workstream each model operation
+	// capacity check last found its operation in.
+	modelOperationStreams sync.Map // project ID + "/" + operation ID -> config.WorkstreamID
 	// spends is the daily spend each project's daily budget pass publishes.
 	spends    daySpends
 	pending   error

@@ -371,18 +371,19 @@ func MarkWorkgroupsResolved(ctx context.Context, r *Repository, groups []Workgro
 	return newly, nil
 }
 
+// latestDocument returns the content and revision of the latest revision
+// of the project document at path, or no content and revision 0 when none
+// is recorded. Like Read, it fails on any damaged record.
 func latestDocument(r *Repository, path string) (string, int, error) {
-	documents, err := Read[Document](r, "")
+	target, err := r.questionRead("")
 	if err != nil {
 		return "", 0, err
 	}
-	content, revision := "", 0
-	for _, d := range documents {
-		if d.Path == path && d.Revision > revision {
-			content, revision = d.Content, d.Revision
-		}
+	d, ok, err := target.cachedDocument("", path)
+	if err != nil || !ok {
+		return "", 0, err
 	}
-	return content, revision, nil
+	return d.Content, d.Revision, nil
 }
 
 func latestWorkgroups(r *Repository) (string, int, error) {

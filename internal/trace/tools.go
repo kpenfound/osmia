@@ -79,18 +79,16 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 	if actor == "" {
 		return nil, errors.New("tool call has no active turn")
 	}
-	records, _, err := r.scan()
+	if r.db == nil {
+		return nil, fmt.Errorf("%w: trace repository is closed", ErrLocked)
+	}
+	documents := scopePath(Header{Workstream: stream}) + "documents.jsonl"
+	prefix := fmt.Sprintf("tool-%x-", sha256.Sum256([]byte(turn.Request.ID)))
+	sequence, err := toolCallsBegun(ctx, r.db, documents, prefix)
 	if err != nil {
 		return nil, err
 	}
-	prefix := fmt.Sprintf("tool-%x-", sha256.Sum256([]byte(turn.Request.ID)))
-	sequence := 1
-	for _, record := range records {
-		if d, ok := record.(Document); ok && d.Workstream == stream && strings.HasPrefix(d.ID, prefix) && d.Revision == 1 {
-			sequence++
-		}
-	}
-	id := fmt.Sprintf("%s%d", prefix, sequence)
+	id := fmt.Sprintf("%s%d", prefix, sequence+1)
 	if tool.Name == "preview" {
 		id = ToolCallID(scope, tool.Name, raw)
 	}
@@ -105,13 +103,15 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 	doc := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: scope.Unit, At: now(), Actor: Actor{Kind: "agent", ID: actor}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}, Path: "tools/" + id + ".json", Content: string(data)}
 	existing := false
 	if tool.Name == "preview" {
-		for _, record := range records {
-			if d, ok := record.(Document); ok && d.ID == id {
-				if d.Revision == 2 {
-					return func(context.Context, json.RawMessage, error) error { return nil }, nil
-				}
-				doc, existing = d, true
+		previous, err := r.latestRevision(ctx, r.db, doc)
+		if err != nil {
+			return nil, err
+		}
+		if d, ok := previous.(Document); ok {
+			if d.Revision == 2 {
+				return func(context.Context, json.RawMessage, error) error { return nil }, nil
 			}
+			doc, existing = d, true
 		}
 	}
 	if !existing {
@@ -127,14 +127,15 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		if tool.Name == "preview" {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			records, _, err := r.scan()
+			if r.db == nil {
+				return fmt.Errorf("%w: trace repository is closed", ErrLocked)
+			}
+			previous, err := r.latestRevision(ctx, r.db, doc)
 			if err != nil {
 				return err
 			}
-			for _, record := range records {
-				if d, ok := record.(Document); ok && d.ID == id && d.Revision == 2 {
-					return nil
-				}
+			if previous != nil && previous.header().Revision == 2 {
+				return nil
 			}
 		}
 		call.State, call.Failed = "completed", callErr != nil
@@ -157,4 +158,16 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		}
 		return r.RecordDocuments(ctx, []Document{doc})
 	}, nil
+}
+
+// toolCallsBegun counts the tool calls recorded in documents whose IDs
+// begin with prefix, by their first revisions. The (path, id, revision)
+// index answers it without reading the rest of the trace.
+func toolCallsBegun(ctx context.Context, q querier, documents, prefix string) (int, error) {
+	// prefix ends in '-', so every ID it begins sorts below prefix with
+	// that last byte replaced by '.'.
+	upper := prefix[:len(prefix)-1] + "."
+	var n int
+	err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE path = ? AND id >= ? AND id < ? AND revision = 1 AND schema = 'osmia.trace.document'", documents, prefix, upper).Scan(&n)
+	return n, err
 }

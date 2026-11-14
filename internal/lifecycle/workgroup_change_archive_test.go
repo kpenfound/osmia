@@ -183,6 +183,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 		kind, affectsRetired, resumeRetained := tc.kind, tc.affectsRetired, tc.resumeRetained
 		requiresHold := affectsRetired && tc.order != "change-first"
 		t.Run(fmt.Sprintf("%s/retired-affected=%t/resume-retained=%t/%s", kind, affectsRetired, resumeRetained, tc.order), func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 			t.Cleanup(cleanup.release)

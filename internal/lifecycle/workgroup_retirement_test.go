@@ -77,7 +77,10 @@ func TestDesignProductionFullyRetiredWorkgroupAcrossRestart(t *testing.T) {
 		if pending {
 			name = "pending-decision"
 		}
-		t.Run(name, func(t *testing.T) { testFullyRetiredWorkgroup(t, pending) })
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			testFullyRetiredWorkgroup(t, pending)
+		})
 	}
 }
 

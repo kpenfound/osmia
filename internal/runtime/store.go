@@ -666,10 +666,17 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err = s.persist(data); err != nil {
+	// A mutation that changes nothing still checks the file on disk, but
+	// does not rewrite it.
+	unchanged := bytes.Equal(data, s.disk)
+	if unchanged {
+		err = s.checkDisk()
+	} else {
+		err = s.persist(data)
+	}
+	if err != nil {
 		return err
 	}
-	unchanged := bytes.Equal(data, s.disk)
 	before := s.state.Pauses
 	s.state = next
 	s.disk = data
