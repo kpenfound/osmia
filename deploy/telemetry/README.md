@@ -75,7 +75,8 @@ The collector's ClickHouse exporter creates its schema on first start in the
 - `otel_traces_trace_id_ts`: per-trace start and end times, filled by the
   materialized view `otel_traces_trace_id_ts_mv`.
 
-Queries about Osmia spans read `otel_traces`. The collector listens on
+Queries about Osmia spans read `otel_traces`; [docs/telemetry.md](../../docs/telemetry.md)
+lists the spans and gives four worked queries. The collector listens on
 `4317`/`4318` and ClickHouse's HTTP interface on `8123` for ad-hoc queries:
 
 ```sh

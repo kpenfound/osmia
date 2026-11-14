@@ -129,6 +129,7 @@ func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
 		{rebase("checking", "implementing"), CauseRebaseConflict},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "implementing", To: "checking"}, CauseRebased},
 		{trace.Transition{Header: trace.Header{Actor: review}, From: "reviewing", To: "checking"}, CauseReviewStale},
+		{trace.Transition{Header: trace.Header{Actor: service}, From: "approved", To: "checking"}, CauseRebased},
 		{trace.Transition{Header: trace.Header{Actor: checks}, From: "checking", To: "checking"}, CauseChecksRetry},
 		{trace.Transition{Header: trace.Header{Actor: review}, From: "reviewing", To: "reviewing"}, CauseReviewRetry},
 		{trace.Transition{Header: trace.Header{Actor: checks}, From: "checking", To: "contested"}, CauseChecksIncomplete},

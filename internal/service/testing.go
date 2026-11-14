@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -105,6 +106,12 @@ func (a TestAccess) SoleRepository() *trace.Repository {
 
 // Config returns the loaded configuration for fixture setup.
 func (a TestAccess) Config() *config.Config { return a.s.current() }
+
+// Telemetry reports whether the service's span sink is on and what it has
+// counted so far.
+func (a TestAccess) Telemetry() (bool, telemetry.Stats) {
+	return a.s.telemetry.Enabled(), a.s.telemetry.Stats()
+}
 
 // Schedule publishes one dispatch pass for a fixture with reconciliation held.
 func (a TestAccess) Schedule(ctx context.Context, repo *trace.Repository) error {

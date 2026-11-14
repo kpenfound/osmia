@@ -3,6 +3,7 @@ package telemetry
 import (
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,6 +72,16 @@ var allowed = map[string]kind{
 	KeyCovered: kindInt, KeySlotWaitMS: kindInt, KeyCostUSD: kindFloat, KeyCostKnown: kindBool,
 	KeyGenAIOperation: kindToken, KeyGenAIProvider: kindID, KeyGenAIModel: kindID,
 	KeyGenAIAgentName: kindID, KeyGenAIAgentID: kindID,
+}
+
+// AttributeKeys lists every attribute key a span may carry, sorted.
+func AttributeKeys() []string {
+	keys := make([]string, 0, len(allowed))
+	for k := range allowed {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // identifier matches the shape of an ID, a role, a model or a profile name: a

@@ -1568,7 +1568,9 @@ body must be JSON.
 Osmia can export traces of its own work to an OpenTelemetry collector over OTLP.
 Telemetry is off until `endpoint` is set; with it off the service builds no
 exporter and makes no connection. Only traces are exported: no metrics, and
-the service keeps no local store of them.
+the service keeps no local store of them. The [telemetry guide](telemetry.md)
+lists every span and attribute and gives queries for the questions the traces
+answer.
 
 ```toml
 [telemetry]

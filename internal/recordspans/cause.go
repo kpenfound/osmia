@@ -83,6 +83,8 @@ func UnitCause(t trace.Transition) string {
 			return CauseRebased
 		case intake.UnitReviewing:
 			return CauseReviewStale
+		case intake.UnitApproved:
+			return CauseRebased
 		case intake.UnitChecking:
 			return CauseChecksRetry
 		}

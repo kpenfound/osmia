@@ -131,8 +131,10 @@ type HandInDependencies struct {
 	About               func(repository *trace.Repository) *config.Config
 	ArchivedWorkstream  func(raw string) (runtime.Archive, bool)
 	HandInMu            *sync.Mutex
-	NewWorkspaces       func(ctx context.Context, cfg *config.Config) (WorkspacesStatus, error)
-	RefreshRuntime      func() error
+	// Now is the service's clock; a nil Now is the wall clock.
+	Now            func() time.Time
+	NewWorkspaces  func(ctx context.Context, cfg *config.Config) (WorkspacesStatus, error)
+	RefreshRuntime func() error
 }
 
 func (c *Controller) HandInDependencies() *HandInDependencies {
@@ -141,6 +143,7 @@ func (c *Controller) HandInDependencies() *HandInDependencies {
 		About:               c.About,
 		ArchivedWorkstream:  c.ArchivedWorkstream,
 		HandInMu:            c.HandInMu,
+		Now:                 c.Now,
 		NewWorkspaces:       c.NewWorkspaces,
 		RefreshRuntime:      c.RefreshRuntime,
 	}
