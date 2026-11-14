@@ -1,0 +1,52 @@
+# OpenTelemetry Collector (contrib build) for Osmia traces.
+# OTLP in, ClickHouse out, with a sending queue persisted on disk.
+
+extensions:
+  # Stores the exporter's queue in a bbolt file on the mounted volume.
+  file_storage/queue:
+    directory: /var/lib/otelcol/file_storage
+    create_directory: true
+    timeout: 10s
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s
+    send_batch_size: 2048
+
+exporters:
+  clickhouse:
+    endpoint: ${env:CLICKHOUSE_ENDPOINT}
+    database: ${env:CLICKHOUSE_DATABASE}
+    username: ${env:CLICKHOUSE_USER}
+    password: ${env:CLICKHOUSE_PASSWORD}
+    create_schema: true
+    traces_table_name: otel_traces
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      num_consumers: 4
+      queue_size: 10000
+
+service:
+  extensions: [file_storage/queue, health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhouse]
