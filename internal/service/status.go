@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,14 +59,16 @@ func (s *Service) groupApprovalGeneration() uint64 {
 			if _, seen := decisions[id]; seen {
 				continue
 			}
-			approval, found, err := p.repository.GroupApprovalOf(stream)
+			// The approval document is immutable apart from its completion, and
+			// each recorded revision has its own stored sequence, so that
+			// sequence identifies the decision without reading the approval.
+			status, err := p.repository.GroupApprovalStatusOf(id)
 			if err != nil {
 				return 0
 			}
 			decisions[id] = "pending"
-			if found {
-				data, _ := json.Marshal(approval)
-				decisions[id] = string(data)
+			if status.Found {
+				decisions[id] = strconv.FormatInt(status.Revision, 10)
 			}
 		}
 	}
@@ -215,11 +217,18 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 				return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the title of design session %s; check the trace repository", w.Workstream)}
 			}
 		}
-		approval, accepted, err := active.repository.GroupApprovalOf(w.Workstream)
+		accepted, err := active.repository.MemberGroupApprovalStatus(w.Workstream)
 		if err != nil {
 			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
-		if accepted {
+		var approval trace.GroupApproval
+		if accepted.Found && !accepted.Complete {
+			approval, _, err = active.repository.GroupApprovalOf(w.Workstream)
+			if err != nil {
+				return nil, nil, &APIError{Code: Internal, Message: err.Error()}
+			}
+		}
+		if accepted.Found {
 			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool { return g.Kind == "ratification" })
 		}
 		group, err := active.repository.CrossRepoWorkgroupOf(w.Workstream)
@@ -293,7 +302,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 				}
 			}
 		}
-		if accepted && !approval.Complete {
+		if accepted.Found && !accepted.Complete {
 			_, detail, err := s.groupApprovalDetail(approval)
 			if err != nil {
 				return nil, nil, &APIError{Code: Internal, Message: err.Error()}
@@ -503,7 +512,7 @@ func (s *Service) designStatusAddress(repo *trace.Repository, stream config.Work
 	if err != nil || id == "" {
 		return stream, err
 	}
-	_, g, _, err := repo.CrossRepoProjectSpec(id)
+	g, _, err := repo.CrossRepoWorkgroup(id)
 	if err != nil {
 		return stream, err
 	}

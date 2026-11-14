@@ -118,15 +118,8 @@ func (s *Controller) WorkgroupMembers(ctx context.Context, g trace.Workgroup) ([
 		return nil, false, err
 	}
 	defer authority.Close()
-	approval, _, found, err := trace.ReadGroupApproval(authority, g.Members[0])
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		return nil, false, nil
-	}
-	projects, err := trace.ApprovedWorkgroupMembers(authority, g, approval)
-	if err != nil {
+	projects, found, err := authority.ApprovedMembersOf(g)
+	if err != nil || !found {
 		return nil, false, err
 	}
 	members := make([]trace.CrossRepoMember, 0, len(projects))
@@ -238,18 +231,15 @@ func (s *Controller) WorkgroupFullyRetired(ctx context.Context, g trace.Workgrou
 // project: the approved project once the group is ratified, or the project
 // its archive record names when every member retired before ratification.
 func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *trace.Repository, g trace.Workgroup) (bool, error) {
-	approval, _, found, err := trace.ReadGroupApproval(authority, g.Members[0])
+	projects, found, err := authority.ApprovedMembersOf(g)
 	if err != nil {
 		return false, err
 	}
-	var projects map[config.WorkstreamID]config.ProjectID
-	if found {
-		projects, err = trace.ApprovedWorkgroupMembers(authority, g, approval)
-	} else {
+	if !found {
 		projects, err = s.archivedWorkgroupMembers(g)
-	}
-	if err != nil {
-		return false, err
+		if err != nil {
+			return false, err
+		}
 	}
 	for stream, project := range projects {
 		if err := ctx.Err(); err != nil {

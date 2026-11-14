@@ -498,7 +498,7 @@ func (s *Controller) DesignMemberTrace(raw string) (config.ProjectID, config.Wor
 	if id == "" {
 		return project, stream, repo, nil
 	}
-	_, g, _, err := repo.CrossRepoProjectSpec(id)
+	g, _, err := repo.CrossRepoWorkgroup(id)
 	if err != nil {
 		return "", "", nil, &APIError{Code: Internal, Message: err.Error()}
 	}

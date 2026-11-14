@@ -207,15 +207,11 @@ func (r *Repository) validateMemberBindings(id config.WorkgroupID, members map[c
 				return fmt.Errorf("%w: %w: missing member binding %s", ErrConflict, ErrMembershipChanged, stream)
 			}
 		}
-		approval, _, found, err := ReadGroupApproval(r, group.Members[0])
+		approved, found, err := r.ApprovedMembersOf(group)
 		if err != nil {
 			return err
 		}
 		if found {
-			approved, err := ApprovedWorkgroupMembers(r, group, approval)
-			if err != nil {
-				return err
-			}
 			for stream, project := range approved {
 				m, ok := members[stream]
 				if !ok || m.Project.Project() != project {

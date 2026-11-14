@@ -393,7 +393,7 @@ func (p *conversationPath) discover(ctx context.Context, targets map[config.Work
 		return err
 	}
 	for _, id := range ids {
-		_, g, _, err := p.repository.CrossRepoProjectSpec(id)
+		g, _, err := p.repository.CrossRepoWorkgroup(id)
 		if err != nil {
 			return err
 		}
@@ -412,6 +412,11 @@ func (p *conversationPath) discover(ctx context.Context, targets map[config.Work
 		if !owns {
 			continue
 		}
+		// A target keeps its own handle on the workgroup's trace and its
+		// observer for as long as it lives, so a later scan has nothing to bind.
+		if targets[id] != nil {
+			continue
+		}
 		members, err := p.s.crossRepoMemberRepos(ctx, g)
 		if errors.Is(err, errWorkgroupJoining) {
 			continue
@@ -427,10 +432,6 @@ func (p *conversationPath) discover(ctx context.Context, targets map[config.Work
 			return err
 		}
 		wt.Observe(p.s.observeSharedConversation)
-		if targets[id] != nil {
-			wt.Close()
-			continue
-		}
 		t, err := p.target(wt, func() { wt.Close() })
 		if err != nil {
 			wt.Close()
@@ -447,7 +448,7 @@ func (p *conversationPath) leads(repository *trace.Repository) bool {
 	if !ok {
 		return false
 	}
-	_, g, _, err := p.repository.CrossRepoProjectSpec(id)
+	g, _, err := p.repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		return false
 	}

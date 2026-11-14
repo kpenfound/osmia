@@ -37,6 +37,13 @@ func WorkgroupTraceOpenCount(id config.WorkgroupID) uint64 {
 	return sharedWorkgroupTraceFor(id).opens.Load()
 }
 
+// WorkgroupTraceDiskOpenCount reports how many times this process opened and
+// scanned workgroup id's trace, rather than reusing an instance another holder
+// had open. It is the cost an acquisition pays when no handle is kept.
+func WorkgroupTraceDiskOpenCount(id config.WorkgroupID) uint64 {
+	return sharedWorkgroupTraceFor(id).diskOpens.Load()
+}
+
 // CrossRepoProjectSpecReadCount reports shared project spec lookup attempts.
 func CrossRepoProjectSpecReadCount(id config.WorkgroupID) uint64 {
 	return sharedWorkgroupTraceFor(id).projectSpecReads.Load()

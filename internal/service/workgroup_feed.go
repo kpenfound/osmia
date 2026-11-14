@@ -99,7 +99,7 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 		if !cfg.Active(active.id) {
 			continue
 		}
-		_, group, _, err := active.repository.CrossRepoProjectSpec(id)
+		group, _, err := active.repository.CrossRepoWorkgroup(id)
 		if err != nil {
 			return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 		}

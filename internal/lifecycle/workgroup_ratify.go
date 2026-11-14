@@ -258,28 +258,18 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 // once all members have recorded drafts. An existing unapproved spec is
 // redrafted only when a member's numbered contract text has changed.
 func (s *Controller) DraftProjectSpecIfReady(ctx context.Context, known *trace.Repository, id config.WorkgroupID) error {
-	_, g, _, err := known.CrossRepoProjectSpec(id)
+	g, _, err := known.CrossRepoWorkgroup(id)
 	if err != nil {
 		return err
 	}
 	if len(g.Members) < 2 || g.Conversation != nil && len(g.Members) == 2 {
 		return nil
 	}
-	// Approved groups need no live member documents, including after retirement.
-	authority, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
-	if err != nil {
-		if authority != nil {
-			authority.Close()
-		}
+	// Approved groups need no live member documents, including after
+	// retirement. The decision is read from the revision-keyed approval state,
+	// so an idle approved group is not decoded on each pass.
+	if status, err := known.GroupApprovalStatusOf(id); err != nil || status.Found {
 		return err
-	}
-	_, _, approved, readErr := trace.ReadGroupApproval(authority, g.Members[0])
-	closeErr := authority.Close()
-	if err := errors.Join(readErr, closeErr); err != nil {
-		return err
-	}
-	if approved {
-		return nil
 	}
 	live, err := s.LiveWorkgroupMembers(g)
 	if err != nil || len(live) != len(g.Members)-1 {
@@ -783,7 +773,7 @@ func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace
 		if id == "" {
 			continue
 		}
-		_, g, _, err := repository.CrossRepoProjectSpec(id)
+		g, _, err := repository.CrossRepoWorkgroup(id)
 		if errors.Is(err, trace.ErrLocked) {
 			// Another member's own pass, or this workgroup's leader, holds
 			// the workgroup trace open right now (for example, while

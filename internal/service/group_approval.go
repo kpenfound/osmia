@@ -23,7 +23,7 @@ func (s *Service) groupApprovalLock(id config.WorkgroupID) *sync.Mutex {
 }
 
 func (s *Service) approvalTrace(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) (*trace.Repository, trace.Workgroup, error) {
-	_, g, _, err := repo.CrossRepoProjectSpec(id)
+	g, _, err := repo.CrossRepoWorkgroup(id)
 	if err != nil {
 		return nil, g, err
 	}
@@ -185,7 +185,7 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 		if id == "" {
 			continue
 		}
-		_, g, _, err := repo.CrossRepoProjectSpec(id)
+		g, _, err := repo.CrossRepoWorkgroup(id)
 		if err != nil {
 			return err
 		}
@@ -193,20 +193,14 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 			continue
 		}
 		// Completion is authoritative even when every member has retired and
-		// only the adopted conversation's source locator remains.
-		authority, err := trace.OpenWorkgroupAuthority(s.current().Root, id)
+		// only the adopted conversation's source locator remains. It is read
+		// from the revision-keyed approval state, so an idle workgroup neither
+		// decodes the approval nor opens its trace on each pass.
+		status, err := repo.GroupApprovalStatusOf(id)
 		if err != nil {
-			if authority != nil {
-				authority.Close()
-			}
 			return err
 		}
-		decision, _, found, readErr := trace.ReadGroupApproval(authority, g.Members[0])
-		closeErr := authority.Close()
-		if err := errors.Join(readErr, closeErr); err != nil {
-			return err
-		}
-		if found && decision.Complete {
+		if status.Complete {
 			continue
 		}
 		leader, err := s.liveWorkgroupLeader(g)

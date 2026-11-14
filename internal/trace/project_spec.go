@@ -242,6 +242,9 @@ func readProjectSpecs(r *Repository) ([]projectSpecEntry, int, error) {
 	if content == "" {
 		return nil, 0, nil
 	}
+	if r.shared != nil {
+		r.shared.projectSpecDecodes.Add(1)
+	}
 	var file projectSpecsFile
 	if err := json.Unmarshal([]byte(content), &file); err != nil {
 		return nil, revision, err

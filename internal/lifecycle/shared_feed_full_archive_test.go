@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 )
@@ -148,16 +149,18 @@ func TestSharedFeedStaysReadableAfterTheOwnerArchivesEveryMember(t *testing.T) {
 		must(t, err)
 		recordResolutionMerge(t, repo, m.stream)
 	}
-	// The downstream member's dependency edge observes its upstream's recorded
-	// merge before it is archived: an archived member's edges are no longer
-	// refreshed, and its cleanup waits for the edge to be released. The pull
+	// The downstream member's dependency edge is released before it is
+	// archived: an archived member's edges are no longer refreshed, and its
+	// cleanup waits for the edge to be released. The edge is released once it
+	// observes its upstream's recorded merge, or once the workgroup is recorded
+	// resolved, which leaves a merged member with no edges to wait on. The pull
 	// request host reports no merge, so the chief of staff archives nothing.
 	down, err := g.s.repository(g.project2)
 	must(t, err)
-	lifecycleAwait(t, g.f(), "the downstream edge observes the recorded merge", func() bool {
-		observed, _, _, err := edgeObservationAt(down, g.stream2)
+	lifecycleAwait(t, g.f(), "the downstream edge is released", func() bool {
+		wait, err := lifecycle.EdgeWaitDisplay(down, g.stream2)
 		must(t, err)
-		return len(observed.Edges) == 1 && observed.Edges[0].Merged
+		return wait == ""
 	})
 	for _, m := range resolutionMembers(g.f()) {
 		resp, err := g.c.Archive(context.Background(), m.stream)

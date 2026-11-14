@@ -164,6 +164,9 @@ func TestProjectSpecRefreshDefersHeldMembersAndTrace(t *testing.T) {
 			unlock := func() {}
 			switch hold {
 			case "locked":
+				// Another holder takes the trace: members give back what they kept.
+				must(t, mustRepo(t, f.s, f.project).ReleaseWorkgroupTraces())
+				must(t, mustRepo(t, f.s, f.project2).ReleaseWorkgroupTraces())
 				directory, err := f.s.current().Root.WorkgroupTrace(id)
 				must(t, err)
 				lock, err := os.OpenFile(filepath.Join(directory, "osmia.lock"), os.O_RDWR, 0600)

@@ -201,7 +201,7 @@ func (d *Debate) Reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	if feature.Value != SketchedState && feature.Value != InShedState {
 		return nil
 	}
-	if _, decided, err := d.Repository.GroupApprovalOf(stream); err != nil || decided {
+	if status, err := d.Repository.MemberGroupApprovalStatus(stream); err != nil || status.Found {
 		return err
 	}
 	if required, err := d.Repository.GroupApprovalRequired(stream); err != nil {
@@ -211,7 +211,7 @@ func (d *Debate) Reconcile(ctx context.Context, stream config.WorkstreamID) erro
 		if err != nil {
 			return err
 		}
-		if _, _, drafted, err := d.Repository.CrossRepoProjectSpec(group); err != nil || !drafted {
+		if _, drafted, err := d.Repository.CrossRepoWorkgroup(group); err != nil || !drafted {
 			return err
 		}
 	}

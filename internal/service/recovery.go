@@ -139,7 +139,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	if len(projects) == 0 {
 		return nil
 	}
-	_, g, _, err := projects[0].repository.CrossRepoProjectSpec(id)
+	g, _, err := projects[0].repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		return err
 	}

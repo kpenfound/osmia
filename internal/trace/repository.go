@@ -93,6 +93,14 @@ type Repository struct {
 	// decoded counts the stored records this handle decoded.
 	decoded        atomic.Uint64
 	workgroupReads atomic.Uint64
+	// approvalDecodes counts the approval documents this handle decoded.
+	approvalDecodes atomic.Uint64
+	// groupTraces holds, on a project instance, the shared workgroup trace
+	// references its approval reads keep until Close. Guarded by
+	// groupTracesMu, which is never held while opening or closing a trace.
+	groupTracesMu     sync.Mutex
+	groupTraces       map[config.WorkgroupID]*Repository
+	groupTracesClosed bool
 	// parent is the project instance that opened this workstream instance
 	// through scoped, nil on the project's own instance. observed delegates
 	// to it so that Observe, called once on the project instance, also
@@ -442,6 +450,8 @@ func (r *Repository) Close() error {
 			return nil
 		}
 		r.shared.repo = nil
+		r.shared.approval.reset()
+		r.shared.projectSpec.reset()
 		r.shared.Unlock()
 	}
 	r.workstreamsMu.Lock()
@@ -450,6 +460,7 @@ func (r *Repository) Close() error {
 	r.closed = true
 	r.workstreamsMu.Unlock()
 	var errs []error
+	errs = append(errs, r.releaseWorkgroupTraces())
 	for _, s := range children {
 		errs = append(errs, s.Close())
 	}

@@ -53,7 +53,7 @@ func (s *Controller) chiefRepository(ctx context.Context, repository *trace.Repo
 	// A member can join between reading the membership and binding it;
 	// the membership is then read again.
 	for attempt := 0; ; attempt++ {
-		_, g, _, err = repository.CrossRepoProjectSpec(id)
+		g, _, err = repository.CrossRepoWorkgroup(id)
 		if err != nil {
 			return nil, "", "", noop, err
 		}

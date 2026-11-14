@@ -337,7 +337,7 @@ func (w *WorkgroupResolver) ResolveCrossRepoWorkgroup(ctx context.Context, id co
 		return nil
 	}
 	defer lock.Unlock()
-	_, g, _, err := w.Repository.CrossRepoProjectSpec(id)
+	g, _, err := w.Repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		return err
 	}

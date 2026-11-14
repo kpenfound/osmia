@@ -31,7 +31,7 @@ func (s *Controller) ChiefEventsSkip(repository *trace.Repository) func(config.W
 		if err != nil || id == "" {
 			return false, err
 		}
-		_, g, _, err := repository.CrossRepoProjectSpec(id)
+		g, _, err := repository.CrossRepoWorkgroup(id)
 		if err != nil {
 			return false, err
 		}

@@ -99,7 +99,7 @@ func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trac
 			continue
 		}
 		seen[a.Workgroup] = true
-		_, group, _, err := repository.CrossRepoProjectSpec(a.Workgroup)
+		group, _, err := repository.CrossRepoWorkgroup(a.Workgroup)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trac
 			continue
 		}
 		seen[id] = true
-		_, group, _, err := repository.CrossRepoProjectSpec(id)
+		group, _, err := repository.CrossRepoWorkgroup(id)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +143,7 @@ func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trac
 // independently numbered inbox.
 func (s *Controller) WorkgroupInbox(ctx context.Context, known *trace.Repository, id config.WorkgroupID) ([]InboxEntry, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the inbox of workgroup %s; check the trace repository", id)}
-	_, g, _, err := known.CrossRepoProjectSpec(id)
+	g, _, err := known.CrossRepoWorkgroup(id)
 	if err != nil {
 		return nil, failed
 	}
@@ -574,7 +574,7 @@ func (s *Controller) WorkgroupInboxRepository(ctx context.Context, project confi
 	if len(projects) == 0 {
 		return nil, noop, false, nil
 	}
-	_, g, _, err := projects[0].Repository.CrossRepoProjectSpec(id)
+	g, _, err := projects[0].Repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		s.Log().Error("cannot resolve inbox workgroup", "workgroup", id, "error", err.Error())
 		return nil, noop, true, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve workgroup %s; check the trace repository", id)}

@@ -28,7 +28,7 @@ func (s *Controller) ProjectSpecRefreshPass(ctx context.Context, repository *tra
 		if id == "" {
 			continue
 		}
-		_, g, found, err := repository.CrossRepoProjectSpec(id)
+		g, found, err := repository.CrossRepoWorkgroup(id)
 		if errors.Is(err, trace.ErrLocked) {
 			continue
 		}
@@ -60,12 +60,18 @@ func (s *Controller) ProjectSpecRefreshPass(ctx context.Context, repository *tra
 // RefreshProjectSpec requires the group approval lock throughout the read and
 // append, so ratification either sees this revision or suppresses the refresh.
 func (s *Controller) RefreshProjectSpec(ctx context.Context, repository *trace.Repository, id config.WorkgroupID) error {
-	_, g, _, err := repository.CrossRepoProjectSpec(id)
+	g, _, err := repository.CrossRepoWorkgroup(id)
 	if err != nil {
 		return err
 	}
 	live, err := s.LiveWorkgroupMembers(g)
 	if err != nil || len(live) != len(g.Members)-1 {
+		return err
+	}
+	// A recorded approval, complete or not, ends refreshing. Answering it from
+	// the revision-keyed approval state keeps an idle workgroup from decoding
+	// the approval or opening its trace on every pass.
+	if status, err := repository.GroupApprovalStatusOf(id); err != nil || status.Found {
 		return err
 	}
 	wt, g, err := s.ApprovalTrace(ctx, repository, id)

@@ -330,14 +330,11 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		if cross != "" {
 			cached, ok := crossRepo[cross]
 			if !ok {
-				authority, _, g, _, err := repo.OpenCrossRepoProjectSpec(cross)
+				g, _, err := repo.CrossRepoWorkgroup(cross)
 				if err != nil {
 					return err
 				}
-				if authority != nil {
-					defer authority.Close()
-				}
-				cached = &crossRepoReads{authority: authority, group: g}
+				cached = &crossRepoReads{group: g}
 				crossRepo[cross] = cached
 			}
 			group = cached.group
@@ -353,6 +350,16 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 						return err
 					}
 					if len(live) == 0 {
+						// Only a group with no live member needs its own trace here;
+						// an active group's pass reads none until it has a leader.
+						authority, err := trace.OpenWorkgroupAuthority(s.Current().Root, cross)
+						if authority != nil {
+							defer authority.Close()
+						}
+						if err != nil {
+							return err
+						}
+						cached.authority = authority
 						cached.retired, err = s.validateRetiredWorkgroup(ctx, cached.authority, group)
 						if err != nil {
 							return err
