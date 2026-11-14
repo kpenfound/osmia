@@ -4253,6 +4253,12 @@
           "candidates": {
             "type": "integer"
           },
+          "covered": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "depth_judgment": {
             "type": "string"
           },

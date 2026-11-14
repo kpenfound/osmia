@@ -1230,6 +1230,10 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	observe := s.hub.TraceEvents(cfg.Project.ID, librarianWorkstream(cfg.Project.ID))
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
+	// With telemetry off the trace derives nothing for spans.
+	if s.telemetry.Enabled() {
+		repository.ObserveSpans(s.recorder().Observe)
+	}
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}

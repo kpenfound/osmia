@@ -47,11 +47,13 @@ func SpanName(parts ...string) Name {
 }
 
 // GenAIName builds the name of a generative AI span the way the OpenTelemetry
-// GenAI conventions do: the operation, a space and the requested model. Both
-// must be identifier-shaped; otherwise the Name is invalid.
-func GenAIName(operation, model string) Name {
-	if !namePart.MatchString(operation) || !identifier.MatchString(model) {
+// GenAI conventions do: the operation, a space and what it was applied to, the
+// agent's name for an agent invocation or the requested model for an inference.
+// The operation must be a lowercase word and the target identifier-shaped;
+// otherwise the Name is invalid.
+func GenAIName(operation, target string) Name {
+	if !namePart.MatchString(operation) || !identifier.MatchString(target) {
 		return Name{}
 	}
-	return Name{operation + " " + model}
+	return Name{operation + " " + target}
 }

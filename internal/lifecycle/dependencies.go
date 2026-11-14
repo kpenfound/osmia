@@ -58,9 +58,12 @@ type Dependencies struct {
 	ShedMore          func(ctx context.Context, raw string, req ShedMoreRequest) (ShedResponse, *APIError)
 	ShedRedraft       func(ctx context.Context, raw string, req ShedRedraftRequest) (ShedResponse, *APIError)
 	Step              func(name string) error
-	Stoppable         func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
-	Store             func() *runtime.Store
-	ThreadRunner      func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
+	// WorkstreamEnded, when set, is told that an archived workstream left the
+	// factory at the recorded time, while its trace still exists.
+	WorkstreamEnded func(repository *trace.Repository, stream config.WorkstreamID, end time.Time)
+	Stoppable       func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
+	Store           func() *runtime.Store
+	ThreadRunner    func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
 }
 type Controller struct{ Dependencies }
 

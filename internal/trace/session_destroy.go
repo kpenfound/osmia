@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
@@ -15,6 +16,9 @@ type SessionDestroy struct {
 	Project    config.Project      `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Kind       string              `json:"kind"`
+	// At is when the destroy was recorded, the end of the workstream's root
+	// span. Intents recorded before it was kept have none.
+	At time.Time `json:"at,omitempty"`
 }
 
 func sessionDestroyDirectory(root config.Root, project config.ProjectID) string {

@@ -194,6 +194,7 @@ The selection has this shape:
   ],
   "candidates": 37,
   "listed": 214,
+  "covered": 61,
   "judgment": "judgment_4f1c..."
 }
 ```
@@ -205,6 +206,7 @@ The selection has this shape:
 | `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections, full runs and older records |
 | `candidates` | How many links ranking was asked about, after breadth, depth, broad-link removal and narrowing |
 | `listed` | Total links the project listed, before removing broad links or narrowing; absent when listing was skipped or failed, and in older records |
+| `covered` | How many of the listed checks the run covered: the listed checks no other listed link is narrower than that a selected link covers, or all of them for a full run. Absent when listing was skipped or failed, on a run that fell back to every check after Dagger refused the selected links, and in older records. Check run spans carry it |
 | `judgment` | The ranking judgment record, also set on a full run whose ranking judgment fell back |
 | `breadth_judgment` | Optional breadth judgment record, including when that judgment fell back |
 | `depth_judgment` | Optional depth judgment record; absent when no depth question was needed or breadth failed |

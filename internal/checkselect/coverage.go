@@ -1,5 +1,7 @@
 package checkselect
 
+import "slices"
+
 // coverage holds the original listing's leaves. Links that cover each other
 // represent the same check; only strictly narrower links make a link a parent.
 // Opaque links stay options because their coverage cannot be determined.
@@ -63,4 +65,41 @@ func (c *coverage) broad(link string) bool {
 		}
 	}
 	return narrower
+}
+
+// Leaves returns how many distinct checks listed names: its links that no
+// other listed link is narrower than, and each link whose coverage cannot be
+// read.
+func Leaves(listed []string) int {
+	links := distinct(listed)
+	n := len(listedCoverage(links).leaves)
+	for _, link := range links {
+		if parseAddress(link).opaque {
+			n++
+		}
+	}
+	return n
+}
+
+// Covered returns how many of the checks listed names the selected links run:
+// the leaves some selected link covers, and each link whose coverage cannot be
+// read that is selected as it was listed.
+func Covered(selected, listed []string) int {
+	links := distinct(listed)
+	chosen := make([]*address, len(selected))
+	for i, link := range selected {
+		chosen[i] = parseAddress(link)
+	}
+	n := 0
+	for _, leaf := range listedCoverage(links).leaves {
+		if slices.ContainsFunc(chosen, func(c *address) bool { return !c.opaque && c.covers(leaf) }) {
+			n++
+		}
+	}
+	for _, link := range links {
+		if parseAddress(link).opaque && slices.Contains(selected, link) {
+			n++
+		}
+	}
+	return n
 }

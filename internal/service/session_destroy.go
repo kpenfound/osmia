@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/recordspans"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -89,7 +90,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		if busy {
 			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "a turn or control is running for this session; try again once it finishes"}
 		}
-		intent := trace.SessionDestroy{Project: cfg.For(p.id).Project, Workstream: id, Kind: trace.SessionKind}
+		intent := trace.SessionDestroy{Project: cfg.For(p.id).Project, Workstream: id, Kind: trace.SessionKind, At: s.now()}
 		if design {
 			if _, pinned, err := intake.DesignStartIntentOf(p.repository, id); err != nil {
 				return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
@@ -169,6 +170,8 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 	if err := os.RemoveAll(runtime.ModelSessionDirectory(cfg.Root.String(), project, stream)); err != nil {
 		return err
 	}
+	// The root span is sent while the trace it is read from still exists.
+	s.recorder().Ended(repository, stream, intent.At, recordspans.Removed)
 	if _, err := repository.MarkWorkstreamTraceForDeletion(stream); err != nil {
 		return err
 	}

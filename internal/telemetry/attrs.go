@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
 // The attribute keys a span may carry. Anything else is dropped; a new key
@@ -39,11 +40,15 @@ var (
 	KeyCostKnown     = Key("cost_known")
 )
 
-// The OpenTelemetry GenAI convention attributes a turn span may carry.
-const (
-	KeyGenAIOperation = "gen_ai.operation.name"
-	KeyGenAIProvider  = "gen_ai.provider.name"
-	KeyGenAIModel     = "gen_ai.request.model"
+// The OpenTelemetry GenAI convention attributes a turn span may carry. They
+// are the keys of the pinned semantic conventions version (see
+// GenAIConventionsVersion), not Osmia's own.
+var (
+	KeyGenAIOperation = string(semconv.GenAIOperationNameKey)
+	KeyGenAIProvider  = string(semconv.GenAIProviderNameKey)
+	KeyGenAIModel     = string(semconv.GenAIRequestModelKey)
+	KeyGenAIAgentName = string(semconv.GenAIAgentNameKey)
+	KeyGenAIAgentID   = string(semconv.GenAIAgentIDKey)
 )
 
 type kind int
@@ -65,6 +70,7 @@ var allowed = map[string]kind{
 	KeyWaitReason: kindToken, KeyKind: kindToken, KeyPauseScope: kindToken, KeyPauseSource: kindToken,
 	KeyCovered: kindInt, KeySlotWaitMS: kindInt, KeyCostUSD: kindFloat, KeyCostKnown: kindBool,
 	KeyGenAIOperation: kindToken, KeyGenAIProvider: kindID, KeyGenAIModel: kindID,
+	KeyGenAIAgentName: kindID, KeyGenAIAgentID: kindID,
 }
 
 // identifier matches the shape of an ID, a role, a model or a profile name: a
@@ -218,7 +224,8 @@ func CostUSD(usd float64) Attr { return Float(KeyCostUSD, usd) }
 // CostKnown records whether the backend reported the turn's cost.
 func CostKnown(known bool) Attr { return Bool(KeyCostKnown, known) }
 
-// GenAIOperation is the gen_ai.operation.name of a turn span, such as "chat".
+// GenAIOperation is the gen_ai.operation.name of a turn span, such as
+// "invoke_agent".
 func GenAIOperation(operation string) Attr { return String(KeyGenAIOperation, operation) }
 
 // GenAIProvider is the gen_ai.provider.name of a turn span.
@@ -228,3 +235,9 @@ func GenAIProvider(provider string) Attr {
 
 // GenAIModel is the gen_ai.request.model of a turn span.
 func GenAIModel(model string) Attr { return String(KeyGenAIModel, model) }
+
+// GenAIAgentName is the gen_ai.agent.name of a turn span.
+func GenAIAgentName(name string) Attr { return String(KeyGenAIAgentName, name) }
+
+// GenAIAgentID is the gen_ai.agent.id of a turn span.
+func GenAIAgentID(id string) Attr { return String(KeyGenAIAgentID, id) }

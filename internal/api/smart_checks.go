@@ -4,6 +4,8 @@ package api
 // chosen by Jev judgment Judgment from Candidates check links. A full run ran
 // every check, because of Reason, with Detail. Listed is the number of links
 // the project listed, before narrowing, or nil when listing did not complete.
+// Covered is how many of the listed checks the run covered, or nil when the
+// listing did not complete or the record predates the count.
 type CheckSelection struct {
 	// FallbackPicks is the configured count when no check reached the threshold.
 	FallbackPicks   int               `json:"fallback_picks,omitempty"`
@@ -11,6 +13,7 @@ type CheckSelection struct {
 	Links           []string          `json:"links,omitempty"`
 	Candidates      int               `json:"candidates,omitempty"`
 	Listed          *int              `json:"listed,omitempty"`
+	Covered         *int              `json:"covered,omitempty"`
 	Judgment        string            `json:"judgment,omitempty"`
 	BreadthJudgment string            `json:"breadth_judgment,omitempty"`
 	DepthJudgment   string            `json:"depth_judgment,omitempty"`

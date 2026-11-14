@@ -201,10 +201,18 @@ func (r *Repository) publish(ctx context.Context, c change) error {
 		return err
 	}
 	r.generation.Add(1)
+	var detail *CommitDetail
+	if r.spansObserved() {
+		d := r.commitDetail(c, stream, r.workflows[c.stream])
+		detail = &d
+	}
 	if persisted != nil {
 		r.workflows[c.stream] = persisted
 	}
 	r.observed(Commit{Paths: paths, Workflow: workflow})
+	if detail != nil {
+		r.reportSpans(*detail)
+	}
 	return r.boundary(boundaryCommitted)
 }
 

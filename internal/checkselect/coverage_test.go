@@ -169,3 +169,44 @@ func TestCandidatesSkipForbiddenLargestParent(t *testing.T) {
 	}
 	assertLeavesCovered(t, links, got)
 }
+
+func TestCoveredCountsTheListedChecksASelectionRuns(t *testing.T) {
+	t.Parallel()
+	const (
+		root   = "dag+check://go/packages/tests/test"
+		module = root + "?go-module=."
+		a      = module + "&go-package=a"
+		b      = module + "&go-package=b"
+		a1, a2 = a + "&go-test=T1", a + "&go-test=T2"
+		b1     = b + "&go-test=T1"
+		opaque = "dag+check://?check=lint#weird"
+		plain  = "dag+check://release/round-trip"
+	)
+	listed := []string{root, module, a, b, a1, a2, b1, plain, opaque, a1}
+	for _, tc := range []struct {
+		name     string
+		selected []string
+		want     int
+	}{
+		{"nothing", nil, 0},
+		{"one test", []string{a1}, 1},
+		{"a package covers its tests", []string{a}, 2},
+		{"a package and a test in it", []string{a, a1}, 2},
+		{"two packages", []string{a, b}, 3},
+		{"the module covers every test", []string{module}, 3},
+		{"a standalone check", []string{plain}, 1},
+		{"an unreadable link selected as listed", []string{opaque}, 1},
+		{"an unlisted link", []string{"dag+check://other"}, 0},
+		{"everything", []string{root, plain, opaque}, 5},
+	} {
+		if got := Covered(tc.selected, listed); got != tc.want {
+			t.Errorf("%s: covered %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if got := Leaves(listed); got != 5 {
+		t.Errorf("leaves %d, want 5", got)
+	}
+	if got := Leaves(nil); got != 0 {
+		t.Errorf("leaves of nothing %d", got)
+	}
+}
