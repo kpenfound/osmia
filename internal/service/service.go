@@ -38,9 +38,12 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/skills"
+	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/tailnet"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Options struct {
@@ -163,8 +166,12 @@ type Options struct {
 	// use it to wait for a pass to demonstrably complete instead of a fixed
 	// number of ticks or a sleep.
 	schedulePassed func()
-	// getenv replaces os.Getenv for the transcription key, for tests.
+	// getenv replaces os.Getenv for the transcription key and the telemetry
+	// headers, for tests.
 	getenv func(string) string
+	// telemetryExporter replaces the exporter built from [telemetry] and turns
+	// telemetry on without an endpoint, for tests.
+	telemetryExporter sdktrace.SpanExporter
 	// transcribeLimit and transcribeTimeout replace the clip size limit and
 	// the request bound to the transcription server, for tests.
 	transcribeLimit   int64
@@ -195,6 +202,19 @@ type Service struct {
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
+	// telemetry sends the service's spans. It is set once at start from the
+	// configuration, is never nil after Start and discards spans when
+	// telemetry is off.
+	telemetry *telemetry.Sink
+	// slots sends the slot spans of the capacity pools and keeps the intervals
+	// still open across a restart. It is nil while telemetry is off.
+	slots *slotspans.Recorder
+	// capacity is the pools' limits in force, readable without s.mu.
+	capacity atomic.Pointer[config.Capacity]
+	// spans sends the factory-level spans: pool limits, pauses, loop-guard
+	// trips, service start and uptime. Nil-safe; it sends nothing while
+	// telemetry is off.
+	spans *factorySpans
 	// pool is the role capacity the schedulers of every project draw on.
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
@@ -318,13 +338,25 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	registerHearsaySecrets(cfg.Hearsay)
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	s.telemetry = s.startTelemetry(cfg.Telemetry)
+	s.slots = s.startSlotSpans(cfg)
+	s.spans = newFactorySpans(s.telemetry, ledgerPath(root), s.now, logger)
+	defer func() {
+		if err != nil {
+			s.slots.Close()
+			s.telemetry.Close()
+		}
+	}()
 	if err := s.ensureEngine(ctx, cfg); err != nil {
 		return nil, err
 	}
 	s.activity = activity.New(s.now)
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: EventActivity}) }
-	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
-	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
+	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
+	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
+	// Check holders and waiters do not survive a restart: those the earlier run
+	// left open are sent as interrupted.
+	s.slots.Interrupt(telemetry.PoolID(checksRole))
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
@@ -381,6 +413,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	st.Observe(func() { s.hub.Publish(Event{Kind: EventRuntime}) })
+	st.ObservePauseEnd(func(p runtime.Pause, replaced bool) { s.spans.pauseEnded(p, s.now(), replaced) })
 	defer func() {
 		if err != nil {
 			st.Close()
@@ -524,6 +557,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: tailnet.ConnContext}
+	s.spans.begin(poolsOf(cfg.Capacity))
 	s.ready.Store(true)
 	for _, p := range projects {
 		s.launch(p)
@@ -590,6 +624,15 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Lock()
 		s.projects = nil
 		s.mu.Unlock()
+		// Spans the stopped projects emitted last are sent before the service ends,
+		// and the intervals still open are kept for the next start.
+		s.slots.Close()
+		// The run's pool limit intervals and uptime end with the shutdown, then
+		// the spans the stopped projects emitted last are sent before the service ends.
+		s.spans.end()
+		if e := s.telemetry.Close(); e != nil {
+			logger.Warn("telemetry spans were not all sent", "component", "telemetry", "error", e.Error())
+		}
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
@@ -1210,6 +1253,10 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	observe := s.hub.TraceEvents(cfg.Project.ID, librarianWorkstream(cfg.Project.ID))
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
+	// With telemetry off the trace derives nothing for spans.
+	if s.telemetry.Enabled() {
+		repository.ObserveSpans(s.recorder().Observe)
+	}
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
@@ -1287,7 +1334,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
-	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
+	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})

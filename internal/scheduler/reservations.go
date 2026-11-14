@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -37,7 +38,17 @@ func (p *Shared) TryReserve(repository *trace.Repository, stream config.Workstre
 	}
 	candidate := Candidate{Project: l.project, Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: role}}}
 	s := Scheduler{options: Options{Capacity: limits}}
+	rec := p.spans()
 	if s.roleRefusal(used, candidate) != "" {
+		if rec != nil {
+			now := rec.Now()
+			wait := reservationInterval(slotspans.Wait, l.project, stream, role, agent, now, limits)
+			wait.Reason = slotspans.ReasonCapacity
+			if _, began := rec.Begin(wait); !began {
+				rec.Touch(wait, now)
+			}
+			rec.Abandon(now.Add(-StaleReservationWait))
+		}
 		return nil, false, nil
 	}
 	key := reservationKey{l.project, stream, role, agent}
@@ -52,6 +63,13 @@ func (p *Shared) TryReserve(repository *trace.Repository, stream config.Workstre
 	}
 	p.reservations[key]++
 	p.usageMu.Unlock()
+	var held slotspans.Interval
+	if rec != nil {
+		now := rec.Now()
+		rec.End(reservationInterval(slotspans.Wait, l.project, stream, role, agent, now, limits), now, slotspans.Granted)
+		p.syncHolds(l.project, own.flights, p.Limits, now)
+		held, _ = rec.Begin(reservationInterval(slotspans.Held, l.project, stream, role, agent, now, limits))
+	}
 	if p.Changed != nil {
 		p.Changed()
 	}
@@ -65,6 +83,7 @@ func (p *Shared) TryReserve(repository *trace.Repository, stream config.Workstre
 				delete(p.reservations, key)
 			}
 			p.usageMu.Unlock()
+			rec.End(held, rec.Now(), slotspans.Released)
 			p.mu.Unlock()
 			if p.Changed != nil {
 				p.Changed()
@@ -112,8 +131,12 @@ func (p *Shared) countWithout(l loaded, used usage, agent string, owner config.W
 	}
 	for _, stream := range l.streams {
 		for _, t := range l.threads[stream] {
-			if !covered[turnKey{workstream: stream, agent: t.Identity.ID}] && inFlight(t, stream, l.dispatched) {
+			if covered[turnKey{workstream: stream, agent: t.Identity.ID}] {
+				continue
+			}
+			if q, ok := inFlightTurn(t, stream, l.dispatched); ok {
 				used.add(l.project, stream, t.Identity.Role)
+				used.addTurn(l.flight(stream, t, q))
 			}
 		}
 	}

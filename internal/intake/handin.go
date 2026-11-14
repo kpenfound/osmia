@@ -231,6 +231,9 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 	}
 	if doc == nil {
 		now := time.Now().UTC()
+		if h.S.Now != nil {
+			now = h.S.Now().UTC()
+		}
 		if exists {
 			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, OwnerActor)
 		} else {

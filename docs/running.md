@@ -532,8 +532,8 @@ afterwards.
 Projects added to `active_projects` start; projects removed from it stop
 taking new work and drain what is in flight before the reload returns.
 
-The root, `listen.socket`, `listen.web`, `listen.tailnet` and
-`listen.tailnet_https` keep their loaded values until the service restarts; the reload lists the ones the files change
+The root, `listen.socket`, `listen.web`, `listen.tailnet`,
+`listen.tailnet_https` and the `[telemetry]` table keep their loaded values until the service restarts; the reload lists the ones the files change
 as requiring a restart.
 
 Pauses, priorities and profile overrides are runtime state, not

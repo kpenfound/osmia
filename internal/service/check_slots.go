@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"slices"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/slotspans"
+	"github.com/kpenfound/osmia/internal/telemetry"
 )
 
 // CheckSlotRun identifies a service check run waiting for or holding capacity.
@@ -45,12 +49,35 @@ type checkSlotPool struct {
 	// mu during engine commands or blocking capacity snapshots.
 	maintenance chan struct{}
 	turns       map[*EngineTurn]struct{}
+	// spans, when set, sends a span for each slot the pool grants and each wait
+	// for one; now is its clock. They only observe the pool.
+	spans *slotspans.Recorder
+	now   func() time.Time
 }
 
 type checkSlotWait struct {
 	run     CheckSlotRun
 	ready   chan struct{}
 	granted bool
+	// work names the run in the pool's slot spans.
+	work string
+}
+
+// interval identifies the held or wait interval of w's run.
+func (p *checkSlotPool) interval(kind slotspans.Kind, w *checkSlotWait, at time.Time) slotspans.Interval {
+	iv := slotspans.Interval{Kind: kind, Source: slotspans.SourceCheck, Pool: telemetry.PoolID(checksRole), Role: checksRole, Project: w.run.Project, Workstream: w.run.Workstream, Unit: w.run.Unit, Work: w.work, Start: at}
+	iv.Bound(p.limit, true)
+	if kind == slotspans.Wait {
+		iv.Reason = slotspans.ReasonCapacity
+	}
+	return iv
+}
+
+func (p *checkSlotPool) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now().UTC()
 }
 
 func (p *checkSlotPool) status() CheckSlotStatus {
@@ -85,6 +112,11 @@ func (p *checkSlotPool) admit() {
 		}
 		p.held[w] = struct{}{}
 		p.used++
+		if p.spans != nil {
+			now := p.clock()
+			p.spans.End(p.interval(slotspans.Wait, w, now), now, slotspans.Granted)
+			p.spans.Begin(p.interval(slotspans.Held, w, now))
+		}
 		close(w.ready)
 	}
 }
@@ -102,9 +134,15 @@ func (p *checkSlotPool) acquire(ctx context.Context, run CheckSlotRun) (func(), 
 		return nil, err
 	}
 	w := &checkSlotWait{run: run, ready: make(chan struct{})}
+	if p.spans != nil {
+		w.work = strconv.FormatUint(p.spans.Sequence(), 10)
+	}
 	p.mu.Lock()
 	p.waiting = append(p.waiting, w)
 	p.admit()
+	if p.spans != nil && !w.granted {
+		p.spans.Begin(p.interval(slotspans.Wait, w, p.clock()))
+	}
 	p.mu.Unlock()
 	p.notify()
 	var once sync.Once
@@ -114,9 +152,11 @@ func (p *checkSlotPool) acquire(ctx context.Context, run CheckSlotRun) (func(), 
 			if w.granted {
 				p.used--
 				delete(p.held, w)
+				p.spans.End(p.interval(slotspans.Held, w, time.Time{}), p.clock(), slotspans.Released)
 			} else {
 				i := slices.Index(p.waiting, w)
 				p.waiting = slices.Delete(p.waiting, i, i+1)
+				p.spans.End(p.interval(slotspans.Wait, w, time.Time{}), p.clock(), slotspans.Canceled)
 			}
 			p.admit()
 			p.mu.Unlock()

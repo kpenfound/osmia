@@ -160,6 +160,14 @@ func (r Root) Tailnet() (string, error) { return r.managed("tailnet") }
 // Notifications is the ledger of owner notifications sent to notify.webhook.
 func (r Root) Notifications() (string, error) { return r.managed("notifications.json") }
 
+// SlotIntervals is the ledger of the held and waited capacity intervals that
+// are still open, which lets a restart send each one with its original start.
+func (r Root) SlotIntervals() (string, error) { return r.managed("slot-intervals.json") }
+
+// ServiceIntervals is the ledger of the factory-level telemetry intervals a
+// running service has open, written only while telemetry is on.
+func (r Root) ServiceIntervals() (string, error) { return r.managed("service-intervals.json") }
+
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 

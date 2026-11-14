@@ -86,6 +86,8 @@ configuration list; they belong to persisted workstream manifests.
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
+<root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
+<root>/service-intervals.json                 the pool limit intervals and uptime of the running service, while [telemetry] is on
 <root>/projects/<repo-id>/config.toml
 <root>/projects/<repo-id>/trace.db             project charter, KB, entity map and role notes
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
@@ -259,6 +261,18 @@ url = ""
 model = "large-v3-turbo"
 # The environment variable holding an optional bearer key.
 api_key_env = "WHISPER_API_KEY"
+
+[telemetry]
+# The OpenTelemetry collector traces are sent to, as host[:port]; empty (the
+# default) turns telemetry off and builds no exporter.
+endpoint = ""
+# "grpc" (default) or "http/protobuf".
+protocol = "grpc"
+# Connect without TLS.
+insecure = false
+# The environment variable holding optional export headers, as
+# comma-separated name=value pairs.
+headers_env = ""
 
 [projects]
 # The GitHub user account new project repositories are created under; it must
@@ -1263,7 +1277,7 @@ in `runtime.json`, never these files.
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
-`listen.web`, `listen.tailnet` and `listen.tailnet_https` keep their loaded
+`listen.web`, `listen.tailnet`, `listen.tailnet_https` and the `[telemetry]` table keep their loaded
 values until the service restarts. Role skills and `skills.refresh` apply to turns that start after a
 reload, and `[transcribe]` to transcriptions that start after one. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
@@ -1548,6 +1562,71 @@ status, a reply that is not a `{"text": ...}` object and a timeout each answer
 a transcription error with no text. On the web and tailnet listeners the route
 follows the other writes: the `Host` must name the listener and the request
 body must be JSON.
+
+## Optional telemetry
+
+Osmia can export traces of its own work to an OpenTelemetry collector over OTLP.
+Telemetry is off until `endpoint` is set; with it off the service builds no
+exporter and makes no connection. Only traces are exported: no metrics, and
+the service keeps no local store of them. The [telemetry guide](telemetry.md)
+lists every span and attribute and gives queries for the questions the traces
+answer.
+
+```toml
+[telemetry]
+# The collector, as host[:port] (and a base path for http/protobuf). The
+# port defaults to 4317 for grpc and 4318 for http/protobuf. Empty (the
+# default) turns telemetry off.
+endpoint = "collector.<tailnet>.ts.net:4317"
+# "grpc" (the default) or "http/protobuf".
+protocol = "grpc"
+# Connect without TLS. The default connects with TLS.
+insecure = false
+# The environment variable holding optional export headers, as
+# comma-separated name=value pairs with percent-encoded values.
+headers_env = "OSMIA_OTLP_HEADERS"
+```
+
+`endpoint` is a host, with an optional port, without a scheme, credentials, a
+query or a fragment; with `http/protobuf` it may carry a base path such as
+`collector:4318/otlp`, and spans are posted to `<base path>/v1/traces`.
+`insecure` alone chooses between TLS and a plain connection. `protocol` must
+be `grpc` or `http/protobuf`, and `headers_env` names an environment variable.
+The settings are validated whether or not telemetry is on; an invalid one
+fails the load with an error naming the field, such as `telemetry.protocol`.
+
+Only this table configures the exporter. The service never reads an `OTEL_*`
+environment variable: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+`OTEL_RESOURCE_ATTRIBUTES` and the rest change neither where spans go nor the
+resource attributes, which are `service.name` (`osmia`) and the service
+version. Setting any of them has no effect. The table applies at start; a
+reload that changes it reports `telemetry` as needing a restart and keeps the
+running settings.
+
+The headers come from the variable `headers_env` names, read once at start.
+Typically they carry a collector credential, so the value is a secret: it is
+never stored in configuration, and it appears in no response (`osmia config`
+and `GET /v1/config` show only the variable's name), error or log record. A
+variable that is named but unset sends no headers; one that is not
+`name=value` pairs stops telemetry from starting, and the service logs an
+error naming the variable and runs with telemetry off.
+
+Telemetry is best effort and never slows or fails the service's work. Spans
+wait in a bounded in-memory queue and are exported in the background; when
+the collector is slow, down or refusing, the queue fills and the newest spans
+are dropped, and a failed export is logged at most once a minute without any
+header value. On shutdown the service flushes the queue, waiting at most five
+seconds. Spans carry identifiers, roles, models, states and outcomes only;
+prompts, replies, titles, reasons and check output are never attached to
+them.
+
+While telemetry is on, the running service keeps `service-intervals.json` in
+the root: the start of the run, the pool limit intervals it has open and the
+last time it recorded being alive (every 30 seconds). A clean shutdown sends
+those intervals' spans and removes the file. If the service stopped without
+shutting down, the next start sends the spans of that run's open pool limit
+intervals and its uptime, ended at the last time it was seen alive. With
+telemetry off the file is never written.
 
 ## Optional Jev boost
 

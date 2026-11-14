@@ -196,6 +196,10 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 		return ArchiveResponse{}, apiErr
 	}
 	if recorded, ok := s.ArchivedWorkstream(string(stream)); ok {
+		// Only the archive this call recorded ends the workstream's spans.
+		if s.WorkstreamEnded != nil && recorded.ArchivedAt.Equal(a.ArchivedAt) && recorded.Actor == a.Actor {
+			s.WorkstreamEnded(repository, stream, recorded.ArchivedAt)
+		}
 		a = recorded
 	}
 	return ArchiveResponse{Project: project, Workstream: stream, Archived: true, ArchivedBy: ArchivedBy(a)}, nil

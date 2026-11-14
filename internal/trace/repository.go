@@ -84,6 +84,7 @@ type Repository struct {
 	wake            *coreadapter.WakeAdapter
 	failPublication func(string) error
 	observer        atomic.Pointer[func(Commit)]
+	spanObserver    atomic.Pointer[func(CommitDetail)]
 	// db is the write connection and reads the read-only pool of the
 	// trace's database.
 	db    *sql.DB

@@ -116,7 +116,10 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 		return FullSelection(SelectionUnlisted, err.Error())
 	}
 	listed := len(links)
-	defer func() { selection.Listed = &listed }()
+	defer func() {
+		covered := coveredChecks(selection, links)
+		selection.Listed, selection.Covered = &listed, &covered
+	}()
 	if len(links) == 0 {
 		return FullSelection(SelectionNoChecks, "the project lists no check links")
 	}
@@ -168,6 +171,15 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 		selection.FallbackPicks = picks
 	}
 	return selection
+}
+
+// coveredChecks counts the listed checks selection runs: those its links cover,
+// or every one of them for a run of every check.
+func coveredChecks(selection api.CheckSelection, listed []string) int {
+	if selection.Mode == SelectionSelected {
+		return checkselect.Covered(selection.Links, listed)
+	}
+	return checkselect.Leaves(listed)
 }
 
 // prefilterChecks falls back at the failed stage, retaining every earlier answer.

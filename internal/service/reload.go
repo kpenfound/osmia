@@ -174,6 +174,8 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		return failUnchanged()
 	}
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
+	s.capacity.Store(&next.Capacity)
+	reloadedAt := s.now()
 	s.checkSlots.resize(next.Capacity.Checks)
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
@@ -191,6 +193,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.launch(p)
 	}
 	s.mu.Unlock()
+	s.spans.reload(reloadedAt, poolsOf(next.Capacity))
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
 			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())
@@ -214,7 +217,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 
 // candidate loads the configuration on disk as a reload applies it over cfg.
 // Changed settings that need a restart keep cfg's values and are named: the
-// listen socket and the web and tailnet listeners.
+// listen socket, the web and tailnet listeners and the telemetry export.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
 	next, err := config.Load(s.options.Config)
 	if err != nil {
@@ -237,6 +240,13 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	if next.Listen != cfg.Listen {
 		pinned := *next
 		pinned.Listen = cfg.Listen
+		next = &pinned
+	}
+	// The telemetry exporter is built once, at start.
+	if next.Telemetry != cfg.Telemetry {
+		restart = append(restart, "telemetry")
+		pinned := *next
+		pinned.Telemetry = cfg.Telemetry
 		next = &pinned
 	}
 	return next, restart, nil

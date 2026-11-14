@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -83,6 +84,12 @@ type Shared struct {
 	// reservations change, or the project leaves the pool. It must not call
 	// back into the pool.
 	Changed func()
+	// Spans, when set, sends a span for each slot the pool holds and each wait
+	// for one. It only observes: it never decides who gets a slot.
+	Spans *slotspans.Recorder
+	// Limits reports the limit of the pool that grants role's slots, or that it
+	// has none, for the slots held when a project joins.
+	Limits func(role string) (limit int, bounded bool)
 }
 
 // published is one project's turns in flight by role kind, as its own
@@ -108,6 +115,7 @@ func (p *Shared) Join(repository *trace.Repository) error {
 	used := newUsage()
 	l.count(used)
 	p.publish(l.project, used.roles, nil)
+	p.syncHolds(l.project, used.flights, p.Limits, p.Spans.Now())
 	return nil
 }
 
@@ -123,6 +131,7 @@ func (p *Shared) Leave(project config.ProjectID) {
 	_, ok := p.usage[project]
 	delete(p.usage, project)
 	p.usageMu.Unlock()
+	p.endProject(project, p.Spans.Now())
 	if ok && p.Changed != nil {
 		p.Changed()
 	}
@@ -265,9 +274,14 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		return err
 	}
 	var waiting []Wait
+	spans := s.options.Shared.spans()
 	if s.options.Shared != nil {
-		defer func() { s.options.Shared.publish(s.repository.Project(), r.own.roles, waiting) }()
+		defer func() {
+			s.options.Shared.publish(s.repository.Project(), r.own.roles, waiting)
+			s.options.Shared.syncHolds(s.repository.Project(), r.own.flights, s.limits, s.options.Now())
+		}()
 	}
+	touched := map[string]bool{}
 	candidates, used, order := r.candidates, r.used, s.order(r.served)
 	for len(candidates) > 0 {
 		slices.SortStableFunc(candidates, order)
@@ -280,11 +294,15 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 				return err
 			}
 			if held {
+				touched[s.waitInterval(c).Key()] = true
+				spans.End(s.waitInterval(c), s.options.Now(), slotspans.Blocked)
 				continue
 			}
 		}
 		if reason := s.refusal(used, c); reason != "" {
 			waiting = append(waiting, Wait{c, reason})
+			touched[s.waitInterval(c).Key()] = true
+			s.refused(spans, c, reason)
 			continue
 		}
 		if s.options.Admit != nil {
@@ -293,6 +311,8 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 				return err
 			}
 			if !admitted {
+				touched[s.waitInterval(c).Key()] = true
+				spans.End(s.waitInterval(c), s.options.Now(), slotspans.Blocked)
 				continue
 			}
 		}
@@ -300,10 +320,14 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		if err := s.dispatch(ctx, c, at); err != nil {
 			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
 		}
+		touched[s.waitInterval(c).Key()] = true
+		spans.End(s.waitInterval(c), at, slotspans.Granted)
 		used.add(c.Project, c.Workstream, role)
 		r.own.add(c.Project, c.Workstream, role)
+		r.own.addTurn(flightOf(c, at))
 		r.served[rotationKey(c.Project, c.Workstream, role)] = at
 	}
+	s.endGoneWaits(spans, r.loaded, touched)
 	return nil
 }
 
@@ -341,6 +365,8 @@ type reading struct {
 	own        usage
 	candidates []Candidate
 	served     map[rotation]time.Time
+	// loaded is what the trace held when the pass read it.
+	loaded loaded
 }
 
 // read reads every workstream's threads, then its turn operations. With a
@@ -372,7 +398,7 @@ func (s *Scheduler) read() (reading, error) {
 			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
 		}
 	}
-	return reading{used: used, own: own, candidates: candidates, served: l.served}, nil
+	return reading{used: used, own: own, candidates: candidates, served: l.served, loaded: l}, nil
 }
 
 // loaded is one trace's workstreams, their threads, the turns its turn
@@ -382,7 +408,9 @@ type loaded struct {
 	streams    []config.WorkstreamID
 	threads    map[config.WorkstreamID][]trace.Thread
 	dispatched map[turnKey]bool
-	served     map[rotation]time.Time
+	// dispatchedAt is when each dispatched turn's operation was recorded.
+	dispatchedAt map[turnKey]time.Time
+	served       map[rotation]time.Time
 }
 
 // load reads every workstream's threads of repository, then its turn
@@ -403,7 +431,7 @@ func load(repository *trace.Repository) (loaded, error) {
 
 func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (loaded, error) {
 	project := repository.Project()
-	out := loaded{project: project, threads: map[config.WorkstreamID][]trace.Thread{}, dispatched: map[turnKey]bool{}, served: map[rotation]time.Time{}}
+	out := loaded{project: project, threads: map[config.WorkstreamID][]trace.Thread{}, dispatched: map[turnKey]bool{}, dispatchedAt: map[turnKey]time.Time{}, served: map[rotation]time.Time{}}
 	for _, stream := range all {
 		kind, err := repository.Kind(stream)
 		if err != nil {
@@ -432,7 +460,11 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 			if err != nil {
 				continue
 			}
-			out.dispatched[turnKey{in.Workstream, in.Agent, in.Turn}] = true
+			key := turnKey{in.Workstream, in.Agent, in.Turn}
+			out.dispatched[key] = true
+			if at := record.Transition.At; out.dispatchedAt[key].IsZero() || at.Before(out.dispatchedAt[key]) {
+				out.dispatchedAt[key] = at
+			}
 			if role, ok := roles[in.Agent]; ok {
 				key := rotationKey(project, in.Workstream, role)
 				if at := record.Transition.At; at.After(out.served[key]) {
@@ -448,8 +480,9 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 func (l loaded) count(used usage) {
 	for _, stream := range l.streams {
 		for _, t := range l.threads[stream] {
-			if inFlight(t, stream, l.dispatched) {
+			if q, ok := inFlightTurn(t, stream, l.dispatched); ok {
 				used.add(l.project, stream, t.Identity.Role)
+				used.addTurn(l.flight(stream, t, q))
 			}
 		}
 	}
@@ -493,10 +526,13 @@ type usage struct {
 	roles   map[string]int
 	streams map[streamKey]int
 	local   map[localKey]int
+	// flights lists the turns counted, for the spans of the slots they hold.
+	// Counting does not read them, and merge leaves them out.
+	flights map[turnKey]flight
 }
 
 func newUsage() usage {
-	return usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
+	return usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}, flights: map[turnKey]flight{}}
 }
 
 type streamKey struct {
@@ -581,18 +617,19 @@ func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	return ""
 }
 
-// inFlight reports whether the thread's oldest unfinished turn is claimed or
-// named by a turn operation. A claim a restart interrupted runs nowhere.
-func inFlight(t trace.Thread, stream config.WorkstreamID, dispatched map[turnKey]bool) bool {
+// inFlightTurn returns the thread's oldest unfinished turn and whether it is
+// in flight: claimed or named by a turn operation. A claim a restart
+// interrupted runs nowhere.
+func inFlightTurn(t trace.Thread, stream config.WorkstreamID, dispatched map[turnKey]bool) (trace.QueuedTurn, bool) {
 	for _, q := range t.Turns {
 		if q.CompletedAt.IsZero() {
 			if q.Claim != nil {
-				return t.Status != "interrupted"
+				return q, t.Status != "interrupted"
 			}
-			return dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}]
+			return q, dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}]
 		}
 	}
-	return false
+	return trace.QueuedTurn{}, false
 }
 
 type turnKey struct {

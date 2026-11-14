@@ -24,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Options struct {
@@ -36,10 +37,12 @@ type Options struct {
 	sbxBin         string
 	reviewChecks   service.ReviewChecks
 	controls       *runtimeControls
+	// telemetryExporter receives the service's spans and turns telemetry on.
+	telemetryExporter sdktrace.SpanExporter
 }
 
 func (o Options) hooks() service.TestHooks {
-	h := service.TestHooks{ConversationTicks: o.conversationTicks, Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks}
+	h := service.TestHooks{ConversationTicks: o.conversationTicks, Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks, TelemetryExporter: o.telemetryExporter}
 	if o.controls != nil {
 		h.Enforcement = o.controls.binding
 	}

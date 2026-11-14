@@ -18,8 +18,10 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // TestHooks replaces execution boundaries only for fixture-driven services.
@@ -35,6 +37,13 @@ type TestHooks struct {
 	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
 	CheckJJ           func(context.Context) (string, error)
 	SandboxBinary     string
+	// TelemetryExporter receives the service's spans in place of an OTLP
+	// exporter and turns telemetry on without an endpoint. The service never
+	// shuts it down, so a test reads an in-memory exporter after the service
+	// closes.
+	TelemetryExporter sdktrace.SpanExporter
+	// Getenv replaces os.Getenv for the telemetry headers.
+	Getenv func(string) string
 }
 
 // StartForTest starts the real service with fixture execution boundaries.
@@ -62,6 +71,12 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	}
 	if hooks.CheckJJ != nil {
 		opts.checkJJ = hooks.CheckJJ
+	}
+	if hooks.TelemetryExporter != nil {
+		opts.telemetryExporter = hooks.TelemetryExporter
+	}
+	if hooks.Getenv != nil {
+		opts.getenv = hooks.Getenv
 	}
 	if hooks.SandboxBinary != "" {
 		opts.sbxBin = hooks.SandboxBinary
@@ -91,6 +106,12 @@ func (a TestAccess) SoleRepository() *trace.Repository {
 
 // Config returns the loaded configuration for fixture setup.
 func (a TestAccess) Config() *config.Config { return a.s.current() }
+
+// Telemetry reports whether the service's span sink is on and what it has
+// counted so far.
+func (a TestAccess) Telemetry() (bool, telemetry.Stats) {
+	return a.s.telemetry.Enabled(), a.s.telemetry.Stats()
+}
 
 // Schedule publishes one dispatch pass for a fixture with reconciliation held.
 func (a TestAccess) Schedule(ctx context.Context, repo *trace.Repository) error {

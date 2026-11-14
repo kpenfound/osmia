@@ -18,6 +18,7 @@
 ["","git-sha",["github.com/dagger/go","refs/tags/v0.4.0"],"e327bee9103fe60cb66c9d11bf2e1604686021df"]
 ["","git-sha",["github.com/dagger/sdk-helpers","refs/tags/v1.0.5"],"2d593321b19e3519584b1bbd6e77d83b2be9de2f"]
 ["","git-sha",["github.com/dagger/sdk-helpers","refs/tags/v1.0.8"],"31dafd0c74d9a08faa00c09dce87a5af072e7a9d"]
+["","oci-sha",["docker.io/library/golang:1.25"],"sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80"]
 ["","oci-sha",["docker.io/library/golang:1.26-alpine"],"sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308"]
 ["","oci-sha",["docker.io/library/golang:1.26-bookworm"],"sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb"]
 ["","oci-sha",["docker.io/library/golang:1.27-alpine"],"sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb"]

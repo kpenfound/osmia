@@ -32,6 +32,7 @@ func (s *Service) lifecycle() *lifecycle.Controller {
 		Log:                       s.log,
 		NewWorkspaces:             s.newWorkspaces,
 		Now:                       s.now,
+		WorkstreamEnded:           s.workstreamEnded,
 		Options: lifecycle.Execution{
 			Committee:    s.options.Committee,
 			Architect:    s.options.Architect,
