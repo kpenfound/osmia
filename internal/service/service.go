@@ -251,6 +251,10 @@ type Service struct {
 	// with that snapshot, marked stale, instead of blocking past the
 	// bound (bounded_read.go, readview.Bounded).
 	statusViews readview.Cache[StatusResponse]
+	// removed is the state of the reconciliation of removed projects'
+	// Hearsay records, and removedDone closes when that loop has stopped.
+	removed     removedPublication
+	removedDone chan struct{}
 }
 
 // log returns s's structured logger, or a silent one when a test built s
@@ -312,6 +316,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
+	registerHearsaySecrets(cfg.Hearsay)
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	if err := s.ensureEngine(ctx, cfg); err != nil {
 		return nil, err
@@ -525,6 +530,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
 	go s.notifier.run(s.lifetime)
+	// Removed projects have no runtime, so their pending Hearsay records are
+	// posted from here.
+	s.removedDone = make(chan struct{})
+	go func() {
+		defer close(s.removedDone)
+		s.publishRemoved(s.lifetime)
+	}()
 	go func() {
 		listeners := []net.Listener{listener}
 		if s.web != nil {
@@ -558,6 +570,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		stop()
 		s.cancel()
 		<-s.notifier.done
+		<-s.removedDone
 		if s.tailnet != nil {
 			<-s.tailnetDone
 		}
@@ -1055,6 +1068,13 @@ func (s *Service) launch(active *activeProject) {
 			}
 			watchDone <- err
 		}()
+		// Publishing to Hearsay reads the committed trace and never blocks
+		// or fails the project: it stops with the project's runtime.
+		publishDone := make(chan struct{})
+		go func() {
+			defer close(publishDone)
+			_ = s.publishHearsay(ctx, active.repository)
+		}()
 		conversationDone := make(chan error, 1)
 		go func() {
 			err := active.conversations.run(ctx)
@@ -1079,6 +1099,7 @@ func (s *Service) launch(active *activeProject) {
 			err = conversationErr
 		}
 		cancel()
+		<-publishDone
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
 		}

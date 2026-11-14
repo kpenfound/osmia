@@ -13,7 +13,7 @@ import (
 // ProjectSettings lists the settings of a project configuration file that
 // have an effect, in display order. hearsay_entities is the mapping whose
 // entries are set and cleared one by one.
-var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_entities"}
+var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "hearsay_entities"}
 
 // ProjectPin identifies the exact bytes of a project configuration file.
 func ProjectPin(data []byte) string {
@@ -68,12 +68,13 @@ func (c *Config) WithLoadedProject(p Project) *Config {
 }
 
 // ProjectEdit changes some settings of one project's configuration file.
-// Strings and Ints set settings by name; Entities sets hearsay_entities
+// Strings, Ints and Bools set settings by name; Entities sets hearsay_entities
 // entries. Clear removes settings, and ClearEntities removes entries, so a
 // default or inherited value applies again.
 type ProjectEdit struct {
 	Strings       map[string]string
 	Ints          map[string]int
+	Bools         map[string]bool
 	Entities      map[string]string
 	Clear         []string
 	ClearEntities []string
@@ -83,6 +84,7 @@ type ProjectEdit struct {
 var (
 	stringSettings   = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "hearsay_scope"}
 	intSettings      = []string{"capacity.per_workstream", "capacity.git_operations"}
+	boolSettings     = []string{"hearsay_declare_repo"}
 	requiredSettings = []string{"upstream", "clone"}
 	// optionalSettings have an empty string for a default: an empty value
 	// clears them.
@@ -131,8 +133,17 @@ func (c *Config) EditProject(id ProjectID, home string, pinned []byte, edit Proj
 		}
 		edits = append(edits, keyEdit{path: strings.Split(name, "."), value: edit.Ints[name]})
 	}
+	for _, name := range sortedKeys(edit.Bools) {
+		if !slices.Contains(boolSettings, name) {
+			return nil, ProjectFile{}, fieldError(path, name, "is not a true or false setting of the project file")
+		}
+		if err := touch(name); err != nil {
+			return nil, ProjectFile{}, err
+		}
+		edits = append(edits, keyEdit{path: []string{name}, value: edit.Bools[name]})
+	}
 	for _, name := range edit.Clear {
-		if !slices.Contains(stringSettings, name) && !slices.Contains(intSettings, name) {
+		if !slices.Contains(stringSettings, name) && !slices.Contains(intSettings, name) && !slices.Contains(boolSettings, name) {
 			return nil, ProjectFile{}, fieldError(path, name, "is not a setting that can be cleared")
 		}
 		if slices.Contains(requiredSettings, name) {
@@ -146,7 +157,7 @@ func (c *Config) EditProject(id ProjectID, home string, pinned []byte, edit Proj
 	entities := map[string]bool{}
 	for _, entity := range sortedKeys(edit.Entities) {
 		if strings.TrimSpace(entity) == "" {
-			return nil, ProjectFile{}, fieldError(path, "hearsay_entities", "must map local entity IDs to Hearsay scope names")
+			return nil, ProjectFile{}, fieldError(path, "hearsay_entities", "must map local entity IDs to Hearsay entity ids")
 		}
 		entities[entity] = true
 		edits = append(edits, keyEdit{path: []string{"hearsay_entities", entity}, value: edit.Entities[entity]})

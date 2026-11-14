@@ -9,8 +9,8 @@ import "github.com/kpenfound/osmia/internal/config"
 // Pending says the file's value is not yet applied. When the file does not
 // load, only Name and Effective are present.
 type ProjectConfigSetting struct {
-	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope or hearsay_entities."`
-	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, or for hearsay_entities an object of entity to scope."`
+	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities."`
+	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo, or for hearsay_entities an object of local entity ID to Hearsay entity id."`
 	Default   *bool  `json:"default,omitempty" description:"True when the file leaves the setting out and Value is its default or inherited value."`
 	Effective any    `json:"effective" description:"The value in the loaded configuration."`
 	Pending   bool   `json:"pending" description:"True when Value differs from Effective: the file holds an edit that is not yet applied."`
@@ -50,8 +50,9 @@ type ProjectConfigValues struct {
 	ChecksTimeout         *string           `json:"checks_timeout,omitempty"`
 	CapacityPerWorkstream *int              `json:"capacity.per_workstream,omitempty"`
 	CapacityGitOperations *int              `json:"capacity.git_operations,omitempty"`
-	HearsayScope          *string           `json:"hearsay_scope,omitempty"`
-	HearsayEntities       map[string]string `json:"hearsay_entities,omitempty" description:"Entries to set, by local entity ID."`
+	HearsayScope          *string           `json:"hearsay_scope,omitempty" description:"A Hearsay entity id, such as work:<source>:<project>, that replaces the project's default read entity."`
+	HearsayDeclareRepo    *bool             `json:"hearsay_declare_repo,omitempty" description:"True posts the project to Hearsay with its GitHub repo declared, which makes its records visible to that repository's readers. Default false."`
+	HearsayEntities       map[string]string `json:"hearsay_entities,omitempty" description:"Entries to set, by local entity ID, each a Hearsay entity id."`
 }
 
 // ProjectConfigEdit is a save of one project's config.toml: the pin of the

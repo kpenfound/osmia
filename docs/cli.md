@@ -794,6 +794,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   workstream's own trace repository and the clone are kept. Adding the same
   upstream again afterwards creates a new project ID and new trace
   repositories; see [configuration](configuration.md#project-registration).
+  With `[hearsay.publish]` configured, removal also commits the project's
+  removal and its pending Hearsay records in the retained trace without
+  contacting Hearsay, and the service posts them afterwards; see
+  [Hearsay integration](hearsay.md#project-removal).
 - `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file
@@ -1020,9 +1024,15 @@ the design describe the eventual product; this reference lists the implemented
 surface.
 
 `project memory <project-id>` prints a read-only Hearsay setup export as JSON:
-configuration fragments, scope/entity mappings and anchor artifact handles.
-It uses the local trace and contacts no memory service. Merge and validate the
-fragments when configuring Hearsay; see [memory setup](hearsay.md).
+the four configuration fragments (`files`), the paired `work_source` and
+`owner_source`, the `publisher` agent, the owner `principal` and the project's
+`hearsay_scope` entity id. The fragments define a `work` source and its owner
+source, both posted to only by the publisher agent as an attributor, the
+principals, and an authority policy that ratifies documents and decisions from
+the owner source only. Ids come from `[hearsay.publish]` and `[hearsay]` when
+set. The command uses the local configuration and contacts no memory service.
+Merge and validate the fragments when configuring Hearsay; see
+[memory setup](hearsay.md#prepare-hearsays-configuration).
 
 A hand-in's `--base <workstream-id>` selects an available feature on the same
 repo. That workstream's project must be selected, and only its member inherits

@@ -18,7 +18,7 @@ func memoryWatchKey(cfg *config.Config) string {
 	data, _ := json.Marshal(struct {
 		Config config.Hearsay
 		Scope  string
-	}{cfg.Hearsay, cfg.Project.HearsayScope})
+	}{cfg.Hearsay, cfg.HearsayScope()})
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
@@ -39,7 +39,8 @@ func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error
 			return nil
 		}
 		delay = time.Second
-		if cfg.Hearsay.URL == "" || cfg.Project.HearsayScope == "" {
+		scope := cfg.HearsayScope()
+		if cfg.Hearsay.URL == "" || scope == "" {
 			continue
 		}
 		key := memoryWatchKey(cfg)
@@ -47,7 +48,7 @@ func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error
 		if err != nil {
 			return err
 		}
-		args := map[string]any{"scope": cfg.Project.HearsayScope, "filter": map[string]any{}}
+		args := map[string]any{"scope": scope, "filter": map[string]any{}}
 		if cursor != "" {
 			args["after"] = cursor
 		}

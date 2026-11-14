@@ -54,6 +54,7 @@ func (s *Service) lifecycle() *lifecycle.Controller {
 		MemoryTurns:           memoryTurns,
 		UnresolvedWork:        unresolvedWork,
 		LearningsIncorporated: learningsIncorporated,
+		KeepForPublication:    s.keepForCleanup,
 		ThreadRunner:          s.threadRunner,
 	})
 }

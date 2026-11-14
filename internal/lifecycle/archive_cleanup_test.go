@@ -622,3 +622,66 @@ func TestArchiveRecordsOutcomeAndPullRequestLinkThenCleansUp(t *testing.T) {
 		t.Fatalf("archived list after cleanup: %+v %v", got, api)
 	}
 }
+
+// TestArchiveCleanupKeepsPendingPublicationWithoutReachingHearsay shows that,
+// with publishing configured, cleanup of an abandoned workstream carries its
+// unposted final state and reason into the project's own trace before the
+// workstream's trace is removed, and that cleanup completes while Hearsay is
+// unreachable. Without publishing configured it writes nothing of the kind.
+func TestArchiveCleanupKeepsPendingPublicationWithoutReachingHearsay(t *testing.T) {
+	for _, publishing := range []bool{true, false} {
+		t.Run(fmt.Sprintf("publishing=%v", publishing), func(t *testing.T) {
+			ctx := context.Background()
+			opts, cfg := conversationFixture(t, "archive-publication-")
+			if publishing {
+				cfg.Hearsay = config.Hearsay{URL: "https://memory.example", Principal: "owner", TokenEnv: "KEEP_OWNER", Agents: map[string]config.HearsayAgent{
+					"worker": {ID: "w", TokenEnv: "KEEP_W"}, "orchestrator": {ID: "o", TokenEnv: "KEEP_O"}, "observer": {ID: "b", TokenEnv: "KEEP_B"}},
+					// Nothing listens here: Hearsay is down.
+					Publish: &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: "http://127.0.0.1:1", Agent: "osmia-publisher", TokenEnv: "KEEP_PUBLISHER"}}
+				cfg.Projects = slices.Clone(cfg.Projects)
+				cfg.Projects[0] = cfg.Project
+			}
+			repo, err := trace.Open(cfg.Root, cfg.Project)
+			must(t, err)
+			t.Cleanup(func() { repo.Close() })
+			librarian := librarianWorkstream(project)
+			must(t, repo.CreateWorkstream(ctx, librarian, demoStart, serviceActor))
+			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, librarian}}})
+			must(t, err)
+			t.Cleanup(func() { store.Close() })
+			s := &Service{cfg: cfg, store: store, options: opts}
+			s.setSole(runtimeFor(repo))
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandon", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
+			_, err = repo.SetFeatureState(ctx, h, AbandonedState, "No longer needed.")
+			must(t, err)
+			must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: stream, ArchivedAt: demoStart}))
+			cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
+			if clean := awaitArchiveCleaned(t, ctx, repo, cleanup, store, stream); clean.CleanedAt.IsZero() {
+				t.Fatal("cleanup did not complete")
+			}
+			kept, err := repo.HearsayKept()
+			must(t, err)
+			if !publishing {
+				if len(kept) != 0 {
+					t.Fatalf("kept %v without publishing configured", kept)
+				}
+				return
+			}
+			var found bool
+			for _, k := range kept {
+				var rec struct {
+					Key      string
+					Versions []struct{ State, Status, Description string }
+				}
+				must(t, json.Unmarshal(k.Data, &rec))
+				if rec.Key == "workstream/"+string(stream) && !k.Released && len(rec.Versions) == 1 {
+					v := rec.Versions[0]
+					found = v.State == "abandoned" && v.Status == "abandoned" && strings.Contains(v.Description, "Cancelled: No longer needed.")
+				}
+			}
+			if !found {
+				t.Fatalf("the workstream's final state was not kept before its trace was removed: %v", kept)
+			}
+		})
+	}
+}

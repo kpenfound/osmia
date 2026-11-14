@@ -150,6 +150,54 @@ func charterProposals(records []Record, v *workflowView, stream config.Workstrea
 	return out, nil
 }
 
+// CharterDecision is a charter proposal the owner has decided: the proposal
+// as the chief of staff drew it, the revision that recorded the owner's
+// ratification or decline, and that decision with the owner's note.
+type CharterDecision struct {
+	Proposed Document
+	Decided  Document
+	Proposal CharterProposal
+}
+
+// CharterDecisions returns the charter proposals among docs, a workstream's
+// documents, whose owner has ratified or declined them, oldest first. A
+// proposal still waiting for the owner is not returned.
+func CharterDecisions(docs []Document) ([]CharterDecision, error) {
+	byPath := map[string]*CharterDecision{}
+	var order []string
+	for _, d := range docs {
+		if !charterProposalPath(strings.Split(d.Path, "/")) {
+			continue
+		}
+		var p CharterProposal
+		if err := json.Unmarshal([]byte(d.Content), &p); err != nil {
+			return nil, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+		}
+		s := byPath[d.Path]
+		if s == nil {
+			s = &CharterDecision{Proposed: d}
+			byPath[d.Path] = s
+			order = append(order, d.Path)
+		}
+		if d.Revision < s.Proposed.Revision {
+			s.Proposed = d
+		}
+		if p.Decision != "" && (s.Decided.Revision == 0 || d.Revision < s.Decided.Revision) {
+			s.Decided, s.Proposal = d, p
+		}
+	}
+	var out []CharterDecision
+	for _, path := range order {
+		if s := byPath[path]; s.Decided.Revision > 0 {
+			out = append(out, *s)
+		}
+	}
+	slices.SortStableFunc(out, func(x, y CharterDecision) int {
+		return cmp.Or(x.Decided.At.Compare(y.Decided.At), strings.Compare(x.Proposed.Path, y.Proposed.Path))
+	})
+	return out, nil
+}
+
 // charterProposalPath reports whether parts name a charter proposal of a
 // workstream, questions/<n>/charter.json, where the question is a key.
 func charterProposalPath(parts []string) bool {

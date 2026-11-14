@@ -3964,7 +3964,7 @@
   const configRows = new Map();
 
   // configText is how a setting's value is written in its field. The
-  // hearsay_entities mapping is one "entity = scope" line per entry.
+  // hearsay_entities mapping is one "entity = Hearsay entity id" line per entry.
   function configText(value) {
     if (value === null || value === undefined) return '';
     if (typeof value === 'object') {
@@ -3974,7 +3974,7 @@
   }
 
   // parseEntities reads the hearsay_entities field. bad is the first line
-  // that is not "entity = scope".
+  // that is not "entity = Hearsay entity id".
   function parseEntities(text) {
     const map = {};
     for (const line of text.split('\n')) {
@@ -3992,8 +3992,9 @@
     let row = configRows.get(setting.name);
     if (row) return row;
     const sample = setting.effective ?? setting.value;
-    const kind = typeof sample === 'number' ? 'number' : typeof sample === 'object' && sample !== null ? 'entities' : 'text';
-    const input = kind === 'entities' ? el('textarea', { rows: '3', spellcheck: 'false', placeholder: 'entity = scope, one per line' }) :
+    const kind = typeof sample === 'number' ? 'number' : typeof sample === 'boolean' ? 'bool' : typeof sample === 'object' && sample !== null ? 'entities' : 'text';
+    const input = kind === 'entities' ? el('textarea', { rows: '3', spellcheck: 'false', placeholder: 'entity = Hearsay entity id, one per line' }) :
+      kind === 'bool' ? el('select', {}, el('option', { value: 'false' }, 'false'), el('option', { value: 'true' }, 'true')) :
       el('input', { type: kind === 'number' ? 'number' : 'text', step: '1', min: '0' });
     input.name = setting.name;
     row = { name: setting.name, kind, input, marker: el('span', { class: 'marker', 'data-marker': 'default' }),
@@ -4089,7 +4090,7 @@
       const text = row.input.value.trim();
       if (row.kind === 'entities') {
         const parsed = parseEntities(row.input.value);
-        if (parsed.bad !== null) return { field: setting.name, message: setting.name + ': "' + parsed.bad + '" is not "entity = scope"' };
+        if (parsed.bad !== null) return { field: setting.name, message: setting.name + ': "' + parsed.bad + '" is not "entity = Hearsay entity id"' };
         for (const [entity, scope] of Object.entries(parsed.map)) {
           if (setting.value[entity] !== scope) (edit.set.hearsay_entities ||= {})[entity] = scope;
         }
@@ -4098,6 +4099,8 @@
         }
       } else if (text === '') {
         if (!setting.default) edit.clear.push(setting.name);
+      } else if (row.kind === 'bool') {
+        edit.set[setting.name] = text === 'true';
       } else if (row.kind === 'number') {
         if (!/^\d+$/.test(text)) return { field: setting.name, message: setting.name + ': must be a whole number' };
         edit.set[setting.name] = Number(text);

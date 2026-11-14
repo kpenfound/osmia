@@ -222,6 +222,15 @@ contract: Git/Jujutsu delivered-branch equivalence is an example. A fixture
 should establish its starting state and fail clearly if setup fails; unrelated
 workflow decisions belong in the tests responsible for those decisions.
 
+## Hearsay Compose smoke run
+
+The one test that talks to a real Hearsay is not part of `dagger check`. It is a
+script that builds Hearsay, runs it under Docker Compose and drives Osmia's
+publisher and read path against it; see
+[the Compose smoke run](hearsay-compose-smoke.md). Its Go test carries the
+`hearsaysmoke` build tag, so `go vet -tags hearsaysmoke ./internal/service/`
+type-checks it and no other run compiles it.
+
 ## Profile inside Dagger
 
 Measure the same tests with the same container, CPU affinity, race setting and

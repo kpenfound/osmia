@@ -15,7 +15,25 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/redact"
 )
+
+// PublisherToken reads the publisher agent's token from its configured
+// environment variable and registers the value for redaction, so no log,
+// error or response the service writes carries it. It is empty when
+// publishing is off or the variable is unset. Only the service's own posts
+// use it; role reads never do.
+func PublisherToken(h config.Hearsay, lookup func(string) string) string {
+	if h.Publish == nil {
+		return ""
+	}
+	if lookup == nil {
+		lookup = os.Getenv
+	}
+	token := lookup(h.Publish.TokenEnv)
+	redact.Register(token)
+	return token
+}
 
 // Class maps Osmia roles to Hearsay's grant classes.
 func Class(role string) string {
@@ -39,7 +57,7 @@ type Client struct {
 
 func (c Client) Call(ctx context.Context, role, name string, input any) (json.RawMessage, error) {
 	switch name {
-	case "get_bundle", "resolve", "stance_history", "get_l1", "get_l0", "search", "assert", "watch":
+	case "get_bundle", "resolve", "stance_history", "get_l1", "get_l0", "search", "traverse", "assert", "watch":
 	default:
 		return nil, errors.New("unsupported memory call")
 	}
@@ -53,6 +71,8 @@ func (c Client) Call(ctx context.Context, role, name string, input any) (json.Ra
 	}
 	agent := c.Config.Agents[class]
 	human, token := lookup(c.Config.TokenEnv), lookup(agent.TokenEnv)
+	redact.Register(human)
+	redact.Register(token)
 	if human == "" || token == "" || agent.ID == "" {
 		return nil, errors.New("memory credentials are unavailable")
 	}

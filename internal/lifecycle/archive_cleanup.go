@@ -105,7 +105,7 @@ func (c *ArchiveCleanup) RunPass(ctx context.Context, h *ActivityHandle) error {
 	}
 	for stream := range ready {
 		c.LogDeferral(stream, "")
-		if err := c.BeginDeletion(stream); err != nil {
+		if err := c.BeginDeletion(ctx, stream); err != nil {
 			return err
 		}
 	}
@@ -244,10 +244,17 @@ func (c *ArchiveCleanup) ResolveDependencies(ready map[config.WorkstreamID]bool,
 
 // BeginDeletion durably marks stream's trace repository for deletion, then
 // hands its actual removal to a background goroutine so this pass, and the
-// lock it runs serialized under, never waits for it.
-func (c *ArchiveCleanup) BeginDeletion(stream config.WorkstreamID) error {
+// lock it runs serialized under, never waits for it. Before the trace is moved
+// aside, what it holds of pending publication is carried into the project's
+// own trace; that never waits for a remote service.
+func (c *ArchiveCleanup) BeginDeletion(ctx context.Context, stream config.WorkstreamID) error {
 	if err := c.S.Step("archive-cleanup-ready"); err != nil {
 		return err
+	}
+	if keep := c.S.KeepForPublication; keep != nil {
+		if err := keep(ctx, c.Workspaces.Repository, stream); err != nil {
+			return fmt.Errorf("keeping pending publication of workstream %s: %w", stream, err)
+		}
 	}
 	state, _ := c.S.Store().Snapshot()
 	authorized := false

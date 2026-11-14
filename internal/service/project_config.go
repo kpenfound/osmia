@@ -122,6 +122,8 @@ func settingValue(p config.Project, name string) any {
 		return p.Capacity.GitOperations
 	case "hearsay_scope":
 		return p.HearsayScope
+	case "hearsay_declare_repo":
+		return p.HearsayDeclareRepo
 	case "hearsay_entities":
 		entities := map[string]string{}
 		maps.Copy(entities, p.HearsayEntities)
@@ -220,7 +222,7 @@ func (s *Service) notApplied(cfg *config.Config, id config.ProjectID, path strin
 
 // projectEdit translates a request into the settings the file edit changes.
 func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
-	out := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Entities: e.Set.HearsayEntities, Clear: e.Clear, ClearEntities: e.ClearHearsayEntities}
+	out := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Bools: map[string]bool{}, Entities: e.Set.HearsayEntities, Clear: e.Clear, ClearEntities: e.ClearHearsayEntities}
 	for name, value := range map[string]*string{"name": e.Set.Name, "upstream": e.Set.Upstream, "fork": e.Set.Fork, "clone": e.Set.Clone, "base_branch": e.Set.BaseBranch, "landing": e.Set.Landing, "classifier": e.Set.Classifier, "upstream_rebase": e.Set.UpstreamRebase, "pull_request_poll": e.Set.PullRequestPoll, "checks_timeout": e.Set.ChecksTimeout, "hearsay_scope": e.Set.HearsayScope} {
 		if value != nil {
 			out.Strings[name] = *value
@@ -230,6 +232,9 @@ func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
 		if value != nil {
 			out.Ints[name] = *value
 		}
+	}
+	if e.Set.HearsayDeclareRepo != nil {
+		out.Bools["hearsay_declare_repo"] = *e.Set.HearsayDeclareRepo
 	}
 	return out
 }

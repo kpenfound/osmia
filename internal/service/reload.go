@@ -220,6 +220,7 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	if err != nil {
 		return nil, nil, err
 	}
+	registerHearsaySecrets(next.Hearsay)
 	restart := []string{}
 	if next.Listen.Socket != cfg.Listen.Socket {
 		restart = append(restart, "listen.socket")

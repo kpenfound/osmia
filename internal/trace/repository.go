@@ -687,6 +687,25 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.openAll()
+}
+
+// OpenByID opens the trace of the project id as Open does, from the project's
+// ID alone. It serves a project that is no longer active, whose configuration
+// and clone are not at hand.
+func OpenByID(root config.Root, id config.ProjectID) (*Repository, error) {
+	directory, err := root.ProjectTrace(id)
+	if err != nil {
+		return nil, err
+	}
+	r, err := openStoreDirectory(root, id, "", directory)
+	if err != nil {
+		return nil, err
+	}
+	return r.openAll()
+}
+
+func (r *Repository) openAll() (*Repository, error) {
 	if err := r.openDatabase(false); err != nil {
 		r.Close()
 		return nil, err
