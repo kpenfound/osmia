@@ -38,6 +38,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/skills"
+	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/tailnet"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -205,6 +206,11 @@ type Service struct {
 	// configuration, is never nil after Start and discards spans when
 	// telemetry is off.
 	telemetry *telemetry.Sink
+	// slots sends the slot spans of the capacity pools and keeps the intervals
+	// still open across a restart. It is nil while telemetry is off.
+	slots *slotspans.Recorder
+	// capacity is the pools' limits in force, readable without s.mu.
+	capacity atomic.Pointer[config.Capacity]
 	// pool is the role capacity the schedulers of every project draw on.
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
@@ -329,8 +335,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	registerHearsaySecrets(cfg.Hearsay)
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	s.telemetry = s.startTelemetry(cfg.Telemetry)
+	s.slots = s.startSlotSpans(cfg)
 	defer func() {
 		if err != nil {
+			s.slots.Close()
 			s.telemetry.Close()
 		}
 	}()
@@ -339,8 +347,11 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.activity = activity.New(s.now)
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: EventActivity}) }
-	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
-	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }}
+	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
+	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
+	// Check holders and waiters do not survive a restart: those the earlier run
+	// left open are sent as interrupted.
+	s.slots.Interrupt(telemetry.PoolID(checksRole))
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
@@ -606,7 +617,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Lock()
 		s.projects = nil
 		s.mu.Unlock()
-		// Spans the stopped projects emitted last are sent before the service ends.
+		// Spans the stopped projects emitted last are sent before the service ends,
+		// and the intervals still open are kept for the next start.
+		s.slots.Close()
 		if e := s.telemetry.Close(); e != nil {
 			logger.Warn("telemetry spans were not all sent", "component", "telemetry", "error", e.Error())
 		}

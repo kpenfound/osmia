@@ -86,6 +86,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
+<root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
 <root>/projects/<repo-id>/config.toml
 <root>/projects/<repo-id>/trace.db             project charter, KB, entity map and role notes
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock

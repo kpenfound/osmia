@@ -174,6 +174,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		return failUnchanged()
 	}
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
+	s.capacity.Store(&next.Capacity)
 	s.checkSlots.resize(next.Capacity.Checks)
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
