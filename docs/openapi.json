@@ -4519,6 +4519,9 @@
           "skills": {
             "$ref": "#/components/schemas/ConfigSkills"
           },
+          "telemetry": {
+            "$ref": "#/components/schemas/ConfigTelemetry"
+          },
           "transcribe": {
             "$ref": "#/components/schemas/ConfigTranscribe"
           },
@@ -4971,6 +4974,23 @@
       "ConfigSkills": {
         "properties": {
           "refresh": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigTelemetry": {
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          },
+          "headers_env": {
+            "type": "string"
+          },
+          "insecure": {
+            "type": "boolean"
+          },
+          "protocol": {
             "type": "string"
           }
         },

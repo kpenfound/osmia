@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // TestHooks replaces execution boundaries only for fixture-driven services.
@@ -35,6 +36,13 @@ type TestHooks struct {
 	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
 	CheckJJ           func(context.Context) (string, error)
 	SandboxBinary     string
+	// TelemetryExporter receives the service's spans in place of an OTLP
+	// exporter and turns telemetry on without an endpoint. The service never
+	// shuts it down, so a test reads an in-memory exporter after the service
+	// closes.
+	TelemetryExporter sdktrace.SpanExporter
+	// Getenv replaces os.Getenv for the telemetry headers.
+	Getenv func(string) string
 }
 
 // StartForTest starts the real service with fixture execution boundaries.
@@ -62,6 +70,12 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	}
 	if hooks.CheckJJ != nil {
 		opts.checkJJ = hooks.CheckJJ
+	}
+	if hooks.TelemetryExporter != nil {
+		opts.telemetryExporter = hooks.TelemetryExporter
+	}
+	if hooks.Getenv != nil {
+		opts.getenv = hooks.Getenv
 	}
 	if hooks.SandboxBinary != "" {
 		opts.sbxBin = hooks.SandboxBinary

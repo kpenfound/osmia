@@ -39,8 +39,10 @@ import (
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/tailnet"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Options struct {
@@ -163,8 +165,12 @@ type Options struct {
 	// use it to wait for a pass to demonstrably complete instead of a fixed
 	// number of ticks or a sleep.
 	schedulePassed func()
-	// getenv replaces os.Getenv for the transcription key, for tests.
+	// getenv replaces os.Getenv for the transcription key and the telemetry
+	// headers, for tests.
 	getenv func(string) string
+	// telemetryExporter replaces the exporter built from [telemetry] and turns
+	// telemetry on without an endpoint, for tests.
+	telemetryExporter sdktrace.SpanExporter
 	// transcribeLimit and transcribeTimeout replace the clip size limit and
 	// the request bound to the transcription server, for tests.
 	transcribeLimit   int64
@@ -195,6 +201,10 @@ type Service struct {
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
+	// telemetry sends the service's spans. It is set once at start from the
+	// configuration, is never nil after Start and discards spans when
+	// telemetry is off.
+	telemetry *telemetry.Sink
 	// pool is the role capacity the schedulers of every project draw on.
 	pool          *scheduler.Shared
 	gitOperations gitOperationPool
@@ -318,6 +328,12 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	registerHearsaySecrets(cfg.Hearsay)
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	s.telemetry = s.startTelemetry(cfg.Telemetry)
+	defer func() {
+		if err != nil {
+			s.telemetry.Close()
+		}
+	}()
 	if err := s.ensureEngine(ctx, cfg); err != nil {
 		return nil, err
 	}
@@ -590,6 +606,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Lock()
 		s.projects = nil
 		s.mu.Unlock()
+		// Spans the stopped projects emitted last are sent before the service ends.
+		if e := s.telemetry.Close(); e != nil {
+			logger.Warn("telemetry spans were not all sent", "component", "telemetry", "error", e.Error())
+		}
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
