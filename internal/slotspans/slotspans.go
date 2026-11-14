@@ -63,6 +63,9 @@ const (
 	Blocked = "blocked"
 	// Abandoned: a wait stopped being refreshed, so its owner gave up on it.
 	Abandoned = "abandoned"
+	// Completed: the work finished without this wait being granted, such as a
+	// workflow operation another run completed.
+	Completed = "completed"
 	// Interrupted: the service stopped while the interval was open and nothing
 	// carried it over a restart.
 	Interrupted = "interrupted"
@@ -97,9 +100,8 @@ type Interval struct {
 	Unbounded bool `json:"unbounded,omitempty"`
 	// Reason is why work waited.
 	Reason string `json:"reason,omitempty"`
-	// Volatile intervals are not kept for a restart; they live in memory only.
-	Volatile bool `json:"-"`
-	// Seen is when a volatile wait was last refused.
+	// Seen is when a reservation wait was last refused in this run. It is not
+	// kept for a restart.
 	Seen time.Time `json:"-"`
 	// Recovered marks an interval read from the ledger that no owner has taken
 	// up in this run.
@@ -252,9 +254,7 @@ func (r *Recorder) save() {
 	r.mu.Lock()
 	f := ledgerFile{Version: 1}
 	for _, iv := range r.open {
-		if !iv.Volatile {
-			f.Intervals = append(f.Intervals, iv)
-		}
+		f.Intervals = append(f.Intervals, iv)
 	}
 	r.mu.Unlock()
 	slices.SortFunc(f.Intervals, func(a, b Interval) int { return cmp.Compare(a.Key(), b.Key()) })
@@ -290,7 +290,7 @@ func writeAtomic(path string, data []byte) error {
 }
 
 func (r *Recorder) changed(iv Interval) {
-	if iv.Volatile || r.path == "" {
+	if r.path == "" {
 		return
 	}
 	select {
@@ -331,7 +331,7 @@ func (r *Recorder) Begin(iv Interval) (Interval, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if have, ok := r.open[iv.Key()]; ok {
-		if have.Volatile && iv.Volatile {
+		if refusalTracked(have) {
 			have.Seen = iv.Start
 		}
 		if have.Recovered {
@@ -341,7 +341,7 @@ func (r *Recorder) Begin(iv Interval) (Interval, bool) {
 		r.open[have.Key()] = have
 		return have, false
 	}
-	if iv.Volatile {
+	if refusalTracked(iv) {
 		iv.Seen = iv.Start
 	}
 	r.open[iv.Key()] = iv
@@ -402,26 +402,56 @@ func (r *Recorder) End(iv Interval, end time.Time, outcome string) bool {
 	return true
 }
 
-// Touch records that the volatile wait for the same work as iv was refused again at at.
+// refusalTracked tells the waits whose owner asks again for as long as it waits:
+// a workflow reservation is refused each time its operation tries again.
+func refusalTracked(iv Interval) bool { return iv.Kind == Wait && iv.Source == SourceReservation }
+
+// EndRecovered closes the interval for the same work as iv like End, but only
+// while it is still one that no owner has taken up in this run: an owner that
+// asked for the slot again keeps the interval to itself.
+func (r *Recorder) EndRecovered(iv Interval, end time.Time, outcome string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	have, ok := r.open[iv.Key()]
+	if ok && have.Recovered {
+		delete(r.open, iv.Key())
+		r.recovered--
+		r.changed(have)
+	} else {
+		ok = false
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	r.send(have, end, outcome)
+	return true
+}
+
+// Touch records that the reservation wait for the same work as iv was refused again at at.
 func (r *Recorder) Touch(iv Interval, at time.Time) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if have, ok := r.open[iv.Key()]; ok && have.Volatile {
+	if have, ok := r.open[iv.Key()]; ok && refusalTracked(have) {
 		have.Seen = at
 		r.open[iv.Key()] = have
 	}
 }
 
-// Abandon closes the volatile waits last refused before cutoff, at that last
-// refusal, so a wait whose owner stopped asking does not stay open.
+// Abandon closes the reservation waits last refused before cutoff, at that last
+// refusal, so a wait whose owner stopped asking does not stay open. A wait
+// recovered from the ledger has no refusal in this run: its operation's fate
+// decides how it ends.
 func (r *Recorder) Abandon(cutoff time.Time) {
 	if r == nil {
 		return
 	}
-	for _, iv := range r.Find(Wait, SourceReservation, func(iv Interval) bool { return iv.Volatile && iv.Seen.Before(cutoff) }) {
+	for _, iv := range r.Find(Wait, SourceReservation, func(iv Interval) bool { return !iv.Recovered && iv.Seen.Before(cutoff) }) {
 		r.End(iv, iv.Seen, Abandoned)
 	}
 }

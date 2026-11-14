@@ -173,7 +173,7 @@ A turn that was stopped or failed carries `osmia.cause`: the stop cause
 | turn | `completed`, `waiting`, `failed`, `cancelled` |
 | `osmia.check.run` | the run's status: `passed`, `failed`, `incomplete` |
 | `osmia.slot.held` | `released`, `interrupted` |
-| `osmia.slot.wait` | `granted`, `canceled`, `removed`, `blocked`, `abandoned`, `interrupted` |
+| `osmia.slot.wait` | `granted`, `canceled`, `removed`, `blocked`, `completed`, `abandoned`, `interrupted` |
 | `osmia.pool.limit` | `reloaded` (a reload changed the limit), `shutdown`, `interrupted` |
 | `osmia.pause` | `released`, `replaced` (the same target was paused again) |
 | `osmia.service.uptime` | `shutdown`, `interrupted` |
@@ -182,8 +182,11 @@ A **wait** span starts at the first refusal by capacity (or by the
 per-workstream cap), not when the work was queued, and not while a pause holds
 it back. It ends `granted` when the work gets its slot, `canceled` or
 `removed` when the work goes away, and `blocked` when it stops waiting for
-capacity for another reason, such as a pause. `abandoned` closes a workflow
-reservation that stopped being asked for.
+capacity for another reason, such as a pause. `completed` closes a workflow
+reservation wait whose operation finished without getting the slot. `abandoned`
+closes a workflow reservation wait that stopped being asked for. A wait a
+restart left open ends by what became of its operation: see
+[Restarts](#restarts).
 
 `interrupted` is a span that an earlier run left open and no one closed: a
 service that stopped without shutting down, or a slot interval a restart did
@@ -230,11 +233,31 @@ start and the IDs it would have had without the restart.
 Intervals that exist only in the service's memory are kept in two small files
 in the root, written only while telemetry is on:
 
-- `slot-intervals.json` holds the slots held and waited for. After a restart
-  the interval keeps its original start and IDs and its span is sent once when
-  it closes. An interval nothing takes up within ten minutes of the start is
-  sent `interrupted`, ending at the start of the run; so is a check-pool slot
-  held at the stop, which cannot survive a restart.
+- `slot-intervals.json` holds the slots held and waited for, the waits for a
+  shared workflow reservation (architect, committee and librarian operations)
+  included. After a restart the interval keeps its original start and IDs and
+  its span is sent once when it closes. An interval nothing takes up within ten
+  minutes of the start is sent `interrupted`, ending at the start of the run;
+  so is a check-pool slot held at the stop, which cannot survive a restart.
+
+A reservation wait is found again by the same key it had before the restart:
+project, workstream, pool and the operation's runner thread. The operation's
+next admission ends it `granted` with the original start and IDs, and a
+further refusal after the restart updates it instead of opening a second wait.
+A reservation wait recovered from the ledger is never `abandoned` for the time
+the service was down. While the service runs, each pass checks the operations
+behind the recovered waits that no admission has taken up yet and closes each
+wait once, at the time of the check, by what became of its operation:
+
+| Outcome | The operation behind the wait |
+| --- | --- |
+| `removed` | belongs to a workstream that is no longer in the project |
+| `canceled` | is no longer pending and its workstream was abandoned |
+| `completed` | is no longer pending, finished without getting the slot, and its workstream was not abandoned |
+| `blocked` | is still pending but held back, such as by a pause |
+
+A wait whose operation is pending and not held stays open for that operation's
+next admission.
 - `service-intervals.json` holds the run's start, its open pool limit intervals
   and the last time the service recorded being alive (every 30 seconds). A run
   that never shut down is sent by the next start as `interrupted`, ended at that

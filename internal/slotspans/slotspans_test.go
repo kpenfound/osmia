@@ -229,17 +229,40 @@ func TestAnUnreadableLedgerStartsEmpty(t *testing.T) {
 	rec.Begin(check("u", Held, "1", t0))
 }
 
-func TestVolatileIntervalsAreNotKept(t *testing.T) {
+func reservationWait(agent string, start time.Time) Interval {
+	iv := Interval{Kind: Wait, Source: SourceReservation, Pool: "committee", Role: "committee", Project: project, Workstream: stream, Agent: agent, Work: agent, Start: start, Reason: ReasonCapacity}
+	iv.Bound(1, true)
+	return iv
+}
+
+func TestReservationWaitsSurviveARestartAndAreNotAbandonedBeforeTheirOwnerAsksAgain(t *testing.T) {
 	r := newRig(t)
 	rec := r.recorder()
-	wait := check("u", Wait, "1", t0)
-	wait.Volatile = true
+	wait := reservationWait("reader", t0)
 	rec.Begin(wait)
+	id := wait.SpanID()
 	rec.Close()
+
+	// The service was down for longer than a wait stays open without a refusal.
+	r.clock.Advance(time.Hour)
 	rec = r.recorder()
 	defer rec.Close()
-	if open := rec.Find(Wait, SourceCheck, nil); len(open) != 0 {
-		t.Fatalf("a volatile wait outlived its run: %+v", open)
+	other := reservationWait("another", r.clock.Now())
+	rec.Begin(other)
+	rec.Abandon(r.clock.Now().Add(-5 * time.Minute))
+	if got := r.spans(); len(got) != 0 {
+		t.Fatalf("a recovered wait was abandoned before its operation asked again: %+v", got)
+	}
+	again := reservationWait("reader", r.clock.Now())
+	got, began := rec.Begin(again)
+	if began || !got.Start.Equal(t0) || got.SpanID() != id {
+		t.Fatalf("the refusal after the restart opened %+v (new: %v)", got, began)
+	}
+	end := r.clock.Now()
+	rec.End(again, end, Granted)
+	spans := r.spans()
+	if len(spans) != 1 || spans[0].SpanContext.SpanID() != id || !spans[0].StartTime.Equal(t0) || !spans[0].EndTime.Equal(end) {
+		t.Fatalf("spans after the restart: %+v", spans)
 	}
 }
 

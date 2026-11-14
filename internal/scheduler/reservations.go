@@ -43,7 +43,7 @@ func (p *Shared) TryReserve(repository *trace.Repository, stream config.Workstre
 		if rec != nil {
 			now := rec.Now()
 			wait := reservationInterval(slotspans.Wait, l.project, stream, role, agent, now, limits)
-			wait.Reason, wait.Volatile = slotspans.ReasonCapacity, true
+			wait.Reason = slotspans.ReasonCapacity
 			if _, began := rec.Begin(wait); !began {
 				rec.Touch(wait, now)
 			}
