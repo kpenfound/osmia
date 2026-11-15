@@ -106,6 +106,12 @@ replaced by a hash of the same inputs.
   tension, the conflict, what was blocked and the options put to the owner. The
   chief of staff's relay of the ruling to the askers is a later revision and is
   never posted, as a ruling or in any other form.
+- **Jev decisions.** A decision Jev made, whose record has Jev as its actor and
+  names its judgment (a ratification, an amendment decision, a question ruling,
+  a contest resolution, an objection decision, a discovery disposition or a
+  triage), is never an owner ruling. It is posted on the work source with no
+  owner author, and the owner source holds only what the owner decided. The web
+  page and the CLI label these records "decided by Jev".
 - **Chief answers.** An answer the chief of staff gave from the record is posted
   on the work source with its citations. An answer that cites a recorded code
   inspection (`inspection#…`) came from reading code and is not posted.

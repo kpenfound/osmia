@@ -298,7 +298,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   show revision identifiers, provenance, evidence and explicit gaps. `--json`
   returns the complete typed response. Delivered and abandoned workstreams
   remain readable. A missing selector returns `not_found` (exit 4); malformed
-  input returns `validation` (exit 4).
+  input returns `validation` (exit 4). A ratification, ruling or other decision
+  Jev made carries `jev` as its `decided_by` and names its judgment; the
+  command prints it as `(decided by Jev)` after the decision.
 - `send <workstream-id> <message>` sends a message to the workstream's shared workgroup chief
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
@@ -613,7 +615,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
 - `amendment <workstream-id> <n>` shows amendment `n` of a building or
   assembled workstream: its state, the debate round it reached, the packet the
   chief of staff presented (when available) with its revision, and the latest
-  decision with its actor.
+  decision with its actor, labelled `(decided by Jev)` when Jev made it.
   `amendment <workstream-id> <n> <approve|reject|round|overrule> [note]`
   decides it. Cards recommend `approve` or `do not approve yet` using these
   amendment decisions; ratification packets still recommend `ratify`.

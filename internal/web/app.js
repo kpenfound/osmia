@@ -481,6 +481,7 @@
           if (!streams().some(w => w.workstream === ui.selected)) {
             const member = streams().find(w => w.workgroup?.conversation?.workstream === ui.selected);
             if (member) {
+              carryOutcomes(ui.selected, member.workstream);
               ui.selected = member.workstream;
               store('selected', ui.selected);
               if (ui.view === 'design' || ui.view === 'workstream') {
@@ -669,6 +670,17 @@
   function captureOutcome(result) {
     const scope = outcomeScopes.get(result);
     return scope ? { scope, key: scope.instance() } : result;
+  }
+
+  // carryOutcomes moves the outcomes shown for one selection to the
+  // selection that replaces it, such as a started design session's start
+  // result when its conversation continues as a workgroup member.
+  function carryOutcomes(from, to) {
+    for (const scope of outcomeScopes.values()) {
+      if (scope.entries.has(from) && !scope.entries.has(to)) {
+        scope.entries.set(to, scope.entries.get(from));
+      }
+    }
   }
 
   function paintOutcome(scope) {

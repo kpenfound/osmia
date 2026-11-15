@@ -251,6 +251,17 @@ The member view is laid out like a chat client:
   ends without one. The brief is also its own entry in the feed, so you can
   reply to the chief of staff right under it; a workgroup's conversation
   shows each member's brief labelled with the member.
+  Jev, the factory's decision maker, decides some of these entries before
+  they reach you: when its confidence on a ratification, an amendment that
+  changes the approved intent, an escalated question, an escalated contested
+  unit or an escalated objection reaches `jev.decision_threshold` (0.9 by
+  default), its pick is recorded as your decision, the flow continues as if you
+  had chosen it, and the entry never appears. The feed and the trace label
+  such a decision "decided by Jev". Otherwise the entry reaches you with Jev's
+  pick and confidence as its recommendation. Delivery approval, charter
+  proposals, "no change needed" escalations, cancellation and anything that
+  needs your own words are always yours. Without Jev's API key the service
+  still runs and every entry reaches you; `osmia doctor` fails its Jev check.
   The Documents tab reads and edits the draft spec and plan before
   ratification, each save a new revision as with `osmia edit`, the dependency,
   and the debate actions; the Trace tab walks the workstream's record. The
