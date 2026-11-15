@@ -18,6 +18,7 @@ import (
 // the session in that project, and from the sidebar in the first active
 // project. The page shows the project the agent drafted, with its visibility.
 func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	s, c, home, engine := newDesignEnforcementFixture(t, true)
 	ctx := context.Background()
@@ -93,6 +94,7 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 // With no active project the New project form refuses with a clear message
 // and opens no session.
 func TestBrowserDesignFormRefusesANewProjectWithoutAnActiveProject(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	opts, _ := projectFixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")

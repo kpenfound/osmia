@@ -163,6 +163,7 @@ func newDismissPage(t *testing.T, entries ...string) (*page, *fakeAPI) {
 // Submitting a ruling on a contested workstream removes its item from the
 // feed at once, before the faked server answers.
 func TestBrowserFeedDismissesAContestedRulingBeforeTheServerResponds(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, contestedEntry("w_000", "index"))
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
@@ -180,6 +181,7 @@ func TestBrowserFeedDismissesAContestedRulingBeforeTheServerResponds(t *testing.
 // Ratifying a proposal removes its item from the feed at once, before the
 // faked server answers.
 func TestBrowserFeedDismissesARatificationBeforeTheServerResponds(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, ratificationEntry("w_000"))
 	card := decisionSelector("ratification", "w_000", "")
 	p.awaitVisible("the ratification packet", card)
@@ -197,6 +199,7 @@ func TestBrowserFeedDismissesARatificationBeforeTheServerResponds(t *testing.T) 
 // refreshed state no longer lists it, at which point the entry, if relisted
 // under the same identity, shows again rather than staying hidden.
 func TestBrowserFeedDismissedItemStaysHiddenUntilARefreshDropsItThenShowsAgain(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, contestedEntry("w_000", "index"))
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
@@ -236,6 +239,7 @@ func TestBrowserFeedDismissedItemStaysHiddenUntilARefreshDropsItThenShowsAgain(t
 // can never be hidden for good; a fake clock makes this testable without
 // waiting on it in real time.
 func TestBrowserFeedDismissalExpiresAfter120SecondsIfStillListed(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, contestedEntry("w_000", "index"))
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
@@ -260,6 +264,7 @@ func TestBrowserFeedDismissalExpiresAfter120SecondsIfStillListed(t *testing.T) {
 // If a submission fails, the item comes back at once, with the refusal
 // shown and the owner's input kept.
 func TestBrowserFeedFailedSubmissionRestoresTheItemAtOnceWithErrorAndInput(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, contestedEntry("w_000", "index"))
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
@@ -283,6 +288,7 @@ func TestBrowserFeedFailedSubmissionRestoresTheItemAtOnceWithErrorAndInput(t *te
 // Submitting an action on one feed item leaves every other item in the feed
 // visible and unchanged.
 func TestBrowserFeedDismissingOneItemLeavesOthersUnaffected(t *testing.T) {
+	t.Parallel()
 	p, api := newDismissPage(t, contestedEntry("w_000", "index"), ratificationEntry("w_000"))
 	contested := decisionSelector("contested", "w_000", "index")
 	ratification := decisionSelector("ratification", "w_000", "")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/api"
@@ -92,10 +93,20 @@ func AddArchitectProject(t *testing.T, client ArchitectProjectClient, clone, cha
 	return added.Project.ID, added.Project.Trace
 }
 
+// debateProgressWindow is the routine-progress event window of a debate
+// fixture. The demo clock advances a second on every read, so the default
+// fifteen minutes would hold each routine event turn for hundreds of reads;
+// a minute still exceeds the five-second events.window it is measured
+// against.
+const debateProgressWindow = "[events]\nprogress_window = \"1m\"\n"
+
 func ConfigureDebate(t *testing.T, root string, members, rounds int, extra string) {
 	t.Helper()
 	configFile, err := os.OpenFile(filepath.Join(root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	fixturekit.Must(t, err)
+	if !strings.Contains(extra, "[events]") {
+		extra += debateProgressWindow
+	}
 	_, err = fmt.Fprintf(configFile, "[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = %d\n[shed]\nmax_rounds = %d\n%s", members, rounds, extra)
 	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 }

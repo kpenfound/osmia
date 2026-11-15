@@ -394,6 +394,7 @@ func (f *fakeAPI) handler() http.Handler {
 // list immediately, before the workstream list's response arrives, and
 // shows the list once it does.
 func TestBrowserFirstLoadShowsLayoutAndLoadingBeforeTheListArrives(t *testing.T) {
+	t.Parallel()
 	api := newFakeAPI(3)
 	release := api.holdStatus()
 	server := httptest.NewServer(api.handler())
@@ -425,6 +426,7 @@ func TestBrowserFirstLoadShowsLayoutAndLoadingBeforeTheListArrives(t *testing.T)
 // of times whether there is one workstream or twenty: the request does not
 // grow with the number of workstreams.
 func TestBrowserFirstLoadRequestsTheWorkstreamListInBoundedRequests(t *testing.T) {
+	t.Parallel()
 	requireBrowser(t)
 	requests := func(t *testing.T, workstreams int) int {
 		api := newFakeAPI(workstreams)

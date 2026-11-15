@@ -36,6 +36,7 @@ func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamI
 // those three kinds; sending a message and its answer on the quiet
 // workstream covers the message and response kinds.
 func TestBrowserFeedAnnotationFitsAtPhoneWidth(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
 
@@ -61,6 +62,7 @@ func TestBrowserFeedAnnotationFitsAtPhoneWidth(t *testing.T) {
 // annotation still reads left to right on one line because there is room
 // for it, since the CSS only wraps the annotation when it does not fit.
 func TestBrowserFeedAnnotationShowsAtLaptopWidth(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
 

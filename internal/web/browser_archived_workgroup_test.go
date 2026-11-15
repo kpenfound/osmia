@@ -75,6 +75,7 @@ func openArchivedGroupPage(t *testing.T, a *archivedGroupAPI, members ...string)
 // A workgroup whose members are all archived is reached from the list and read
 // as a conversation that cannot be written to.
 func TestBrowserArchivedWorkgroupShowsItsRetainedConversationReadOnly(t *testing.T) {
+	t.Parallel()
 	a := &archivedGroupAPI{base: newFakeAPI(0)}
 	p := openArchivedGroupPage(t, a, "w_003", "w_004")
 	row := `#archived [data-select-workgroup="g_test"]`
@@ -107,6 +108,7 @@ func TestBrowserArchivedWorkgroupShowsItsRetainedConversationReadOnly(t *testing
 // A workgroup whose shared feed is gone, or that the status no longer lists, is
 // unavailable.
 func TestBrowserWorkgroupWithoutItsSharedFeedIsUnavailable(t *testing.T) {
+	t.Parallel()
 	t.Run("feed gone", func(t *testing.T) {
 		a := &archivedGroupAPI{base: newFakeAPI(0), gone: true}
 		p := openArchivedGroupPage(t, a, "w_003", "w_004")

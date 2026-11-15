@@ -54,6 +54,7 @@ const briefCard = `[data-decision][data-kind="delivery"] [data-field=brief]`
 // the full image, apart from the report, and, with items, a labelled block of
 // them that is always visible.
 func TestBrowserDeliveryCardShowsTheRecordedBrief(t *testing.T) {
+	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"recorded","review":2,"review_revision":3,"commit":"abc123",`+
 		`"text":"Owners see the **new** page.","before_you_ship":["Set OSMIA_TOKEN","Restart the service"],"screenshots":["img1","img2"]}`))
 	p.awaitVisible("the brief", briefCard)
@@ -89,6 +90,7 @@ func TestBrowserDeliveryCardShowsTheRecordedBrief(t *testing.T) {
 
 // A brief with no items shows no deployment block.
 func TestBrowserDeliveryCardShowsNoBeforeYouShipWithoutItems(t *testing.T) {
+	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"recorded","review":2,"review_revision":3,"commit":"abc123","text":"Text only."}`))
 	p.awaitText(briefCard+" [data-field=brief-text]", "Text only.")
 	var shown int
@@ -100,6 +102,7 @@ func TestBrowserDeliveryCardShowsNoBeforeYouShipWithoutItems(t *testing.T) {
 
 // With no brief recorded for the review, the card says so.
 func TestBrowserDeliveryCardSaysNoBriefWasRecorded(t *testing.T) {
+	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"none_recorded","review":2,"review_revision":3,"commit":"abc123"}`))
 	p.awaitText(briefCard+" [data-field=brief-state]", "No brief was recorded for this review")
 	var text int
@@ -111,6 +114,7 @@ func TestBrowserDeliveryCardSaysNoBriefWasRecorded(t *testing.T) {
 
 // A presentation without a brief field has no brief block.
 func TestBrowserDeliveryCardWithoutBriefFieldShowsNoBlock(t *testing.T) {
+	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(""))
 	p.awaitText(`[data-decision][data-kind="delivery"] [data-field=summary]`, "Everything shown.")
 	var shown int
@@ -123,8 +127,9 @@ func TestBrowserDeliveryCardWithoutBriefFieldShowsNoBlock(t *testing.T) {
 // The brief is its own entry of the workstream's feed, with its text, items and
 // screenshots, and the conversation composer stays under it.
 func TestBrowserFeedShowsTheBriefAsItsOwnEntry(t *testing.T) {
-	brief := `{"kind":"brief","at":"2026-01-01T00:00:05Z","brief":{"review":2,"review_revision":3,"commit":"abc123",`+
-		`"text":"Owners see the new page.","before_you_ship":["Set OSMIA_TOKEN"],`+
+	t.Parallel()
+	brief := `{"kind":"brief","at":"2026-01-01T00:00:05Z","brief":{"review":2,"review_revision":3,"commit":"abc123",` +
+		`"text":"Owners see the new page.","before_you_ship":["Set OSMIA_TOKEN"],` +
 		`"screenshots":[{"id":"img1","url":"/v1/images/w_000/img1","content_type":"image/png"},{"id":"img2","placeholder":"image img2 is no longer stored"}]}}`
 	p := newDeliveryBriefPage(t, deliveryPresentation(""), transitionEntry("2026-01-01T00:00:01Z", "assembled"), brief)
 	p.awaitFeedKinds("transition,brief")

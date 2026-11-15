@@ -280,12 +280,8 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 // loaded one and a reload has something to do. A reload that fails keeps it
 // lit and shows the error; one that applies clears it and shows the new
 // digest; a change only a restart applies is named and does not light it.
-// serial: asserts the config drift indicator, which app.js refreshes only
-// through a setInterval poll gated on document.visibilityState === 'visible'
-// (internal/web/app.js); openBrowser's shared browser window has one visible
-// tab at a time, and a concurrent test's chromedp.BringToFront() races this
-// test's visibility.
 func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
 	ctx := context.Background()

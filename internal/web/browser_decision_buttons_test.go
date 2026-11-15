@@ -117,6 +117,7 @@ func assertDecisionRequest(t *testing.T, f *decisionButtonFixture, path string, 
 }
 
 func TestBrowserDecisionButtonsSendOfferedRulings(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		kind, choice, label string
 		note                bool
@@ -167,6 +168,7 @@ func TestBrowserDecisionButtonsSendOfferedRulings(t *testing.T) {
 }
 
 func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
+	t.Parallel()
 	f := newDecisionButtonFixture(t, strings.Replace(ratificationEntry("w_000"), `["ratify"]`, `[]`, 1))
 	card := decisionSelector("ratification", "w_000", "")
 	assertDecisionButtons(f.p, card, map[string]string{"redraft": "Ask for a Redraft"})
@@ -183,6 +185,7 @@ func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
 }
 
 func TestBrowserRatificationObjectionButtonsSendDispositions(t *testing.T) {
+	t.Parallel()
 	for _, choice := range []string{"sustain", "overrule"} {
 		t.Run(choice, func(t *testing.T) {
 			f := newDecisionButtonFixture(t, ratificationEntry("w_000"))
@@ -213,6 +216,7 @@ func TestBrowserRatificationObjectionButtonsSendDispositions(t *testing.T) {
 }
 
 func TestBrowserDecisionButtonsBlockDuringRequestAndKeepNoteOnFailure(t *testing.T) {
+	t.Parallel()
 	f := newDecisionButtonFixture(t, ratificationEntry("w_000"))
 	card := decisionSelector("ratification", "w_000", "")
 	assertDecisionButtons(f.p, card, map[string]string{"ratify": "Ratify", "redraft": "Ask for a Redraft"})
@@ -234,6 +238,7 @@ func TestBrowserDecisionButtonsBlockDuringRequestAndKeepNoteOnFailure(t *testing
 }
 
 func TestBrowserParkedBaseWithoutOptionsHasNoVisibleForm(t *testing.T) {
+	t.Parallel()
 	entry := `{"kind":"base","project":"p_fake","workstream":"w_000","options":[],"asked":[],"answer":{"method":"POST","path":"/v1/base/w_000/upstream","body":{}}}`
 	f := newDecisionButtonFixture(t, entry)
 	f.p.await("a parked base with no form", `document.querySelector('[data-kind=base] form').hidden && document.querySelectorAll('[data-kind=base] [data-decision-choice]').length === 0`)
@@ -241,6 +246,7 @@ func TestBrowserParkedBaseWithoutOptionsHasNoVisibleForm(t *testing.T) {
 }
 
 func TestBrowserDecisionButtonsRefreshWhilePendingPreservesNoteAndBlocksNewChoices(t *testing.T) {
+	t.Parallel()
 	entry := strings.Replace(ratificationEntry("w_000"), `["ratify"]`, `[]`, 1)
 	f := newDecisionButtonFixture(t, entry)
 	card := decisionSelector("ratification", "w_000", "")
@@ -269,6 +275,7 @@ func TestBrowserDecisionButtonsRefreshWhilePendingPreservesNoteAndBlocksNewChoic
 // not, and offers only a retry, which sends the creation's identity to the
 // create route.
 func TestBrowserStuckProjectCreationOffersOnlyRetry(t *testing.T) {
+	t.Parallel()
 	const id = "p_0123456789abcdef0123456789abcdef"
 	for _, workstream := range []string{"", "w_000"} {
 		t.Run("workstream "+workstream, func(t *testing.T) {
@@ -357,6 +364,7 @@ func (f *decisionButtonFixture) reads() int {
 // A delivery card has no editor: the preview and the label are all it
 // offers besides the button, and the label says what approving does.
 func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, extra string
 		accept      bool
@@ -420,6 +428,7 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
 // the earlier approval's when the presentation carries one, even when it
 // differs from the draft, and the draft otherwise. It is plain text.
 func TestBrowserDeliveryPreviewShowsTheApprovalTextOverTheDraft(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, approval, description, message string
 	}{
@@ -461,6 +470,7 @@ func TestBrowserDeliveryPreviewShowsTheApprovalTextOverTheDraft(t *testing.T) {
 // repaints a refreshed inbox causes, and the card is restored with the
 // button available when the service refuses.
 func TestBrowserDeliveryButtonStaysLockedWhileTheApprovalIsPending(t *testing.T) {
+	t.Parallel()
 	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
 	submit := deliveryCard + "button[type=submit]"
 	f.p.await("the enabled button", `document.querySelector(`+quote(submit)+`)?.disabled === false`)
@@ -486,6 +496,7 @@ func TestBrowserDeliveryButtonStaysLockedWhileTheApprovalIsPending(t *testing.T)
 // A refusal because the draft changed makes the card read the presentation
 // again, and the card then shows the new draft, pinned by the new entry.
 func TestBrowserDeliveryStaleDraftConflictReadsThePresentationAgain(t *testing.T) {
+	t.Parallel()
 	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
 	submit := deliveryCard + "button[type=submit]"
 	f.p.await("the enabled button", `document.querySelector(`+quote(submit)+`)?.disabled === false`)

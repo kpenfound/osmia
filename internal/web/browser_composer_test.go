@@ -181,6 +181,7 @@ func (p *page) checkSendIcon(form string) {
 }
 
 func TestBrowserConversationWidthsAndSendIcons(t *testing.T) {
+	t.Parallel()
 	for _, size := range []struct{ width, height int64 }{{1920, 1080}, {1440, 900}, {390, 844}} {
 		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
 			p, _ := openChatPage(t, size.width, size.height)
@@ -259,6 +260,7 @@ func assertChatMessage(t *testing.T, a *chatAPI, count int, view chatView, step,
 }
 
 func TestBrowserChatComposersClickAndKeyboard(t *testing.T) {
+	t.Parallel()
 	// A container need not have a physical mouse. Give Chromium a fine
 	// pointer (Blink's enum value 4) so this exercises desktop Enter handling.
 	p, a := openChatPage(t, 1440, 900, chromedp.Flag("blink-settings", "primaryPointerType=4,availablePointerTypes=4"))
@@ -317,6 +319,7 @@ func TestBrowserChatComposersClickAndKeyboard(t *testing.T) {
 }
 
 func TestBrowserChatTouchEnterInsertsNewline(t *testing.T) {
+	t.Parallel()
 	p, a := openChatPage(t, 390, 844)
 	p.run(chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTouchEmulationEnabled(true).Do(ctx) }))
 	p.await("a touch pointer", `matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches`)

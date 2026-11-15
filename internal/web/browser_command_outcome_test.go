@@ -22,6 +22,7 @@ func (p *page) outcomeOf(selector string) string {
 // ('error'). Refusals restore the actionable card; an accepted ratification
 // keeps it dismissed.
 func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testing.T) {
+	t.Parallel()
 	api := newFakeAPI(1)
 	api.setInbox(ratificationEntry("w_000"))
 	server := httptest.NewServer(api.handler())

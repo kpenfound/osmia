@@ -145,8 +145,8 @@ func TestBrowserSessionSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.
 // which work end to end against a real local worktree and remote, with no
 // spec, plan, unit, review or delivery panel. Covers plan#sess-web
 // acceptance item 3 and spec#22's control list.
-// serial: native confirmation dialogs use the shared browser window.
 func TestBrowserSessionViewShowsControlsAndNoWorkstreamPanels(t *testing.T) {
+	t.Parallel()
 	s, c, projectID, _, clone := sessionWebFixture(t)
 	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: projectID, Profile: "default"})
 	must(t, err)

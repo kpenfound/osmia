@@ -13,6 +13,7 @@ import (
 )
 
 func TestBrowserMarkdownLiteralFallbackAndInertHTML(t *testing.T) {
+	t.Parallel()
 	api := newFakeAPI(1)
 	hostile := `<script>window.agentScriptRan = true</script>` + "\n" +
 		`<img src=x onerror="window.agentImageRan = true">` + "\n" + `<b>literal bold tag</b>` + "\n" +

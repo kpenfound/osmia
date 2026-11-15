@@ -60,6 +60,7 @@ func awaitOneClickCard(t *testing.T, p *page, card string) string {
 // records an approval whose description and commit messages equal the draft
 // the preview showed.
 func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
 	must(t, repository.Close())
@@ -124,6 +125,7 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 // recorded the way a refused publication records it, before the service
 // starts.
 func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
 	ctx := context.Background()
