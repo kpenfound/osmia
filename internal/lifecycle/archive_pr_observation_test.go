@@ -18,6 +18,7 @@ import (
 func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 	for _, edge := range []string{trace.EdgeHardBlock, trace.EdgeContract, ""} {
 		t.Run("edge-"+edge, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			host := &fakePulls{}
 			var interrupt, reached atomic.Bool

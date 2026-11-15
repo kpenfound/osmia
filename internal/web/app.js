@@ -561,6 +561,27 @@
     refresh();
   }
 
+  // markFromEvent gathers the views events name for eventReadDelayMs before
+  // marking them, so a burst of commits reads each view once rather than
+  // once per event. A resync and the owner's own actions are read at once.
+  const eventReadDelayMs = 300;
+  const eventViews = new Set();
+  let eventTimer = null;
+  function markFromEvent(names) {
+    for (const name of names) {
+      eventViews.add(name);
+    }
+    if (eventTimer !== null) {
+      return;
+    }
+    eventTimer = setTimeout(() => {
+      eventTimer = null;
+      const pending = [...eventViews];
+      eventViews.clear();
+      mark(pending);
+    }, eventReadDelayMs);
+  }
+
   // expand turns an event's view names into view paths.
   function expand(name, event) {
     if (name === 'feeds') {
@@ -601,7 +622,14 @@
       setConnection('live');
     };
     for (const [kind, names] of Object.entries(reads)) {
-      stream.addEventListener(kind, (event) => mark(names.flatMap((name) => expand(name, event))));
+      stream.addEventListener(kind, (event) => {
+        const expanded = names.flatMap((name) => expand(name, event));
+        if (kind === 'resync') {
+          mark(expanded);
+        } else {
+          markFromEvent(expanded);
+        }
+      });
     }
     stream.onerror = () => {
       stream.close();

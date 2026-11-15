@@ -94,6 +94,7 @@ func lifecycleWorker(t *testing.T, f *productionDesignFixture, project config.Pr
 func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing.T) {
 	for _, choice := range []string{"source-repo", "least-member"} {
 		t.Run(choice, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			f, cleanupGate := newLifecycleDesignFixture(t)
 			defer func() { f.stop(t) }()
@@ -678,6 +679,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 	for _, step := range []string{"member-retirement-snapshot", "member-archive-recorded", "archive-cleanup-ready", "archive-cleanup-intent", "archive-cleanup-renamed", "archive-cleanup-completed"} {
 		t.Run(step, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			f, cleanupGate := newLifecycleDesignFixture(t)
 			defer func() { f.stop(t) }()
