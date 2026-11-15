@@ -17,6 +17,7 @@ import (
 )
 
 func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
+	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	checked := make(chan struct{}, 1)
@@ -52,6 +53,7 @@ func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 }
 
 func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
+	t.Parallel()
 	f := newProductionDesignFixture(t)
 	defer f.stop(t)
 	checked := make(chan struct{}, 4)
@@ -85,6 +87,7 @@ func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
 }
 
 func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
+	t.Parallel()
 	f, stream, repo := newApprovedFixture(t, "delta-charters")
 	defer repo.Close()
 	f.s.setSole(runtimeFor(repo))
@@ -131,6 +134,7 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 }
 
 func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
+	t.Parallel()
 	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{options: func(opts *Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action == deltaTurnAction }
 	}})

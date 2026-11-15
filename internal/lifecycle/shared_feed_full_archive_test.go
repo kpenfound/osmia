@@ -69,6 +69,7 @@ func requireRetained(t *testing.T, feed api.WorkgroupFeedResponse, before []api.
 // stays so across a restart, and sending to the group is refused without
 // adding an entry.
 func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	group := resolutionGroupID(t, g.productionDesignFixture)
@@ -136,6 +137,7 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 // An owner archive of the last member leaves the retained shared conversation
 // readable and adds no automatic-archive entry.
 func TestSharedFeedStaysReadableAfterTheOwnerArchivesEveryMember(t *testing.T) {
+	t.Parallel()
 	g := newAutoArchiveGroup(t)
 	group := resolutionGroupID(t, g.productionDesignFixture)
 	before := retainedEntries(readWorkgroupFeed(t, g.productionDesignFixture, group))

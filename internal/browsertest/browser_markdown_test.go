@@ -70,6 +70,7 @@ func assertMarkdownPhone(p *page, selector string) {
 }
 
 func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newPageFixture(t)
 	p := openBrowser(t)
@@ -172,6 +173,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 }
 
 func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	f.status(t, trace.StatusContent{Goal: "Markdown reports", Note: browserMarkdown, Attention: browserMarkdown, Agents: []string{}})
 	f.answerChief(t, stream, f.chief.Turn, browserMarkdown)

@@ -17,6 +17,7 @@ import (
 // contested card is reused when its unit is contested again, and still
 // shows no value from the ruling before it.
 func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
 	ctx := context.Background()
@@ -161,6 +162,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 // soon as each decision succeeds, so deciding the next objection on the same
 // card never shows a value from the decision before it.
 func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
 	t.Cleanup(func() { f.stop(t) })

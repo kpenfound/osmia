@@ -33,6 +33,7 @@ const (
 // set_status, and the page then shows that goal as the title of the started
 // workstream or workgroup.
 func TestBrowserDesignTitlesFollowTheAgentAndTheHandoffTitlesTheStartedWork(t *testing.T) {
+	t.Parallel()
 	for _, workgroup := range []bool{false, true} {
 		name := "sole member"
 		if workgroup {
@@ -162,8 +163,13 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 	// The owner starts the work from the page.
 	awaitBrowserDesignBrief(t, p, c, id)
 	p.Click("#design-start")
-	p.Await("workgroup start", `document.getElementById('design-start-result').textContent.includes('Started a workgroup')`)
-	if !workgroup {
+	if workgroup {
+		// A started workgroup's design session leaves the sidebar, and the
+		// page follows it to the workgroup's view; the start's result line
+		// belongs to the design view it left.
+		p.Await("the started workgroup view", `!document.querySelector('[data-view="workgroup"]').hidden`)
+	} else {
+		p.Await("workgroup start", `document.getElementById('design-start-result').textContent.includes('Started a workgroup')`)
 		assertBrowserDesignSelection(t, p, c, id, true)
 	}
 

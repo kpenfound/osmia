@@ -39,6 +39,7 @@ func activityEntry(id, kind, workstream, phase, lastProgress, failure string) st
 // progress at least once and then gone quiet counts as stalled
 // (service's activity.go, ActivityEntry.reported).
 func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testing.T) {
+	t.Parallel()
 	api := newFakeAPI(1)
 	current := time.Now().UTC().Format(time.RFC3339)
 	const stale = "2020-01-01T00:00:00Z"

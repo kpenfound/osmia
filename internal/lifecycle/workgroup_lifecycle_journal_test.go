@@ -21,6 +21,7 @@ import (
 )
 
 func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, gate := newLifecycleDesignFixture(t)
 	defer f.stop(t)

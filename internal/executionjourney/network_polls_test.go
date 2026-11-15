@@ -41,6 +41,7 @@ func (p *heldPoll) Find(ctx context.Context, _, fork, branch string) ([]pulls.Pu
 var awaitPollSignal = fixturekit.AwaitPollSignal
 
 func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
+	t.Parallel()
 	for _, archived := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own-pr", true: "archive"}[archived], func(t *testing.T) {
 			ctx := context.Background()

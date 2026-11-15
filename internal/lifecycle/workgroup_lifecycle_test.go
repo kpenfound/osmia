@@ -92,6 +92,7 @@ func lifecycleWorker(t *testing.T, f *productionDesignFixture, project config.Pr
 	f.sharedDesign().LifecycleWorker(t, project, stream, worker, turn, prompt)
 }
 func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing.T) {
+	t.Parallel()
 	for _, choice := range []string{"source-repo", "least-member"} {
 		t.Run(choice, func(t *testing.T) {
 			t.Parallel()
@@ -565,6 +566,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 	}
 }
 func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, _ := newLifecycleDesignFixture(t)
 	defer f.stop(t)
@@ -677,6 +679,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	})
 }
 func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, step := range []string{"member-retirement-snapshot", "member-archive-recorded", "archive-cleanup-ready", "archive-cleanup-intent", "archive-cleanup-renamed", "archive-cleanup-completed"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
@@ -771,6 +774,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 	}
 }
 func TestDesignProductionLifecycleRecoversLegacyArchiveEvidence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, cleanupGate := newLifecycleDesignFixture(t)
 	defer func() { f.stop(t) }()
@@ -837,6 +841,7 @@ func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
 // history after cleanup. Its archive record alone locates it, so the inbox,
 // the shared conversation and the surviving member stay readable.
 func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, cleanupGate := newLifecycleDesignFixture(t)
 	defer func() { f.stop(t) }()

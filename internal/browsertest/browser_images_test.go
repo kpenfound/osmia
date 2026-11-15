@@ -80,6 +80,7 @@ func openBrowserFullImage(p *page, feed string, v trace.Image) {
 }
 
 func TestBrowserWorkstreamImages(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	seedScrollMessages(t, f.c, stream)
 	repo := service.InspectForTest(f.s).SoleRepository()
@@ -103,6 +104,7 @@ func TestBrowserWorkstreamImages(t *testing.T) {
 }
 
 func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
+	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	seedScrollMessages(t, f.c, stream)
 	v := recordBrowserImage(t, f.repo, quiet, "member-image")
@@ -147,6 +149,7 @@ func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
 }
 
 func TestBrowserSessionImages(t *testing.T) {
+	t.Parallel()
 	s, c, project, engine, _ := sessionWebFixture(t)
 	engine.Turn = func(context.Context, agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "session", ResultText: strings.Repeat(scrollReply, 45)}, nil

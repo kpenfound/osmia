@@ -111,6 +111,7 @@ func (a *settingsAPI) seen() []settingsSave {
 // value as not yet applied beside the value in effect, and a later save
 // from it is accepted rather than refused as stale.
 func TestBrowserProjectSettingsShowASavedButNotAppliedOutcomeAndAdoptItsPin(t *testing.T) {
+	t.Parallel()
 	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)

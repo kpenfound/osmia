@@ -10,6 +10,7 @@ import (
 )
 
 func TestBrowserRatifySendsDisplayedProjectSpecRevision(t *testing.T) {
+	t.Parallel()
 	api := newFakeAPI(1)
 	api.setInbox(ratificationEntry("w_000"))
 	requests := make(chan map[string]int, 1)

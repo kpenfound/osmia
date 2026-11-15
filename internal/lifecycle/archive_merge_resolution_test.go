@@ -15,6 +15,7 @@ import (
 )
 
 func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	host := &fakePulls{}
 	var interrupt, reached atomic.Bool
@@ -162,6 +163,7 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 	}
 }
 func TestSameRepoArchivedMergeReceiptRequiresExactPublication(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"current", "cleaned current", "earlier PR", "unmerged", "no commit", "edge removed after observation"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()

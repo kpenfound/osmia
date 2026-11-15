@@ -163,6 +163,7 @@ func awaitMemberMergeResolution(t *testing.T, f *productionDesignFixture) {
 	resolutionGroupState(t, f, true)
 }
 func TestDesignProductionProjectSpecWaitsForEveryMemberMerge(t *testing.T) {
+	t.Parallel()
 	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait}, "contract", nil)
 	defer f.stop(t)
 	deliverResolutionMembers(t, f)
@@ -183,6 +184,7 @@ func TestDesignProductionProjectSpecWaitsForEveryMemberMerge(t *testing.T) {
 	resolutionGroupState(t, f, true)
 }
 func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
+	t.Parallel()
 	for _, edge := range []string{trace.EdgeHardBlock, trace.EdgeContract, ""} {
 		t.Run("edge-"+edge, func(t *testing.T) {
 			host := &resolutionPulls{fakePulls: &fakePulls{}}

@@ -185,11 +185,8 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 // and the selection and what was seen survive a reload. Selecting a
 // workstream, a status change on one not shown and a reload never change the
 // sidebar's order, which the server already sorts by last activity.
-// serial: asserts markSeen's unread tracking, which app.js gates on
-// document.visibilityState === 'visible' (internal/web/app.js); openBrowser's
-// shared browser window has one visible tab at a time, and a concurrent
-// test's chromedp.BringToFront() races this test's visibility.
 func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
 	streamRow := `[data-select="` + string(stream) + `"] `

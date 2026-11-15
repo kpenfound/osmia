@@ -163,6 +163,7 @@ func exerciseHeldSends(p *page, a, b config.WorkstreamID, kind, form, result, su
 }
 
 func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
+	t.Parallel()
 	s, c, project, engine := newDesignEnforcementFixture(t, true)
 	engine.Turns["*"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": "Decisions: keep compatibility.\nIntent and tradeoffs: prefer existing names.\nRejected options: a breaking replacement."})
@@ -204,6 +205,7 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 }
 
 func TestBrowserSessionOutcomesBelongToTheirSession(t *testing.T) {
+	t.Parallel()
 	s, c, project, engine, _ := sessionWebFixture(t)
 	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Hold this turn") {
@@ -256,6 +258,7 @@ func TestBrowserSessionOutcomesBelongToTheirSession(t *testing.T) {
 }
 
 func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	p := openOutcomePage(t, f.s)
 	p.SelectWorkstream(stream)
@@ -336,6 +339,7 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 }
 
 func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	_, err := f.c.Abandon(context.Background(), quiet, "Finished with this work")
 	must(t, err)
@@ -401,6 +405,7 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 }
 
 func TestBrowserCreateOutcomesBelongToTheirOpeningAndProject(t *testing.T) {
+	t.Parallel()
 	s, c, first, _, clone := sessionWebFixture(t)
 	ctx := context.Background()
 	secondClone := filepath.Join(filepath.Dir(clone), "other-project")

@@ -14,6 +14,7 @@ import (
 )
 
 func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
+	t.Parallel()
 	for _, retire := range []bool{true, false} {
 		name := "retired"
 		if !retire {

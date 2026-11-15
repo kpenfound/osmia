@@ -154,6 +154,7 @@ func containsMessage(err error, message string) bool {
 	return err != nil && strings.Contains(err.Error(), message)
 }
 func TestProjectSpecRefreshDefersHeldMembersAndTrace(t *testing.T) {
+	t.Parallel()
 	for _, hold := range []string{"locked", "joining", "retired", "canceled"} {
 		t.Run(hold, func(t *testing.T) {
 			t.Parallel()

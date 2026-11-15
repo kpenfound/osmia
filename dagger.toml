@@ -11,9 +11,7 @@ base = "dag://osmia-dev/test-runtime"
 # -count=1 keeps go test from recording every file the tests touch for its
 # result cache and reading that log back after each package: the service
 # tests' log outgrows the engine's memory.
-# Each parallel service test starts its own controllers and local processes.
-# Bound those too: the check runner's --parallel limits package checks only.
-goflags = "-count=1 -timeout=30m -parallel=4"
+goflags = "-count=1 -timeout=30m"
 # Keep factory state out of module discovery, including any go.mod files left
 # in session directories.
 test = ["**", "!.bees"]
@@ -38,11 +36,11 @@ name = "osmia-dev"
 
 # dagger check --env=race runs the selected tests with the race detector.
 [env.race.modules.go.settings]
-goflags = "-count=1 -timeout=30m -parallel=4 -race"
+goflags = "-count=1 -timeout=30m -race"
 
 # dagger check --env=flake runs each selected test five times.
 [env.flake.modules.go.settings]
-goflags = "-count=5 -timeout=30m -parallel=4"
+goflags = "-count=5 -timeout=30m"
 
 [modules.staticcheck]
 source = "dagger.io/go/staticcheck"

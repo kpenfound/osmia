@@ -17,6 +17,7 @@ import (
 )
 
 func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"owner-ruling-member", "chief-relay-member"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()

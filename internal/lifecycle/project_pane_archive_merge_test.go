@@ -15,6 +15,7 @@ import (
 )
 
 func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	host := &fakePulls{}
 	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait}, trace.EdgeHardBlock, host)

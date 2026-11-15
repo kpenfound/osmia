@@ -22,6 +22,7 @@ import (
 )
 
 func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const merged = "aabbccddeeff0011223344556677889900aabbccdd"
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}

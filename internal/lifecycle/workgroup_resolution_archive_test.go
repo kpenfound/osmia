@@ -33,6 +33,7 @@ func rewriteLegacyResolutionArchive(t *testing.T, f *productionDesignFixture, me
 	must(t, os.WriteFile(path, data, 0600))
 }
 func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"ready-unmerged", "owner-merged", "own-pr-merged"} {
 		merged := name != "ready-unmerged"
 		t.Run(name, func(t *testing.T) {
@@ -133,6 +134,7 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 	}
 }
 func TestSingleMemberResolutionAndDeliveryCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, member, repo := newCleanupFixture(t, config.WorkspacesGit)
 	defer repo.Close()
@@ -181,6 +183,7 @@ func TestSingleMemberResolutionAndDeliveryCleanup(t *testing.T) {
 	}
 }
 func TestSingleMemberReadyArchivePinsUnresolved(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	gate := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}

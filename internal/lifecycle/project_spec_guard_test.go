@@ -117,6 +117,7 @@ func assertGuardRatifiable(t *testing.T, f *crossRepoRatifyFixture, id config.Wo
 	}
 }
 func TestProjectSpecContractGuardRedraftsChangedAndRemovedCriteria(t *testing.T) {
+	t.Parallel()
 	for _, removed := range []bool{false, true} {
 		t.Run(fmt.Sprint("removed=", removed), func(t *testing.T) {
 			t.Parallel()
@@ -301,6 +302,7 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 	assertGuardRatifiable(t, f, id, 2, old.Revision+1)
 }
 func TestProjectSpecDraftSupersedesUnpinnedOutput(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"queued", "reserved", "captured", "completed"} {
 		t.Run(stage, func(t *testing.T) {
 			t.Parallel()
@@ -384,6 +386,7 @@ func TestProjectSpecContractGuardAllowsOtherMembersToRefresh(t *testing.T) {
 	assertGuardRefusal(t, f, id, 2, "")
 }
 func TestProjectSpecContractGuardPinsMidRedraftEdits(t *testing.T) {
+	t.Parallel()
 	for _, interruption := range []string{"none", "requested", "staged", "delivered", "recorded"} {
 		t.Run(interruption, func(t *testing.T) {
 			t.Parallel()
@@ -610,6 +613,7 @@ func TestProjectSpecInitialDraftFailureRemainsTerminal(t *testing.T) {
 	}
 }
 func TestProjectSpecContractGuardDefersHeldMembers(t *testing.T) {
+	t.Parallel()
 	for _, hold := range []string{"joining", "retired"} {
 		t.Run(hold, func(t *testing.T) {
 			t.Parallel()

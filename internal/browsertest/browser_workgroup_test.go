@@ -108,6 +108,7 @@ func openWorkgroup(p *page, id config.WorkgroupID) {
 }
 
 func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
+	t.Parallel()
 	f := newWorkgroupPageFixture(t, true)
 	shared := f.question(t, 1)
 	p := openOutcomePage(t, f.s, `
@@ -206,6 +207,7 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 }
 
 func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
+	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	first, second := entriesOf(t, f.c, api.InboxContested)[0], f.question(t, 2)
 	p := openOutcomePage(t, f.s)
@@ -266,6 +268,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 }
 
 func TestBrowserWorkgroupPhoneLayout(t *testing.T) {
+	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	longGoal := strings.Repeat("UnbrokenGoal", 20)
 	_, err := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: longGoal, Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
@@ -289,6 +292,7 @@ func settleWorkgroupAction(p *page) {
 }
 
 func TestBrowserWorkgroupArchivedCardsAndOpenableRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, repo := sidebarFixture(t)
 	retired := config.WorkstreamID("w_000000000000000000000000000000a3")
@@ -337,6 +341,7 @@ func TestBrowserWorkgroupArchivedCardsAndOpenableRow(t *testing.T) {
 }
 
 func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 	withWeb(t, f.opts, "127.0.0.1:0")
@@ -479,6 +484,7 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 }
 
 func TestBrowserWorkgroupAndMemberDecisionButtonsAnswerOriginalEndpoint(t *testing.T) {
+	t.Parallel()
 	for _, view := range []string{"workgroup", "member"} {
 		t.Run(view, func(t *testing.T) {
 			f := newWorkgroupPageFixture(t, false)

@@ -13,6 +13,7 @@ import (
 // submitted before; a failed registration leaves the owner's entry in place
 // and shows the refusal beside it.
 func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	opts, clone := projectFixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
@@ -67,6 +68,7 @@ func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t 
 // it for the next workstream never shows what the owner submitted before; a
 // refused action leaves the owner's entry in place and shows the refusal.
 func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
 

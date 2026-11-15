@@ -325,7 +325,9 @@ func ReportInput(r FinalReport) FinalReviewInput {
 // one has no result yet, the workstream is paused, the service has no
 // committee runner, or a review was already asked for, or a report already
 // reads, the current branch, seal, spec, plan and charter. A review that
-// failed is asked for again only once one of them changes.
+// failed is asked for again only once one of them changes. A delivered
+// workstream is asked for a maintenance review only while upstream delivery
+// maintenance is pending.
 func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID) error {
 	observed, _, err := a.S.BaseObservationAt(a.Repository, stream)
 	if err != nil || observed {
@@ -375,6 +377,15 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	}
 	if err != nil {
 		return err
+	}
+	// The feature can be delivered after the caller read it assembled; a
+	// delivered feature's review is maintenance, asked for only while
+	// maintenance is pending.
+	if now.Maintenance {
+		pending, err := a.S.UpstreamDeliveryPending(a.Repository, a.S.About(a.Repository), stream)
+		if err != nil || !pending {
+			return err
+		}
 	}
 	report, found, err := LatestFinalReport(a.Repository, stream)
 	if err != nil {

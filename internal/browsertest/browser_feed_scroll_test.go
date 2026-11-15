@@ -113,6 +113,7 @@ func addScrollFollowup(t *testing.T, f *workgroupPageFixture, g *trace.Workgroup
 }
 
 func TestBrowserWorkgroupFeedScroll(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newMemberPageFixture(t, false, false)
 	addScrollFollowup(t, f, &f.group, stream)
@@ -164,6 +165,7 @@ func TestBrowserWorkgroupFeedScroll(t *testing.T) {
 }
 
 func TestBrowserWorkstreamFeedScroll(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	seedScrollMessages(t, f.c, stream)
 	path := "/v1/feed/" + string(stream)
@@ -217,6 +219,7 @@ func TestBrowserWorkstreamFeedScroll(t *testing.T) {
 const scrollReply = "A detailed agent reply.\n\n"
 
 func TestBrowserSessionFeedScroll(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, c, project, engine, _ := sessionWebFixture(t)
 	release := make(chan struct{})
@@ -275,6 +278,7 @@ func TestBrowserSessionFeedScroll(t *testing.T) {
 }
 
 func TestBrowserDesignFeedScroll(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, c, project, engine := newDesignEnforcementFixture(t, true)
 	release := make(chan struct{})

@@ -16,6 +16,7 @@ import (
 )
 
 func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 	t.Cleanup(cleanup.release)
@@ -127,6 +128,7 @@ func TestArchivedUpstreamReadRecoversConcurrentCleanupAcrossRestart(t *testing.T
 	}
 }
 func TestUpstreamReadErrorsWithoutCleanupEvidence(t *testing.T) {
+	t.Parallel()
 	for _, archived := range []bool{false, true} {
 		name := "live"
 		if archived {
@@ -154,6 +156,7 @@ func TestUpstreamReadErrorsWithoutCleanupEvidence(t *testing.T) {
 	}
 }
 func TestArchivedUpstreamGoneTraceUsesOnlyPinnedPublication(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"merged", "closed", "stale", "lookup failure", "no publication"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, repo, host, refresh := ownPRFixture(t)

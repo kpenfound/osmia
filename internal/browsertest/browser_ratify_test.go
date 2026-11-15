@@ -14,6 +14,7 @@ import (
 )
 
 func TestBrowserRatifyButtonRecordsRatificationAndLeavesGate(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	opts, clone := projectFixture(t)
 	engine, _, clock, architect, issues := intakefixture.ArchitectExecution(t, opts.Config, clone)

@@ -106,6 +106,7 @@ func (p *page) settle() {
 // full resync, leaves exactly one outcome entry without marking anything
 // unread.
 func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 2, func(api *fakeAPI) {
 		api.setInbox(contestedEntry("w_000", "index"))
 		api.setFeed("w_000", transitionEntry("2026-01-01T00:00:01Z", "building"))
@@ -166,6 +167,7 @@ func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
 // A refused command leaves no feed entry: its reason stays in the shared
 // result line beside the restored card. A later accepted command adds one.
 func TestBrowserRefusedCommandAddsNoFeedEntry(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) {
 		api.setInbox(contestedEntry("w_000", "index"))
 	})
@@ -201,6 +203,7 @@ func TestBrowserRefusedCommandAddsNoFeedEntry(t *testing.T) {
 // workstream, put their accepted outcomes into its feed in the order they
 // were accepted, and nothing into the shared result line.
 func TestBrowserMenuActionOutcomesAreFeedEntries(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) { api.state = "assembled" })
 	p := f.p
 	p.click("#workstream-menu-button")
@@ -220,6 +223,7 @@ func TestBrowserMenuActionOutcomesAreFeedEntries(t *testing.T) {
 // A refused menu action keeps its reason in the shared result line and adds
 // no feed entry.
 func TestBrowserRefusedMenuActionAddsNoFeedEntry(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) {})
 	p := f.p
 	f.rebase.failNext("a drift rebase is already requested")
@@ -235,6 +239,7 @@ func TestBrowserRefusedMenuActionAddsNoFeedEntry(t *testing.T) {
 // A charter rule decision puts its accepted outcome into the feed of the
 // workstream the proposal belongs to.
 func TestBrowserCharterRuleDecisionOutcomeIsFeedEntry(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) { api.charter = charterProposals("w_000") })
 	p := f.p
 	proposal := `[data-proposal="w_000:q1"] `
@@ -248,6 +253,7 @@ func TestBrowserCharterRuleDecisionOutcomeIsFeedEntry(t *testing.T) {
 // outcome only into the feed of the workstream the command was taken on,
 // where it is when the owner returns, and shows nothing in the other one.
 func TestBrowserLateOutcomeBelongsToTheOriginatingFeed(t *testing.T) {
+	t.Parallel()
 	f := newOutcomeFeedFixture(t, 2, func(api *fakeAPI) {
 		api.setInbox(contestedEntry("w_000", "index"))
 		api.setFeed("w_000", transitionEntry("2026-01-01T00:00:01Z", "building"))

@@ -25,6 +25,7 @@ import (
 // TestDraftBriefRefusesAnIncompleteBriefAndRecordsTheLatest and
 // TestStartDesignWorkgroupHandsOffBriefOnTheSameChiefOfStaffThread.
 func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	opts, clone := projectFixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
@@ -67,6 +68,7 @@ func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *te
 }
 
 func TestBrowserDesignReadinessAssumptionsAndStartWorkgroup(t *testing.T) {
+	t.Parallel()
 	p := openBrowser(t)
 	s, c, project, engine := newDesignEnforcementFixture(t, true)
 	const brief = "Decisions: keep the existing endpoint.\nIntent and tradeoffs: favor compatibility over flexibility.\nRejected options: a breaking replacement."

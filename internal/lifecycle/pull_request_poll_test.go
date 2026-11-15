@@ -20,6 +20,7 @@ import (
 )
 
 func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
+	t.Parallel()
 	for _, delivered := range []bool{false, true} {
 		for _, interval := range []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute} {
 			t.Run(fmt.Sprintf("delivered-%v/%s", delivered, interval), func(t *testing.T) {
@@ -68,6 +69,7 @@ func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
 	}
 }
 func TestEdgePullRequestPollAttempts(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{trace.EdgeHardBlock, trace.EdgeMergeOrder} {
 		for _, previous := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/previous-%v", kind, previous), func(t *testing.T) {
@@ -155,6 +157,7 @@ func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 	}
 }
 func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
+	t.Parallel()
 	for _, interval := range []time.Duration{10 * time.Minute, 20 * time.Minute, 5 * time.Minute} {
 		t.Run(interval.String(), func(t *testing.T) {
 			ctx := context.Background()
@@ -218,6 +221,7 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 	}
 }
 func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
+	t.Parallel()
 	for _, projectRequest := range []bool{false, true} {
 		t.Run(fmt.Sprintf("project-%v", projectRequest), func(t *testing.T) {
 			f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
@@ -274,6 +278,7 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 	}
 }
 func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	host := &fakePulls{}
@@ -357,6 +362,7 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	}
 }
 func TestEdgePullRequestPollReload(t *testing.T) {
+	t.Parallel()
 	for _, failed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("failed-%v", failed), func(t *testing.T) {
 			ctx := context.Background()
@@ -436,6 +442,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 	}
 }
 func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
+	t.Parallel()
 	for _, projectRequest := range []bool{false, true} {
 		t.Run(fmt.Sprintf("project-request-%v", projectRequest), func(t *testing.T) {
 			f := newDebateFixture(t, 1, 1)

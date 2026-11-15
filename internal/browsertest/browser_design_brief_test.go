@@ -18,6 +18,7 @@ import (
 
 func TestBrowserDesignBriefRefreshAndPinnedStart(t *testing.T) { browserDesignBrief(t, false) }
 func TestBrowserDesignBriefConflictRefreshesDisplayedRevision(t *testing.T) {
+	t.Parallel()
 	browserDesignBrief(t, true)
 }
 

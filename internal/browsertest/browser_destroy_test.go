@@ -138,8 +138,8 @@ func assertBrowserDestroyed(p *page, s *Service, c *Client, project config.Proje
 	}
 }
 
-// serial: native confirmation dialogs use the shared browser window.
 func TestBrowserDestroyDesignConfirmsRefusesBusyAndRemovesHistory(t *testing.T) {
+	t.Parallel()
 	s, c, project, engine := newDesignEnforcementFixture(t, true)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -195,8 +195,8 @@ func TestBrowserDestroyDesignConfirmsRefusesBusyAndRemovesHistory(t *testing.T) 
 	assertDestroyRequests(p, "design", id, 2)
 }
 
-// serial: native confirmation dialogs use the shared browser window.
 func TestBrowserDestroySessionConfirmsRefusesBusyAndRemovesCommittedBranch(t *testing.T) {
+	t.Parallel()
 	s, c, project, engine, _ := sessionWebFixture(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once

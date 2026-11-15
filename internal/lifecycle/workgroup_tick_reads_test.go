@@ -52,6 +52,7 @@ func resolvedTickFixture(t *testing.T) (*crossRepoRatifyFixture, *trace.Reposito
 }
 
 func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testing.T) {
+	t.Parallel()
 	f, wt, g, spec := resolvedTickFixture(t)
 	ctx := context.Background()
 	id, host := g.ID, g.Members[0]
@@ -134,6 +135,7 @@ func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testin
 }
 
 func TestApprovedChangeReactivatesResolvedWorkgroupWithoutRestart(t *testing.T) {
+	t.Parallel()
 	f, wt, g, spec := resolvedTickFixture(t)
 	ctx := context.Background()
 	first, second := mustRepo(t, f.s, f.project), mustRepo(t, f.s, f.project2)
