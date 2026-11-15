@@ -96,7 +96,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 		}
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
-	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, "", prepare)
+	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
 	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, librarianActor)
 	defer f.stop(t)
 	j := &telemetryJourney{f: f}
@@ -105,7 +105,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	for i := range selection {
 		selection[i] = jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.92), "check-1": jevtest.Noul(.05)}}}
 	}
-	boostJev(f.s, &jevtest.Provider{Results: selection})
+	useJevProvider(f.s, &jevtest.Provider{Results: selection})
 
 	// The masons report with seeded text, and the first mason turns of two units
 	// wait at a gate so both mason slots are held while the limit is raised.

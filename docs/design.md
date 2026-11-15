@@ -918,7 +918,7 @@ Hearsay is an optional external context and memory service. It is not an orchest
 
 Hearsay is the record of how decisions are made about each project Osmia runs. Factory internals stay in Osmia.
 
-- **Decisions.** The owner's rulings, charter revisions, sealed specs, charter-proposal outcomes and accepted final-review findings are ratified records, posted to an owner source. The chief of staff's logged assumptions, intent and scope answers, scope calls and plan-only amendments are inferred records, posted to the work source. A decision Jev made, whose record has Jev as its actor and links its judgment, is never the owner's ruling: it is a work-source record with no owner author.
+- **Decisions.** The owner's rulings, charter revisions, specs the owner's ratification sealed, charter-proposal outcomes and accepted final-review findings are ratified records, posted to an owner source. The chief of staff's logged assumptions, intent and scope answers, scope calls and plan-only amendments are inferred records, posted to the work source. A decision Jev made, whose record has Jev as its actor and links its judgment, is never the owner's ruling: it is a work-source record with no owner author, and a spec sealed by Jev's ratification or by an amendment Jev decided is a work-source document with no author too.
 - **The shape of the project.** Projects, workstreams with their states and pull request outcomes, workgroup contracts and structural changes to the subsystem map.
 - **The outside.** For a project like dagger, the scope also ingests the repository's GitHub activity and its Discord channels, so a mason on the engine gets what the maintainers said about the engine, not only what your factory learned.
 

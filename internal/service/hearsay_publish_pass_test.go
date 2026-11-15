@@ -58,6 +58,11 @@ func newHooksFakeOn(t *testing.T, addr string) *hooksFake {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/hooks/") || json.Unmarshal(raw, &post.Body) != nil {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		// Hearsay answers 400 to a decision whose decider is missing or is
+		// not one of these.
+		if post.Body["kind"] == "decision" && !slices.Contains([]string{"owner", "chief_of_staff", "committee"}, post.str("decider")) {
+			t.Errorf("a decision carries decider %q, which Hearsay's connector contract refuses: %s", post.str("decider"), raw)
+		}
 		f.mu.Lock()
 		status := f.status
 		if status == http.StatusAccepted {
