@@ -212,7 +212,7 @@ func TestSelectedFallbackKeepsIncompleteAndDeadline(t *testing.T) {
 			ctx := t.Context()
 			switch name {
 			case "full refused":
-				selection = FullSelection("disabled", "")
+				selection = FullSelection("unconfigured", "")
 				attempts, parts = attempts[1:2], 1
 			case "fallback deadline":
 				attempts = []daggerfixture.Attempt{{Delay: time.Second}, {Refusal: daggerfixture.Refusal}, {Delay: time.Second}}

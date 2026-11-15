@@ -173,7 +173,7 @@ func demonstrate(t *testing.T, mode string) {
 		// independent of Osmia's own role confinement (which only the session
 		// role gets in production; see thread.Runner.ResumableRoles and
 		// internal/service/enforcement.go).
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now, ResumableRoles: func(string) bool { return true }},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now, ResumableRoles: func(string) bool { return true }},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "sessions", in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)

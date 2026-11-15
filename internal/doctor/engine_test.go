@@ -62,7 +62,12 @@ model = "opus"
 					return dagger, nil
 				}
 				return h.lookPath(name)
-			}, Command: h.command, CheckJJ: func(context.Context) (string, error) { return "0.45.1", nil }, Getenv: os.Getenv}
+			}, Command: h.command, CheckJJ: func(context.Context) (string, error) { return "0.45.1", nil }, Getenv: func(name string) string {
+				if name == "OPENROUTER_API_KEY" {
+					return "key"
+				}
+				return os.Getenv(name)
+			}}
 			// Leave EngineCommand on the real subprocess implementation, rather than
 			// the generic fake toolchain Command.
 			o.EngineCommand = func(ctx context.Context, path string, env []string, args ...string) (string, error) {

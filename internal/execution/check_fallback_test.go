@@ -37,7 +37,7 @@ func selectLinks(f *buildFixture, answers int, scores ...float64) {
 		results[i] = jevtest.Result{Response: systemone.Response{Model: "stub", Answers: a}}
 	}
 	p := &jevtest.Provider{Results: results}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5}
 	f.s.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
 }
 
@@ -279,7 +279,7 @@ func TestRecordsWithoutEnginesReadAsLocalOnly(t *testing.T) {
   "diff_sha256": "d",
   "report": 1,
   "status": "incomplete",
-  "selection": {"mode": "full", "reason": "disabled"},
+  "selection": {"mode": "full", "reason": "unconfigured"},
   "exit_code": 1,
   "output": "Error: engine lost\n",
   "error": "engine unreachable",

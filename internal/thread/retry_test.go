@@ -42,7 +42,7 @@ func TestInfrastructureFailuresRetryThenFollowFallbacks(t *testing.T) {
 	repo, root, p := setup(t)
 	queue(t, repo, "first")
 	var ran []string
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		ran = append(ran, p.Profile.Name)
 		if p.Profile.Name == "last" {
 			return healthy(p)
@@ -86,7 +86,7 @@ func TestProviderLimitSkipsSameBackendWithoutRetry(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
 	var ran, recorded []string
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain,
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain,
 		OnProviderLimit: func(p coreadapter.Profile, limit coreadapter.ProviderLimit) error {
 			recorded = append(recorded, p.Name+":"+limit.Status)
 			return nil
@@ -111,7 +111,7 @@ func TestExhaustedFallbackChainFailsTheTurnOnce(t *testing.T) {
 	queue(t, repo, "first")
 	calls := 0
 	d := Dispatcher{
-		Runner: Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		Runner: Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			calls++
 			return coreadapter.SessionResult{TimedOut: true}, context.DeadlineExceeded
 		})},
@@ -174,7 +174,7 @@ func TestBehaviouralFailureIsNotRetried(t *testing.T) {
 			repo, _, _ := setup(t)
 			queue(t, repo, "first")
 			calls := 0
-			runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 				calls++
 				result := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "ran"}, IsError: true}
 				if mode == "reported" {
@@ -200,7 +200,7 @@ func TestFallbackNeverReturnsToATriedProfile(t *testing.T) {
 	queue(t, repo, "first")
 	var ran []string
 	cycle := map[string]coreadapter.Profile{"default": {Name: "backup", Backend: "fake", Model: "x"}, "backup": {Name: "default", Backend: "fake", Model: "test"}}
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Fallbacks: cycle, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Fallbacks: cycle, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		ran = append(ran, p.Profile.Name)
 		return crashed(p)
 	})}
@@ -214,7 +214,7 @@ func TestCancelledAttemptIsNotRetried(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
 	calls := 0
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: chain}
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: chain}
 	runner.Turns = fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		calls++
 		return coreadapter.SessionResult{}, errors.Join(coreadapter.ErrNotStarted, context.Canceled)
@@ -229,7 +229,7 @@ func TestStartupFailureKeepsBackendDiagnosticWithoutSession(t *testing.T) {
 	repo, root, project := setup(t)
 	queue(t, repo, "first")
 	const diagnostic = "400 Bad Request: cmd element 21 is empty"
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
 		Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			return coreadapter.SessionResult{IsError: true, ExitCode: 1, FinalResponse: diagnostic}, nil
 		})}

@@ -62,7 +62,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		bound.Lock()
 		live = r
 		bound.Unlock()
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
 			}}, nil
@@ -183,7 +183,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	must(t, repo.Close())
 
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			return coreadapter.SessionResult{}, errors.New("no turn may run")
 		}), Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

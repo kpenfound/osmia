@@ -32,7 +32,7 @@ func TestUnitSelectedLinksReachDagger(t *testing.T) {
 				score = .4
 			}
 			p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "stub", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(score), "check-1": jevtest.Noul(score - .1), "check-2": jevtest.Noul(.01)}}}}}
-			settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: picks}
+			settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: picks}
 			f.s.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
 			runChecks(t, f.s, repo, stream)
 			run := onlyRun(t, repo, stream)
@@ -82,7 +82,7 @@ func TestUnitPicksLateRefusalRecordsFullRun(t *testing.T) {
 	}})
 	f, stream, repo := newChecksFixture(t, "late-refusal", checkrun.DaggerChecks{})
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "stub", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.4), "check-1": jevtest.Noul(.3)}}}}}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: 2}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: 2}
 	f.s.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
 	runChecks(t, f.s, repo, stream)
 	run := onlyRun(t, repo, stream)
@@ -139,7 +139,7 @@ func TestUnitCollectionOptionsReachDagger(t *testing.T) {
 				answers[checkselect.Question(i)] = jevtest.Noul(score)
 			}
 			p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "stub", Answers: answers}}}}
-			boostJev(f.s, p)
+			useJevProvider(f.s, p)
 			settings := f.s.Jev.Config()
 			settings.CheckFallbackPicks = picks
 			f.s.Jev.Config = func() config.Jev { return settings }
@@ -185,7 +185,7 @@ func TestUnitCollectionTooManyChecksRunsFull(t *testing.T) {
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links})
 	f, stream, repo := newChecksFixture(t, "too-many-options", checkrun.DaggerChecks{})
 	p := &jevtest.Provider{}
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	settings := f.s.Jev.Config()
 	settings.CheckFallbackPicks = 2
 	f.s.Jev.Config = func() config.Jev { return settings }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,10 +102,31 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestJevBoostIsOneSwitch(t *testing.T) {
-	c, err := Load(fixture(t, topConfig+"[jev]\nenabled = true\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
-	if err != nil || !c.Jev.Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
+func TestJevSettingsAlwaysEnableTheJudge(t *testing.T) {
+	c, err := Load(fixture(t, topConfig+"[jev]\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
+	if err != nil || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
 		t.Fatalf("jev: %+v %v", c.Jev, err)
+	}
+	if len(c.Warnings) != 0 {
+		t.Fatalf("warnings %q", c.Warnings)
+	}
+}
+
+// The removed [jev] enabled switch is accepted and ignored; false warns.
+func TestJevEnabledSwitchIsAcceptedAndIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		warnings []string
+	}{{"true", nil}, {"false", []string{JevEnabledIgnored}}} {
+		opts := fixture(t, topConfig+"[jev]\nenabled = "+tc.value+"\nmodel = 'jev-1.13.0'\n", projectConfig)
+		c, err := Load(opts)
+		if err != nil || !slices.Equal(c.Warnings, tc.warnings) || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" {
+			t.Fatalf("enabled = %s: warnings %q, jev %+v, err %v", tc.value, c.Warnings, c.Jev, err)
+		}
+		top, err := LoadTopLevel(opts)
+		if err != nil || !slices.Equal(top.Warnings, tc.warnings) {
+			t.Fatalf("enabled = %s: top-level warnings %q, err %v", tc.value, top.Warnings, err)
+		}
 	}
 }
 

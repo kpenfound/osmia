@@ -1,13 +1,13 @@
 # Smart checks
 
 Before a unit or assembled feature is reviewed, the service runs the project's
-Dagger checks on the commit to be read. With the [Jev boost](configuration.md#optional-jev-boost)
-on, Jev judges how likely the change is to alter each check's result, and
+Dagger checks on the commit to be read. [Jev](configuration.md#jev)
+judges how likely the change is to alter each check's result, and
 `dagger check` runs the likely ones. Configured fallback picks run the
 highest-scored checks when none reaches the ranking threshold. Selection runs
 in three stages: breadth, depth and ranking. A breadth or depth failure keeps
 selection going with a fallback for that stage; a ranking failure runs every
-check, exactly as with the boost off. The [design](design.md#96-jev-judgments) calls
+check, exactly as when Jev is unconfigured. The [design](design.md#96-jev-judgments) calls
 this the check selection and defines what it may decide.
 
 Smart checks pay off in a project whose Dagger checks are fine-grained, such
@@ -30,8 +30,8 @@ requested tests exist and exercise the behaviour.
    records the diff's SHA-256, and exports the candidate into a fresh
    directory under `<root>/checks`, made a Git root of its own so Dagger finds
    the project's workspace.
-2. **Boost off.** With the boost off, the run checks everything without
-   listing checks or asking Jev.
+2. **Jev unconfigured.** Without Jev's API key, the run checks everything
+   without listing checks or asking Jev.
 3. **List and attribute.** `dagger list checks --all --format=link` lists the
    export's expanded checks. `dagger list checks --format=link`, without
    `--all`, lists its top-level checks with collections unexpanded. Dagger
@@ -65,7 +65,7 @@ requested tests exist and exercise the behaviour.
 
    Task `check-breadth`, version 1, asks one Noul per top-level check whether
    the change could affect it or any of its items. Roots at or above
-   [`jev.check_threshold`](configuration.md#optional-jev-boost), 0.5 by
+   [`jev.check_threshold`](configuration.md#jev), 0.5 by
    default, are kept. Their collections go on to depth; their standalone
    checks go on to ranking. A root below the threshold and all its items are
    skipped. If none reaches the threshold, all top-level checks are kept.
@@ -219,7 +219,7 @@ A full run's `reason` is one of the service's own:
 
 | Reason | Cause |
 | --- | --- |
-| `disabled` | The boost is off |
+| `unconfigured` | Jev's API key is not set; nothing was listed or asked, and `detail` names the variable |
 | `unlisted` | The expanded `dagger list checks --all --format=link` listing failed or timed out |
 | `no_checks` | The project lists no check links |
 | `too_many_checks` | The remaining links cannot narrow to 1024 without a broad link |
@@ -228,7 +228,7 @@ A full run's `reason` is one of the service's own:
 
 or the judgment's [fallback reason](../internal/jev/reason.go): `declined`
 when no check reached the threshold and picks are disabled or have no usable
-score, `unconfigured`, `cooling_down`, `timeout`,
+score, `cooling_down`, `timeout`,
 `rate_limited`, `unavailable`, `rejected`, `unusable`, `interrupted`,
 `unrecorded` or `cancelled`.
 

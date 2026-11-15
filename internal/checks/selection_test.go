@@ -136,19 +136,18 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 		fmt.Fprintf(&large, "diff --git a/f%05d.go b/f%05d.go\n--- a/f%05d.go\n+++ b/f%05d.go\n@@ -1 +1 @@\n-a\n+b\n", i, i, i, i)
 	}
 	for _, tc := range []struct {
-		name    string
-		enabled bool
-		diff    string
-		result  jevtest.Result
-		reason  string
+		name   string
+		diff   string
+		result jevtest.Result
+		reason string
 	}{
-		{name: "threshold", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
-		{name: "threshold zero picks", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
-		{name: "threshold oversized picks", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
-		{name: "disabled", reason: string(jev.ReasonDisabled)},
-		{name: "large change", enabled: true, diff: large.String(), reason: SelectionTooLarge},
-		{name: "no usable scores", enabled: true, result: jevtest.Result{Response: systemone.Response{Model: "jev-test"}}, reason: string(jev.ReasonDeclined)},
-		{name: "timeout", enabled: true, result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}, reason: string(jev.ReasonTimeout)},
+		{name: "threshold", result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "threshold zero picks", result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "threshold oversized picks", result: jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.5), "check-1": jevtest.Noul(.1)}}}},
+		{name: "unconfigured", reason: string(jev.ReasonUnconfigured)},
+		{name: "large change", diff: large.String(), reason: SelectionTooLarge},
+		{name: "no usable scores", result: jevtest.Result{Response: systemone.Response{Model: "jev-test"}}, reason: string(jev.ReasonDeclined)},
+		{name: "timeout", result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}, reason: string(jev.ReasonTimeout)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -164,7 +163,6 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			stream := fixturekit.Stream
 			must(t, repository.CreateWorkstream(t.Context(), stream, fixturekit.DemoStart, trace.Actor{Kind: "service", ID: "fixture"}))
 			settings := cfg.Jev
-			settings.Enabled = tc.enabled
 			settings.CheckFallbackPicks = 2
 			if tc.name == "threshold zero picks" {
 				settings.CheckFallbackPicks = 0
@@ -174,8 +172,16 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			}
 			settings.Timeout = "1s"
 			p := &jevtest.Provider{Results: []jevtest.Result{tc.result}}
-			j := &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: func() time.Time { return fixturekit.DemoStart }}
+			key := "key"
+			if tc.name == "unconfigured" {
+				key = ""
+			}
+			j := &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return key }, Now: func() time.Time { return fixturekit.DemoStart }}
 			checks := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b"}, Outcomes: fixturekit.Passing()}
+			if tc.name == "unconfigured" {
+				// Listing would fail with another reason, so the reason shows it was skipped.
+				checks.ListErr = errors.New("listing must be skipped")
+			}
 			scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(stream), Thread: "checks", Turn: "check-1", Role: "checks"}
 			selection := Select(t.Context(), j, repository, scope, "check-1", nil, t.TempDir(), tc.diff, Identity{}, checks)
 			_, err = checks.Check(t.Context(), t.TempDir(), Identity{}, selection.Links)
@@ -190,10 +196,19 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			if !slices.Equal(checks.Runs()[0], selection.Links) {
 				t.Fatalf("runner %v, selection %+v", checks.Runs(), selection)
 			}
-			if (tc.name == "disabled" || tc.name == "large change") && len(p.Requests()) != 0 {
+			if (tc.name == "unconfigured" || tc.name == "large change") && len(p.Requests()) != 0 {
 				t.Fatal("full run asked Jev")
 			}
 		})
+	}
+}
+
+func TestUnconfiguredSelectionDescribesNoOffMode(t *testing.T) {
+	t.Parallel()
+	got := DescribeSelection(FullSelection(string(jev.ReasonUnconfigured), "OPENROUTER_API_KEY is not set"))
+	want := "every check ran: Jev did not select them (unconfigured: OPENROUTER_API_KEY is not set)"
+	if got != want || strings.Contains(got, "boost") || strings.Contains(got, "off") {
+		t.Fatalf("description %q, want %q", got, want)
 	}
 }
 

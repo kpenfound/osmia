@@ -893,11 +893,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   worktree with nothing to commit (`validation`, exit 4). The client sends a
   new request key with each command, so a request the API retries produces
   one commit rather than a second one.
-- `session check <session-id>` checks the session's latest commit. With the
-  Jev boost on, it runs the same smart-check selection a unit's own check run
+- `session check <session-id>` checks the session's latest commit. With
+  Jev configured, it runs the same smart-check selection a unit's own check run
   uses, scoped to what changed between the session's starting commit and its
-  head; with the boost off, it runs the full `dagger check` the service runs
-  before every review. The output names the run number, the checked commit,
+  head; without Jev's API key, or when Jev does not select, it runs the full
+  `dagger check` the service runs before every review. The output names the run number, the checked commit,
   whether the run was smart or full (with its selected checks when smart),
   its status and exit code. Only one check per session runs at a time; a
   second request while one is still running, or one sent after the session
@@ -1064,7 +1064,7 @@ the root and the configuration directly, the way `serve` does.
 | Group | Checks |
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
-| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
+| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
 | `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
@@ -1115,6 +1115,7 @@ root
 config
   ✓ config.toml                                 /home/kyle/.config/osmia/config.toml (2 profiles, 1 active projects)
   ✓ project p_0123456789abcdef0123456789abcdef  widgets (acme/widgets)
+  ✓ jev                                        Jev is configured with OPENROUTER_API_KEY set for ~typesafe/jev-latest
 
 toolchain
   ✓ git                                         /usr/bin/git (git version 2.50.1)
@@ -1136,7 +1137,7 @@ state
   ✓ widgets trace                               /home/kyle/.local/share/osmia/projects/p_0123456789abcdef0123456789abcdef (3 workstreams)
   ✓ runtime.json                                /home/kyle/.local/share/osmia/runtime.json
 
-15 checks: 13 passed, 1 warnings, 1 failed
+16 checks: 14 passed, 1 warnings, 1 failed
 ```
 
 `--json` prints the checks as a JSON array of `group`, `name`, `status`

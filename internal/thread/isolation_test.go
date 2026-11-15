@@ -53,7 +53,7 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 					}
 					return isolation.Selection{Paths: paths, Execution: execution}, nil
 				}}
-			runner := Runner{Store: repo, Turns: boundary, Now: func() time.Time { return timestamp.Add(time.Second) }}
+			runner := Runner{Jev: unconfiguredJudge(), Store: repo, Turns: boundary, Now: func() time.Time { return timestamp.Add(time.Second) }}
 			q, runErr := runner.RunNext(context.Background(), stream, "agent", a.PreparedTurn{SessionDirectory: t.TempDir()})
 			if runErr == nil || q.Response == nil || q.Response.Failure == "" || !q.Response.Result.IsError || q.CompletedAt.IsZero() {
 				t.Fatalf("failure not captured: %+v %v", q, runErr)

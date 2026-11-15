@@ -37,7 +37,7 @@ func (f *TwoProjectScenario) Threads(r *trace.Repository, cfg *config.Config) (c
 	f.mu.Lock()
 	f.live[r.Project()] = r
 	f.mu.Unlock()
-	return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: f.Turns, Now: f.Clock.Now}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	return thread.Dispatcher{Runner: thread.Runner{Jev: UnconfiguredJudge(nil), Store: r, Turns: f.Turns, Now: f.Clock.Now}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(f.Config.Root, "sessions", string(r.Project()), in.Agent, in.Turn)}, nil
 	}}, nil
 }

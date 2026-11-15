@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,7 +120,7 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 	calls := make(chan coreadapter.PreparedTurn, 1)
 	opts.Reconciliation.Now = clock.Now
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Now: clock.Now, Turns: turnsFunc(func(_ context.Context, input coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Now: clock.Now, Turns: turnsFunc(func(_ context.Context, input coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			calls <- input
 			return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "codex", ID: "recovered"}, FinalResponse: "Continued"}, nil
 		})}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

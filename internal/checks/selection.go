@@ -54,9 +54,6 @@ func DescribeSelection(s api.CheckSelection) string {
 	if clause != "" {
 		clause = "; ranking considered links" + clause
 	}
-	if s.Reason == string(jev.ReasonDisabled) {
-		return "every check ran: the Jev boost is off" + clause
-	}
 	if s.Reason == SelectionRefused {
 		return "every check ran: Dagger refused the links Jev selected (" + s.Detail + ")" + clause
 	}
@@ -104,12 +101,12 @@ func RunSelection(ctx context.Context, checks ReviewChecks, dir string, identity
 // of the listed checks a change, described by diff from a disposable export
 // at dir, can affect, scoped to scope and keyed by cause for reuse across a
 // retry. Breadth and depth failures retain the earlier stages; a ranking
-// failure runs every check. Listing waits for the project's modules to load, so it is skipped while the boost
-// is off. Unit, final-review and session check runs all ask through this
+// failure runs every check. Listing waits for the project's modules to load,
+// so it is skipped while Jev is unconfigured. Unit, final-review and session check runs all ask through this
 // function and use its selection and fallback rules.
 func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, identity Identity, checks ReviewChecks) (selection api.CheckSelection) {
-	if j.Status().Mode == jev.ModeDisabled {
-		return FullSelection(string(jev.ReasonDisabled), "")
+	if status := j.Status(); status.Mode == jev.ModeUnconfigured {
+		return FullSelection(string(jev.ReasonUnconfigured), status.Detail)
 	}
 	links, err := checks.List(ctx, dir, identity)
 	if err != nil {

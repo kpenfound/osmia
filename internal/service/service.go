@@ -360,7 +360,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	// Check holders and waiters do not survive a restart: those the earlier run
 	// left open are sent as interrupted.
 	s.slots.Interrupt(telemetry.PoolID(checksRole))
-	// Getenv reads the Jev boost's API key the same way the default would,
+	// Getenv reads Jev's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
 	// EnvSecrets' default, and the key must never reach a log record
@@ -485,6 +485,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
+	for _, warning := range cfg.Warnings {
+		logger.Warn(warning, "component", "config")
+	}
 	s.recoverArchiveLifecycle(ctx)
 	if s.tailnet != nil {
 		// A first join that fails leaves the tailnet down for the supervisor

@@ -25,6 +25,7 @@ func fakeDoctor(t *testing.T) {
 				return filepath.Base(path) + " 1.0.0", nil
 			},
 			CheckJJ: func(context.Context) (string, error) { return "", exec.ErrNotFound },
+			Getenv:  func(name string) string { return map[string]string{"OPENROUTER_API_KEY": "key"}[name] },
 		}
 	}
 	t.Cleanup(func() { doctorOptions = old })
@@ -57,6 +58,20 @@ func TestDoctor(t *testing.T) {
 	if len(checks) == 0 || checks[0].Group != doctor.GroupRoot {
 		t.Fatalf("%+v", checks)
 	}
+
+	// Without Jev's API key doctor fails its Jev check.
+	old := doctorOptions
+	t.Cleanup(func() { doctorOptions = old })
+	doctorOptions = func(root config.Root) doctor.Options {
+		o := old(root)
+		o.Getenv = func(string) string { return "" }
+		return o
+	}
+	code, out, diag = invoke(t, root, "doctor")
+	if code != 1 || diag != "" || !strings.Contains(out, "  ✗ jev") || !strings.Contains(out, "OPENROUTER_API_KEY is not set") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out, diag)
+	}
+	doctorOptions = old
 
 	for _, args := range [][]string{{"doctor", "extra"}, {"doctor", "--socket", "x.sock"}, {"doctor", "--detach"}} {
 		if code, _, _ := invoke(t, root, args...); code != 2 {

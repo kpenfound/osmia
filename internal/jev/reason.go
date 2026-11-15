@@ -12,10 +12,7 @@ type Provider = corejev.Provider
 type Reason = corejev.Reason
 
 const (
-	// ReasonDisabled is a judgment asked while the boost is off. It is
-	// neither sent nor recorded.
-	ReasonDisabled = corejev.ReasonDisabled
-	// ReasonUnconfigured is an enabled boost whose API key is not set.
+	// ReasonUnconfigured is a judgment asked while Jev's API key is not set.
 	ReasonUnconfigured = corejev.ReasonUnconfigured
 	// ReasonCoolingDown is a judgment not sent while the provider recovers
 	// from rate limits or an outage.

@@ -1156,7 +1156,7 @@ call. An unknown profile is rejected. The classifier inherits the mason's
 sandbox, uses an empty read-only workspace and receives no service tools or native write, shell or web tools. A Claude
 sandbox requires a Claude classifier profile. Its attempts are limited to two,
 each with a 30 second maximum timeout. Invalid or unavailable answers retain
-the code classification. With the Jev boost on, a Jev judgment classifies the
+the code classification. A Jev judgment classifies the
 response first, and the classifier runs only when that judgment falls back.
 
 ### Reading and saving a project's settings
@@ -1628,16 +1628,17 @@ shutting down, the next start sends the spans of that run's open pool limit
 intervals and its uptime, ended at the last time it was seen alive. With
 telemetry off the file is never written.
 
-## Optional Jev boost
+## Jev
 
-The Jev boost asks Jev, TypeSafe's System One model, bounded typed questions
-inside turns and the service's check runs. One setting turns it on or off for
-every judgment; it is off by default, and with it off Osmia makes no Jev
-request and needs no Jev credential. The other settings show their defaults:
+Jev is TypeSafe's System One model. Osmia asks it bounded typed questions
+inside turns and the service's check runs. Jev is required: there is no switch
+to turn it off. Without its API key Jev is unconfigured: the service still
+starts, every judgment takes its fallback, and check selection runs every
+check. `osmia doctor` fails its Jev check until the key is set. The settings
+show their defaults:
 
 ```toml
 [jev]
-enabled = false
 # Base URL of a TypeSafe-compatible API; requests go to <url>/v1/systemone.
 url = "https://openrouter.ai/api"
 # The model asked. An alias moves when a new version ships; name a versioned
@@ -1655,14 +1656,15 @@ check_threshold = 0.5
 check_fallback_picks = 0
 ```
 
-The settings are validated whether or not the boost is on, and apply through
-reload. The service reads the key when it makes a request; configuration
+The settings are validated and apply through reload. A leftover
+`enabled = true` or `enabled = false` from a configuration written when Jev was
+optional still loads and has no effect; `false` logs a warning when the
+service loads or reloads it. Remove the line. The service reads the key when it makes a request; configuration
 responses, sessions and trace records never contain it, and it is not sent
 through a redirect. A judgment's state, such as a unit candidate's diff for
 smart checks, is sent to the configured provider.
 
-Every judgment falls back to the workflow as it runs without Jev when the key
-is missing, the request times out, is rate limited, fails or is refused, the
+Every judgment takes its fallback when the key is missing, the request times out, is rate limited, fails or is refused, the
 response does not answer the questions as asked, or the answers fall below the
 judgment's own threshold. A transient failure is retried once. A rate limit,
 or three transient failures in a row, cools Jev down for every judgment for 30
@@ -1670,7 +1672,7 @@ seconds, doubling with each further episode up to 15 minutes or as long as the
 provider's `Retry-After` asks within that cap; judgments fall back without a
 request meanwhile.
 
-With the boost on, a clean mason turn without an outcome is classified by Jev
+A clean mason turn without an outcome is classified by Jev
 before the `classifier` profile and the code rules. Jev chooses the class and
 the sentence of the response that supports it, which becomes the recorded
 evidence. A class below its threshold, a stricter one for `gave_up`, or one no
@@ -1678,8 +1680,7 @@ sentence supports falls back to the classifier, then the code rules. The turn's
 classification records `by` as `jev`, `classifier` or `rule`, and a Jev class
 names its judgment, which the chief of staff's notice cites.
 
-With the boost on, unit, final-review and smart session check runs use three
-stages. `dagger list checks --format=link` supplies top-level checks;
+Unit, final-review and smart session check runs use three stages. `dagger list checks --format=link` supplies top-level checks;
 `dagger list checks --all --format=link` supplies expanded links, with scoped
 listings attributing them to top-level checks. Breadth asks which top-level
 checks the change could affect and uses `jev.check_threshold` to keep them.
@@ -1704,15 +1705,16 @@ scored candidates run all scored links; no usable score or 0 (the default)
 runs every check. A pick may cover a whole collection item. Picks can miss an
 affected check that a full run would catch. An explicit full session run
 stays full. The selection, summary and feed distinguish fallback picks.
-The setting is validated with the boost on or off, reported in effective
-configuration and applied through reload. Each stage records the acceptance
+The setting is validated, reported in effective configuration and applied
+through reload. Without the key, selection skips the listing and runs every
+check. Each stage records the acceptance
 values it applies; a changed value creates a new judgment.
 
 [Smart checks](smart-checks.md) describes the selection end to end: what Jev
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
 same selection on any Git working tree.
 
-With the boost on, the chief of staff's turn that delivers a question asks
+The chief of staff's turn that delivers a question asks
 Jev, before the session starts, whether the question's honest answer would
 change the sealed spec or plan, whether answering it as it proposes would
 contradict one of the owner's rulings or the project's notices, and whether it
@@ -1720,19 +1722,18 @@ asks for a standing project rule. The prompt ends with each answer that
 reaches its threshold as a signal naming its judgment and the outcome it
 argues for, and the turn's response records that text as `advice`. The chief
 of staff still chooses the outcome and explains a choice against a signal. A
-fallback, or answers below every threshold, leaves the prompt as it is with
-the boost off. A question's judgment is reused when the question is delivered
+fallback, or answers below every threshold, leaves the prompt without
+signals. A question's judgment is reused when the question is delivered
 again, and names the question, so its signals can be compared with the
 question's outcome.
 
-While the boost is on, each judgment is recorded under its workstream in
+Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
 and its usage is a ledger cost under the `jev` role. A judgment asked again
 with the same inputs, after a restart included, returns the recorded decision.
-`osmia status` reports the boost as `disabled`, `unconfigured`, `ready` or
-`degraded`, with the latest failure and any cool-down, and its spend appears
-as the `jev` provider in today's usage. `osmia doctor` warns when the boost is
-on without its key.
+`osmia status` reports Jev as `unconfigured`, `ready` or `degraded`, with the
+latest failure and any cool-down, and its spend appears as the `jev` provider
+in today's usage. `osmia doctor` fails when the key is not set.
 
 ### Resolution, retention and shared lifecycle
 

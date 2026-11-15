@@ -117,7 +117,7 @@ func TestFinalChecksSendLinksThatNeededCloudThereDirectly(t *testing.T) {
 	answers := map[string]systemone.Answer{"check-0": jevtest.Noul(.9), "check-1": jevtest.Noul(.9), "check-2": jevtest.Noul(.01)}
 	result := jevtest.Result{Response: systemone.Response{Model: "stub", Answers: answers}}
 	p := &jevtest.Provider{Results: []jevtest.Result{result, result}}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5}
 	reviewer.S.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }}
 
 	first, err := reviewer.FinalChecks(t.Context(), cfg, stream, report)
@@ -152,7 +152,7 @@ func TestFinalCheckRecordsWithoutEnginesReadAsLocalOnly(t *testing.T) {
   "operation": "review",
   "commit": "` + report.Commit + `",
   "status": "incomplete",
-  "selection": {"mode": "full", "reason": "disabled"},
+  "selection": {"mode": "full", "reason": "unconfigured"},
   "exit_code": 1,
   "output": "Error: engine lost\n",
   "error": "engine unreachable",

@@ -12,6 +12,7 @@ import (
 	isolation "github.com/kpenfound/osmia/internal/isolation"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	status "github.com/kpenfound/osmia/internal/status"
 	thread "github.com/kpenfound/osmia/internal/thread"
@@ -100,7 +101,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(ctx context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				select {
 				case <-startTurn:

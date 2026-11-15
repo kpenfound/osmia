@@ -108,6 +108,7 @@ func fixture(t *testing.T) (Options, string) {
 		Root: root, LookPath: h.lookPath, Command: h.command,
 		CheckJJ:   func(context.Context) (string, error) { return "0.45.1", nil },
 		Token:       "good",
+		Getenv:      func(name string) string { return map[string]string{"OPENROUTER_API_KEY": "key"}[name] },
 		TotalMemory: func() (uint64, error) { return 16 << 30, nil },
 		GitHubAPI:   github(t, "acme/widgets"),
 	}, dir
@@ -169,7 +170,6 @@ func TestHealthyRoot(t *testing.T) {
 	expect(t, find(t, checks, "claude"), Pass, "claude 1.0.0")
 	expect(t, find(t, checks, "GITHUB_TOKEN"), Pass, "owner")
 	absent(t, checks, "docker")
-	absent(t, checks, "jev")
 	if Failed(checks) {
 		t.Fatal("a healthy root failed")
 	}
@@ -406,15 +406,19 @@ func TestUnopenableState(t *testing.T) {
 	expect(t, find(t, Run(context.Background(), o), "widgets trace"), Warn, "no trace")
 }
 
-func TestEnabledJevBoostNeedsItsKey(t *testing.T) {
-	o, dir := fixture(t)
-	top, err := os.ReadFile(filepath.Join(dir, "config.toml"))
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), append(top, "\n[jev]\nenabled = true\n"...), 0o600))
+func TestJevNeedsItsKey(t *testing.T) {
+	o, _ := fixture(t)
 	env := map[string]string{}
 	o.Getenv = func(name string) string { return env[name] }
 	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "jev"), Warn, "OPENROUTER_API_KEY is not set")
+	expect(t, find(t, checks, "jev"), Fail, "OPENROUTER_API_KEY is not set")
+	if !Failed(checks) {
+		t.Fatal("a missing Jev key did not fail doctor")
+	}
 	env["OPENROUTER_API_KEY"] = "set"
-	expect(t, find(t, Run(context.Background(), o), "jev"), Pass, "~typesafe/jev-latest")
+	checks = Run(context.Background(), o)
+	expect(t, find(t, checks, "jev"), Pass, "~typesafe/jev-latest")
+	if Failed(checks) {
+		t.Fatal("a configured Jev failed doctor")
+	}
 }

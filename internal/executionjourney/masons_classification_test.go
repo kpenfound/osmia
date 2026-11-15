@@ -200,7 +200,7 @@ func TestMasonJevClassification(t *testing.T) {
 		opts.JevProvider = p.Factory()
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 		must(t, err)
-		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
+		_, err = configFile.WriteString("\n[jev]\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
 		must(t, errors.Join(err, configFile.Close()))
 	})
 	defer f.stop(t)

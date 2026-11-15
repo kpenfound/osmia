@@ -399,18 +399,19 @@ func (r *run) web(cfg *config.Config) {
 	r.add(GroupConfig, "listen.web", Pass, cfg.Listen.Web+" can be bound", "")
 }
 
-// jev checks that an enabled Jev boost has its API key. Without it every
-// judgment falls back, so a missing key is a warning.
+// jev checks that Jev has its API key. The service starts without it, but
+// every judgment then falls back and every check runs, so a missing key fails
+// the check.
 func (r *run) jev(cfg *config.Config) {
-	if cfg == nil || !cfg.Jev.Enabled {
+	if cfg == nil {
 		return
 	}
 	name := cfg.Jev.APIKeyEnv
 	if r.Getenv(name) == "" {
-		r.add(GroupConfig, "jev", Warn, "the Jev boost is enabled but "+name+" is not set; its judgments fall back", "export "+name+" before osmia serve, or set jev.enabled = false")
+		r.add(GroupConfig, "jev", Fail, "Jev is unconfigured: "+name+" is not set, so every judgment falls back and every check runs", "export "+name+" before osmia serve")
 		return
 	}
-	r.add(GroupConfig, "jev", Pass, "the Jev boost is enabled with "+name+" set for "+cfg.Jev.Model, "")
+	r.add(GroupConfig, "jev", Pass, "Jev is configured with "+name+" set for "+cfg.Jev.Model, "")
 }
 
 // project checks a project's clone and the remotes the service fetches from

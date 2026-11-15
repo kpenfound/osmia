@@ -646,8 +646,8 @@ type RuntimeResponse struct {
 	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode.
 	Projects []ProjectRuntime `json:"projects"`
-	// Jev reports the optional Jev boost. Every mode but ready means its
-	// judgments fall back.
+	// Jev reports Jev's mode. Every mode but ready means its judgments fall
+	// back.
 	Jev         jev.Status   `json:"jev"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }

@@ -454,10 +454,10 @@ credentials, review your session's work and move it along yourself:
   refused while the agent is mid-turn, on an empty message, when there is
   nothing to commit, or once you have ended the session.
 - **Check** `osmia session check <session>` checks the session's latest
-  commit. With the Jev boost on, it runs the same smart selection of checks
-  a unit's own check run uses for the files that changed since the
-  session's starting commit; with it off, it runs the full `dagger check`
-  the service runs before every review. Either way it tells you whether the
+  commit. It runs the same smart selection of checks a unit's own check run
+  uses for the files that changed since the session's starting commit; when
+  Jev's API key is not set or Jev does not select, it runs the full
+  `dagger check` the service runs before every review. Either way it tells you whether the
   run was smart or full, its status and exit code, and keeps its output.
   Only one check runs at a time.
 - **Push** `osmia session push <session>` sends the session's branch to the

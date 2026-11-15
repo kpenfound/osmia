@@ -56,6 +56,9 @@ type Config struct {
 	Project Project `toml:"-" json:"project"`
 	// Projects holds every active project, in active_projects order.
 	Projects []Project `toml:"-" json:"projects,omitempty"`
+	// Warnings describes settings that loaded but have no effect, one
+	// sentence each. A service logs them when it loads or reloads.
+	Warnings []string `toml:"-" json:"-"`
 }
 type Listen struct {
 	Socket string `toml:"socket" json:"socket"`
@@ -340,6 +343,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 		return nil, err
 	}
 	c.Root = root
+	c.Warnings = legacyWarnings(path)
 	if c.Version != 1 {
 		return nil, fieldError(path, "version", "must be 1 (no migrations supported)")
 	}
@@ -748,6 +752,29 @@ func decodeBytes(path string, data []byte, dest any, project bool) (toml.MetaDat
 	return md, nil
 }
 
+// JevEnabledIgnored warns that a top-level file sets the removed [jev] enabled
+// switch to false. Jev is required, so the value has no effect.
+const JevEnabledIgnored = "jev.enabled = false is ignored: Jev is always on, and without its API key it is unconfigured and every judgment falls back"
+
+// legacyWarnings reads the top-level file at path again for settings that are
+// accepted and ignored but deserve a warning. A file that cannot be read has
+// none: the load already read it.
+func legacyWarnings(path string) []string {
+	var raw struct {
+		Jev struct {
+			Switch *bool `toml:"enabled"`
+		} `toml:"jev"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	if _, err := toml.Decode(string(data), &raw); err != nil || raw.Jev.Switch == nil || *raw.Jev.Switch {
+		return nil
+	}
+	return []string{JevEnabledIgnored}
+}
+
 // typeMismatch matches the TOML decoder's message for a value of the wrong
 // type, which carries the key and line but no parse position.
 var typeMismatch = regexp.MustCompile(`^toml: (?:line ([0-9]+) )?\(last key ("(?:[^"\\]|\\.)*")\): incompatible types`)
@@ -820,6 +847,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "dagger", "skills"}, key[2])
 	}
+	// jev.enabled is the removed Jev switch: accepted and ignored.
 	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 

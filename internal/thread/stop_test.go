@@ -28,7 +28,7 @@ func runStopped(t *testing.T, repo *trace.Repository, early bool) (trace.QueuedT
 		stop(&Stop{pauseStop})
 	}
 	var calls atomic.Int32
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(run context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(run context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		calls.Add(1)
 		stop(&Stop{pauseStop})
 		<-run.Done()
@@ -88,7 +88,7 @@ func TestStopDuringSessionInterruptsWithoutFailure(t *testing.T) {
 	// The queued turn runs next on the same thread and resumes the stopped
 	// session.
 	var resumed *coreadapter.BackendSession
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, ResumableRoles: func(string) bool { return true }, Turns: resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, ResumableRoles: func(string) bool { return true }, Turns: resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		resumed = prepared.Resume
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "stopped"}, FinalResponse: "Finished"}, nil
 	}}}
@@ -106,7 +106,7 @@ func TestStopBeforeSessionRunsNothing(t *testing.T) {
 	queue(t, repo, "earlier")
 	queue(t, repo, "first")
 	queue(t, repo, "second")
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "earlier"}, FinalResponse: "Earlier"}, nil
 	})}
 	if _, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/earlier"}); err != nil {
@@ -138,7 +138,7 @@ func TestSessionEndingBeforeStopKeepsItsResult(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
 	ctx, stop := Stoppable(context.Background())
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		stop(&Stop{pauseStop})
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "done"}, FinalResponse: "Done", Outcome: &coreadapter.Outcome{Status: "done", Report: "Built"}}, nil
 	})}
@@ -153,7 +153,7 @@ func TestCancellationWithoutStopStaysAFailure(t *testing.T) {
 	queue(t, repo, "first")
 	parent, cancel := context.WithCancel(context.Background())
 	ctx, _ := Stoppable(parent)
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(run context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(run context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		cancel()
 		<-run.Done()
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "cancelled"}}, run.Err()

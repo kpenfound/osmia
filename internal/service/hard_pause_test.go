@@ -125,7 +125,7 @@ func hardPauseService(t *testing.T, cfg *config.Config, repo *trace.Repository, 
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}
-	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: backend, Now: clock.Now},
+	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Turns: backend, Now: clock.Now},
 		Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)}, nil
 		}}, s: s, repository: repo}
@@ -256,7 +256,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	lives := make(chan *trace.Repository, 1)
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
 			}}, nil

@@ -32,7 +32,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	checks := newHeldChecks()
 	checks.links = []string{"dag+check://go/test"}
 	provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.9)}}}}}
-	boostJev(f.s, provider)
+	useJevProvider(f.s, provider)
 	f.s.options.reviewChecks = checks
 	preparing, release := make(chan string, 1), make(chan struct{})
 	defer close(release)
@@ -134,7 +134,7 @@ func TestFinalCheckAttemptsStartAfterPreparationAndRetryDelay(t *testing.T) {
 	a = &finalReviewer{s: f.s, repository: reopened}
 	// A fresh judge has no in-memory decision; recovery must use the trace.
 	restartedProvider := &jevtest.Provider{}
-	boostJev(f.s, restartedProvider)
+	useJevProvider(f.s, restartedProvider)
 	if got := finalCheckStarts(t, reopened, stream); !reflect.DeepEqual(got, starts) {
 		t.Fatalf("starts lost on restart: %+v", got)
 	}

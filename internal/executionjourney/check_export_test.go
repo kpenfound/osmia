@@ -110,7 +110,7 @@ elif [ -n "${DAGGER_CLOUD_TOKEN-}" ]; then
 fi`, 1)), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	enableListing := func(s *Service) {
-		boostJev(s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1)}}}}})
+		useJevProvider(s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1)}}}}})
 	}
 
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {

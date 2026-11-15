@@ -125,7 +125,7 @@ observation. These gates establish the interleavings without sleep-based timing.
 Code that asks Jev judgments tests with
 agentcore's `jev/jevtest.Provider`, which returns scripted answers
 or `systemone` errors and can block until a request is cancelled. Cover the
-consumer with the boost disabled as well as with accepted, declined and failed
+consumer with an unconfigured Jev as well as with accepted, declined and failed
 judgments.
 
 Service tests run checks with a fake `ReviewChecks`: fixtures built on

@@ -24,12 +24,11 @@ const DefaultJevCheckThreshold = 0.5
 // long.
 const MaxJevTimeout = jev.MaxTimeout
 
-// Jev configures the optional Jev boost. Enabled is the one switch for every
-// judgment Osmia asks Jev for; the other settings say how to reach it. The API
-// key is an environment reference; its value never becomes configuration or a
-// trace record.
+// Jev configures how Osmia reaches Jev, which every judgment Osmia asks for
+// goes to. The API key is an environment reference; its value never becomes
+// configuration or a trace record. Without the key Jev is unconfigured and
+// every judgment falls back.
 type Jev struct {
-	Enabled bool `toml:"enabled" json:"enabled"`
 	// URL is the base of a TypeSafe-compatible API; requests go to
 	// <url>/v1/systemone.
 	URL       string `toml:"url" json:"url"`
@@ -51,11 +50,9 @@ func defaultJev() Jev {
 // Settings are j as a Jev judge reads them, with the timeout parsed.
 func (j Jev) Settings() jev.Settings {
 	timeout, _ := time.ParseDuration(j.Timeout)
-	return jev.Settings{Enabled: j.Enabled, URL: j.URL, Model: j.Model, APIKeyEnv: j.APIKeyEnv, Timeout: timeout}
+	return jev.Settings{Enabled: true, URL: j.URL, Model: j.Model, APIKeyEnv: j.APIKeyEnv, Timeout: timeout}
 }
 
-// The settings are validated whether or not Jev is enabled, so turning the
-// switch on never reveals a broken setting.
 func (j Jev) validate(path string) error {
 	u, err := url.Parse(j.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

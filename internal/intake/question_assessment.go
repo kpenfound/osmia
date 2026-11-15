@@ -72,11 +72,11 @@ const QuestionAdvice = "Jev signals on the open questions above. Jev, a small ju
 	"When you choose against a signal, say why in your final response."
 
 // questionSignals returns the advice of a chief-of-staff turn: Jev signals on
-// the open questions the turn delivers, or "" when the boost is off, no
-// question is open or no signal reaches its threshold.
+// the open questions the turn delivers, or "" when no question is open or no
+// signal reaches its threshold.
 func (s *Controller) QuestionSignals(repository *trace.Repository) func(context.Context, trace.TurnRequest, coreadapter.Scope) string {
 	return func(ctx context.Context, req trace.TurnRequest, scope coreadapter.Scope) string {
-		if scope.Role != trace.ChiefOfStaff || s.Jev.Status().Mode == jev.ModeDisabled {
+		if scope.Role != trace.ChiefOfStaff {
 			return ""
 		}
 		a := Assessor{Judge: s.Jev, Repository: repository, Stream: config.WorkstreamID(scope.Workstream), Scope: scope}

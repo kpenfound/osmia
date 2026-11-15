@@ -1,7 +1,7 @@
 // Package jev asks Jev, TypeSafe's System One model, the bounded judgments of
 // Osmia's turns, and owns what Osmia does with them: judgment identity, trace
 // records, reuse after a restart, acceptance thresholds and ledger costs.
-// agentcore's jev sends the requests, with the global switch, retries,
+// agentcore's jev sends the requests, with retries,
 // cool-down and status. Nothing here runs on the scheduling path.
 package jev
 
@@ -151,7 +151,8 @@ func Path(id string) string { return "judgments/" + id + ".json" }
 // Judge asks Jev the judgments of every project's turns. One Judge serves the
 // whole service, so an outage cools every caller down together. It must be
 // called from turn execution, never from scheduling: a judgment waits on a
-// network call. A nil Judge has the boost off.
+// network call. A Judge is always non-nil; without an API key it is
+// unconfigured and every judgment falls back.
 type Judge struct {
 	// Config returns the current settings.
 	Config func() config.Jev
@@ -204,23 +205,15 @@ func (j Judgment) validate() error {
 var traceKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // Evaluate returns the judgment's decision; repo is the trace of the
-// judgment's project. While the boost is off it returns a disabled fallback
-// and neither sends nor records anything. Otherwise the
-// judgment is identified by its cause, task, version, acceptance and exact
-// request, so the same judgment asked again, after a restart included, returns the
-// decision recorded the first time instead of asking again, and changed
-// inputs are a new judgment. Every failure is a fallback; Evaluate never
+// judgment's project. The judgment is identified by its cause, task, version,
+// acceptance and exact request, so the same judgment asked again, after a
+// restart included, returns the decision recorded the first time instead of
+// asking again, and changed inputs are a new judgment. Every failure is a fallback; Evaluate never
 // returns accepted answers it could not record. It waits for at most two
 // requests of the configured timeout, and returns when ctx ends, leaving the
 // attempt interrupted.
 func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment Judgment) Decision {
-	if j == nil {
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
-	}
 	settings := j.Config()
-	if !settings.Enabled {
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
-	}
 	if err := judgment.validate(); err != nil {
 		return Decision{Outcome: Fallback, Reason: ReasonRejected, Detail: err.Error()}
 	}
@@ -270,8 +263,6 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	// started revision. A cool-down that begins after this check is
 	// recorded as the attempt's result instead.
 	switch status := j.core().Status(); {
-	case status.Mode == ModeDisabled:
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
 	case status.Mode == ModeUnconfigured:
 		r := base
 		r.State, r.Reason, r.Detail = StateFallback, ReasonUnconfigured, status.Detail
@@ -392,26 +383,22 @@ func (w *writer) cost(ctx context.Context, attempt int, u systemone.Usage) error
 	return nil
 }
 
-// Mode is the boost's state as status reports it: disabled, unconfigured
-// while its API key is not set, ready, or degraded while its latest request
-// failed or it cools down.
+// Mode is Jev's state as status reports it: unconfigured while its API key is
+// not set, ready, or degraded while its latest request failed or it cools
+// down.
 type Mode = corejev.Mode
 
 const (
-	ModeDisabled     = corejev.ModeDisabled
 	ModeUnconfigured = corejev.ModeUnconfigured
 	ModeReady        = corejev.ModeReady
 	ModeDegraded     = corejev.ModeDegraded
 )
 
-// Status reports the boost's mode, the configured model and the latest
+// Status reports Jev's mode, the configured model and the latest
 // failure since the last success.
 type Status = corejev.Status
 
-// Status reports the boost under the current settings.
+// Status reports Jev under the current settings.
 func (j *Judge) Status() Status {
-	if j == nil {
-		return Status{Mode: ModeDisabled}
-	}
 	return j.core().Status()
 }

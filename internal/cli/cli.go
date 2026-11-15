@@ -1706,9 +1706,9 @@ func showRuntime(w io.Writer, rt wire.RuntimeResponse) {
 	diagnostics(w, rt.Diagnostics)
 }
 
-// showJev prints the Jev boost's mode and, when it is not ready, why.
+// showJev prints Jev's mode and, when it is not ready, why.
 func showJev(w io.Writer, s jev.Status) {
-	line := "Jev boost: " + string(s.Mode)
+	line := "Jev: " + string(s.Mode)
 	if s.Model != "" {
 		line += " model=" + s.Model
 	}

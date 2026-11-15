@@ -35,7 +35,7 @@ func TestServiceSmartCheckStagesSurviveRestart(t *testing.T) {
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"depth-0": jevtest.Choice("go-package", .8, .8, "go-test")}}},
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.9), "check-2": jevtest.Noul(.1), "check-3": jevtest.Noul(.1)}}},
 	}}
-	boostJev(f.s, provider)
+	useJevProvider(f.s, provider)
 	c, op := requestUnitCheck(t, f.s, repo, stream)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -78,7 +78,7 @@ func TestServiceSmartCheckStagesSurviveRestart(t *testing.T) {
 	// owns the resumed run, including all three judgment identities.
 	checks.ListErr = errors.New("listings unavailable after restart")
 	replacement := &jevtest.Provider{}
-	boostJev(f.s, replacement)
+	useJevProvider(f.s, replacement)
 	c = &checkers{masons: newMasonController(f.s, reopened)}
 	if observed, err := c.Inspect(t.Context(), op); err != nil || observed.State != coreadapter.EffectAbsent {
 		t.Fatalf("interrupted observation %+v %v", observed, err)

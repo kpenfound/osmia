@@ -25,8 +25,8 @@ import (
 )
 
 // newAssessingFixture is a mason fixture whose resume mason asks question 1.
-// With p, the Jev boost is on and p answers its judgments; the caller sets
-// the key's environment variable.
+// With p, Jev is configured and p answers its judgments; the caller sets the
+// key's environment variable. Without p, Jev is unconfigured.
 func newAssessingFixture(t *testing.T, p *jevtest.Provider, faults *faults) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(opts *Options) {
@@ -36,7 +36,7 @@ func newAssessingFixture(t *testing.T, p *jevtest.Provider, faults *faults) (*sh
 		opts.JevProvider = p.Factory()
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 		must(t, err)
-		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
+		_, err = configFile.WriteString("\n[jev]\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
 		must(t, errors.Join(err, configFile.Close()))
 	})
 	f.engine.Mu.Lock()
@@ -90,14 +90,14 @@ func (f *shedFixture) questionTurns(t *testing.T, stream config.WorkstreamID, id
 
 var judgments = intakefixture.Judgments
 
-// With the boost on, the chief of staff's turn that delivers a question ends
+// With Jev configured, the chief of staff's turn that delivers a question ends
 // with Jev's signals on it, as advice the turn records. The judgment is
 // recorded under its question and read back, not asked again, by the turn
 // that delivers the question again after the first failed. A later question
 // is compared against the owner's earlier ruling. The workflow takes its own
 // course: the fake chief escalates both questions whatever the signals say.
 //
-// The boost is on through the configuration and its key's environment
+// Jev is configured through the configuration and its key's environment
 // variable, so the test does not run in parallel.
 //
 // serial: sets OSMIA_TEST_JEV_KEY via t.Setenv
@@ -210,12 +210,12 @@ func TestChiefQuestionSignals(t *testing.T) {
 	fake.Check(t)
 }
 
-// Without the boost, and whenever a judgment falls back, the turn that
+// While Jev is unconfigured, and whenever a judgment falls back, the turn that
 // delivers a question carries no signals and the chief of staff chooses for
 // it as it always does.
 //
-// The boost is on through the configuration and its key's environment
-// variable, so the test does not run in parallel.
+// Jev is configured through its key's environment variable, so the test does
+// not run in parallel.
 //
 // serial: sets OSMIA_TEST_JEV_KEY via t.Setenv
 func TestChiefQuestionWithoutSignals(t *testing.T) {
@@ -225,7 +225,7 @@ func TestChiefQuestionWithoutSignals(t *testing.T) {
 		result *jevtest.Result
 		reason jev.Reason
 	}{
-		{"disabled", nil, ""},
+		{"unconfigured", nil, jev.ReasonUnconfigured},
 		{"rate limited", &jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, jev.ReasonRateLimited},
 		{"uncertain", &jevtest.Result{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 			amendmentQuestion: jevtest.Noul(0.45), scopeQuestion: jevtest.Noul(0.6)}}}, jev.ReasonDeclined},
@@ -245,21 +245,15 @@ func TestChiefQuestionWithoutSignals(t *testing.T) {
 				t.Fatalf("question turns %+v", turns)
 			}
 			recorded := judgments(t, f.repository(), stream)
-			if tc.result == nil {
-				if len(recorded) != 0 {
-					t.Fatalf("judgments with the boost off: %+v", recorded)
+			if len(recorded) != 1 {
+				t.Fatalf("judgments %+v", recorded)
+			}
+			for _, r := range recorded {
+				if r.State != jev.StateFallback || r.Reason != tc.reason {
+					t.Fatalf("judgment %+v, want a %s fallback", r, tc.reason)
 				}
-			} else {
-				if len(recorded) != 1 {
-					t.Fatalf("judgments %+v", recorded)
-				}
-				for _, r := range recorded {
-					if r.State != jev.StateFallback || r.Reason != tc.reason {
-						t.Fatalf("judgment %+v, want a %s fallback", r, tc.reason)
-					}
-					if tc.reason == jev.ReasonDeclined && r.Answers[amendmentQuestion].Noul != 0.45 {
-						t.Fatalf("declined answers were not kept: %+v", r.Answers)
-					}
+				if tc.reason == jev.ReasonDeclined && r.Answers[amendmentQuestion].Noul != 0.45 {
+					t.Fatalf("declined answers were not kept: %+v", r.Answers)
 				}
 			}
 			faults.Check(t)

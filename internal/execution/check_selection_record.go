@@ -59,7 +59,7 @@ func (c *checkers) restoreSelection(in checkInput, run *UnitCheckRun) (bool, err
 }
 
 // selection reuses the run's immutable choice, including full-run fallbacks,
-// even if listing or the boost configuration changes across a restart.
+// even if listing or the Jev configuration changes across a restart.
 func (c *checkers) selection(ctx context.Context, in checkInput, run *UnitCheckRun, dir, diff string, checks ReviewChecks) (CheckSelection, error) {
 	if found, err := c.restoreSelection(in, run); err != nil {
 		return CheckSelection{}, err

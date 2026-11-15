@@ -14,6 +14,7 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -422,7 +423,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 					continue
 				}
 				in, decodeErr := thread.DecodeTurn(op.Operation)
-				observed, inspectErr := (thread.Dispatcher{Runner: thread.Runner{Store: r}}).Inspect(ctx, op.Operation)
+				observed, inspectErr := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r}}).Inspect(ctx, op.Operation)
 				outcome, failure := "", ""
 				if op.Result != nil {
 					outcome = op.Result.Outcome
