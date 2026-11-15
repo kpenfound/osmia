@@ -9,8 +9,10 @@ import (
 type ContestedRuling struct {
 	Decision string `json:"decision"`
 	Note     string `json:"note"`
-	// By names who ruled: "owner", or "chief of staff". Empty is the owner.
+	// By names who ruled: "owner", "chief of staff" or "jev". Empty is the
+	// owner. Judgment names the Jev judgment record a Jev ruling comes from.
 	By        string `json:"by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 	Bounces   int    `json:"bounces"`
 	Candidate string `json:"candidate"`
 	Contest   string `json:"contest,omitempty"`

@@ -2169,6 +2169,7 @@
           t.from ? el('span', { 'data-field': 'from' }, t.from) : null, t.from ? ' → ' : '',
           el('strong', { 'data-field': 'to', 'data-ann': 'action' }, t.to)),
         t.reason ? el('span', { class: 'reason', 'data-field': 'reason' }, t.reason) : null,
+        t.actor === 'service:jev' ? el('span', { class: 'meta decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 

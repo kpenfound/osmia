@@ -76,7 +76,7 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
-	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
+	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5, DecisionThreshold: 0.9}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
 		t.Fatalf("jev defaults: %+v", c.Jev)
 	}
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
@@ -163,6 +163,22 @@ func TestJevCheckThreshold(t *testing.T) {
 		if err != nil || cfg.Jev.CheckThreshold != c.want {
 			t.Fatalf("check_threshold = %s: %+v %v", c.value, cfg, err)
 		}
+	}
+}
+
+func TestJevDecisionThreshold(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  float64
+	}{{"0.75", 0.75}, {"1", 1}} {
+		cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = "+c.value+"\n", projectConfig))
+		if err != nil || cfg.Jev.DecisionThreshold != c.want {
+			t.Fatalf("decision_threshold = %s: %+v %v", c.value, cfg, err)
+		}
+	}
+	cfg, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || cfg.Jev.DecisionThreshold != 0.9 {
+		t.Fatalf("default decision threshold = %v %v", cfg.Jev.DecisionThreshold, err)
 	}
 }
 
@@ -363,6 +379,10 @@ func TestInvalid(t *testing.T) {
 		{"jev check threshold negative", topConfig + "[jev]\ncheck_threshold = -0.1\n", "", "jev.check_threshold"},
 		{"jev check threshold above one", topConfig + "[jev]\ncheck_threshold = 1.5\n", "", "jev.check_threshold"},
 		{"jev check threshold nan", topConfig + "[jev]\ncheck_threshold = nan\n", "", "jev.check_threshold"},
+		{"jev decision threshold zero", topConfig + "[jev]\ndecision_threshold = 0\n", "", "jev.decision_threshold"},
+		{"jev decision threshold negative", topConfig + "[jev]\ndecision_threshold = -0.1\n", "", "jev.decision_threshold"},
+		{"jev decision threshold above one", topConfig + "[jev]\ndecision_threshold = 1.01\n", "", "jev.decision_threshold"},
+		{"jev decision threshold nan", topConfig + "[jev]\ndecision_threshold = nan\n", "", "jev.decision_threshold"},
 		{"jev unknown key", topConfig + "[jev]\nclassification = true\n", "", "jev.classification"},
 		{"transcribe url scheme", topConfig + "[transcribe]\nurl = 'ftp://whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
 		{"transcribe url relative", topConfig + "[transcribe]\nurl = '/v1/audio/transcriptions'\n", "", "transcribe.url"},

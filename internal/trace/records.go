@@ -154,6 +154,11 @@ type Ruling struct {
 	Scope            string   `json:"scope,omitempty"`
 	Citations        []string `json:"citations,omitempty"`
 	Changes          []string `json:"changes,omitempty"`
+	// DecidedBy names who made the decision when it was not the record's
+	// own decider, and Judgment the Jev judgment record a Jev decision
+	// comes from; see ValidDecider.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 func (Ruling) traceRecord() {}
@@ -321,7 +326,7 @@ func validate(r Record) error {
 	case Amendment:
 		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
-		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && ValidDecider(v.DecidedBy, v.Judgment) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
 		valid = key(v.Role) && key(v.ThreadID) && (v.Session == (coreadapter.BackendSession{}) || validSession(v.Session))
 	case TurnRequest:

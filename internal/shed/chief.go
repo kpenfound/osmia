@@ -36,6 +36,10 @@ type ChiefDecision struct {
 	Decision  Decide `json:"decision"`
 	Note      string `json:"note"`
 	Turn      string `json:"turn,omitempty"`
+	// DecidedBy is empty for the chief of staff's own decision, or
+	// trace.DecidedByJev with the Jev judgment it comes from.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 // ChiefDecisions is what the chief of staff decided during one round, against
@@ -70,6 +74,8 @@ func (c ChiefDecisions) check() error {
 			return fmt.Errorf("unsupported decision %q", one.Decision)
 		case strings.TrimSpace(one.Note) == "":
 			return fmt.Errorf("the decision on objection %s requires a note", one.Objection)
+		case !trace.ValidDecider(one.DecidedBy, one.Judgment) || one.DecidedBy == trace.DecidedByOwner:
+			return fmt.Errorf("the decision on objection %s names the chief of staff or Jev with its judgment as its decider", one.Objection)
 		case seen[one.Objection]:
 			return fmt.Errorf("objection %s is decided twice", one.Objection)
 		}

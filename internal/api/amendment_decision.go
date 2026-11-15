@@ -23,6 +23,8 @@ type AmendmentDecision struct {
 	SealRevision int      `json:"seal_revision"`
 	Overruled    []string `json:"overruled,omitempty"`
 	Actor        string   `json:"actor,omitempty"`
+	// Judgment names the Jev judgment record when Actor is "jev".
+	Judgment string `json:"judgment,omitempty"`
 }
 
 // AmendmentDecisionRequest is the owner's decision on the named revision of

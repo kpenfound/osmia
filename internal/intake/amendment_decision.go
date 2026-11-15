@@ -690,6 +690,8 @@ func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 			section = "answer"
 		} else if d.Actor == AmendmentActor.ID {
 			section = "service_response"
+		} else if d.Actor == trace.DecidedByJev {
+			section = "jev_response"
 		}
 		sections = append(sections, envelope.Section{Name: section, Text: d.Note})
 	}
@@ -737,6 +739,8 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
 	} else if actor == AmendmentActor.ID {
 		reason = strings.ReplaceAll(reason, "the owner", "the service")
+	} else if actor == trace.DecidedByJev {
+		reason = strings.ReplaceAll(reason, "the owner", "Jev")
 	}
 	h := a.AmendmentHeader(resumed, stream, req.Unit, cause)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitWaiting, To: stage, Reason: reason}, Events: []trace.Event{trace.Notice(resumed, "unit", reason)}}

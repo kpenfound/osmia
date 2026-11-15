@@ -836,7 +836,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				fmt.Fprintf(stdout, "Packet revision %d:\n%s", view.Revision, view.Packet)
 			}
 			if d := view.Decision; d != nil {
-				fmt.Fprintf(stdout, "Decision: %s on packet revision %d\n", d.Decision, d.Packet)
+				fmt.Fprintf(stdout, "Decision: %s on packet revision %d%s\n", d.Decision, d.Packet, decidedByJev(d.Actor))
 			}
 			return 0
 		}
@@ -1158,7 +1158,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s\n", result.Unit, result.Workstream, result.Ruling.Decision)
+		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s%s\n", result.Unit, result.Workstream, result.Ruling.Decision, decidedByJev(result.Ruling.By))
 		return 0
 	}
 	if cmd == "move" && len(a) == 3 {

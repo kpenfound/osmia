@@ -25,6 +25,10 @@ type workDiscovery struct {
 	Disposition string `json:"disposition"`
 	Unit        string `json:"unit,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+	// DecidedBy is empty for the chief of staff's disposition, or "jev" with
+	// the Jev judgment it comes from.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 func discoveries(r *trace.Repository, stream config.WorkstreamID) (map[string]workDiscovery, error) {

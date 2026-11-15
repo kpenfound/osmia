@@ -3,8 +3,10 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	wire "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func traceRef(w io.Writer, label string, ref *wire.TraceRef) {
@@ -42,7 +44,7 @@ func traceUnit(w io.Writer, u wire.UnitTrace) {
 	}
 	for _, r := range u.Rulings {
 		traceRef(w, "  Ruling", &r.Ref)
-		fmt.Fprintf(w, "    %s: %s\n", r.Kind, r.Decision)
+		fmt.Fprintf(w, "    %s: %s%s\n", r.Kind, r.Decision, decidedByJev(r.DecidedBy))
 	}
 	for _, r := range u.Rebases {
 		traceRef(w, "  Rebase", &r.Ref)
@@ -108,7 +110,7 @@ func showTrace(w io.Writer, result any) {
 		traceRef(w, "Plan", v.Plan)
 		for _, r := range v.Rulings {
 			traceRef(w, "Ruling", &r.Ref)
-			fmt.Fprintf(w, "  %s: %s\n", r.Kind, r.Decision)
+			fmt.Fprintf(w, "  %s: %s%s\n", r.Kind, r.Decision, decidedByJev(r.DecidedBy))
 		}
 		for _, u := range v.Units {
 			traceUnit(w, u)
@@ -139,9 +141,21 @@ func showTrace(w io.Writer, result any) {
 			}
 			for _, r := range l.Rulings {
 				traceRef(w, "    Ruling", &r.Ref)
+				if label := decidedByJev(r.DecidedBy); label != "" {
+					fmt.Fprintf(w, "      %s\n", strings.TrimSpace(label))
+				}
 			}
 		}
 		traceDelivery(w, v.Delivery)
 		traceGaps(w, v.Gaps)
 	}
+}
+
+// decidedByJev is the label of a decision Jev made, with its separator, and
+// empty for any other decider.
+func decidedByJev(by string) string {
+	if by == trace.DecidedByJev {
+		return " (decided by Jev)"
+	}
+	return ""
 }

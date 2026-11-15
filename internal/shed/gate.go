@@ -260,6 +260,10 @@ type Ratification struct {
 	Revision     Pin      `json:"revision"`
 	Dispositions []Ruling `json:"dispositions"`
 	Dissent      []Entry  `json:"dissent"`
+	// DecidedBy is empty for the owner's ratification, or trace.DecidedByJev
+	// with the Jev judgment it comes from.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 // RatificationPath is the workstream path of the owner's ratification,
@@ -276,6 +280,9 @@ func (r Ratification) check() error {
 		return errors.New("a ratification requires the round it was given in")
 	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
 		return errors.New("a ratification requires the revisions it approves")
+	}
+	if !trace.ValidDecider(r.DecidedBy, r.Judgment) || r.DecidedBy == trace.DecidedByChief {
+		return errors.New("a ratification names the owner or Jev with its judgment as its decider")
 	}
 	for _, e := range r.Dissent {
 		if e.Blocking {

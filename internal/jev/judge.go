@@ -68,6 +68,12 @@ type Judgment struct {
 	// keeps the value it was made with.
 	Acceptance string
 	Sources    []Source
+	// Occurrence ties the judgment to one subject occurrence of a decision
+	// kind. It is part of the judgment's identity and record.
+	Occurrence *Occurrence
+	// MaxBytes, when positive, bounds the request body; a larger request
+	// is recorded as a fallback without being sent.
+	MaxBytes int
 	// Request is the state and questions sent. Include only what the
 	// question needs; it is recorded in the trace.
 	Request systemone.Request
@@ -122,6 +128,8 @@ type Record struct {
 	Version int               `json:"version"`
 	// Acceptance is the judgment's configured acceptance values.
 	Acceptance string `json:"acceptance,omitempty"`
+	// Occurrence is the subject occurrence a decision judgment belongs to.
+	Occurrence *Occurrence `json:"occurrence,omitempty"`
 	// Model is the configured model; ResolvedModel the versioned model
 	// that answered.
 	Model   string   `json:"model"`
@@ -226,6 +234,9 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	if judgment.Acceptance != "" {
 		parts = append(parts, judgment.Acceptance)
 	}
+	if o := judgment.Occurrence; o != nil {
+		parts = append(parts, o.Kind, o.Key, o.Ask)
+	}
 	identity, _ := json.Marshal(parts)
 	id := fmt.Sprintf("judgment_%x", sha256.Sum256(identity))
 	stream := config.WorkstreamID(judgment.Scope.Workstream)
@@ -237,7 +248,7 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	if revision > 0 && latest.State != StateStarted {
 		return latest.decision(id, true)
 	}
-	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Acceptance: judgment.Acceptance, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
+	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Acceptance: judgment.Acceptance, Occurrence: judgment.Occurrence, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
 	if len(body) <= maxRecordedRequest {
 		base.Request = body
 	}
@@ -257,6 +268,11 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		attempt = latest.Attempt
 		r := base
 		r.State, r.Reason, r.Detail = StateFallback, ReasonInterrupted, fmt.Sprintf("%d attempts were interrupted", latest.Attempt)
+		return finish(r)
+	}
+	if judgment.MaxBytes > 0 && len(body) > judgment.MaxBytes {
+		r := base
+		r.State, r.Reason, r.Detail = StateFallback, ReasonRejected, fmt.Sprintf("request is %d bytes, above the limit of %d", len(body), judgment.MaxBytes)
 		return finish(r)
 	}
 	// A judgment the provider cannot be asked now falls back without a

@@ -126,24 +126,34 @@ func (s *Controller) RuleContested(ctx context.Context, rawStream, unit string, 
 // rulerName is how a contested ruling's actor is named to the roles it
 // resumes.
 func rulerName(actor trace.Actor) string {
-	if actor.Kind == ownerActor.Kind {
+	switch {
+	case actor.Kind == ownerActor.Kind:
 		return "owner"
+	case actor == trace.JevActor:
+		return trace.DecidedByJev
 	}
 	return "chief of staff"
 }
 
-// contestRuler returns who gave a recorded ruling.
+// contestRuler returns who gave a recorded ruling, as the roles it resumes
+// are told.
 func contestRuler(r ContestedRuling) string {
-	if r.By == "" {
+	switch r.By {
+	case "":
 		return "owner"
+	case trace.DecidedByJev:
+		return "decision maker Jev"
 	}
 	return r.By
 }
 
 // contestActor returns the trace actor of whoever gave the ruling.
 func contestActor(r ContestedRuling) trace.Actor {
-	if contestRuler(r) == "owner" {
+	switch r.By {
+	case "", "owner":
 		return ownerActor
+	case trace.DecidedByJev:
+		return trace.JevActor
 	}
 	return chiefActor
 }

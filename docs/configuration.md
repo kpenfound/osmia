@@ -1643,6 +1643,9 @@ timeout = "10s"
 # The probability at or above which breadth keeps a top-level check and
 # ranking selects a link, above 0 and at most 1. Tune against a versioned model.
 check_threshold = 0.5
+# The confidence at or above which Jev's pick on a decision is binding, above
+# 0 and at most 1. One value serves every decision kind.
+decision_threshold = 0.9
 # When no check reaches the threshold, run this many highest-scored links.
 # Non-negative integer; 0 (default) runs every check instead.
 check_fallback_picks = 0

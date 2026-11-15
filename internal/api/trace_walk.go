@@ -84,6 +84,10 @@ type TraceRuling struct {
 	Owner     string    `json:"owner,omitempty"`
 	Answer    string    `json:"answer,omitempty"`
 	Citations []string  `json:"citations,omitempty"`
+	// DecidedBy is "owner", "chief_of_staff" or "jev". Judgment names the
+	// Jev judgment record a Jev decision comes from.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 // TraceLanding is one revision of a unit's landing.json.
