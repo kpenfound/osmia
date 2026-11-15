@@ -66,6 +66,28 @@ const decideAmendmentTool = intake.DecideAmendmentTool
 
 const amendmentGuidance = intake.AmendmentGuidance
 
+// heldGates returns what a chief-of-staff status check reads, before the status
+// is stored, of the workstream's open owner gates that Jev's judgment holds
+// back from the owner.
+func (c *runtimeControls) heldGates(repository *trace.Repository, stream config.WorkstreamID) func() []trace.OwnerGate {
+	return func() []trace.OwnerGate {
+		s := c.service.Load()
+		if s == nil {
+			return nil
+		}
+		statuses, err := repository.Statuses()
+		if err != nil {
+			return nil
+		}
+		for _, w := range statuses {
+			if w.Workstream == stream {
+				return s.intake().HeldGates(repository, w)
+			}
+		}
+		return nil
+	}
+}
+
 func (c *runtimeControls) decideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return c.intake().DecideAmendment(repository, scope)
 }
@@ -452,6 +474,7 @@ func (s *Service) intake() *intake.Controller {
 		ChiefOverride:            s.chiefOverride,
 		ChiefRepository:          s.chiefRepository,
 		ContestedEntry:           s.contestedEntry,
+		ContestedGate:            s.contestedGate,
 		ContextFor:               s.contextFor,
 		ContinueStopped:          s.continueStopped,
 		ContractGuardRefusal:     s.contractGuardRefusal,

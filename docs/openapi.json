@@ -6467,6 +6467,9 @@
           "blocked": {
             "type": "string"
           },
+          "jev": {
+            "$ref": "#/components/schemas/InboxJev"
+          },
           "kind": {
             "type": "string"
           },
@@ -6509,6 +6512,34 @@
           },
           "workstream": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxJev": {
+        "properties": {
+          "binding": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "format": "double",
+            "type": "number"
+          },
+          "deferred": {
+            "type": "boolean"
+          },
+          "judgment": {
+            "type": "string"
+          },
+          "pick": {
+            "type": "string"
+          },
+          "refused": {
+            "type": "string"
+          },
+          "threshold": {
+            "format": "double",
+            "type": "number"
           }
         },
         "type": "object"

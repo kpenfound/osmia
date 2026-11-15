@@ -83,7 +83,7 @@ func (f *fixture) records(t *testing.T, id string) []jev.Record {
 		if d.ID != id {
 			continue
 		}
-		if d.Path != jev.Path(id) || d.Actor != (trace.Actor{Kind: "service", ID: jev.Role}) || d.Cause != "request_1" {
+		if d.Path != jev.Path(id) || d.Actor != (trace.Actor{Kind: "service", ID: jev.Role}) || d.Cause != "request_1" && d.Cause != "refused-"+id {
 			t.Fatalf("document = %+v", d.Header)
 		}
 		var r jev.Record

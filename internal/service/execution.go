@@ -150,6 +150,8 @@ var chiefRulingsLeft = execution.ChiefRulingsLeft
 
 var contestRaised = execution.ContestRaised
 
+var contestEscalated = execution.ContestEscalated
+
 const maxRecoveries = execution.MaxRecoveries
 
 var interruptedInARow = execution.InterruptedInARow

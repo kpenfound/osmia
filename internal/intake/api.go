@@ -380,6 +380,8 @@ const InboxProjectCreation = api.InboxProjectCreation
 
 type InboxEntry = api.InboxEntry
 
+type InboxJev = api.InboxJev
+
 type InboxAnswer = api.InboxAnswer
 
 type InboxQuestion = api.InboxQuestion

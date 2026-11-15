@@ -16,6 +16,7 @@ import (
 	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
+	corejev "github.com/kpenfound/agentcore/jev"
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	systemone "github.com/kpenfound/agentcore/jev/systemone"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -23,6 +24,35 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// assessmentOnly passes the question assessments to the scripted provider and
+// answers the owner gate judgments of the escalated question below the
+// threshold, so the script holds the assessments alone and the card goes to the
+// owner without a cool-down.
+type assessmentOnly struct{ inner *jevtest.Provider }
+
+func (a assessmentOnly) Evaluate(ctx context.Context, r systemone.Request) (systemone.Response, error) {
+	gate, ok := r.Questions["decision"]
+	if !ok {
+		return a.inner.Evaluate(ctx, r)
+	}
+	var others []string
+	for _, o := range gate.Options[1:] {
+		others = append(others, o.Name)
+	}
+	return systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{"decision": jevtest.Choice(gate.Options[0].Name, 0.1, 0.1, others...)}}, nil
+}
+
+// assessments are the question assessments among recorded judgments.
+func assessments(recorded map[string]jev.Record) map[string]jev.Record {
+	out := map[string]jev.Record{}
+	for id, r := range recorded {
+		if r.Task == questionAssessmentTask {
+			out[id] = r
+		}
+	}
+	return out
+}
 
 // newAssessingFixture is a mason fixture whose resume mason asks question 1.
 // With p, Jev is configured and p answers its judgments; the caller sets the
@@ -33,7 +63,7 @@ func newAssessingFixture(t *testing.T, p *jevtest.Provider, faults *faults) (*sh
 		if p == nil {
 			return
 		}
-		opts.JevProvider = p.Factory()
+		opts.JevProvider = func(corejev.Settings, string) corejev.Provider { return assessmentOnly{p} }
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 		must(t, err)
 		_, err = configFile.WriteString("\n[jev]\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
@@ -173,7 +203,7 @@ func TestChiefQuestionSignals(t *testing.T) {
 	if _, ok := requests[0].Questions[conflictQuestion]; ok || len(requests[0].Questions) != 2 {
 		t.Fatalf("questions without a ruling: %+v", requests[0].Questions)
 	}
-	recorded := judgments(t, f.repository(), stream)
+	recorded := assessments(judgments(t, f.repository(), stream))
 	if len(recorded) != 1 {
 		t.Fatalf("judgments %+v", recorded)
 	}
@@ -244,7 +274,7 @@ func TestChiefQuestionWithoutSignals(t *testing.T) {
 			if len(turns) != 1 || turns[0].Response.Advice != "" || strings.Contains(turns[0].Request.Prompt, questionAdvice) {
 				t.Fatalf("question turns %+v", turns)
 			}
-			recorded := judgments(t, f.repository(), stream)
+			recorded := assessments(judgments(t, f.repository(), stream))
 			if len(recorded) != 1 {
 				t.Fatalf("judgments %+v", recorded)
 			}

@@ -205,6 +205,17 @@ func (s *Controller) DecideAmendment(ctx context.Context, raw, id string, req Am
 // twice. Approval is refused while an objection blocks it, and approval or
 // overrule once the sealed spec or plan moved since the request was filed.
 func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
+	return s.RecordAmendmentDecisionBy(ctx, project, stream, repository, id, req, actor, cause, "")
+}
+
+// RecordAmendmentDecisionBy is RecordAmendmentDecision with the Jev judgment
+// the decision comes from: a non-empty judgment is Jev deciding an owner gate,
+// as the Jev actor, and the decision names the judgment. It is held to the
+// owner's rules, not the chief of staff's delegated authority.
+func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause, judgment string) (AmendmentResponse, *APIError) {
+	if judgment != "" && actor != trace.JevActor || judgment == "" && actor == trace.JevActor {
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "a Jev decision is written by Jev and names its judgment"}
+	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if !slices.Contains([]string{AmendmentApprove, AmendmentReject, AmendmentRound, AmendmentOverrule}, decision) {
@@ -251,8 +262,8 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 		return AmendmentResponse{}, failed
 	}
 	entries := AmendmentDissent(records)
-	record := AmendmentDecision{Actor: actor.ID, Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.Round, Packet: c.Packet.Revision, Spec: c.Spec.Revision, Plan: c.Plan.Revision, SealRevision: sealDoc.Revision}
-	if actor.Kind != "owner" {
+	record := AmendmentDecision{Actor: actor.ID, Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.Round, Packet: c.Packet.Revision, Spec: c.Spec.Revision, Plan: c.Plan.Revision, SealRevision: sealDoc.Revision, Judgment: judgment}
+	if actor.Kind != "owner" && judgment == "" {
 		if api := s.EngineeringRevision(repository, stream, c, current, entries, req.Note); api != nil {
 			return AmendmentResponse{}, api
 		}
@@ -293,7 +304,10 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 		to = "proposed"
 		reason = fmt.Sprintf("the owner asked for debate round %d on amendment %s after reading packet revision %d", c.Round+1, id, c.Packet.Revision)
 	}
-	if actor.Kind != "owner" {
+	switch {
+	case judgment != "":
+		reason = strings.ReplaceAll(reason, "the owner", "Jev")
+	case actor.Kind != "owner":
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
 	}
 	if record.Note != "" {

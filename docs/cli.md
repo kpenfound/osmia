@@ -359,6 +359,26 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   `loop.max_sessions` sessions without progress, is answered with `resume`. Decided entries, superseded packet revisions and entries of an
   abandoned workstream are left out. Without a project or a trace the inbox is
   empty.
+
+  Jev decides some of these gates itself. When a ratification, an amendment
+  that changes the approved intent, an escalated question, an escalated
+  contested unit or an escalated objection reaches its gate, the service asks
+  Jev once, in a worker of its own, with what the card shows and only the
+  options that need none of your words: `ratify`; `approve` or `reject`; one of
+  the options the chief of staff wrote; `review`; `dismissed` or `overruled`.
+  When Jev's confidence reaches `jev.decision_threshold` its pick is recorded as
+  the decision, with Jev as its actor and a link to its judgment, the flow
+  continues as if you had chosen it and the entry never reaches the inbox.
+  Reading the inbox, the status or the open decisions never asks Jev and never
+  records a decision; they leave out a gate while its judgment is pending. When
+  Jev answers below the threshold, defers or falls back, the entry reaches you
+  as usual and is not judged again; its recommendation is Jev's pick with its
+  confidence (the entry's `jev` field) when Jev gave one, and the chief of
+  staff's when it did not. A confident pick the service cannot carry out, such
+  as a ratification of a plan that stopped validating, also leaves the entry
+  with you, showing Jev's judgment. Delivery approval, charter proposals and
+  conflicts between charters, a project that needs no change, cancellation, your
+  own objections and anything that needs your own words are never sent to Jev.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
   the chief of staff then rephrases it for every asker of the entry, whose

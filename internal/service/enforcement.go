@@ -84,7 +84,7 @@ var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 
 // chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
-	set, err := status.Tool(r, trace.ChiefOfStaff, scope, now)
+	set, err := status.ToolHolding(r, trace.ChiefOfStaff, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
 		return nil, err
 	}

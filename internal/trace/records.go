@@ -318,7 +318,7 @@ func validate(r Record) error {
 	case ImageReference:
 		valid = h.Revision == 1 && config.CheckWorkstreamIDs(v.Member) == nil && key(v.ImageID) && h.ID == imageIdentity(string(v.Member)+"/"+v.ImageID)
 	case Document:
-		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n"))
+		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n")) && ValidDecisionActor(v)
 	case Transition:
 		valid = key(v.Subject) && present(v.To) && present(v.Reason)
 	case Question:
@@ -326,7 +326,7 @@ func validate(r Record) error {
 	case Amendment:
 		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
-		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && ValidDecider(v.DecidedBy, v.Judgment) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && ValidDecider(v.DecidedBy, v.Judgment) && validRulingActor(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
 		valid = key(v.Role) && key(v.ThreadID) && (v.Session == (coreadapter.BackendSession{}) || validSession(v.Session))
 	case TurnRequest:

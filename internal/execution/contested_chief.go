@@ -94,6 +94,24 @@ func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 	return false, "", nil
 }
 
+// ContestEscalated reports whether the chief of staff escalated the contest to
+// the owner, and its note. A contest the owner moved the unit into, or one the
+// chief of staff ruled on, is not an escalation.
+func ContestEscalated(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (string, bool, error) {
+	if moveContest(contest, unit) {
+		return "", false, nil
+	}
+	_, decisions, err := chiefDecisions(repo, stream, unit)
+	if err != nil {
+		return "", false, err
+	}
+	i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID && d.Decision == escalateContest })
+	if i < 0 {
+		return "", false, nil
+	}
+	return decisions[i].Note, true, nil
+}
+
 // resolveContested returns the resolve_contested tool of one claimed
 // chief-of-staff turn. The chief of staff rules on a contested unit of its
 // workstream on the owner's behalf, or explicitly escalates it

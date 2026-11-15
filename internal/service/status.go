@@ -211,6 +211,11 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			continue
 		}
 		view := statusView(active.id, mode, w, design)
+		if held := s.intake().HeldGates(active.repository, w); len(held) > 0 {
+			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool {
+				return slices.ContainsFunc(held, func(h trace.OwnerGate) bool { return h.Kind == g.Kind && h.Reference == g.Reference })
+			})
+		}
 		if design {
 			view.Title, _, err = intake.LatestDesignTitle(active.repository, w.Workstream)
 			if err != nil {

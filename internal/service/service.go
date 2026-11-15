@@ -189,6 +189,8 @@ type activeProject struct {
 	cancel        context.CancelFunc
 	pollCancel    context.CancelFunc
 	done          chan error
+	// gates decides the project's owner gates for Jev beside its scheduler.
+	gates *gateWorker
 }
 
 type Service struct {
@@ -197,8 +199,11 @@ type Service struct {
 	// jev answers the Jev judgments of every project's turns under the
 	// current configuration.
 	jev *jev.Judge
-	mu  sync.Mutex // guards cfg, projects, pending and reloadErr
-	cfg *config.Config
+	// gateWorkers maps each active project's trace to its gate worker, so a
+	// scheduling pass can wake it.
+	gateWorkers sync.Map
+	mu          sync.Mutex // guards cfg, projects, pending and reloadErr
+	cfg         *config.Config
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
@@ -942,7 +947,8 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
-	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, conversations: &conversationPath{s: s, repository: repository, pipeline: p, drain: make(chan struct{})}, pipeline: p, done: make(chan error, 1)}, nil
+	active := &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, conversations: &conversationPath{s: s, repository: repository, pipeline: p, drain: make(chan struct{})}, pipeline: p, done: make(chan error, 1)}
+	return active, nil
 }
 
 // dispatcher is the scheduler of the project cfg is about, drawing on the
@@ -1104,6 +1110,10 @@ func (s *Service) launch(active *activeProject) {
 		return
 	}
 	s.log().Info("project started", "project", string(active.id))
+	if active.gates == nil {
+		active.gates = newGateWorker(s, active)
+	}
+	s.gateWorkers.Store(active.repository, active.gates)
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
 	pollCtx, stopPolls := context.WithCancel(ctx)
@@ -1137,6 +1147,11 @@ func (s *Service) launch(active *activeProject) {
 			s.runNetworkPolls(pollCtx, active.repository, active.pipeline)
 			close(pollDone)
 		}()
+		gatesDone := make(chan struct{})
+		go func() {
+			active.gates.run(ctx)
+			close(gatesDone)
+		}()
 		err := active.controller.Run(ctx)
 		stopPolls()
 		<-pollDone
@@ -1149,6 +1164,8 @@ func (s *Service) launch(active *activeProject) {
 		}
 		cancel()
 		<-publishDone
+		<-gatesDone
+		s.gateWorkers.Delete(active.repository)
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
 		}
@@ -1340,7 +1357,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
-	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
+	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})

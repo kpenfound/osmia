@@ -222,7 +222,7 @@ func (z *Sealer) Request(ctx context.Context, stream config.WorkstreamID, r Rati
 		return 0, err
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(z.Repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: SealAction, Input: input}
-	reason := fmt.Sprintf("the owner ratified %s in round %d; sealing %d fetches upstream, records the seal and the footprints and creates the feature branch", r.Revision, r.Round, k)
+	reason := fmt.Sprintf("%s ratified %s in round %d; sealing %d fetches upstream, records the seal and the footprints and creates the feature branch", decidingOf(r.DecidedBy, r.Judgment).Name(), r.Revision, r.Round, k)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: z.Header(transition, stream, fmt.Sprintf("%s-%d", shed.RatificationDocumentID(r.Round), r.Recorded), z.S.Now()), Subject: SealSubject, From: state.Value, To: fmt.Sprintf("sealing-%d", k), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: "seal", Body: fmt.Sprintf("Seal %s of the workstream", r.Revision), Operation: &op}}}

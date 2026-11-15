@@ -185,6 +185,10 @@ type Result struct {
 	Detail string
 	// Recorded says the result was read from the trace, not asked now.
 	Recorded bool
+	// Refused is why the service refused the transition a binding pick called
+	// for, when it did. The pick stays binding for the occurrence, but is not
+	// applied again, and its decision is the owner's.
+	Refused string
 }
 
 // ValidOccurrence reports why a decision kind and occurrence key are not
@@ -289,6 +293,7 @@ func resultOf(records []recorded) Result {
 				res.Pick = choice
 				if confidence >= threshold && threshold > 0 {
 					res.Status = Binding
+					res.Refused = rec.record.Refused
 				}
 			}
 			return res
@@ -315,6 +320,31 @@ func (j *Judge) Lookup(repo *trace.Repository, stream config.WorkstreamID, kind 
 		return Result{}, err
 	}
 	return resultOf(records), nil
+}
+
+// Refuse records, as the next revision of the judgment, that the service
+// refused the transition the occurrence's binding pick calls for, so the pick
+// is never applied again and the occurrence is never asked again. It is a
+// no-op for a judgment already refused. The judgment must be an accepted one
+// of the workstream.
+func (j *Judge) Refuse(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, judgment, reason string) error {
+	latest, revision, err := load(repo, stream, judgment)
+	switch {
+	case err != nil:
+		return err
+	case revision == 0 || latest.State != StateAccepted:
+		return fmt.Errorf("judgment %s is not an accepted judgment", judgment)
+	case latest.Refused != "":
+		return nil
+	}
+	latest.Refused = reason
+	data, err := json.Marshal(latest)
+	if err != nil {
+		return err
+	}
+	s := latest.Scope
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: judgment, Revision: revision + 1, Project: config.ProjectID(s.Project), Workstream: stream, Unit: s.Unit, At: j.now(), Actor: trace.Actor{Kind: "service", ID: Role}, Cause: "refused-" + judgment}
+	return repo.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{{Header: h, Path: Path(judgment), Content: string(data)}})
 }
 
 var occurrenceLocks sync.Map // string -> *sync.Mutex

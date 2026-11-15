@@ -151,6 +151,10 @@ type Record struct {
 	// DurationMS how long they took.
 	Requests   int   `json:"requests,omitempty"`
 	DurationMS int64 `json:"duration_ms,omitempty"`
+	// Refused is set by a later revision of an accepted decision judgment
+	// when the service refused the transition its binding pick called for. The
+	// pick is then never applied again and the decision is the owner's.
+	Refused string `json:"refused,omitempty"`
 }
 
 // Path is where a judgment's record lives in its workstream's trace.
