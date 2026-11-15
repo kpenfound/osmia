@@ -4600,17 +4600,6 @@
         },
         "type": "object"
       },
-      "ConfigDagger": {
-        "properties": {
-          "engine": {
-            "type": "string"
-          },
-          "version": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ConfigDaggerConfig": {
         "properties": {
           "check_fallback": {
@@ -4939,9 +4928,6 @@
         "properties": {
           "cpus": {
             "type": "integer"
-          },
-          "dagger": {
-            "$ref": "#/components/schemas/ConfigDagger"
           },
           "events_profile": {
             "type": "string"

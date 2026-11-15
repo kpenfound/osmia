@@ -17,10 +17,17 @@ const gib = uint64(1) << 30
 func sizing(t *testing.T, total uint64, roles string) []Check {
 	t.Helper()
 	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+roles), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+roles+sbxDagger), 0o600))
 	o.TotalMemory = func() (uint64, error) { return total, nil }
 	return Run(context.Background(), o)
 }
+
+// sbxDagger is the service engine a mason in sbx runs Dagger on.
+const sbxDagger = `
+[dagger]
+engine = "tcp://127.0.0.1:1234"
+version = "v0.20.5"
+`
 
 const sizedRoles = `
 [roles.mason]
@@ -102,7 +109,7 @@ func TestOnlySbxRolesCount(t *testing.T) {
 
 func TestUnreadableHostMemoryWarns(t *testing.T) {
 	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+sizedRoles), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+sizedRoles+sbxDagger), 0o600))
 	o.TotalMemory = func() (uint64, error) { return 0, errors.New("no meminfo") }
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "sandbox memory"), Warn, "no meminfo")

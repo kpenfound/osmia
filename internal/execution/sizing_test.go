@@ -18,10 +18,10 @@ import (
 )
 
 // sizedRoles is a mason that runs in sbx from a template, with the Dagger CLI
-// against a host engine, and the given size lines.
+// against the service's host engine, and the given size lines.
 func sizedRoles(sizing string) string {
 	return "[roles.mason]\nsandbox = 'sbx'\nimage = 'example/osmia:1'\n" + sizing +
-		"[roles.mason.dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n"
+		"[dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n"
 }
 
 // configLoader loads the fixture's configuration with the mason roles given to

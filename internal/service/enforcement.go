@@ -111,17 +111,6 @@ var unitMasonGrant = execution.UnitMasonGrant
 // reads instead of a unit's.
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, reviewtools.DiffToolName}}
 
-// threadExecution is how a thread turn of role runs: in the role's sandbox
-// and image with the role's skills, and for a mason with the Dagger engine the
-// role configures.
-func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
-	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Skills: slices.Clone(r.Skills)}
-	if role == masonRole {
-		execution.Dagger = r.Dagger.Settings()
-	}
-	return execution
-}
-
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
 // staff, mason and reviewer; a turn of any other role fails with a recorded
@@ -183,13 +172,13 @@ func Enforce(opts Options, e Enforcement) Options {
 			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == sessionRole && scope.Project == project {
-					return sessionSelection(ctx, cfg, scope, threadExecution(masonRole, cfg.Roles[masonRole]))
+					return sessionSelection(ctx, cfg, scope, cfg.RoleExecution(masonRole))
 				}
-				role, ok := cfg.Roles[scope.Role]
+				_, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
-				execution := threadExecution(scope.Role, role)
+				execution := cfg.RoleExecution(scope.Role)
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					return drifts.Selection(ctx, scope, execution)
 				}

@@ -471,7 +471,6 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
 | `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
-| `dagger` | unset | Mason only, with `sbx`: the Dagger CLI `version` and host `engine` given to implementation turns; see [Dagger for masons](#dagger-for-masons) |
 | `skills` | `[]` | Skills by git reference, given to the role's Claude turns; see [Role skills](#role-skills) |
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
@@ -784,15 +783,15 @@ cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
 `auto` lets the host CLI choose an engine. `managed` selects Osmia's
 `osmia-dagger-engine` container at
 `docker-container://osmia-dagger-engine`. An explicit address selects an
-engine the owner operates. `cloud` selects a Dagger Cloud engine for service
-checks; masons cannot use a Cloud engine.
+engine the owner operates. `cloud` selects a Dagger Cloud engine. A mason in
+`sbx` runs Dagger on the same engine; see [Dagger for masons](#dagger-for-masons).
 
 Cloud authentication is independent of engine selection: a token can
 authenticate checks using `auto`, `managed` or an explicit address as well.
 The setting names an environment variable, never the token itself. Loading
 configuration does not read the variable or contact an engine. Only the
-service's check client receives the token; mason execution settings and
-sandboxes never receive it. Code under check can probably read the check
+service's check client and, under `engine = "cloud"`, each mason sandbox
+receive the token; under any other engine no sandbox does. Code under check can probably read the check
 client's environment, for example through `env://`, and with it the Cloud
 token. Use a dedicated, narrowly scoped token.
 
@@ -808,7 +807,7 @@ with a single `checks_timeout`.
 
 The key does nothing when `engine` is already `cloud`: checks keep running on
 that Cloud engine, with no separate local attempt, escalation or routing.
-Masons never use the Cloud engine or receive the token. How unit, final-review
+Masons stay on the configured engine and do not receive the token. How unit, final-review
 and session check runs use the fallback is described under
 [Cloud fallback](smart-checks.md#cloud-fallback).
 
@@ -866,27 +865,25 @@ service forwarding the engine connection.
 
 ### Dagger for masons
 
-A mason in `sbx` can run the project's Dagger checks and functions while it
-works. Configure the CLI release and the host engine it runs against:
+A mason in `sbx` runs the project's Dagger checks and functions while it
+works, on the engine the top-level `[dagger]` section selects for the
+service's own checks. A mason in any other sandbox gets no Dagger. A
+`check_fallback` does not apply to masons.
 
 ```toml
 [roles.mason]
 sandbox = "sbx"
 
-[roles.mason.dagger]
-version = "v0.20.5"                                 # the Dagger CLI release; match the engine's
-engine = "docker-container://dagger-engine-v0.20.5"  # or tcp://<host>:<port>, unix:///<socket>
+[dagger]
+engine = "managed"   # or cloud, docker-container://<container>, tcp://<host>:<port>, unix:///<socket>
+version = "v0.20.5"  # required for a host engine: the CLI release installed in the sandbox
 ```
 
-| Key | Validation/meaning |
-| --- | --- |
-| `version` | Required. A Dagger release such as `v0.20.5` or `0.20.5`, installed in each mason sandbox whose template lacks it |
-| `engine` | Optional under top-level `dagger.engine = "managed"` or an explicit address: defaults to `docker-container://osmia-dagger-engine` or that address. Required under `auto` or `cloud`. An override must be `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>`; `cloud` is rejected |
-
-The mason receives Dagger only when its own `[roles.mason.dagger]` section is
-present. Its CLI `version` remains required and independent of the top-level
-engine version. With no top-level `[dagger]` section, the engine selection is
-`auto` and a mason must specify its engine.
+With an sbx mason, configuration fails to load when `dagger.engine` is `auto`
+(also the default with no `[dagger]` section), because a sandbox cannot follow
+the host CLI's own engine choice, and when a host engine has no
+`dagger.version`. A `[roles.mason.dagger]` section left from an earlier
+configuration loads with a warning and has no effect.
 
 A Dagger-enabled mason's view holds an empty Git repository at its root, made
 on the host before the sandbox starts, so the CLI finds `dagger.toml` there. It
@@ -896,11 +893,27 @@ mason runs plain `dagger check`, `dagger check -l`, the Go check's
 through the link `dag+check://?check=lint&staticcheck-project=.`. Dagger is the
 mason's only validation route.
 
-Each mason turn asks its sandbox for `dagger version`. A template that already
-has the configured release keeps it, so baking the CLI into the mason's `image`
-saves an install per turn. Otherwise the turn installs that release with the
-Dagger install script, and the sandbox network policy must allow `dl.dagger.io`.
-A failed installation fails the turn before the agent starts.
+#### Dagger Cloud
+
+Under `engine = "cloud"` the mason's sandbox gets `DAGGER_ENGINE=cloud` and
+`DAGGER_CLOUD_TOKEN`, which holds the value of the variable `cloud_token_env`
+names, both passed to the sandbox by name. Nothing is forwarded and no host
+port is allowed. The sandbox's own Dagger CLI runs the checks, so the mason's
+`image` must include it; `scripts/build-sandbox.sh` installs the host's
+release. The sbx network policy must allow Dagger Cloud. A turn fails before
+its agent starts when the token's variable is unset in the service's
+environment. The agent can read the token, so use a dedicated token you accept
+exposing to masons. Mason turns on Dagger Cloud do not hold back an engine
+restart or prune.
+
+#### Host engines
+
+Each mason turn on a host engine asks its sandbox for `dagger version`. A
+template that already has `dagger.version` keeps it, so baking the CLI into the
+mason's `image` saves an install per turn. Otherwise the turn installs that
+release with the Dagger install script, and the sandbox network policy must
+allow `dl.dagger.io`. A failed installation fails the turn before the agent
+starts.
 
 The CLI reaches the engine through `_EXPERIMENTAL_DAGGER_RUNNER_HOST`. A
 `docker-container` or `unix` engine is forwarded from a fresh loopback port that
@@ -909,9 +922,9 @@ own port. The sandbox reaches either one as `host.docker.internal`, and the port
 is allowed for that sandbox alone. Cleanup removes the rule and the forward along
 with the sandbox. Other roles never receive the engine.
 
-The simplest engine is the one your own Dagger CLI provisions: run any Dagger
-command on the host, such as `dagger core version`, and name its container,
-`dagger-engine-<release>`. Each connection to a `docker-container` engine runs
+`managed` is the simplest host engine. Another is the one your own Dagger CLI
+provisions: run any Dagger command on the host, such as `dagger core version`,
+and name its container, `dagger-engine-<release>`. Each connection to a `docker-container` engine runs
 `docker exec -i <container> buildctl dial-stdio`, as the Dagger CLI does, with
 the service's Docker environment. The sandbox receives no Docker socket.
 

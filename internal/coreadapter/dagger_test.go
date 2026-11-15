@@ -87,6 +87,136 @@ func TestSbxMasonTurnGetsDaggerCLIAndEngine(t *testing.T) {
 	}
 }
 
+// cloudTurn is daggerTurn on Dagger Cloud: no host engine, the token's
+// variable named, and the variables the service adds for it in the turn's
+// environment.
+func cloudTurn(t *testing.T, token string) a.PreparedTurn {
+	t.Helper()
+	turn := daggerTurn(t)
+	turn.Execution.Dagger = nil
+	turn.Execution.DaggerCloudTokenEnv = "OSMIA_TEST_DAGGER_CLOUD_TOKEN"
+	turn.Sandbox.Verified.Environment[a.DaggerEngineEnvironment] = "cloud"
+	turn.Sandbox.Verified.Environment[a.DaggerCloudTokenEnvironment] = token
+	return turn
+}
+
+// A mason turn on Dagger Cloud reaches its sandbox with DAGGER_ENGINE=cloud
+// and the token, both by name, and an empty repository at its view's root.
+// agentcore gives it no Dagger: no CLI install, engine forward or host port.
+func TestSbxMasonTurnOnDaggerCloud(t *testing.T) {
+	const token = "mason-cloud-token"
+	turn := cloudTurn(t, token)
+	turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
+	runner := sbxRunner(t, agenttest.Session(t, agent.AgentClaude, agenttest.Turn{ResultText: "built"}).Bin)
+	dir := filepath.Dir(runner.SbxBin)
+	result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
+	if err != nil || result.IsError || result.FinalResponse != "built" {
+		t.Fatalf("result %+v: %v", result, err)
+	}
+	env := strings.Split(readSbxFile(t, filepath.Join(turn.SessionDirectory, "sbx-exec-env.txt")), "\n")
+	for _, want := range []string{a.DaggerEngineEnvironment + "=cloud", a.DaggerCloudTokenEnvironment + "=" + token} {
+		if !slices.Contains(env, want) {
+			t.Fatalf("session environment lacks %s", strings.SplitN(want, "=", 2)[0])
+		}
+	}
+	for _, line := range env {
+		if strings.HasPrefix(line, agent.EnvDaggerRunnerHost+"=") {
+			t.Fatalf("a Dagger Cloud turn was given a host engine: %s", line)
+		}
+	}
+	args := readSbxFile(t, filepath.Join(turn.SessionDirectory, "sbx-exec-args.txt"))
+	if strings.Contains(args, token) {
+		t.Fatal("the Dagger Cloud token is on the sbx command line")
+	}
+	for _, name := range []string{a.DaggerEngineEnvironment, a.DaggerCloudTokenEnvironment} {
+		if !strings.Contains(args, "--env\n"+name+"\n") {
+			t.Fatalf("sbx exec does not pass %s by name:\n%s", name, args)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sbx-setup.txt")); err == nil {
+		t.Fatal("a Dagger Cloud turn ran a Dagger CLI install")
+	}
+	policy, _ := os.ReadFile(filepath.Join(dir, "sbx-policy.txt"))
+	for _, line := range strings.Split(string(policy), "\n") {
+		// The turn's MCP server at 127.0.0.1:1 is the only host port.
+		if strings.Contains(line, "allow network") && !strings.HasSuffix(line, " localhost:1") {
+			t.Fatalf("a Dagger Cloud turn was allowed a host port: %s", line)
+		}
+	}
+}
+
+// A Dagger Cloud turn is granted its variables and the view's empty
+// repository, and asks agentcore for no Dagger engine.
+func TestDaggerCloudTurnGrants(t *testing.T) {
+	turn := cloudTurn(t, "mason-cloud-token")
+	engine := &adaptertest.Engine{}
+	if _, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	req := engine.Requests[0]
+	if req.Grants == nil || req.Grants.DaggerEngine != "" || req.Profile.Dagger != nil || !req.Grants.Mounts[0].EmptyRepository {
+		t.Fatalf("grants %+v profile Dagger %+v", req.Grants, req.Profile.Dagger)
+	}
+	for _, name := range []string{a.DaggerEngineEnvironment, a.DaggerCloudTokenEnvironment} {
+		if !slices.Contains(req.Grants.Env, name) || req.Env[name] == "" {
+			t.Fatalf("%s is not granted: %v", name, req.Grants.Env)
+		}
+	}
+}
+
+// The Dagger Cloud variables reach only a Dagger Cloud turn, and a Dagger
+// Cloud turn only with them, in sbx, with execution, and without a host
+// engine besides.
+func TestDaggerCloudTurnBoundary(t *testing.T) {
+	ctx := context.Background()
+	for name, mutate := range map[string]func(*a.PreparedTurn){
+		"variables without Dagger Cloud": func(turn *a.PreparedTurn) { turn.Execution.DaggerCloudTokenEnv = "" },
+		"no token": func(turn *a.PreparedTurn) {
+			delete(turn.Sandbox.Verified.Environment, a.DaggerCloudTokenEnvironment)
+		},
+		"another engine": func(turn *a.PreparedTurn) {
+			turn.Sandbox.Verified.Environment[a.DaggerEngineEnvironment] = "tcp://127.0.0.1:1234"
+		},
+		"and a host engine": func(turn *a.PreparedTurn) {
+			turn.Execution.Dagger = &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}
+		},
+		"container": func(turn *a.PreparedTurn) {
+			turn.Execution.Mode, turn.Execution.Image = "container", "fixture-image"
+		},
+		"no execute":     func(turn *a.PreparedTurn) { turn.Sandbox.Verified.Capabilities.Execute = false },
+		"bad token name": func(turn *a.PreparedTurn) { turn.Execution.DaggerCloudTokenEnv = "A;B" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			turn := cloudTurn(t, "mason-cloud-token")
+			mutate(&turn)
+			engine := &adaptertest.Engine{}
+			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+			if err := executor.Check(ctx, turn.Sandbox.Verified, turn.Execution); !errors.Is(err, a.ErrUnsupported) {
+				t.Fatalf("boundary check: %v", err)
+			}
+			if len(engine.Prepared) != 0 {
+				t.Fatal("a refused Dagger Cloud turn was prepared")
+			}
+		})
+	}
+}
+
+// DaggerCloudEnvironment reads the token from the variable a Dagger Cloud
+// turn names, refuses an unset one, and adds nothing to any other turn.
+func TestDaggerCloudEnvironment(t *testing.T) {
+	getenv := func(name string) string { return map[string]string{"SET": "token-value"}[name] }
+	env, err := a.DaggerCloudEnvironment(a.ExecutionSettings{DaggerCloudTokenEnv: "SET"}, getenv)
+	if err != nil || len(env) != 2 || env[a.DaggerEngineEnvironment] != "cloud" || env[a.DaggerCloudTokenEnvironment] != "token-value" {
+		t.Fatalf("environment %v: %v", env, err)
+	}
+	if _, err := a.DaggerCloudEnvironment(a.ExecutionSettings{DaggerCloudTokenEnv: "UNSET"}, getenv); err == nil || !strings.Contains(err.Error(), "UNSET") {
+		t.Fatalf("unset token: %v", err)
+	}
+	if env, err := a.DaggerCloudEnvironment(a.ExecutionSettings{Dagger: &agent.Dagger{Engine: "tcp://127.0.0.1:1234"}}, getenv); err != nil || env != nil {
+		t.Fatalf("host engine environment %v: %v", env, err)
+	}
+}
+
 func TestDaggerRequiresAnSbxTurnThatExecutes(t *testing.T) {
 	ctx := context.Background()
 	for name, mutate := range map[string]func(*a.PreparedTurn){

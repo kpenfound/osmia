@@ -212,7 +212,8 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	role, profile, unit := describeQueuedTurn(th, in.Turn)
 	// Sessions use the mason's execution settings, including its Dagger
 	// sandbox. Bind this decision to the same config as the turn reconciler.
-	if a.cfg != nil && (role == masonRole || role == sessionRole) && a.cfg.Roles[masonRole].Dagger != nil {
+	// A turn on Dagger Cloud uses no engine of the service's.
+	if a.cfg != nil && (role == masonRole || role == sessionRole) && a.cfg.RoleExecution(masonRole).Dagger != nil {
 		release, err := a.s.checkSlots.startEngineTurn(ctx, EngineTurn{Project: running.project, Workstream: in.Workstream, Unit: unit, Agent: in.Agent, Turn: in.Turn})
 		if err != nil {
 			return coreadapter.OperationResult{}, err
