@@ -31,8 +31,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	defaultScope := cfg.HearsayScope()
 	external := cfg.Hearsay.URL != "" && defaultScope != ""
 	for role, grant := range turns.Grants {
-			continue
-		}
 		grant.Tools = slices.Clone(grant.Tools)
 		if role != sessionRole && !slices.Contains(grant.Tools, projectContextTool) {
 			grant.Tools = append(grant.Tools, projectContextTool)
@@ -55,8 +53,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 			if err != nil {
 				return nil, err
 			}
-		}
-			return tools, nil
 		}
 		if scope.Role != sessionRole && !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
 			tools = append(tools, projectContext(repo, scope))
