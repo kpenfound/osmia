@@ -376,6 +376,8 @@ const InboxLoop = api.InboxLoop
 
 const InboxBase = api.InboxBase
 
+const InboxDiscovery = api.InboxDiscovery
+
 const InboxProjectCreation = api.InboxProjectCreation
 
 type InboxEntry = api.InboxEntry

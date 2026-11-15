@@ -90,19 +90,39 @@ const (
 	FindingAdvisory = "advisory"
 )
 
+// BlockingFinding is one thing that stops a reviewed report from authorising
+// delivery on its own, named so the chief of staff can triage it: a sealed
+// criterion no merged unit serves, or a finding the reader called blocking.
+type BlockingFinding struct {
+	// ID names the finding within its final review: "gap-<criterion>" for an
+	// unserved criterion, and "finding-<n>" for the reader's n-th finding.
+	ID   string
+	Text string
+}
+
+// BlockingFindings returns each criterion no merged unit serves and each
+// blocking finding of the report, in report order.
+func BlockingFindings(r FinalReport) []BlockingFinding {
+	var out []BlockingFinding
+	for _, c := range r.Criteria {
+		if c.Gap != "" {
+			out = append(out, BlockingFinding{ID: "gap-" + c.Criterion, Text: c.Criterion + ": " + c.Gap})
+		}
+	}
+	for i, f := range r.Findings {
+		if f.Severity == FindingBlocking {
+			out = append(out, BlockingFinding{ID: fmt.Sprintf("finding-%d", i+1), Text: f.Describe()})
+		}
+	}
+	return out
+}
+
 // ReportBlocking returns what stops the reviewed report from authorising delivery
 // on its own: each criterion no merged unit serves and each blocking finding.
 func ReportBlocking(r FinalReport) []string {
 	var out []string
-	for _, c := range r.Criteria {
-		if c.Gap != "" {
-			out = append(out, c.Criterion+": "+c.Gap)
-		}
-	}
-	for _, f := range r.Findings {
-		if f.Severity == FindingBlocking {
-			out = append(out, f.Describe())
-		}
+	for _, b := range BlockingFindings(r) {
+		out = append(out, b.Text)
 	}
 	return out
 }
@@ -1211,8 +1231,12 @@ func CountSeverity(findings []FinalFinding, severity string) int {
 func FinalReviewNotice(report FinalReport, blocking []string, rounds int, edgePending bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "The final review of the assembled branch is recorded: %d blocking, %d advisory.", len(blocking), CountSeverity(report.Findings, FindingAdvisory))
-	for _, item := range blocking {
+	ids := BlockingFindings(report)
+	for i, item := range blocking {
 		b.WriteString("\nBlocking: " + item)
+		if i < len(ids) && ids[i].Text == item {
+			fmt.Fprintf(&b, " (finding %s)", ids[i].ID)
+		}
 	}
 	for _, f := range report.Findings {
 		if f.Severity == FindingAdvisory {
@@ -1225,11 +1249,11 @@ func FinalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 	case report.Maintenance && edgePending:
 		b.WriteString("\nOne follow-up unit repairs the post-merge dependency update; the final review runs again once it lands.")
 	case report.Maintenance:
-		fmt.Fprintf(&b, "\nThe workstream is delivered with its pull request open. Triage them: to repair a finding that needs code, move the workstream to building with %s and then file one plan revision, through route_amendment, that groups related findings into as few units as fit; the open pull request is updated only after a fresh final review and the owner's delivery approval. A finding that is mistaken or not worth building is the owner's to accept at delivery, so tell the owner why.", moveWorkstreamTool)
+		fmt.Fprintf(&b, "\nThe workstream is delivered with its pull request open. Triage them, one decide call per blocking finding (kind %s, subject <review>:<finding>), then record each outcome with %s: to repair a finding that needs code, move the workstream to building with %s and then file one plan revision, through route_amendment, that groups related findings into as few units as fit and takes every finding triaged as code; the open pull request is updated only after a fresh final review and the owner's delivery approval. A finding that is mistaken or not worth building is the owner's to accept at delivery, so triage it to the owner and say why.", FindingTriageKind, TriageToolName, moveWorkstreamTool)
 	case rounds >= maxFinalRounds:
 		fmt.Fprintf(&b, "\nFinal reviews have found blocking problems %d times. Further revisions of the assembled plan are the owner's decision: present these findings to the owner, who can accept them at delivery or approve the work that resolves them.", rounds)
 	default:
-		b.WriteString("\nTriage them: a finding that needs code is resolved by one plan revision, through route_amendment, that groups related findings into as few units as fit; a finding that is mistaken or not worth building is the owner's to accept at delivery, so tell the owner why.")
+		fmt.Fprintf(&b, "\nTriage them, one decide call per blocking finding (kind %s, subject <review>:<finding>, here %d:<finding>), then record each outcome with %s: a finding that needs code is resolved by one plan revision, through route_amendment, that groups related findings into as few units as fit and takes every finding triaged as code; a finding that is mistaken or not worth building is the owner's to accept at delivery, so triage it to the owner and say why.", FindingTriageKind, report.Review, TriageToolName)
 	}
 	return b.String()
 }

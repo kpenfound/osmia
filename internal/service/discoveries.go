@@ -12,6 +12,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -29,7 +31,14 @@ type workDiscovery struct {
 	// the Jev judgment it comes from.
 	DecidedBy string `json:"decided_by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`
+	// HandedToOwner says why the service could not carry out Jev's decision
+	// on the discovery, which is then open and the owner's.
+	HandedToOwner string `json:"handed_to_owner,omitempty"`
 }
+
+// The outcomes of a discovery's disposition, which are the options of Jev's
+// decision, and the dispositions they record.
+var discoveryOutcomes = map[string]string{"assigned": "assign", "declined": "decline", "suggestion": "retain"}
 
 func discoveries(r *trace.Repository, stream config.WorkstreamID) (map[string]workDiscovery, error) {
 	docs, err := trace.Read[trace.Document](r, stream)
@@ -91,23 +100,28 @@ func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, erro
 // turn may name any member of its workgroup, whose own trace holds the
 // discovery.
 func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	description := "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination."
+	description := "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion, after it called decide for the discovery (kind discovery-disposition, subject its id): when Jev's decision is binding, only the disposition it picked (assign, decline or retain) is recorded, with the chief of staff's reasoning. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination."
+	properties := `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`
 	if scope.Role == trace.ChiefOfStaff {
-		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it; omit for this conversation's own workstream."
+		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it; omit for this conversation's own workstream. owner_decided: true only to record a disposition the owner gave in the message this turn answers, which needs no decide result."
+		properties += `,"owner_decided":{"type":"boolean"}`
 	}
-	return coreadapter.Tool{Name: discoveryTool, Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: discoveryTool, Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, properties), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		if err := r.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
 		var in struct {
 			workDiscovery
-			Key        string              `json:"key"`
-			Revision   int                 `json:"revision"`
-			Workstream config.WorkstreamID `json:"workstream"`
+			Key          string              `json:"key"`
+			Revision     int                 `json:"revision"`
+			Workstream   config.WorkstreamID `json:"workstream"`
+			OwnerDecided bool                `json:"owner_decided"`
 		}
 		if err := json.Unmarshal(raw, &in); err != nil {
 			return nil, err
 		}
+		// Who decided a discovery is recorded by the service, never named by a caller.
+		in.DecidedBy, in.Judgment, in.HandedToOwner = "", "", ""
 		if scope.Role != trace.ChiefOfStaff && scope.Role != masonRole && scope.Role != reviewerRole {
 			return nil, errors.New("discovery recording is not granted")
 		}
@@ -179,8 +193,8 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if in.Disposition != "open" && scope.Role != trace.ChiefOfStaff {
 			return priorityRefusal("the chief of staff coordinates discovery dispositions")
 		}
+		var old workDiscovery
 		if prior.Revision > 0 {
-			var old workDiscovery
 			if err := json.Unmarshal([]byte(prior.Content), &old); err != nil {
 				return nil, err
 			}
@@ -193,7 +207,42 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if in.Disposition != "open" && strings.TrimSpace(in.Reason) == "" {
 			return priorityRefusal("a disposition requires reasoning against approved intent")
 		}
+		if in.OwnerDecided {
+			if prior.Revision == 0 || scope.Role != trace.ChiefOfStaff {
+				return priorityRefusal("owner_decided names an existing discovery, and only the chief of staff relays the owner's disposition")
+			}
+			if _, owner, err := r.OwnerTurn(trace.ChiefOfStaff, scope); err != nil {
+				return nil, err
+			} else if !owner {
+				return priorityRefusal("owner_decided is only for a disposition the owner gave in the message this turn answers")
+			}
+		}
+		// The chief of staff's own disposition of an open discovery needs a
+		// decide result, and a confident Jev pick allows only itself.
+		var bound *jev.Result
+		switch {
+		case in.OwnerDecided:
+		case in.Disposition == "open":
+			in.DecidedBy, in.Judgment, in.HandedToOwner = old.DecidedBy, old.Judgment, old.HandedToOwner
+		case prior.Revision > 0:
+			if old.HandedToOwner != "" {
+				return priorityRefusal("Jev's decision on this discovery could not be carried out; the owner decides it")
+			}
+			res, err := jev.Recorded(target, stream, jev.KindDiscovery, jev.DiscoveryKey(in.ID))
+			if err != nil {
+				return nil, err
+			}
+			if old.Disposition == "open" || res.Status != jev.None {
+				var why string
+				if bound, why, err = jev.Require(target, stream, jev.KindDiscovery, jev.DiscoveryKey(in.ID), discoveryOutcomes[in.Disposition], "discovery "+in.ID); err != nil {
+					return nil, err
+				} else if why != "" {
+					return priorityRefusal(why)
+				}
+			}
+		}
 		var assignment trace.WorkflowState
+		handed := ""
 		if in.Disposition == "assigned" {
 			st, err := target.Workflow(stream, trace.UnitSubject(in.Unit))
 			if err != nil {
@@ -201,16 +250,31 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			}
 			assignment = st
 			if st.Value == "" || st.Value == UnitMerged || st.Value == UnitApproved {
-				return priorityRefusal("assign necessary work to an existing unapproved unit; revise the plan first if needed")
+				const refused = "assign necessary work to an existing unapproved unit; revise the plan first if needed"
+				if bound == nil {
+					return priorityRefusal(refused)
+				}
+				// The service refused the transition Jev's binding pick calls
+				// for. The discovery stays open and goes to the owner with Jev's
+				// judgment, and Jev is not asked about it again.
+				handed = fmt.Sprintf("Jev decided assign with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's reasoning: %s", bound.Confidence, bound.Judgment, refused, in.Reason)
+				in.HandedToOwner, in.Disposition, in.Unit = handed, "open", ""
 			}
+		}
+		actor := trace.Actor{Kind: "agent", ID: scope.Thread}
+		if bound != nil {
+			in.DecidedBy, in.Judgment = trace.DecidedByJev, bound.Judgment
+			actor = trace.JevActor
 		}
 		data, _ := json.MarshalIndent(in.workDiscovery, "", "  ")
 		rev := prior.Revision + 1
-		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: in.ID, Revision: rev, Project: project, Workstream: stream, At: now(), Actor: trace.Actor{Kind: "agent", ID: scope.Thread}, Cause: scope.Turn}, Path: "discoveries/" + in.ID + ".json", Content: string(data) + "\n"}
-		tx := trace.Transaction{ExpectedVersion: uint64(prior.Revision), Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("%s-%d", in.ID, rev), Revision: 1, Project: project, Workstream: stream, At: now(), Actor: doc.Actor, Cause: scope.Turn}, Subject: in.ID, To: in.Disposition, Reason: in.Description + "; " + in.Reason}, Events: []trace.Event{trace.Notice(fmt.Sprintf("%s-%d", in.ID, rev), "discovery", in.Description+"; disposition: "+in.Disposition)}}
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: in.ID, Revision: rev, Project: project, Workstream: stream, At: now(), Actor: actor, Cause: scope.Turn}, Path: "discoveries/" + in.ID + ".json", Content: string(data) + "\n"}
+		notice := in.Description + "; disposition: " + in.Disposition
+		if handed != "" {
+			notice += "; handed to the owner with Jev's judgment"
+		}
+		tx := trace.Transaction{ExpectedVersion: uint64(prior.Revision), Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("%s-%d", in.ID, rev), Revision: 1, Project: project, Workstream: stream, At: now(), Actor: doc.Actor, Cause: scope.Turn}, Subject: in.ID, To: in.Disposition, Reason: in.Description + "; " + in.Reason}, Events: []trace.Event{trace.Notice(fmt.Sprintf("%s-%d", in.ID, rev), "discovery", notice)}}
 		if prior.Revision > 0 {
-			var old workDiscovery
-			_ = json.Unmarshal([]byte(prior.Content), &old)
 			tx.Transition.From = old.Disposition
 		}
 		txs := []trace.Transaction{tx}
@@ -222,6 +286,9 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}
 		if _, err := target.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 			return nil, err
+		}
+		if handed != "" {
+			return json.Marshal(map[string]any{"recorded": true, "id": in.ID, "revision": rev, "detail": "the service could not carry out Jev's decision; the discovery is open and in the owner's inbox with Jev's judgment"})
 		}
 		return json.Marshal(map[string]any{"recorded": true, "id": in.ID, "revision": rev})
 	}}
@@ -248,4 +315,45 @@ func unitDiscoveries(r *trace.Repository, stream config.WorkstreamID, unit strin
 		return "", "", err
 	}
 	return string(data), fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+// discoveryEntries lists the owner's decisions on a workstream's discoveries:
+// each open discovery whose disposition Jev decided and the service could not
+// carry out. Jev is not asked about it again.
+func discoveryEntries(r *trace.Repository, stream config.WorkstreamID) ([]intake.InboxEntry, error) {
+	docs, err := trace.Read[trace.Document](r, stream)
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]trace.Document{}
+	for _, d := range docs {
+		if strings.HasPrefix(d.Path, "discoveries/") && d.Revision > latest[d.ID].Revision {
+			latest[d.ID] = d
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	var out []intake.InboxEntry
+	for _, id := range ids {
+		d := latest[id]
+		var x workDiscovery
+		if err := json.Unmarshal([]byte(d.Content), &x); err != nil {
+			return nil, err
+		}
+		if x.Disposition != "open" || x.HandedToOwner == "" {
+			continue
+		}
+		e := intake.Decision(intake.InboxDiscovery, stream, d.At, "/conversation/"+string(stream), map[string]any{"discovery": x.ID})
+		e.Question = fmt.Sprintf("What happens to the necessary work %s discovered for %s: %s", x.ID, x.Criterion, x.Description)
+		e.Blocked = "The workstream cannot complete while the work is undecided."
+		if res, err := jev.Recorded(r, stream, jev.KindDiscovery, jev.DiscoveryKey(x.ID)); err == nil && res.Status == jev.Binding {
+			intake.CarriedCard(&e, res, "discovery "+x.ID)
+		}
+		e.Recommendation = x.HandedToOwner
+		out = append(out, e)
+	}
+	return out, nil
 }

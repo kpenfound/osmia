@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -61,12 +64,12 @@ func decisionOptions(pairs ...string) []jev.DecisionOption {
 // tool for the subject records its decision only after this result exists.
 func (c *runtimeControls) decide(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: decideTool, Effect: coreadapter.ToolMemory,
-		Description: "Ask Jev to decide a subject you may decide, after you investigated it. kind: question-routing (subject: a question's number; Jev picks answer, route_amendment or escalate), contested-ruling (subject: a contested unit's ID; Jev picks review, revise or escalate) or objection (subject: a committee objection's ID; Jev picks dismiss or escalate). " +
+		Description: "Ask Jev to decide a subject you may decide, after you investigated it. kind: question-routing (subject: a question's number; Jev picks answer, route_amendment or escalate), contested-ruling (subject: a contested unit's ID; Jev picks review, revise or escalate), objection (subject: a committee objection's ID; Jev picks dismiss or escalate), plan-amendment (subject: the number of a presented amendment that leaves the approved intent unchanged; Jev picks approve or reject), discovery-disposition (subject: a discovery's id; Jev picks assign, decline or retain) or final-review-triage (subject: <review>:<finding> of a blocking finding of the current final review, as its notice gives them; Jev picks code or owner, one decide per finding). " +
 			"evidence: a short summary of what you found and why, which Jev reads with the subject's records; Jev never reads code. options: only for a kind whose options you write; the kinds above have fixed options. " +
 			"workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream. The result says Jev's pick and confidence when it is binding: the outcome tool of the subject then records only that outcome, with your own text. " +
-			"Otherwise the decision is yours, as it was before. Calling decide again for the same subject returns the same result. A subject that is the owner's, such as a conflict between member charters or the owner's own objection, is refused. " +
-			"The outcome tools (answer, escalate, route_amendment, resolve_contested, resolve_objection) refuse a subject you have not called decide for.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["question-routing","contested-ruling","objection"]},"subject":{"type":"string"},"evidence":{"type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"}},"required":["name","description"],"additionalProperties":false}},"workstream":{"type":"string"}},"required":["kind","subject","evidence"],"additionalProperties":false}`)}
+			"Otherwise the decision is yours, as it was before. Calling decide again for the same subject returns the same result. A subject that is the owner's, such as a conflict between member charters, the owner's own objection or an amendment that changes approved intent, is refused. " +
+			"The outcome tools (answer, escalate, route_amendment, resolve_contested, resolve_objection, decide_amendment, record_discovery, triage_finding) refuse a subject you have not called decide for.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["question-routing","contested-ruling","objection","plan-amendment","discovery-disposition","final-review-triage"]},"subject":{"type":"string"},"evidence":{"type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"}},"required":["name","description"],"additionalProperties":false}},"workstream":{"type":"string"}},"required":["kind","subject","evidence"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Kind     jev.DecisionKind `json:"kind"`
@@ -121,8 +124,14 @@ func (c *runtimeControls) decide(repository *trace.Repository, scope coreadapter
 			sub, why, err = s.contestSubject(ctx, target, stream, subject)
 		case jev.KindObjection:
 			sub, why, err = s.objectionSubject(ctx, target, stream, subject)
+		case jev.KindPlanAmendment:
+			sub, why, err = s.planAmendmentSubject(ctx, target, stream, subject)
+		case jev.KindDiscovery:
+			sub, why, err = s.discoverySubject(ctx, target, stream, subject)
+		case jev.KindTriage:
+			sub, why, err = s.triageSubject(ctx, target, stream, subject)
 		default:
-			return refuse(fmt.Sprintf("decide covers question-routing, contested-ruling and objection; %q is not one", input.Kind))
+			return refuse(fmt.Sprintf("decide covers question-routing, contested-ruling, objection, plan-amendment, discovery-disposition and final-review-triage; %q is not one", input.Kind))
 		}
 		var refused *trace.QuestionRefused
 		if errors.As(err, &refused) {
@@ -364,3 +373,130 @@ func (s *Service) objectionSubject(ctx context.Context, repository *trace.Reposi
 		}}, "", nil
 }
 
+// planAmendmentSubject prepares a presented amendment for the chief of staff's
+// decision, or says why the chief may not decide it with Jev: an amendment that
+// changes the approved intent is the owner's gate, as is one beyond the chief
+// of staff's authority, and a decision is made once.
+func (s *Service) planAmendmentSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, id string) (decisionSubject, string, error) {
+	why, err := s.intake().PlanAmendmentSubject(repository, stream, id)
+	if err != nil || why != "" {
+		return decisionSubject{}, why, err
+	}
+	c, found, err := intake.ReadAmendment(repository, stream, id)
+	if err != nil || !found {
+		return decisionSubject{}, "", err
+	}
+	records, err := intake.AmendmentRecords(repository, stream, id)
+	if err != nil {
+		return decisionSubject{}, "", err
+	}
+	entries := intake.AmendmentDissent(records)
+	return decisionSubject{repository: repository, stream: stream, unit: c.Request.Unit, kind: jev.KindPlanAmendment, key: jev.AmendmentKey(id),
+		options: decisionOptions(
+			intake.AmendmentApprove, "Approve the amendment: the plan is revised and resealed with the approved intent unchanged, and the unit that asked resumes.",
+			intake.AmendmentReject, "Decline the amendment: the sealed spec and plan stay in force and the requester is told."),
+		state: func(evidence string) (string, []jev.Source, error) {
+			var b stateSections
+			b.add("Decision", fmt.Sprintf("Amendment %s of workstream %s revises the plan and leaves the approved intent unchanged, so the chief of staff decides it on the owner's behalf. Choose whether it is approved or declined.", id, stream), 0)
+			b.add("Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", c.Request.Requester.ID, c.Request.Role, strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
+			b.add("Chief of staff's evidence", evidence, 0)
+			var dissent []string
+			for _, e := range entries {
+				dissent = append(dissent, fmt.Sprintf("%s (%s, by %s): %s", e.ID, e.Kind, e.Member, e.Argument))
+			}
+			if len(dissent) == 0 {
+				b.add("Dissent", "No objection stands.", 0)
+			} else {
+				b.add("Dissent that stands", strings.Join(dissent, "\n"), 0)
+			}
+			specText, planText, sources := sealedText(repository, stream)
+			b.add("Sealed spec", specText, decideSpec)
+			b.add("Sealed plan", planText, decidePlan)
+			b.add("Proposed plan", c.Plan.Content, decidePlan)
+			b.add("Charter", s.charterSection(ctx, repository), decideCharter)
+			return b.String(), append([]jev.Source{{Kind: "amendment-packet", ID: c.Packet.ID, Revision: c.Packet.Revision}, {Kind: "amendment", ID: c.Request.ID, Revision: c.Request.Revision}}, sources...), nil
+		}}, "", nil
+}
+
+// discoverySubject prepares an open discovery for its disposition, or says why
+// the chief of staff may not decide it with Jev: its workstream is finished,
+// its disposition is already recorded, or Jev's decision on it could not be
+// carried out and the owner has it.
+func (s *Service) discoverySubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, id string) (decisionSubject, string, error) {
+	all, err := discoveries(repository, stream)
+	if err != nil {
+		return decisionSubject{}, "", err
+	}
+	d, ok := all[id]
+	if !ok {
+		return decisionSubject{}, fmt.Sprintf("there is no discovery %s in workstream %s", id, stream), nil
+	}
+	feature, err := repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return decisionSubject{}, "", err
+	}
+	switch {
+	case feature.Value == DeliveredState || feature.Value == AbandonedState:
+		return decisionSubject{}, "terminal workstreams accept no discovered work", nil
+	case d.HandedToOwner != "":
+		return decisionSubject{}, fmt.Sprintf("Jev's decision on discovery %s could not be carried out; the owner decides it", id), nil
+	case d.Disposition != "open":
+		return decisionSubject{}, fmt.Sprintf("discovery %s is already %s; its disposition is decided once", id, d.Disposition), nil
+	}
+	return decisionSubject{repository: repository, stream: stream, kind: jev.KindDiscovery, key: jev.DiscoveryKey(id),
+		options: decisionOptions(
+			"assign", "Assign it to an existing unit that is not yet approved: the work is necessary for the approved intent, that unit's mason builds it and its reviewer accounts for it, and the workstream cannot complete until it lands.",
+			"decline", "Decline it with reasoning against the approved intent: it is out of scope, already covered or mistaken, and blocks nothing.",
+			"retain", "Retain it as an optional suggestion: worth keeping, but not necessary for the approved intent, and it blocks nothing."),
+		state: func(evidence string) (string, []jev.Source, error) {
+			var b stateSections
+			b.add("Decision", fmt.Sprintf("A worker discovered a piece of work while building workstream %s. The chief of staff decides its disposition. Choose whether it is assigned to a unit, declined or retained.", stream), 0)
+			b.add("The discovery", fmt.Sprintf("%s\nCriterion: %s\n%s", d.ID, d.Criterion, d.Description), 0)
+			b.add("Chief of staff's evidence", evidence, 0)
+			specText, planText, sources := sealedText(repository, stream)
+			b.add("Sealed spec", specText, decideSpec)
+			b.add("Sealed plan", planText, decidePlan)
+			b.add("Charter", s.charterSection(ctx, repository), decideCharter)
+			return b.String(), append([]jev.Source{{Kind: "discovery", ID: d.ID}}, sources...), nil
+		}}, "", nil
+}
+
+// triageSubject prepares one blocking finding of the current final review for
+// its triage. The subject is "<review>:<finding>". It says why the chief of
+// staff may not triage the finding with Jev: it is not a blocking finding of
+// the current reviewed final review, it is triaged already, or it is the
+// owner's because final reviews found blocking problems too often.
+func (s *Service) triageSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, subject string) (decisionSubject, string, error) {
+	number, finding, cut := strings.Cut(subject, ":")
+	review, convErr := strconv.Atoi(strings.TrimSpace(number))
+	if !cut || convErr != nil || review < 1 || strings.TrimSpace(finding) == "" {
+		return decisionSubject{}, "name the finding as <review>:<finding>, for example 1:finding-2, exactly as the final review notice gives it", nil
+	}
+	sub, why, err := s.delivery().TriageSubject(ctx, repository, stream, review, finding)
+	if err != nil || why != "" {
+		return decisionSubject{}, why, err
+	}
+	return decisionSubject{repository: repository, stream: stream, kind: jev.KindTriage, key: sub.Key,
+		options: decisionOptions(
+			followup.TriageCode, "The finding needs code: it goes into the one plan revision the chief of staff files, which a mason builds before a fresh final review.",
+			followup.TriageOwner, "Leave it to the owner: the finding is mistaken or not worth building, so the owner reads it at delivery approval and can accept it as it is."),
+		state: func(evidence string) (string, []jev.Source, error) {
+			var b stateSections
+			b.add("Decision", fmt.Sprintf("Final review %d of workstream %s found blocking problems. The chief of staff triages them one by one before the owner decides delivery. Choose how this finding is triaged: it needs code in a plan revision, or it is left to the owner.", review, stream), 0)
+			b.add("The finding", fmt.Sprintf("%s: %s", sub.Finding.ID, sub.Finding.Text), 0)
+			var others []string
+			for _, o := range delivery.BlockingFindings(sub.Report) {
+				if o.ID != sub.Finding.ID {
+					others = append(others, fmt.Sprintf("%s: %s", o.ID, o.Text))
+				}
+			}
+			b.add("The review's other blocking findings", strings.Join(others, "\n"), 0)
+			b.add("The final review's summary", sub.Report.Summary, 0)
+			b.add("Chief of staff's evidence", evidence, 0)
+			specText, planText, sources := sealedText(repository, stream)
+			b.add("Sealed spec", specText, decideSpec)
+			b.add("Sealed plan", planText, decidePlan)
+			b.add("Charter", s.charterSection(ctx, repository), decideCharter)
+			return b.String(), append([]jev.Source{{Kind: "final-review", ID: delivery.FinalReportDocument, Revision: sub.Revision}}, sources...), nil
+		}}, "", nil
+}

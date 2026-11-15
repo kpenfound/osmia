@@ -1711,23 +1711,35 @@ values it applies; a changed value creates a new judgment.
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
 same selection on any Git working tree.
 
-The chief of staff investigates a question, a contested unit or a committee
-objection first and then calls `decide` with the kind, the subject and a short
+The chief of staff investigates a question, a contested unit, a committee
+objection, a plan-only amendment, a discovery or a final review's blocking
+finding first and then calls `decide` with the kind, the subject and a short
 evidence summary. The service checks from the subject's records that the chief
-may decide it today (a conflict between member charters and the owner's own
-objection are refused, with no request and no judgment), builds the state from
-the records and asks Jev to pick: answer, route as an amendment or escalate a
-question; review, revise or escalate a contested unit; dismiss or escalate an
-objection. Jev never reads code or uses tools. A pick at or above
-`[jev] decision_threshold` is binding: the outcome tool (`answer`, `route_amendment`,
-`escalate`, `resolve_contested`, `resolve_objection`) then records only that
+may decide it today (a conflict between member charters, the owner's own
+objection and an amendment that changes approved intent are refused, with no
+request and no judgment), builds the state from the records and asks Jev to
+pick: answer, route as an amendment or escalate a question; review, revise or
+escalate a contested unit; dismiss or escalate an objection; approve or decline
+a plan-only amendment; assign, decline or retain a discovery; and, for each
+blocking finding of the current final review (subject `<review>:<finding>`, as
+the final review notice names it), whether it needs code in the next plan
+revision or is left to the owner. Jev never reads code or uses tools. A pick at
+or above `[jev] decision_threshold` is binding: the outcome tool (`answer`,
+`route_amendment`, `escalate`, `resolve_contested`, `resolve_objection`,
+`decide_amendment`, `record_discovery`, `triage_finding`) then records only that
 outcome, with the chief's own text, and the decision is shown as decided by
 Jev. A pick below the threshold, or a fallback, leaves the decision with the
-chief. The outcome tools refuse a subject `decide` has not been called for.
-The result belongs to the subject occurrence (the question, the contest or the
-objection), is reused when `decide` is called again, and survives a restart.
-When the service refuses the transition a binding pick calls for, the item goes
-to the owner's inbox with Jev's judgment and Jev is not asked again.
+chief. The outcome tools refuse a subject `decide` has not been called for; a
+disposition the owner gave and the chief relays needs none. The result belongs
+to the subject occurrence (the question, the contest, the objection, the
+amendment, the discovery or the finding of one final review), is reused when
+`decide` is called again, and survives a restart. A finding triaged as needing
+code is stated in the next plan revision the chief files with `route_amendment`,
+and one left to the owner is shown on the delivery card with the chief's
+reason. When the service refuses the transition a binding pick calls for, the
+item goes to the owner's inbox with Jev's judgment (a discovery as a
+`discovery` entry, an amendment as its amendment card, a finding on the
+delivery card) and Jev is not asked again.
 
 Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,

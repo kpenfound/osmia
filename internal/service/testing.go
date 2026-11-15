@@ -356,6 +356,14 @@ func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) cor
 	return controls.decide(r, scope)
 }
 
+// TriageTool returns the triage_finding tool of the claimed chief-of-staff turn
+// scope names, as the service composes it.
+func (a TestAccess) TriageTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	controls := &runtimeControls{}
+	controls.service.Store(a.s)
+	return controls.triageFinding(r, scope)
+}
+
 // SetJudge binds a fixture judge for test-controlled check selection.
 func (a TestAccess) SetJudge(j *jev.Judge) {
 	a.s.mu.Lock()

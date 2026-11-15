@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -222,13 +223,32 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		if err := json.Unmarshal([]byte(document.Content), &sealed); err != nil {
 			return nil, err
 		}
-		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
+		// A revision the chief of staff files without a question takes every
+		// blocking finding of a final review it triaged as needing code.
+		change := input.Change
+		var taken []followup.Triage
+		if routed && input.Question == "" && strings.TrimSpace(change) != "" {
+			pending, err := followup.PendingCode(repository, target)
+			if err != nil {
+				return refuse(err)
+			}
+			if len(pending) > 0 {
+				taken = pending
+				change = strings.TrimSpace(change) + "\n\n" + followup.RevisionText(pending)
+			}
+		}
+		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
 		var refused *trace.QuestionRefused
 		if errors.As(err, &refused) && bound != nil && strings.TrimSpace(input.Change) != "" && strings.TrimSpace(input.Reason) != "" {
 			return hand(refused.Reason, err)
 		}
 		if err != nil {
 			return refuse(err)
+		}
+		if len(taken) > 0 && !outcome.ProjectLevel {
+			if err := followup.Carry(ctx, repository, target, taken, outcome.Amendment.ID, now()); err != nil {
+				return nil, err
+			}
 		}
 		if outcome.ProjectLevel {
 			return encode(struct {

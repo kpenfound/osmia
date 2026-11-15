@@ -10,6 +10,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -85,6 +87,8 @@ func TestSharedChiefDispositionsMemberDiscoveries(t *testing.T) {
 	}
 
 	record := recordDiscovery(wg, scope, now)
+	// The disposition needs a decide result; Jev left the decision to the chief.
+	jevfixture.Fallback(r2, r2.Project(), m2, jev.KindDiscovery, jev.DiscoveryKey(id))
 	input, _ := json.Marshal(map[string]any{"workstream": m2, "id": id, "revision": 1, "disposition": "declined", "reason": "The selected checks the service ran cover the changed packages."})
 	raw, err = record.Handle(ctx, input)
 	must(t, err)

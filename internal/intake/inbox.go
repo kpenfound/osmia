@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -321,6 +322,13 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 			return nil, err
 		}
 	}
+	if s.DiscoveryEntries != nil {
+		entries, err := s.DiscoveryEntries(repository, w.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+	}
 	if err := add(HeldNoticesEntry(repository, w.Workstream)); err != nil {
 		return nil, err
 	}
@@ -473,7 +481,10 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 		return InboxEntry{}, false, nil
 	}
 	entries := AmendmentDissent(records)
-	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil {
+	// A plan-only amendment is the chief of staff's to decide, unless Jev's
+	// binding pick on it was refused: it is then the owner's, with that pick.
+	refused, handed := s.RefusedPick(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id))
+	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil && !handed {
 		return InboxEntry{}, false, nil
 	}
 	var options []string
@@ -496,6 +507,9 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 	}
 	e.Options = options
 	e.Recommendation = AmendmentRecommendation(entries, records, c.Round < s.Current().Shed.MaxRounds)
+	if handed {
+		CarriedCard(&e, refused, fmt.Sprintf("amendment %s", id))
+	}
 	return e, true, nil
 }
 

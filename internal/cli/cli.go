@@ -2069,6 +2069,8 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case wire.InboxNotices:
 			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the chief of staff's answer", stream))
+		case wire.InboxDiscovery:
+			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the chief of staff records it", stream))
 		}
 	}
 }

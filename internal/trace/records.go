@@ -475,7 +475,7 @@ func finalPath(parts []string) bool {
 	if brief, ok := strings.CutPrefix(parts[1], "brief-"); ok && strings.HasSuffix(brief, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(brief, ".json")) {
 		return true
 	}
-	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
 }
 
 func checkSelectionName(name string) bool {

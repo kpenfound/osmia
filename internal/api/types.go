@@ -1077,6 +1077,9 @@ const (
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
 	InboxBase         = "base"
+	// InboxDiscovery is a discovered piece of work whose disposition Jev
+	// decided but the service could not carry out, so it is the owner's.
+	InboxDiscovery = "discovery"
 	// InboxProjectCreation reports a project creation that cannot finish
 	// without the owner. Its answer retries the creation; it never adopts or
 	// deletes a repository.

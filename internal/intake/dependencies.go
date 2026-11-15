@@ -32,6 +32,7 @@ type Dependencies struct {
 	ApprovalTrace        func(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) (*trace.Repository, trace.Workgroup, error)
 	ArchivedWorkstream   func(raw string) (runtime.Archive, bool)
 	BaseEntry            func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
+	DiscoveryEntries     func(repository *trace.Repository, stream config.WorkstreamID) ([]InboxEntry, error)
 	ChangeHeld           func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
 	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)

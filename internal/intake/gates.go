@@ -180,6 +180,17 @@ func (s *Controller) CarriedJudgment(repository *trace.Repository, stream config
 	return res, true
 }
 
+// RefusedPick returns the binding Jev judgment of the subject whose pick the
+// service refused to carry out, when there is one. The subject is then with the
+// owner, and Jev is not asked about it again.
+func (s *Controller) RefusedPick(repository *trace.Repository, stream config.WorkstreamID, kind jev.DecisionKind, key string) (jev.Result, bool) {
+	res, err := jev.Recorded(repository, stream, kind, key)
+	if err != nil || res.Status != jev.Binding || res.Refused == "" {
+		return jev.Result{}, false
+	}
+	return res, true
+}
+
 // CarriedCard decorates a card with the binding judgment its subject carries.
 func CarriedCard(e *InboxEntry, res jev.Result, label string) {
 	e.Jev = &api.InboxJev{Pick: res.Pick, Confidence: res.Confidence, Threshold: res.Threshold, Binding: true, Refused: "the service could not carry the decision out", Judgment: res.Judgment}

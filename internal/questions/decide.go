@@ -43,7 +43,9 @@ type RoutingSubject struct {
 func (s RoutingSubject) Key() string { return jev.QuestionKey(s.Question.Asked.ID) }
 
 // Label names the question for the chief of staff.
-func (s RoutingSubject) Label() string { return fmt.Sprintf("question %s of workstream %s", s.Question.Asked.ID, s.Stream) }
+func (s RoutingSubject) Label() string {
+	return fmt.Sprintf("question %s of workstream %s", s.Question.Asked.ID, s.Stream)
+}
 
 // RoutingSubjectOf resolves the question id the way the chief of staff's
 // question tools name it (a number of the turn's own workstream, or

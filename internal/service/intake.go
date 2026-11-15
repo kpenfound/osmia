@@ -464,6 +464,7 @@ func (s *Service) intake() *intake.Controller {
 		ApprovalTrace:            s.approvalTrace,
 		ArchivedWorkstream:       s.archivedWorkstream,
 		BaseEntry:                baseEntry,
+		DiscoveryEntries:         discoveryEntries,
 		ChangeHeld:               changeHeld,
 		ChangeRepositoryHeld:     changeRepositoryHeld,
 		ChiefContext:             chiefContext,
