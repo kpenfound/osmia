@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -30,7 +31,11 @@ const (
 
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
-const Guidance = "When a service event says a question is open, choose exactly once for it. " +
+const Guidance = "When a service event says a question is open, investigate it first (factory_context, inspect_code, read_remote_file), then call decide with kind question-routing, the question's number as subject, and a short evidence summary of what you found. " +
+	"decide asks Jev how the question is routed: answered within the approved intent, routed as an amendment, or escalated. " +
+	"When Jev's decision is binding, answer, route_amendment and escalate record only the outcome it picked, and you still write the text that outcome needs. When decide says the decision is yours, Jev did not reach the confidence needed or could not answer: choose as the record supports. " +
+	"answer, escalate and route_amendment refuse a question decide has not been called for. A question that decide refuses as not Jev's to route, such as one the architect asked, keeps the route it has: use the tools directly. " +
+	"Choose exactly once for a question. " +
 	"Call answer for engineering decisions within the approved intent, including equivalent evidence and necessary supporting changes within an assignment. Cite the requirements and evidence supporting your decision: " + CitationForms + ". " +
 	"Call escalate only when the answer would contradict or extend the agreed design: it changes owner intent, relaxes a constraint, contradicts an owner ruling, or needs an owner-reserved tradeoff. Missing context calls for investigation, not an intent decision. " +
 	"Structure every escalation: section cites the spec or plan passage in tension, conflict states the tension itself, options are the choices and recommendation is what you would decide. " +
@@ -147,12 +152,19 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		// project-level amendment instead) belong, never against the
 		// chief's host workstream by default.
 		target := stream
+		var bound *jev.Result
 		if routed && input.Question != "" {
 			member, _, err := repository.ChiefQuestionTarget(stream, input.Question)
 			if err != nil {
 				return refuse(err)
 			}
 			target = member
+			var why string
+			if bound, why, err = requireRouting(repository, stream, input.Question, OutcomeRouteAmendment); err != nil {
+				return refuse(err)
+			} else if why != "" {
+				return encode(refusal{Reason: why})
+			}
 		}
 		if len(input.Citations) == 0 {
 			return encode(refusal{Reason: "at least one spec#<n> or plan#<unit> citation is required"})
@@ -179,7 +191,28 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 				document = d
 			}
 		}
+		// The service refused the transition Jev's binding pick calls for: the
+		// question goes to the owner with Jev's judgment, so the pick never
+		// leaves it stuck.
+		hand := func(reason string, original error) (json.RawMessage, error) {
+			batch, handErr := handToOwner(ctx, repository, agent, scope, input.Question, bound, reason, now())
+			if handErr != nil {
+				if original != nil {
+					return refuse(original)
+				}
+				return encode(refusal{Reason: reason})
+			}
+			return encode(struct {
+				Recorded  bool     `json:"recorded"`
+				Batch     string   `json:"batch"`
+				Questions []string `json:"questions"`
+				Detail    string   `json:"detail"`
+			}{true, batch, []string{input.Question}, "The service could not carry out Jev's decision (" + reason + "). The question is in the owner's inbox with Jev's judgment."})
+		}
 		if document.ID == "" {
+			if bound != nil {
+				return hand("this workstream has no seal", nil)
+			}
 			return encode(refusal{Reason: "this workstream has no seal"})
 		}
 		var sealed struct {
@@ -190,6 +223,10 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			return nil, err
 		}
 		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
+		var refused *trace.QuestionRefused
+		if errors.As(err, &refused) && bound != nil && strings.TrimSpace(input.Change) != "" && strings.TrimSpace(input.Reason) != "" {
+			return hand(refused.Reason, err)
+		}
 		if err != nil {
 			return refuse(err)
 		}
@@ -229,6 +266,13 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err != nil {
 			return refuse(err)
 		}
+		bound, why, err := requireRouting(repository, stream, input.Question, OutcomeAnswer)
+		if err != nil {
+			return refuse(err)
+		}
+		if why != "" {
+			return encode(refusal{Reason: why})
+		}
 		for _, c := range input.Citations {
 			if err := Resolve(ctx, repository, member, c); err != nil {
 				var unresolved *Unresolved
@@ -238,7 +282,11 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 				return nil, err
 			}
 		}
-		ruling, err := repository.AnswerQuestion(ctx, agent, scope, input.Question, input.Text, input.Citations, now())
+		judgment := ""
+		if bound != nil {
+			judgment = bound.Judgment
+		}
+		ruling, err := repository.AnswerQuestionJudged(ctx, agent, scope, input.Question, input.Text, input.Citations, judgment, now())
 		if err != nil {
 			return refuse(err)
 		}
@@ -266,6 +314,13 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		}
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
+		}
+		for _, id := range input.Questions {
+			if _, why, err := requireRouting(repository, stream, id, OutcomeEscalate); err != nil {
+				return refuse(err)
+			} else if why != "" {
+				return encode(refusal{Reason: why})
+			}
 		}
 		batch, err := repository.EscalateQuestions(ctx, agent, scope, trace.EscalationRequest{Questions: input.Questions, Rephrasing: input.Rephrasing, Section: input.Section, Conflict: input.Conflict, Blocked: input.Blocked, Options: input.Options, Recommendation: input.Recommendation}, now())
 		if err != nil {

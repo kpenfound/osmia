@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -88,7 +89,11 @@ func NewQuestionSetup(t *testing.T, prefix, global, charter string, askers []Que
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				list, err := questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				if scope.Role == trace.ChiefOfStaff {
+					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
+				}
+				return list, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
 		}

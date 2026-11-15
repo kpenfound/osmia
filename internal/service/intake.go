@@ -332,10 +332,6 @@ var registrationActor = intake.RegistrationActor
 
 var serviceActor = intake.ServiceActor
 
-func (s *Service) questionSignals(repository *trace.Repository) func(context.Context, trace.TurnRequest, coreadapter.Scope) string {
-	return s.intake().QuestionSignals(repository)
-}
-
 func (s *Service) chiefEventsSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
 	return s.intake().ChiefEventsSkip(repository)
 }

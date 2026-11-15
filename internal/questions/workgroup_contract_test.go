@@ -1,6 +1,7 @@
 package questions_test
 
 import (
+	"slices"
 	"context"
 	"reflect"
 	"strings"
@@ -95,6 +96,7 @@ func TestCrossRepoContractToolRoutesNonHostRequestToProject(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			chiefTools = decided(t, wg, g.Members[0], chiefTools)
 			input := `{"question":"` + string(crossMember2) + `:1","citations":["spec#1"],"change":"Widen the retry window","reason":"The consumer needs more time"}`
 			route := find(chiefTools, questions.RouteAmendmentTool)
 			result := callTool(t, route, input)
@@ -118,6 +120,8 @@ func TestCrossRepoContractToolRoutesNonHostRequestToProject(t *testing.T) {
 				}
 			}
 			after, err := trace.Read[trace.Document](f.r2, crossMember2)
+			// Jev's decision on the routing is a record of its own, beside the sealed slice.
+			after = slices.DeleteFunc(after, func(d trace.Document) bool { return strings.HasPrefix(d.Path, "judgments/") })
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("routing changed the sealed slice: %+v, %v", after, err)
 			}

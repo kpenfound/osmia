@@ -312,6 +312,12 @@ func resultOf(records []recorded) Result {
 // trace, without asking Jev: a binding pick, a nonbinding answer, only
 // fallbacks, or none. A pending attempt that never finished counts as none.
 func (j *Judge) Lookup(repo *trace.Repository, stream config.WorkstreamID, kind DecisionKind, key string) (Result, error) {
+	return Recorded(repo, stream, kind, key)
+}
+
+// Recorded is Lookup for a caller that holds no Judge: what the workstream's
+// trace records for the occurrence, without asking Jev.
+func Recorded(repo *trace.Repository, stream config.WorkstreamID, kind DecisionKind, key string) (Result, error) {
 	if reason := ValidOccurrence(kind, key); reason != "" {
 		return Result{}, errors.New(reason)
 	}

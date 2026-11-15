@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -371,6 +372,12 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 		if !objectionIsJevs(entry) {
 			continue
 		}
+		if _, carried := s.CarriedJudgment(repository, stream, jev.KindObjection, jev.ObjectionKey(entry.ID)); carried {
+			// The chief of staff's decision on it, which Jev's binding pick
+			// called for, could not be carried out: the objection is the
+			// owner's, with that judgment, and Jev is not asked again.
+			continue
+		}
 		entry := entry
 		reached := e.OpenedAt
 		if docs, err := trace.Read[trace.Document](repository, stream); err == nil {
@@ -473,6 +480,19 @@ func (s *Controller) ratificationEntry(repository *trace.Repository, stream conf
 			recs = append(recs, fmt.Sprintf("Objection %s: %s", strings.TrimPrefix(g.Key, "objection:"), rec))
 			if first == nil {
 				first = view
+			}
+		}
+	}
+	if entries, err := Dissent(repository, stream); err == nil {
+		for _, entry := range entries {
+			if !objectionIsJevs(entry) {
+				continue
+			}
+			if res, carried := s.CarriedJudgment(repository, stream, jev.KindObjection, jev.ObjectionKey(entry.ID)); carried {
+				recs = append(recs, fmt.Sprintf("Objection %s: Jev decided %s for the chief of staff's decision on it with confidence %.2f, but the service could not carry it out. The decision is yours.", entry.ID, res.Pick, res.Confidence))
+				if first == nil {
+					first = &api.InboxJev{Pick: res.Pick, Confidence: res.Confidence, Threshold: res.Threshold, Binding: true, Refused: "the service could not carry the decision out", Judgment: res.Judgment}
+				}
 			}
 		}
 	}
@@ -588,7 +608,7 @@ func (s *Controller) AmendmentGateOf(repository *trace.Repository, stream config
 // escalationRoles are the roles whose escalated questions Jev may decide: the
 // workers that build a feature. An architect's question, such as the judgment
 // that a project needs no change, is the owner's.
-var escalationRoles = []string{MasonRole, ReviewerRole}
+var escalationRoles = questions.RoutingRoles
 
 // escalationGate returns the gate of an escalation whose card is view, or, when
 // Jev may not decide it, nil and the binding Jev judgment it already carries.

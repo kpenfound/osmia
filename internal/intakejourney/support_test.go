@@ -373,17 +373,6 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 	}, key, graph, backend, base)
 }
 
-// seedBuilding gives a running service a sealed build ready for unit dispatch.
-func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
-	t.Helper()
-	return intakefixture.SeedBuilding(t, f.clone, key, graph, func() (string, error) {
-		b, err := f.s.newWorkspaces(context.Background(), f.s.about(f.repository()))
-		return b.Backend, err
-	}, func(k, g, b, base string) config.WorkstreamID {
-		return recordBuild(t, f, f.repository(), k, g, b, base)
-	}, f.s.refreshRuntime)
-}
-
 // seedChecking records a completed mason report and snapshots its
 // candidate, so the unit is checking.
 func seedChecking(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {

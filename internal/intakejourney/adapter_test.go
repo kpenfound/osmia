@@ -171,7 +171,6 @@ func (s *Service) setSole(p *activeProject) {
 func (s *Service) roleExecution(c *config.Config, r string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
 	return s.intake().RoleExecution(c, r)
 }
-func (s *Service) refreshRuntime() error { return service.InspectForTest(s.core()).RefreshRuntime() }
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	service.InspectForTest(s.core()).Handle(w, r)
 }
@@ -344,9 +343,6 @@ func (s *Service) answers(cfg *config.Config, repository *trace.Repository) *que
 }
 func (s *Service) chiefRepository(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
 	return s.intake().ChiefRepository(ctx, r, w)
-}
-func (s *Service) newWorkspaces(ctx context.Context, c *config.Config) (WorkspacesStatus, error) {
-	return s.intake().NewWorkspaces(ctx, c)
 }
 func (s *Service) runtimes() (*config.Config, []*activeProject) {
 	cfg, ps := s.intake().Runtimes()

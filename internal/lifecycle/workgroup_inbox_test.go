@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -128,7 +129,14 @@ clone = "`+home2+`"
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				list, err := questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				if err != nil {
+					return nil, err
+				}
+				if scope.Role == trace.ChiefOfStaff {
+					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
+				}
+				return list, nil
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
@@ -530,7 +538,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	inbox, err := c.Inbox(ctx)
 	must(t, err)
 	if len(inbox.Entries) != 3 {
-		t.Fatalf("inbox before any ruling: %+v", inbox)
+		t.Fatalf("inbox before any ruling: %+v; %s", inbox, f.diagnostics(s))
 	}
 	var consolidated, entryU1, entryU2 InboxEntry
 	for _, e := range inbox.Entries {

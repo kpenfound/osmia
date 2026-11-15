@@ -91,6 +91,7 @@ func prepareBounceFixture(t *testing.T, history string, build bool, configure ..
 				decision = "revise"
 			}
 			owner := strings.Contains(req.Prompt, "owner_decided")
+			decideContest(f.repository(), config.WorkstreamID(sessionStream(req)), bounceUnit)
 			body, err := callTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": decision, "note": bounceNote, "owner_decided": owner})
 			if err == nil && !strings.Contains(body, `"recorded":true`) {
 				err = fmt.Errorf("resolve_contested: %s", body)
@@ -107,6 +108,7 @@ func prepareBounceFixture(t *testing.T, history string, build bool, configure ..
 			return result, err
 		}
 		if strings.Contains(req.Prompt, "escalate bounce now") && escalated.CompareAndSwap(false, true) {
+			decideContest(f.repository(), config.WorkstreamID(sessionStream(req)), bounceUnit)
 			body, err := callTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "escalate", "note": "The retry needs the owner's decision."})
 			if err == nil && !strings.Contains(body, `"recorded":true`) {
 				err = fmt.Errorf("escalate: %s", body)

@@ -401,6 +401,14 @@ func (r *Repository) chiefQuestionScope(ctx context.Context, agent string, scope
 // open, an empty answer and an answer without a citation are refused with
 // *QuestionRefused.
 func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, at time.Time) (Ruling, error) {
+	return r.AnswerQuestionJudged(ctx, agent, scope, id, text, citations, "", at)
+}
+
+// AnswerQuestionJudged is AnswerQuestion for an answer Jev's binding decision
+// calls for: a non-empty judgment names the Jev judgment record, and the
+// ruling records Jev as its decider and actor and links the judgment. The
+// answer's text is still the chief of staff's.
+func (r *Repository) AnswerQuestionJudged(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, judgment string, at time.Time) (Ruling, error) {
 	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
 		return Ruling{}, err
@@ -428,6 +436,9 @@ func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope cor
 	h := Header{Schema: "osmia.trace.ruling", Version: Version, ID: localID, Revision: 1, Project: target.project, Workstream: stream, Unit: q.Asked.Unit,
 		At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
 	ruling := Ruling{Header: h, QuestionID: localID, QuestionRevision: q.Latest.Revision, Decision: DecisionAnswer, ReturnedAnswer: text, Citations: slices.Clone(citations)}
+	if judgment != "" {
+		ruling.DecidedBy, ruling.Judgment, ruling.Actor = DecidedByJev, judgment, JevActor
+	}
 	if err := validate(ruling); err != nil {
 		return Ruling{}, err
 	}

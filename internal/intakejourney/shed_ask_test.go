@@ -31,7 +31,6 @@ import (
 
 const askedQuestion = intakefixture.AskedQuestion
 const askedAnswer = intakefixture.AskedAnswer
-const ownerRuling = intakefixture.OwnerRuling
 const relayedRuling = intakefixture.RelayedRuling
 const chiefRole = intakefixture.ChiefRole
 const pinOne = intakefixture.PinOne

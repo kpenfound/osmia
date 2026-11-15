@@ -8,6 +8,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -18,6 +20,10 @@ type contestFixture struct {
 	repo   *trace.Repository
 	r      *reviewers
 	tool   coreadapter.Tool
+	// scope is the chief of staff's claimed turn and controls the service's
+	// runtime controls, for tools a test builds beside tool.
+	scope    coreadapter.Scope
+	controls *runtimeControls
 }
 
 func newContestFixture(t *testing.T, key string) *contestFixture {
@@ -29,7 +35,7 @@ func newContestFixture(t *testing.T, key string) *contestFixture {
 	})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	return &contestFixture{f: f, stream: stream, repo: repo, r: &reviewers{masons: newMasonController(f.s, repo)}, tool: controls.resolveContested(repo, scope)}
+	return &contestFixture{f: f, stream: stream, repo: repo, r: &reviewers{masons: newMasonController(f.s, repo)}, tool: controls.resolveContested(repo, scope), scope: scope, controls: controls}
 }
 
 func (c *contestFixture) state(t *testing.T) trace.WorkflowState {
@@ -48,5 +54,23 @@ func (c *contestFixture) contest(t *testing.T) trace.Transition {
 
 func (c *contestFixture) resolve(t *testing.T, input string) string {
 	t.Helper()
+	c.decided(t)
 	return intakefixture.Handle(t, c.tool, input)
+}
+
+// decided leaves the contest's decide result as a fallback, as the decide tool
+// does while Jev is unconfigured, unless a result is recorded.
+func (c *contestFixture) decided(t *testing.T) {
+	t.Helper()
+	contest, contested, err := unitContest(c.repo, c.stream, "resume")
+	must(t, err)
+	if !contested {
+		return
+	}
+	key := jev.ContestKey(contest.ID)
+	if res, err := jev.Recorded(c.repo, c.stream, jev.KindContestedRuling, key); err != nil || res.Status != jev.None {
+		must(t, err)
+		return
+	}
+	jevfixture.Fallback(c.repo, c.repo.Project(), c.stream, jev.KindContestedRuling, key)
 }

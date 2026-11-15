@@ -264,6 +264,20 @@ func tools(t *testing.T, f fixture, agent string, scope coreadapter.Scope, now t
 	if err != nil {
 		t.Fatal(err)
 	}
+	if scope.Role == trace.ChiefOfStaff {
+		for _, s := range []config.WorkstreamID{stream, other} {
+			qs, err := f.repo.Questions(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range qs {
+				if q.State == trace.QuestionOpen {
+					decideFallback(t, f.repo, s, q.Asked.ID)
+				}
+			}
+		}
+		list = decided(t, f.repo, stream, list)
+	}
 	out := map[string]coreadapter.Tool{}
 	for _, tool := range list {
 		if tool.Effect != coreadapter.ToolMemory || tool.Handle == nil || !json.Valid(tool.InputSchema) {
@@ -392,6 +406,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 
 	// An answer without a citation, or with one that names nothing, records
 	// nothing and says why.
+	decideFallback(t, f.repo, stream, "1")
 	before := f.head(t)
 	for _, c := range [][3]string{
 		{"answer", `{"question":"1","text":"In files.","citations":[]}`, `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`},

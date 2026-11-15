@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -213,6 +214,7 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
 	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.Now)
 	Must(t, err)
+	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
 	if i < 0 {
 		t.Fatal("the chief of staff has no answer tool")

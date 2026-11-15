@@ -348,6 +348,14 @@ func (a TestAccess) SetStoppedRuntime(store *runtime.Store) error {
 	}
 }
 
+// DecideTool returns the decide tool of the claimed chief-of-staff turn scope
+// names, as the service composes it.
+func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	controls := &runtimeControls{}
+	controls.service.Store(a.s)
+	return controls.decide(r, scope)
+}
+
 // SetJudge binds a fixture judge for test-controlled check selection.
 func (a TestAccess) SetJudge(j *jev.Judge) {
 	a.s.mu.Lock()

@@ -469,7 +469,7 @@ func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
 }
 
 func TestQuestionToolsFollowTheRole(t *testing.T) {
-	chief := []string{"answer", "escalate", "relay_ruling", "route_amendment", "propose_charter"}
+	chief := []string{"answer", "escalate", "relay_ruling", "route_amendment", "propose_charter", "decide"}
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")

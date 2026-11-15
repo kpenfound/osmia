@@ -1711,18 +1711,23 @@ values it applies; a changed value creates a new judgment.
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
 same selection on any Git working tree.
 
-The chief of staff's turn that delivers a question asks
-Jev, before the session starts, whether the question's honest answer would
-change the sealed spec or plan, whether answering it as it proposes would
-contradict one of the owner's rulings or the project's notices, and whether it
-asks for a standing project rule. The prompt ends with each answer that
-reaches its threshold as a signal naming its judgment and the outcome it
-argues for, and the turn's response records that text as `advice`. The chief
-of staff still chooses the outcome and explains a choice against a signal. A
-fallback, or answers below every threshold, leaves the prompt without
-signals. A question's judgment is reused when the question is delivered
-again, and names the question, so its signals can be compared with the
-question's outcome.
+The chief of staff investigates a question, a contested unit or a committee
+objection first and then calls `decide` with the kind, the subject and a short
+evidence summary. The service checks from the subject's records that the chief
+may decide it today (a conflict between member charters and the owner's own
+objection are refused, with no request and no judgment), builds the state from
+the records and asks Jev to pick: answer, route as an amendment or escalate a
+question; review, revise or escalate a contested unit; dismiss or escalate an
+objection. Jev never reads code or uses tools. A pick at or above
+`[jev] decision_threshold` is binding: the outcome tool (`answer`, `route_amendment`,
+`escalate`, `resolve_contested`, `resolve_objection`) then records only that
+outcome, with the chief's own text, and the decision is shown as decided by
+Jev. A pick below the threshold, or a fallback, leaves the decision with the
+chief. The outcome tools refuse a subject `decide` has not been called for.
+The result belongs to the subject occurrence (the question, the contest or the
+objection), is reused when `decide` is called again, and survives a restart.
+When the service refuses the transition a binding pick calls for, the item goes
+to the owner's inbox with Jev's judgment and Jev is not asked again.
 
 Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
