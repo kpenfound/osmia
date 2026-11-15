@@ -38,6 +38,7 @@ func logUnsettledLifecycleOperations(t *testing.T, repo *trace.Repository, strea
 }
 
 func TestLiveWorkgroupLeaderHandlesRetiredMembersAndErrors(t *testing.T) {
+	t.Parallel()
 	const a config.WorkstreamID = "w_00000000000000000000000000000001"
 	const b config.WorkstreamID = "w_00000000000000000000000000000002"
 	const group config.WorkgroupID = "g_00000000000000000000000000000001"
@@ -72,6 +73,7 @@ func TestLiveWorkgroupLeaderHandlesRetiredMembersAndErrors(t *testing.T) {
 	}
 }
 func TestDesignProductionFullyRetiredWorkgroupAcrossRestart(t *testing.T) {
+	t.Parallel()
 	for _, pending := range []bool{false, true} {
 		name := "completed"
 		if pending {

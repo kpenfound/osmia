@@ -104,6 +104,7 @@ func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 	}
 }
 func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-cleanup-")
@@ -336,6 +337,7 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 // cleanup waits, with a logged reason, for an operation without a result,
 // and proceeds once it is acknowledged.
 func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-pending-op-")
@@ -390,6 +392,7 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 // cleanup waits, with a logged reason, for the librarian refresh covering
 // the archived workstream's landings, and proceeds once it completes.
 func TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-learnings-")
@@ -629,6 +632,7 @@ func TestArchiveRecordsOutcomeAndPullRequestLinkThenCleansUp(t *testing.T) {
 // workstream's trace is removed, and that cleanup completes while Hearsay is
 // unreachable. Without publishing configured it writes nothing of the kind.
 func TestArchiveCleanupKeepsPendingPublicationWithoutReachingHearsay(t *testing.T) {
+	t.Parallel()
 	for _, publishing := range []bool{true, false} {
 		t.Run(fmt.Sprintf("publishing=%v", publishing), func(t *testing.T) {
 			ctx := context.Background()

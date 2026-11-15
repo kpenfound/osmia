@@ -17,6 +17,7 @@ import (
 )
 
 func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, edge                string
 		detected, cleaned, legacy bool
@@ -167,6 +168,7 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 	}
 }
 func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                                                      string
 		cleaned, merged, closed, failed, stale, legacy, cancelled bool

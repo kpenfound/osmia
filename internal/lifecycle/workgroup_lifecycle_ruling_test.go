@@ -16,6 +16,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// serial: beside other parallel tests its recovery after the restart can
+// stall until the test times out; the cause is not yet found.
 func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 	for _, stage := range []string{"owner-ruling-member", "chief-relay-member"} {
 		t.Run(stage, func(t *testing.T) {

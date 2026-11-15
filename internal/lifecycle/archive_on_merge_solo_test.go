@@ -17,6 +17,7 @@ import (
 // merged: no owner action, the chief of staff on the record, and its
 // conversation reading the entry until archive cleanup removes it.
 func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	host := &branchLookups{fakePulls: &fakePulls{}}

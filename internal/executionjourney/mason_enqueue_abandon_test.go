@@ -10,6 +10,7 @@ import (
 )
 
 func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
+	t.Parallel()
 	for _, step := range []string{"mason-implementing", "mason-turn-queued"} {
 		t.Run(step, func(t *testing.T) {
 			ctx := context.Background()

@@ -143,6 +143,7 @@ func edgeCallers(t *testing.T, repo *trace.Repository, stream config.WorkstreamI
 }
 
 func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t *testing.T) {
+	t.Parallel()
 	f := newChangePassFixture(t)
 	ctx := context.Background()
 	locals := []config.WorkstreamID{passFirst, passSecond, passThird}
@@ -324,6 +325,7 @@ var idleSpecSizes = []int{40_000, 100_000, 320_000}
 // at three project spec sizes. Decoding, marshalling or copying the approval
 // or the spec on a pass would add its size to every pass; the measure is an
 // exact allocation count, not a duration.
+// serial: the allocation count is the process's, so no other test may run.
 func TestIdleWorkgroupPassesDoNotGrowWithProjectSpecSize(t *testing.T) {
 	const slack = 32 << 10
 	scheduler, observer := make([]float64, len(idleSpecSizes)), make([]float64, len(idleSpecSizes))

@@ -183,6 +183,7 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 }
 
 func TestModelOperationsUseWorkflowOrderingBesideThePass(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction, ExtractAction, RefreshAction, FinalReviewAction, deliveryReviewAction} {
 		t.Run(action, func(t *testing.T) {
 			op := coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: action}
@@ -272,6 +273,7 @@ func TestModelOperationsHoldForProviderUsageLimits(t *testing.T) {
 }
 
 func TestFinalReviewRestartPreservesAnotherReviewsSettledJujutsuWork(t *testing.T) {
+	t.Parallel()
 	requireJJ(t)
 	for _, point := range []string{"final-rebase-recorded", "final-rebase-moved"} {
 		t.Run(point, func(t *testing.T) {

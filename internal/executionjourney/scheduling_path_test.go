@@ -806,6 +806,7 @@ func pathStartAndPass(t *testing.T, f *shedFixture) {
 // The parent kills the process after a real foreman has advanced the branch
 // inside LocalStep, leaving its checkpoint for Start's workspace recovery.
 func TestServiceJJCrashProcess(t *testing.T) {
+	t.Parallel()
 	root := os.Getenv("OSMIA_TEST_CRASH_ROOT")
 	if root == "" {
 		t.Skip("service crash subprocess")

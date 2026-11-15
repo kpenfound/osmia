@@ -22,6 +22,7 @@ func recordResolutionMerge(t *testing.T, repo *trace.Repository, stream config.W
 }
 
 func TestMemberResolutionRequiresMergeOrCancellation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, state  string
 		pr           int
@@ -70,6 +71,7 @@ func TestMemberResolutionRequiresMergeOrCancellation(t *testing.T) {
 }
 
 func TestMemberEvidenceUsesCurrentDocumentRevisions(t *testing.T) {
+	t.Parallel()
 	docs := []trace.Document{
 		{Header: trace.Header{ID: publicationDocument, Revision: 2}, Content: `{"status":"prepared"}`},
 		{Header: trace.Header{ID: publicationDocument, Revision: 1}, Content: `{"status":"opened","pull_request":42}`},

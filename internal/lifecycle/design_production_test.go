@@ -154,6 +154,7 @@ func TestDesignProductionStartDraftRatifyAndRestart(t *testing.T) {
 }
 
 func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, step := range []string{"design-member-allocated", "design-workgroup-prepared", "design-member-joined", "design-conversation-imported", "design-conversation-adopted", "group-decision-recorded", "group-member-decision-prepared", "seal-branch-created", "seal-recorded", "group-member-seal-prepared", "group-before-completion"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
@@ -213,6 +214,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 }
 
 func TestDesignProductionRatificationRefusesInvalidPacketBeforeDecisions(t *testing.T) {
+	t.Parallel()
 	for _, invalid := range []string{"cycle", "missing-slice"} {
 		t.Run(invalid, func(t *testing.T) {
 			t.Parallel()

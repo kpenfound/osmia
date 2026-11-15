@@ -16,6 +16,7 @@ import (
 )
 
 func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
+	t.Parallel()
 	for _, edge := range []string{trace.EdgeHardBlock, trace.EdgeContract, ""} {
 		t.Run("edge-"+edge, func(t *testing.T) {
 			t.Parallel()
@@ -168,6 +169,7 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 	}
 }
 func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	clock := &fixedClock{At: demoStart}
@@ -227,6 +229,7 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 	}
 }
 func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	host := &fakePulls{}

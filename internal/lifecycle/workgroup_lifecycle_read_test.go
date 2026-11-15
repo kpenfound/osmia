@@ -20,6 +20,7 @@ import (
 )
 
 func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
+	t.Parallel()
 	for _, read := range []string{"inbox", "ruling"} {
 		t.Run(read, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())

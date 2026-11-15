@@ -179,6 +179,7 @@ func (g *autoArchiveGroup) archive() (runtime.Archive, bool) {
 }
 
 func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	group, err := g.c.Status(ctx, g.member)
@@ -294,6 +295,7 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 func (g *autoArchiveGroup) f() *productionDesignFixture { return g.productionDesignFixture }
 
 func TestAutoArchiveSurvivesAnInterruptionBeforeTheEntryIsVisible(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	g.steps.hold("member-archive-recorded")
@@ -322,6 +324,7 @@ func TestAutoArchiveSurvivesAnInterruptionBeforeTheEntryIsVisible(t *testing.T) 
 }
 
 func TestAutoArchiveAfterARestartBetweenTheMergeAndTheArchive(t *testing.T) {
+	t.Parallel()
 	g := newAutoArchiveGroup(t)
 	g.steps.hold("auto-archive-selected")
 	g.merge(t)
@@ -351,6 +354,7 @@ func TestAutoArchiveAfterARestartBetweenTheMergeAndTheArchive(t *testing.T) {
 }
 
 func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	repo, err := g.s.repository(g.project)
@@ -392,6 +396,7 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 // An owner archive that lands first is left as it is: the merged member is
 // archived by the owner and no automatic-archive entry is announced.
 func TestAutoArchiveLeavesAnOwnerArchiveAndAnnouncesNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	resp, err := g.c.Archive(ctx, g.member)

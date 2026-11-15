@@ -25,6 +25,7 @@ var idleSchedulerSteps = []string{"group-approval", "edge", "base", "workgroup-r
 // each phase the approval and project spec are decoded and the workgroup trace
 // is opened from disk a bounded number of times, however many passes run.
 func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
+	t.Parallel()
 	f, id, _ := projectSliceRefreshFixture(t)
 	ctx := context.Background()
 	root := f.s.current().Root

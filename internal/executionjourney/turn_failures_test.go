@@ -168,6 +168,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 }
 
 func TestFailureHistoryCollapsesRepeatedAttempts(t *testing.T) {
+	t.Parallel()
 	attempt := func(n int, profile, failure string) trace.TurnAttempt {
 		return trace.TurnAttempt{Number: n, Profile: coreadapter.Profile{Name: profile}, FailureClass: coreadapter.Infrastructure, Failure: failure}
 	}

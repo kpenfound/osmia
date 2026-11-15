@@ -74,6 +74,12 @@ func factoryPauseOf(t *testing.T, c *Client) (runtime.Pause, bool) {
 	return intakefixture.FactoryPauseOf(t, c.Runtime)
 }
 
+// resumeLimitResets is when the provider usage limit that resume's first
+// attempt reports clears. The demo clock advances a second on every read, so
+// it lies far enough ahead that no run of the test reads its way past it
+// while the test still expects the limit to hold.
+var resumeLimitResets = demoStart.Add(1000 * time.Hour)
+
 func TestReliabilityDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -202,7 +208,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		resumeBackends = append(resumeBackends, backend)
 		mu.Unlock()
 		if backend == agent.AgentClaude {
-			return &agent.Result{ClaudeID: "session-limited", SessionDir: req.SessionDir, IsError: true, RateLimit: &agent.RateLimit{Status: "rejected", Type: "five_hour", ResetsAt: demoStart.Add(5 * time.Hour)}}, nil
+			return &agent.Result{ClaudeID: "session-limited", SessionDir: req.SessionDir, IsError: true, RateLimit: &agent.RateLimit{Status: "rejected", Type: "five_hour", ResetsAt: resumeLimitResets}}, nil
 		}
 		return masons.Turn(ctx, req, verified, tools)
 	}
@@ -372,7 +378,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	if st.Profiles[masonRole] != (EffectiveProfile{Name: "other", Source: "provider_fallback", Reason: "Provider claude usage limit (rejected)"}) {
 		t.Fatalf("mason profile under the usage limit: %+v", st.Profiles[masonRole])
 	}
-	if l := st.ProviderLimits; len(l) != 1 || l[0].Backend != agent.AgentClaude || l[0].Status != "rejected" || l[0].Kind != "five_hour" || !l[0].ResetsAt.Equal(demoStart.Add(5*time.Hour)) {
+	if l := st.ProviderLimits; len(l) != 1 || l[0].Backend != agent.AgentClaude || l[0].Status != "rejected" || l[0].Kind != "five_hour" || !l[0].ResetsAt.Equal(resumeLimitResets) {
 		t.Fatalf("provider limits %+v", st.ProviderLimits)
 	}
 

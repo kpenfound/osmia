@@ -165,6 +165,7 @@ func TestChangePassReportsLiveTraceErrorsAndCancellation(t *testing.T) {
 type changeRaceGate = intakefixture.ChangeRaceGate
 
 func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T) {
+	t.Parallel()
 	type scenario struct {
 		kind                           string
 		affectsRetired, resumeRetained bool
@@ -694,6 +695,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 	}
 }
 func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	gate := &changeRaceGate{Step: "group-approval-retry-locked", Reached: make(chan struct{}), Released: make(chan struct{})}
 	t.Cleanup(gate.Release)

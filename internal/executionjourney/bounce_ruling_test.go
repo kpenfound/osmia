@@ -232,6 +232,7 @@ func (b *bounceFixture) assertOnce(t *testing.T, decision string) {
 }
 
 func TestBounceRecoveryBypassesOtherTransitions(t *testing.T) {
+	t.Parallel()
 	unit := bounceUnit
 	subject := trace.UnitSubject(unit)
 	for _, transition := range []trace.Transition{
@@ -250,6 +251,7 @@ func TestBounceRecoveryBypassesOtherTransitions(t *testing.T) {
 }
 
 func TestBounceRulingsReachTheNextRole(t *testing.T) {
+	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		for _, decision := range []string{"review", "revise"} {
 			for _, entry := range []string{"owner", "chief", "owner_decided"} {
@@ -291,6 +293,7 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 }
 
 func TestBounceEscalationReachesTheOwnersInbox(t *testing.T) {
+	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		t.Run(history, func(t *testing.T) {
 			t.Parallel()
@@ -313,6 +316,7 @@ func TestBounceEscalationReachesTheOwnersInbox(t *testing.T) {
 }
 
 func TestBounceChiefDecisionValidation(t *testing.T) {
+	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		t.Run(history, func(t *testing.T) {
 			t.Parallel()
@@ -347,6 +351,7 @@ func TestBounceChiefDecisionValidation(t *testing.T) {
 }
 
 func TestBounceOwnerDecisionAnswersChiefEscalation(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
 			t.Parallel()
@@ -367,6 +372,7 @@ func TestBounceOwnerDecisionAnswersChiefEscalation(t *testing.T) {
 }
 
 func TestSavedBounceRulingsRecoverAndDeliverOnce(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		for _, retry := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/retry=%t", decision, retry), func(t *testing.T) {
@@ -472,6 +478,7 @@ func TestBounceRulingKeysAreBoundedAndLegacyDecisionsRemainReadable(t *testing.T
 }
 
 func TestBounceRulingAndChiefDecisionCommitTogether(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
 			t.Parallel()
@@ -508,6 +515,7 @@ func TestBounceRulingAndChiefDecisionCommitTogether(t *testing.T) {
 }
 
 func TestBounceRulingFailureLeavesTheContestAvailable(t *testing.T) {
+	t.Parallel()
 	for _, conflict := range []bool{false, true} {
 		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
 			t.Parallel()
@@ -551,6 +559,7 @@ func TestBounceRulingFailureLeavesTheContestAvailable(t *testing.T) {
 }
 
 func TestBounceRulingReconcilesAControllersStaleContest(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
 			t.Parallel()
@@ -570,6 +579,7 @@ func TestBounceRulingReconcilesAControllersStaleContest(t *testing.T) {
 }
 
 func TestBounceRulingRecoveryRejectsADifferentTransition(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		for _, field := range []string{"contest", "candidate", "send-backs", "decision", "note"} {
 			t.Run(decision+"/"+field, func(t *testing.T) {
@@ -629,6 +639,7 @@ func TestBounceRulingRecoveryRejectsADifferentTransition(t *testing.T) {
 }
 
 func TestBounceRulingRecoveryAtRoleDeliveryBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		for _, boundary := range []string{"bounce-ruling-committed:", "unit-role-enqueue:", "unit-role-queued:"} {
 			t.Run(decision+"/"+boundary, func(t *testing.T) {
@@ -721,6 +732,7 @@ func (b *bounceFixture) stop(t *testing.T) {
 }
 
 func TestOrdinarySendBackRecoversFindingsAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, history := range []string{"reviews", "checks"} {
 		for _, recoverer := range []string{"service", "mason-finish"} {
 			t.Run(history+"/"+recoverer, func(t *testing.T) {

@@ -157,6 +157,7 @@ func routedPasses(c *lifecycle.Controller) *[]string {
 }
 
 func TestChangePassLocalGroupRoutesOnlyLeader(t *testing.T) {
+	t.Parallel()
 	f := newChangePassFixture(t)
 	g := f.localGroup(t)
 	groups, _, err := trace.Workgroups(f.local)
@@ -191,6 +192,7 @@ func TestChangePassLocalGroupRoutesOnlyLeader(t *testing.T) {
 }
 
 func TestChangePassCrossRepoReadsOnceAndRoutesOnlyLeader(t *testing.T) {
+	t.Parallel()
 	for _, count := range []int{1, 3} {
 		t.Run(fmt.Sprintf("local-members-%d", count), func(t *testing.T) {
 			f := newChangePassFixture(t)
@@ -227,6 +229,7 @@ func TestChangePassCrossRepoReadsOnceAndRoutesOnlyLeader(t *testing.T) {
 }
 
 func TestChangePassArchivedLeaderRoutesNextLiveMember(t *testing.T) {
+	t.Parallel()
 	for _, cross := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cross-repo-%t", cross), func(t *testing.T) {
 			f := newChangePassFixture(t)
@@ -253,6 +256,7 @@ func TestChangePassArchivedLeaderRoutesNextLiveMember(t *testing.T) {
 }
 
 func TestChangePassJoinDuringPassUsesFreshMembershipNextPass(t *testing.T) {
+	t.Parallel()
 	for _, cross := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cross-repo-%t", cross), func(t *testing.T) {
 			f := newChangePassFixture(t)
@@ -346,6 +350,7 @@ func (f *changePassFixture) retire(t *testing.T, g trace.Workgroup) {
 }
 
 func TestChangePassFullyRetiredPendingDecisionsRemainHeld(t *testing.T) {
+	t.Parallel()
 	f := newChangePassFixture(t)
 	wt, g := f.crossGroup(t, 3)
 	f.approve(t, wt, g)
@@ -383,6 +388,7 @@ func TestChangePassFullyRetiredPendingDecisionsRemainHeld(t *testing.T) {
 }
 
 func TestChangePassRetirementRequiresApprovedArchiveIdentity(t *testing.T) {
+	t.Parallel()
 	f := newChangePassFixture(t)
 	wt, g := f.crossGroup(t, 3)
 	c := f.pending(t, wt, g)
@@ -418,6 +424,7 @@ func TestChangePassRetirementRequiresApprovedArchiveIdentity(t *testing.T) {
 // ratification has no approval. It is retired on its archive records, and
 // the pass carries on instead of failing on every retry.
 func TestChangePassUnratifiedRetiredGroupRemainsHeld(t *testing.T) {
+	t.Parallel()
 	f := newChangePassFixture(t)
 	wt, g := f.crossGroup(t, 3)
 	c := f.pending(t, wt, g)

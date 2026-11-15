@@ -16,6 +16,7 @@ import (
 )
 
 func TestWorkgroupOwnPullRequestObservationWithRecordedBaseIntegration(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
@@ -40,6 +41,7 @@ func TestWorkgroupOwnPullRequestObservationWithRecordedBaseIntegration(t *testin
 }
 
 func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t *testing.T) {
+	t.Parallel()
 	for _, based := range []bool{false, true} {
 		t.Run(fmt.Sprintf("with-base-%v", based), func(t *testing.T) {
 			cfg, repo, host, refresh := ownPRFixture(t)
