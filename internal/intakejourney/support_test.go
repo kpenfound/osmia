@@ -220,7 +220,7 @@ func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.Workstre
 // newApprovedFixtureOn creates approved units on the given workspace backend.
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
+	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan)
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
 	intakefixture.SeedApprovedUnits(t, func(u, o string) { seedReview(t, f, repository, stream, u, o) }, func(u, c string) { approveDirectly(t, f.s, repository, stream, u, c) })
@@ -251,20 +251,20 @@ func newMasonController(s *Service, repository *trace.Repository) *masons {
 
 // newMasonFixtureOn is newConfiguredMasonFixture whose workstreams are
 // handed in on the workspace backend given.
-func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
+func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	return newMasonFixtureWith(t, backend, capacity, drafted, classifier, nil)
+	return newMasonFixtureWith(t, backend, capacity, drafted, nil)
 }
 
 // newMasonFixtureWith is newMasonFixtureOn with prepare, when set, changing
 // the options and the configuration file before the service starts.
-func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
 		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
-		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, backend, capacity, classifier, opts.Threads)
+		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, backend, capacity, opts.Threads)
 		if prepare != nil {
 			prepare(opts)
 		}
@@ -289,7 +289,7 @@ func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 // handed in on the workspace backend given.
 func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "")
+	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
 	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
 	return f, fake
 }

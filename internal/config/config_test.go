@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -188,21 +189,33 @@ func TestBudgetLimits(t *testing.T) {
 	}
 }
 
-func TestProjectClassifier(t *testing.T) {
-	for _, tc := range []struct{ setting, want string }{{"", ""}, {"classifier = 'default'\n", "default"}} {
-		c, err := Load(fixture(t, topConfig, projectConfig+tc.setting))
-		if err != nil || c.Project.Classifier != tc.want {
-			t.Fatalf("classifier %q: %+v %v", tc.setting, c, err)
+// A leftover classifier setting, per project or as roles.classifier, loads
+// and has no effect.
+func TestClassifierSettingsAreIgnored(t *testing.T) {
+	plain, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n"
+	for name, tc := range map[string]struct{ top, project string }{
+		"project profile":         {topConfig, projectConfig + "classifier = 'default'\n"},
+		"unknown project profile": {topConfig, projectConfig + "classifier = 'missing'\n"},
+		"role":                    {topConfig + "[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n", projectConfig},
+		"role and project":        {top, projectConfig + "classifier = 'other'\n"},
+	} {
+		c, err := Load(fixture(t, tc.top, tc.project))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got, want := c.Project, plain.Project
+		// The clone path is expanded against each fixture's own home.
+		got.Clone, want.Clone = "", ""
+		if _, ok := c.Roles["classifier"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: classifier setting took effect: %+v", name, c)
 		}
 	}
-	if _, err := Load(fixture(t, topConfig, projectConfig+"classifier = 'missing'\n")); err == nil || !strings.Contains(err.Error(), "classifier: unknown profile missing") {
-		t.Fatalf("unknown classifier: %v", err)
-	}
-	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n"
-	if _, err := Load(fixture(t, top, projectConfig+"classifier = 'other'\n")); err == nil || !strings.Contains(err.Error(), "claude classifier") {
-		t.Fatalf("incompatible classifier sandbox: %v", err)
-	}
 }
+
 func TestExplicit(t *testing.T) {
 	top := topConfig + `effort = "high"
 timeout = "2m"

@@ -142,7 +142,7 @@ func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.Workstre
 
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
+	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan)
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
 	intakefixture.SeedApprovedUnits(t, func(u, o string) { seedReview(t, f, repository, stream, u, o) }, func(u, c string) { approveDirectly(t, f.s, repository, stream, u, c) })

@@ -29,7 +29,7 @@ import (
 // key's environment variable. Without p, Jev is unconfigured.
 func newAssessingFixture(t *testing.T, p *jevtest.Provider, faults *faults) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(opts *Options) {
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
 		if p == nil {
 			return
 		}

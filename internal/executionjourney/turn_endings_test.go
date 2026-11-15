@@ -91,7 +91,7 @@ func TestMasonDoneWithALongCardIsRecorded(t *testing.T) {
 func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 	t.Parallel()
 	var crash atomic.Int64
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(opts *Options) {
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
 		// Stop the pass that queues the continuation once it is durable,
 		// as a service stopping before it finished the decision does.
 		opts.boundary = func(_ context.Context, step string) error {

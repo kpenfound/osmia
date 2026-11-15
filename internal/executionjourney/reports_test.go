@@ -219,7 +219,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	t.Parallel()
 	var passed atomic.Int64
-	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, "", func(opts *Options) {
+	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(opts *Options) {
 		opts.schedulePassed = func() { passed.Add(1) }
 	})
 	defer f.stop(t)

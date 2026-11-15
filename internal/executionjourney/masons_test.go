@@ -47,22 +47,22 @@ func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *f
 }
 
 func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
-	return newConfiguredMasonFixture(t, capacity, drafted, "")
+	return newConfiguredMasonFixture(t, capacity, drafted)
 }
 
-func newConfiguredMasonFixture(t *testing.T, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
+func newConfiguredMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	return newMasonFixtureOn(t, config.WorkspacesGit, capacity, drafted, classifier)
+	return newMasonFixtureOn(t, config.WorkspacesGit, capacity, drafted)
 }
 
-func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
+func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	return newMasonFixtureWith(t, backend, capacity, drafted, classifier, nil)
+	return newMasonFixtureWith(t, backend, capacity, drafted, nil)
 }
 
 func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	return newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted, "", prepare)
+	return newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted, prepare)
 }
 
 func countingSchedule() (*atomic.Int64, func(*Options)) {
@@ -70,13 +70,13 @@ func countingSchedule() (*atomic.Int64, func(*Options)) {
 	return passed, func(opts *Options) { opts.schedulePassed = scheduled }
 }
 
-func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
 		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
-		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, backend, capacity, classifier, opts.Threads)
+		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, backend, capacity, opts.Threads)
 		if prepare != nil {
 			prepare(opts)
 		}

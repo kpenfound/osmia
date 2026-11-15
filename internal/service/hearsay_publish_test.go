@@ -127,7 +127,7 @@ func memoryTurnTools(t *testing.T, cfg *config.Config, repo *trace.Repository) (
 	t.Helper()
 	turns := memoryTurns(&isolation.Turns{Grants: map[string]coreadapter.Capabilities{
 		trace.ChiefOfStaff: {}, masonRole: {}, reviewerRole: {}, architectRole: {}, committeeRole: {}, librarianRole: {},
-		"classifier": {}, sessionRole: {Tools: []string{"show_image"}},
+		sessionRole: {Tools: []string{"show_image"}},
 	}}, cfg, repo)
 	granted, scoped := map[string][]string{}, map[string][]string{}
 	for role, grant := range turns.Grants {
@@ -164,10 +164,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 				t.Errorf("%s %s write tools: %v", role, class.role, names[class.role])
 			}
 		}
-		// The classifier is offered no tools, and sessions get no project_context.
-		if len(names["classifier"]) != 0 {
-			t.Errorf("%s classifier: %v", role, names["classifier"])
-		}
+		// Sessions get no project_context.
 		if slices.Contains(names[sessionRole], projectContextTool) {
 			t.Errorf("%s session: %v", role, names[sessionRole])
 		}
@@ -195,7 +192,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 			}
 		}
 	}
-	if slices.Contains(granted[masonRole], "traverse") || len(granted["classifier"]) != 0 {
+	if slices.Contains(granted[masonRole], "traverse") {
 		t.Fatalf("file mode grants: %v", granted)
 	}
 }

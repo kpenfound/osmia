@@ -53,7 +53,7 @@ func TestServiceEngineUnitChecks(t *testing.T) {
 			t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
 			t.Setenv("DOCKER_HOST", "tcp://host-docker:2375")
 			t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
-			f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, "", func(o *Options) {
+			f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(o *Options) {
 				appendEngineConfig(t, o, engineConfig(tc.mode, tc.token))
 				o.reviewChecks = nil
 				o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -158,7 +158,7 @@ func TestServiceCloudFinalChecks(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(o *Options) {
+	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(o *Options) {
 		appendEngineConfig(t, o, engineConfig("cloud", "OSMIA_ENGINE_TEST_TOKEN"))
 		o.reviewChecks = nil
 	})
@@ -378,7 +378,7 @@ func TestServiceDockerFinalChecks(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("DOCKER_HOST", "ssh://engine.example.ts.net")
 	t.Setenv("DOCKER_CONTEXT", "default")
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(o *Options) {
+	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(o *Options) {
 		appendEngineConfig(t, o, engineConfig("managed", ""))
 		o.reviewChecks = nil
 	})

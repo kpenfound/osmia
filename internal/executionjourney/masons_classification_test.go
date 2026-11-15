@@ -15,7 +15,6 @@ import (
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	systemone "github.com/kpenfound/agentcore/jev/systemone"
 	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -179,7 +178,7 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 			f.engine.Mu.Lock()
 			for _, name := range f.engine.Runs {
 				if strings.Contains(name, "-classifier-") {
-					t.Errorf("classifier ran without a configured profile: %s", name)
+					t.Errorf("classifier turn ran: %s", name)
 				}
 			}
 			f.engine.Mu.Unlock()
@@ -196,7 +195,7 @@ func TestMasonJevClassification(t *testing.T) {
 		"evidence-asked_in_prose": jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
 		"evidence-gave_up":        jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
 	}}}}}
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "default", func(opts *Options) {
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
 		opts.JevProvider = p.Factory()
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 		must(t, err)
@@ -235,64 +234,59 @@ func TestMasonJevClassification(t *testing.T) {
 	f.engine.Mu.Lock()
 	defer f.engine.Mu.Unlock()
 	for _, name := range f.engine.Runs {
-		if strings.HasPrefix(name, masonTurnID("resume")+"-classifier-") {
-			t.Errorf("classifier ran after Jev classified the turn: %s", name)
+		if strings.Contains(name, "-classifier-") {
+			t.Errorf("classifier turn ran after Jev classified the turn: %s", name)
 		}
 	}
 }
 
-func TestMasonModelClassifier(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name     string
-		replies  []string
-		failed   bool
-		want     string
-		attempts int
-	}{
-		{"invalid", []string{`invalid`, `{"class":"gave_up","evidence":"cannot continue"}`}, false, "gave_up", 2},
-		{"failed", nil, true, "unclear", 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f, fake := newConfiguredMasonFixture(t, "masons = 1\n", validPlan, "default")
-			defer f.stop(t)
-			fake.Response = map[string]string{masonTurnID("resume"): "Edited the file."}
-			f.engine.Mu.Lock()
-			for i := 1; i <= tc.attempts; i++ {
-				i := i
-				f.engine.Turns[masonTurnID("resume")+"-classifier-"+string(rune('0'+i))] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-					if req.Profile.Name != "classifier" {
-						t.Errorf("classifier profile: %+v", req.Profile)
-					}
-					if tc.failed {
-						return &agent.Result{ClaudeID: "classifier", SessionDir: req.SessionDir, ResultText: "unavailable", NumTurns: 1, CostUSD: .02, CostKnown: true, IsError: true}, nil
-					}
-					return &agent.Result{ClaudeID: "classifier", SessionDir: req.SessionDir, ResultText: tc.replies[i-1], NumTurns: 1, CostUSD: .02, CostKnown: true}, nil
-				}
-			}
-			f.engine.Mu.Unlock()
-			stream := f.seedBuilding(t, "model-classifier", validPlan)
-			th := f.awaitMasonRan(t, stream, "resume")
-			if got := th.Turns[0].Response.Classification.Class; got != tc.want {
-				f.engine.Mu.Lock()
-				runs := append([]string(nil), f.engine.Runs...)
-				f.engine.Mu.Unlock()
-				t.Fatalf("class %s want %s; runs %v; response %+v", got, tc.want, runs, th.Turns[0].Response)
-			}
-			if got := len(th.Turns[0].Response.ClassifierUsage); got != tc.attempts {
-				t.Fatalf("usage count %d", got)
-			}
-			costs, err := trace.Read[trace.Cost](f.repository(), stream)
-			must(t, err)
-			count := 0
-			for _, cost := range costs {
-				if cost.Entry.Scope.Turn == masonTurnID("resume") && cost.Entry.AttemptID != "" && cost.Entry.Usage == (coreadapter.Usage{CostUSD: .02, CostKnown: true, Turns: 1}) {
-					count++
-				}
-			}
-			if count != tc.attempts {
-				t.Fatalf("classifier costs %d want %d", count, tc.attempts)
-			}
-		})
+// Each ending the mason makes with no outcome tool is classified by the code
+// rules while Jev falls back. An unclear ending gets a clarify continuation,
+// and every classified turn counts toward mason.max_clean_turns, so the unit
+// is contested once the bound is reached.
+func TestMasonJevFallbackCountsTowardCleanTurnBound(t *testing.T) {
+	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
+	outage := jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}
+	p := &jevtest.Provider{Results: slices.Repeat([]jevtest.Result{outage}, 16)}
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
+		opts.JevProvider = p.Factory()
+		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+		must(t, err)
+		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
+		must(t, errors.Join(err, configFile.Close()))
+	})
+	defer f.stop(t)
+	bound := f.s.cfg.Mason.MaxCleanTurns
+	fake.Response = map[string]string{masonTurnID("resume"): "Work is ongoing."}
+	f.engine.Mu.Lock()
+	for i := 1; i < bound; i++ {
+		delete(fake.Play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
+	}
+	f.engine.Mu.Unlock()
+	stream := f.seedBuilding(t, "jev-fallback-bound", validPlan)
+	f.awaitUnit(t, stream, "resume", UnitContested)
+	f.awaitEventTurns(t, stream, "bound exhausted")
+	th := f.thread(t, stream, masonAgent("resume"))
+	if len(th.Turns) != bound {
+		t.Fatalf("%d mason turns, want the %d of mason.max_clean_turns", len(th.Turns), bound)
+	}
+	for i, turn := range th.Turns {
+		c := turn.Response.Classification
+		if c == nil || c.Class != "unclear" || c.By != trace.ClassifiedByRule || c.Judgment != "" {
+			t.Fatalf("turn %d classification %+v", i+1, c)
+		}
+		if i > 0 && (turn.Request.TurnID != fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i) || !strings.Contains(turn.Request.Prompt, "Call ask")) {
+			t.Fatalf("turn %d is not the clarify continuation of turn %d: %+v", i+1, i, turn.Request)
+		}
+	}
+	if len(p.Requests()) == 0 {
+		t.Fatal("Jev was never asked to classify an ending")
+	}
+	f.engine.Mu.Lock()
+	defer f.engine.Mu.Unlock()
+	for _, name := range f.engine.Runs {
+		if strings.Contains(name, "-classifier-") {
+			t.Errorf("classifier turn ran: %s", name)
+		}
 	}
 }

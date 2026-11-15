@@ -135,7 +135,7 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 	}{
 		{"checks timeout out of range", str("checks_timeout", "25h"), "checks_timeout"},
 		{"checks timeout too small", str("checks_timeout", "30s"), "checks_timeout"},
-		{"unknown classifier", str("classifier", "missing"), "classifier"},
+		{"removed classifier", str("classifier", "other"), "classifier"},
 		{"malformed upstream", str("upstream", "https://github.com/a/b.git"), "upstream"},
 		{"malformed fork", str("fork", "nope"), "fork"},
 		{"bad branch", str("base_branch", "a..b"), "base_branch"},
@@ -162,17 +162,17 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 	}
 
 	edited, file, err := c.EditProject(pid, opts.Home, pinned, ProjectEdit{
-		Strings: map[string]string{"checks_timeout": "30m", "classifier": "other", "landing": "squash"},
+		Strings: map[string]string{"checks_timeout": "30m", "landing": "squash"},
 		Ints:    map[string]int{"capacity.per_workstream": 3},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := projectConfig + "checks_timeout = \"30m\"\nclassifier = \"other\"\nlanding = \"squash\"\n\n[capacity]\nper_workstream = 3\n"
+	want := projectConfig + "checks_timeout = \"30m\"\nlanding = \"squash\"\n\n[capacity]\nper_workstream = 3\n"
 	if string(edited) != want {
 		t.Fatalf("edited:\n%s\nwant:\n%s", edited, want)
 	}
-	if p := file.Project; p.ChecksTimeout != "30m" || p.Classifier != "other" || p.Landing != "squash" || p.Capacity.PerWorkstream != 3 || !file.Set("classifier") || file.Set("base_branch") || file.Set("capacity.git_operations") {
+	if p := file.Project; p.ChecksTimeout != "30m" || p.Landing != "squash" || p.Capacity.PerWorkstream != 3 || !file.Set("landing") || file.Set("base_branch") || file.Set("capacity.git_operations") {
 		t.Fatalf("decoded: %+v", file)
 	}
 	// The edited bytes load to the same project from disk.
@@ -184,13 +184,13 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 }
 
 func TestEditProjectClearsKeysToTheirDefaults(t *testing.T) {
-	text := projectConfig + "classifier = \"other\"\nchecks_timeout = \"30m\"\nhearsay_scope = \"work:main:shop\"\nname = \"Shop\"\n[capacity]\nper_workstream = 7\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
+	text := projectConfig + "checks_timeout = \"30m\"\nhearsay_scope = \"work:main:shop\"\nname = \"Shop\"\n[capacity]\nper_workstream = 7\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
 	c, opts := projectEditFixture(t, text)
 	if c.Project.Capacity.PerWorkstream != 7 {
 		t.Fatalf("fixture: %+v", c.Project)
 	}
 	edited, file, err := c.EditProject(pid, opts.Home, []byte(text), ProjectEdit{
-		Clear:         []string{"classifier", "checks_timeout", "capacity.per_workstream"},
+		Clear:         []string{"checks_timeout", "capacity.per_workstream"},
 		Strings:       map[string]string{"hearsay_scope": "", "name": ""},
 		ClearEntities: []string{"a"},
 	})
@@ -202,10 +202,10 @@ func TestEditProjectClearsKeysToTheirDefaults(t *testing.T) {
 		t.Fatalf("edited:\n%s\nwant:\n%s", edited, want)
 	}
 	p := file.Project
-	if p.Classifier != "" || p.ChecksTimeout != DefaultChecksTimeout || p.Capacity.PerWorkstream != c.Capacity.PerWorkstream || p.HearsayScope != "" || p.Name != "" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
+	if p.ChecksTimeout != DefaultChecksTimeout || p.Capacity.PerWorkstream != c.Capacity.PerWorkstream || p.HearsayScope != "" || p.Name != "" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
 		t.Fatalf("defaults: %+v", p)
 	}
-	if file.Set("classifier") || file.Set("capacity.per_workstream") || !file.Set("hearsay_entities") {
+	if file.Set("checks_timeout") || file.Set("capacity.per_workstream") || !file.Set("hearsay_entities") {
 		t.Fatal("markers do not follow the file")
 	}
 }

@@ -116,7 +116,7 @@ fi`, 1)), 0700))
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		for _, mode := range []string{"identity", "anonymous", "fallback"} {
 			t.Run(backend+"/"+mode+"/unit", func(t *testing.T) {
-				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", independentPlan, "", nil)
+				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", independentPlan, nil)
 				base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 				stream, repo := seedBuild(t, f, "identity-unit", independentPlan, backend, base)
 				seedChecking(t, f, repo, stream, "resume", resumeReport)
@@ -151,7 +151,7 @@ fi`, 1)), 0700))
 				assertCheckTraceRedacted(t, repo, stream)
 			})
 			t.Run(backend+"/"+mode+"/final", func(t *testing.T) {
-				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, "", nil)
+				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, nil)
 				base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 				stream, repo := seedBuild(t, f, "identity-final", validPlan, backend, base)
 				candidate := moveFeature(t, f, stream, map[string]string{"candidate.txt": "pinned candidate tree\n"})

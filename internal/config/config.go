@@ -218,7 +218,6 @@ type Project struct {
 	Clone           string            `toml:"clone" json:"clone"`
 	BaseBranch      string            `toml:"base_branch" json:"base_branch"`
 	Landing         string            `toml:"landing" json:"landing"`
-	Classifier      string            `toml:"classifier" json:"classifier"`
 	HearsayScope    string            `toml:"hearsay_scope" json:"hearsay_scope,omitempty"`
 	HearsayEntities map[string]string `toml:"hearsay_entities" json:"hearsay_entities,omitempty"`
 	// HearsayDeclareRepo posts the project to Hearsay with its GitHub repo
@@ -311,9 +310,6 @@ func Load(options Options) (*Config, error) {
 		}
 		p, err := loadProject(c.Root, id, options.Home, c.Capacity.PerWorkstream)
 		if err != nil {
-			return nil, err
-		}
-		if err := c.validateClassifier(p); err != nil {
 			return nil, err
 		}
 		c.Projects = append(c.Projects, p)
@@ -524,9 +520,6 @@ func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.validateClassifier(p); err != nil {
-		return nil, err
-	}
 	out := *c
 	out.ActiveProjects = []string{string(id)}
 	out.Project = p
@@ -565,9 +558,6 @@ func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := c.validateClassifier(p); err != nil {
-			return nil, err
-		}
 		out.ActiveProjects = append(out.ActiveProjects, string(id))
 		out.Projects = append(out.Projects, p)
 	}
@@ -575,21 +565,6 @@ func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
 		out.Project = out.Projects[0]
 	}
 	return &out, nil
-}
-
-func (c *Config) validateClassifier(p Project) error {
-	if p.Classifier == "" {
-		return nil
-	}
-	if _, ok := c.Profiles[p.Classifier]; !ok {
-		path, _ := c.Root.ProjectConfig(p.ID)
-		return fieldError(path, "classifier", "unknown profile "+p.Classifier)
-	}
-	if c.Roles["mason"].Sandbox == "claude" && c.Profiles[p.Classifier].Agent != "claude" {
-		path, _ := c.Root.ProjectConfig(p.ID)
-		return fieldError(path, "classifier", "mason claude sandbox requires a claude classifier profile")
-	}
-	return nil
 }
 
 // WithoutProject returns a copy of c with no active project.
@@ -919,6 +894,9 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 	if c.Roles == nil {
 		c.Roles = map[string]Role{}
 	}
+	// A leftover roles.classifier from the removed classifier role is
+	// accepted and ignored.
+	delete(c.Roles, "classifier")
 	names = names[:0]
 	for name := range c.Roles {
 		names = append(names, name)

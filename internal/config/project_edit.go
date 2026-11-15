@@ -13,7 +13,7 @@ import (
 // ProjectSettings lists the settings of a project configuration file that
 // have an effect, in display order. hearsay_entities is the mapping whose
 // entries are set and cleared one by one.
-var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "hearsay_entities"}
+var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "hearsay_entities"}
 
 // ProjectPin identifies the exact bytes of a project configuration file.
 func ProjectPin(data []byte) string {
@@ -38,14 +38,10 @@ func (f ProjectFile) Set(setting string) bool {
 }
 
 // DecodeProject decodes and validates the bytes of project id's configuration
-// file as loading does, including the classifier check against c's profiles,
-// without reading the disk. The receiver is unchanged.
+// file as loading does, without reading the disk. The receiver is unchanged.
 func (c *Config) DecodeProject(id ProjectID, home string, data []byte) (ProjectFile, error) {
 	p, md, err := loadProjectBytes(c.Root, id, home, c.Capacity.PerWorkstream, data)
 	if err != nil {
-		return ProjectFile{}, err
-	}
-	if err := c.validateClassifier(p); err != nil {
 		return ProjectFile{}, err
 	}
 	return ProjectFile{Project: p, md: md}, nil
@@ -82,13 +78,13 @@ type ProjectEdit struct {
 
 // Settings that hold a string or an integer, and those that must stay set.
 var (
-	stringSettings   = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "hearsay_scope"}
+	stringSettings   = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "upstream_rebase", "pull_request_poll", "checks_timeout", "hearsay_scope"}
 	intSettings      = []string{"capacity.per_workstream", "capacity.git_operations"}
 	boolSettings     = []string{"hearsay_declare_repo"}
 	requiredSettings = []string{"upstream", "clone"}
 	// optionalSettings have an empty string for a default: an empty value
 	// clears them.
-	optionalSettings = []string{"name", "fork", "classifier", "hearsay_scope"}
+	optionalSettings = []string{"name", "fork", "hearsay_scope"}
 )
 
 // EditProject applies edit to the pinned bytes of project id's file as a text

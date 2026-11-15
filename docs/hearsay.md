@@ -342,7 +342,7 @@ Roles receive the read tools `get_bundle`, `search`, `traverse`, `resolve`,
 `stance_history`, `get_l1` and `get_l0`. `traverse` follows Hearsay's typed
 graph from an entity, so a role can reach the decision log and spec documents
 around a project or workstream. Exploratory sessions receive the read tools at
-the observer class and no write tool, and the classifier receives no tools.
+the observer class and no write tool.
 External context is labelled separately from the local knowledge base, which
 every turn still receives word for word.
 

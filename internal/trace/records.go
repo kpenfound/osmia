@@ -192,7 +192,9 @@ type TurnResponse struct {
 	Failure         string                    `json:"failure,omitempty"`
 	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
-	ClassifierUsage []coreadapter.Usage       `json:"classifier_usage,omitempty"`
+	// ClassifierUsage is the usage of classifier turns, present only on
+	// responses already stored.
+	ClassifierUsage []coreadapter.Usage `json:"classifier_usage,omitempty"`
 	// Advice is the advisory text the service added to the request's prompt
 	// when the turn ran, such as Jev signals on the chief of staff's open
 	// questions.

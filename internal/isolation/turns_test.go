@@ -406,7 +406,7 @@ func TestReviewerGrantIsReadOnly(t *testing.T) {
 }
 
 func TestKnowledgeToolsFollowTheRole(t *testing.T) {
-	for _, role := range []string{"librarian", "chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "classifier", "session"} {
+	for _, role := range []string{"librarian", "chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"kb_check", "project_context"}})
 		if err != nil {
 			t.Fatal(err)
@@ -414,9 +414,15 @@ func TestKnowledgeToolsFollowTheRole(t *testing.T) {
 		if slices.Contains(grant.Tools, "kb_check") != (role == "librarian") {
 			t.Errorf("kb_check granted to %s: %v", role, grant.Tools)
 		}
-		if slices.Contains(grant.Tools, "project_context") != (role != "classifier" && role != "session") {
+		if slices.Contains(grant.Tools, "project_context") != (role != "session") {
 			t.Errorf("project_context grant for %s: %v", role, grant.Tools)
 		}
+	}
+}
+
+func TestRoleGrantRefusesTheRemovedClassifierRole(t *testing.T) {
+	if _, err := roleGrant("classifier", a.Capabilities{}); err == nil {
+		t.Fatal("granted the removed classifier role")
 	}
 }
 
@@ -691,7 +697,7 @@ func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 }
 
 func TestPreviewIsChiefServiceTool(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "librarian", "classifier", "session"} {
+	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "librarian", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"preview"}})
 		if err != nil {
 			t.Fatal(err)
@@ -707,7 +713,7 @@ func TestPreviewIsChiefServiceTool(t *testing.T) {
 
 func TestRoleGrantKeepsWebOnlyForPlanningRoles(t *testing.T) {
 	for role, keeps := range map[string]bool{"chief_of_staff": true, "architect": true, "committee": true, "session": true,
-		"mason": false, "librarian": false, "reviewer": false, "foreman": false, "classifier": false} {
+		"mason": false, "librarian": false, "reviewer": false, "foreman": false} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"file_read"}, Web: true})
 		if err != nil || grant.Web != keeps {
 			t.Fatalf("%s: web=%v err=%v, want %v", role, grant.Web, err, keeps)
@@ -773,7 +779,7 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 		t.Fatalf("session tools %v", engine.Requests[0].Grants.Tools)
 	}
 	// Roles without web access get no web tool even when the service grant sets it.
-	for _, role := range []string{"mason", "librarian", "reviewer", "foreman", "classifier"} {
+	for _, role := range []string{"mason", "librarian", "reviewer", "foreman"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, _, engine, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read"}, Web: true}

@@ -180,16 +180,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-				if scope.Role == "classifier" && scope.Project == project {
-					workspace := filepath.Join(root, "classifier", project)
-					if err := os.MkdirAll(workspace, 0700); err != nil {
-						return isolation.Selection{}, err
-					}
-					role := cfg.Roles[masonRole]
-					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image, CPUs: role.CPUs, Memory: role.Memory}}, nil
-				}
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, threadExecution(masonRole, cfg.Roles[masonRole]))
 				}
@@ -316,19 +308,6 @@ func Enforce(opts Options, e Enforcement) Options {
 			runner.AdmitRole = service.admitRole
 			runner.Jev = service.jev
 			runner.Advise = service.questionSignals(r)
-		}
-		if cfg.Project.Classifier != "" {
-			profile, err := cfg.NamedProfile(cfg.Project.Classifier)
-			if err != nil {
-				return nil, err
-			}
-			runner.ClassifierProfile = &profile
-			runner.Classifier = func(ctx context.Context, input coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-				if err := os.MkdirAll(input.SessionDirectory, 0700); err != nil {
-					return coreadapter.SessionResult{}, err
-				}
-				return turns.Run(ctx, input)
-			}
 		}
 		runner.ResumableRoles = func(role string) bool { return role == sessionRole }
 		return thread.Dispatcher{Runner: runner,

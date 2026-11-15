@@ -87,7 +87,7 @@ var roleTools = map[string]string{"preview": "chief_of_staff", "record_delivery_
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleRestrictedTool(role, name string) bool {
-	return name == "project_context" && (role == "classifier" || role == "session") ||
+	return name == "project_context" && role == "session" ||
 		name == "inspect_code" && role != "chief_of_staff" && role != "architect" ||
 		name == "read_remote_file" && role != "chief_of_staff" && role != "architect" ||
 		name == "factory_context" && role != "chief_of_staff" && role != "architect" && role != "mason" && role != "reviewer" ||
@@ -111,7 +111,7 @@ var webRoles = []string{"chief_of_staff", "architect", "committee", "session"}
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
 	case "mason", "librarian", "session":
-	case "chief_of_staff", "architect", "committee", "reviewer", "foreman", "classifier":
+	case "chief_of_staff", "architect", "committee", "reviewer", "foreman":
 		grant.WriteFiles, grant.Execute, grant.Network = false, false, false
 	default:
 		return coreadapter.Capabilities{}, errors.New("unknown Osmia role")

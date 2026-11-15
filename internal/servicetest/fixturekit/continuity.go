@@ -147,9 +147,9 @@ func (e *DemoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.Sessions.Mu.Lock()
 	tools := e.Sessions.ByKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.Sessions.Mu.Unlock()
-	// A classifier turn has no scoped tool host. Session test callbacks may
-	// use a separate fake host when they need to exercise show_image.
-	if turn == nil || (tools == nil && req.Profile.Name != "classifier" && req.Profile.Name != SessionRole) {
+	// Session test callbacks may use a separate fake host when they need to
+	// exercise show_image.
+	if turn == nil || (tools == nil && req.Profile.Name != SessionRole) {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
 	return turn(ctx, req, verified, tools)

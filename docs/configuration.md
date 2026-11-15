@@ -502,8 +502,9 @@ sandbox = "sbx"
 
 All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
 An omitted `image` lets each fallback profile select its agent's default template.
-A custom template must support every agent in that role's fallback chain. The
-classifier uses the mason's sandbox and template with its own configured profile.
+A custom template must support every agent in that role's fallback chain. A
+`[roles.classifier]` table is accepted and ignored, so a configuration file that
+has one still loads.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
 
 ### Sandbox size
@@ -614,8 +615,8 @@ keeps its version checks for Codex, Claude Code and the host's Dagger release.
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
 `osmia reload`. `image` is configured per role, not inherited from a profile.
-The template supports Codex and Claude profiles, including fallback chains
-and the classifier when configuring the mason. Docker may warn about using a
+The template supports Codex and Claude profiles, including fallback chains.
+Docker may warn about using a
 Codex-based template with Claude; both agent executables are installed. Build
 under the OS account running Osmia so the service can access the local template.
 Existing sandboxes keep their installed versions.
@@ -906,7 +907,7 @@ The CLI reaches the engine through `_EXPERIMENTAL_DAGGER_RUNNER_HOST`. A
 belongs to the turn, and a `tcp` engine on the host's loopback is reached at its
 own port. The sandbox reaches either one as `host.docker.internal`, and the port
 is allowed for that sandbox alone. Cleanup removes the rule and the forward along
-with the sandbox. The classifier and other roles never receive the engine.
+with the sandbox. Other roles never receive the engine.
 
 The simplest engine is the one your own Dagger CLI provisions: run any Dagger
 command on the host, such as `dagger core version`, and name its container,
@@ -958,8 +959,7 @@ name, since that name identifies the generated plugin.
 A turn of a role with skills mounts the skill cache read-only in every
 sandbox, and Claude's `Skill` tool joins its native tools. Codex and OpenCode
 turns receive no skills, so a role whose fallback runs another agent loses its
-skills for those turns. The classifier, which shares the mason's sandbox,
-receives none.
+skills for those turns.
 
 Osmia clones a missing reference when a turn needs it, with the service's own
 `git` and credentials and without prompting. A failed clone fails the turn. A
@@ -1077,7 +1077,6 @@ landing = "commit-per-unit"
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
-classifier = "default"              # optional; omitted by default
 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
@@ -1150,14 +1149,8 @@ checks run again later, and a final review's reader is told its checks did not
 complete. Listing the check links for a Jev selection has its
 own five-minute bound. A change applies to runs that start after a reload.
 
-`classifier` names a top-level profile for clean mason turns with no accepted
-outcome. When omitted, code heuristics classify the response without a model
-call. An unknown profile is rejected. The classifier inherits the mason's
-sandbox, uses an empty read-only workspace and receives no service tools or native write, shell or web tools. A Claude
-sandbox requires a Claude classifier profile. Its attempts are limited to two,
-each with a 30 second maximum timeout. Invalid or unavailable answers retain
-the code classification. A Jev judgment classifies the
-response first, and the classifier runs only when that judgment falls back.
+A `classifier` key in a project file is accepted and ignored, so a file that has
+one still loads.
 
 ### Reading and saving a project's settings
 
@@ -1169,7 +1162,7 @@ request needs a `Host` naming the listener.
 
 **Read.** The editable snapshot is the file on disk. The read decodes the
 current bytes once and returns, for each effective setting (`name`, `upstream`,
-`fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`,
+`fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
 `hearsay_entities`):
@@ -1196,8 +1189,8 @@ omitted setting is unchanged) and `clear`, the names of settings whose key is
 removed so the default or inherited value applies again.
 `set.hearsay_entities` sets entries by local entity ID and
 `clear_hearsay_entities` removes entries. `set.hearsay_declare_repo` is a
-boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`,
-`classifier` or `hearsay_scope` clears it. `upstream` and `clone` are required
+boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`
+or `hearsay_scope` clears it. `upstream` and `clone` are required
 and cannot be cleared. A save runs under the same lock as a reload and a
 project add or removal:
 
@@ -1211,8 +1204,7 @@ project add or removal:
    `[capacity]` or `[hearsay_entities]` table at the end of the file. A layout
    the edit cannot change safely, such as `capacity` written as an inline table,
    is refused and the file is edited by hand.
-3. The candidate is validated with the loader's rules, including
-   `classifier` against the loaded top-level profiles. An invalid value is
+3. The candidate is validated with the loader's rules. An invalid value is
    refused as `validation` with the offending setting in `error.field` and the
    loader's message, for example `checks_timeout: must be a Go duration from 1m
    to 24h`.
@@ -1439,7 +1431,7 @@ The service exposes Hearsay read tools within role turns: `get_bundle`,
 `traverse` follows Hearsay's typed graph edges from entities, so a role can
 reach the decision log and spec documents around a project or workstream entity.
 Exploratory sessions receive the same read tools at the observer class and no
-write tool; the classifier receives no tools. Workers and the chief also receive
+write tool. Workers and the chief also receive
 `assert`, which proposes an agent learning and does not ratify an owner ruling. The endpoint, human token and agent tokens remain service-owned.
 Live Hearsay sources, identities and authority policy are configured by the
 operator in Hearsay; `osmia project memory` generates them for a project (see
@@ -1672,13 +1664,15 @@ seconds, doubling with each further episode up to 15 minutes or as long as the
 provider's `Retry-After` asks within that cap; judgments fall back without a
 request meanwhile.
 
-A clean mason turn without an outcome is classified by Jev
-before the `classifier` profile and the code rules. Jev chooses the class and
-the sentence of the response that supports it, which becomes the recorded
-evidence. A class below its threshold, a stricter one for `gave_up`, or one no
-sentence supports falls back to the classifier, then the code rules. The turn's
-classification records `by` as `jev`, `classifier` or `rule`, and a Jev class
-names its judgment, which the chief of staff's notice cites.
+A clean mason turn without an outcome is classified by Jev before the code
+rules. Jev chooses the class and the sentence of the response that supports it,
+which becomes the recorded evidence. A class below its threshold, a stricter one
+for `gave_up`, or one no sentence supports falls back to the code rules, as does
+an outage, a cool-down or a missing key. The turn's classification records `by`
+as `jev` or `rule`, and a Jev class names its judgment, which the chief of
+staff's notice cites. A fallback leaves an unclear ending a clarify
+continuation, which counts toward `mason.max_clean_turns` like any other
+classified turn, so the unit is contested once the bound is reached.
 
 Unit, final-review and smart session check runs use three stages. `dagger list checks --format=link` supplies top-level checks;
 `dagger list checks --all --format=link` supplies expanded links, with scoped

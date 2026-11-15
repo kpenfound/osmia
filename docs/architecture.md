@@ -153,7 +153,7 @@ planning roles hold it: the design session, the exploratory session, the
 architect on every turn path (including a workgroup's project-spec draft and
 delta amendment turns), the ordinary chief of staff and the committee in plan
 and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers, the
-librarian, the foreman and the classifier never do, whatever a service grant
+librarian and the foreman never do, whatever a service grant
 says, and no configuration key changes that. A role that holds it keeps its
 read-only view and its service tools, gains no write, shell or `Network`
 grant, and is told in its system prompt that web content is evidence rather

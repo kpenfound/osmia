@@ -4823,9 +4823,6 @@
           "checks_timeout": {
             "type": "string"
           },
-          "classifier": {
-            "type": "string"
-          },
           "clone": {
             "type": "string"
           },
@@ -6865,7 +6862,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -6899,12 +6896,6 @@
             ]
           },
           "checks_timeout": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "classifier": {
             "type": [
               "null",
               "string"

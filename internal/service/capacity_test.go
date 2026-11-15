@@ -173,7 +173,7 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 		_, err = a.Apply(ctx, op)
 		must(t, err)
 	}
-	appendDayCost(t, repo, sibling, "classifier", clock.Now(), 0.25, true)
+	appendDayCost(t, repo, sibling, "unmatched", clock.Now(), 0.25, true)
 	appendDayCost(t, repo, sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
 	must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
 		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
