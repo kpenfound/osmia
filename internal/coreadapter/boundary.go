@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -152,15 +153,49 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	if iso.Workspace.Access == ReadWrite && !iso.Capabilities.WriteFiles {
 		return unsupported("workspace", "writable mount requires a file-write grant")
 	}
-	if err := PublicEnvironment(iso.Environment); err != nil {
+	if err := turnEnvironment(iso.Environment, settings); err != nil {
 		return err
 	}
-	return validateFileTree(iso.Workspace.Directory, settings.Dagger != nil)
+	return validateFileTree(iso.Workspace.Directory, settings.RunsDagger())
 }
 
-// checkDagger admits a Dagger engine only for an sbx turn that may execute
-// commands, at an engine address and CLI release core accepts.
+// environmentName is a variable name the service may read a credential from.
+var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// turnEnvironment admits the public environment and, for a Dagger Cloud turn
+// alone, the Dagger Cloud variables with DAGGER_ENGINE selecting Dagger Cloud.
+func turnEnvironment(env map[string]string, settings ExecutionSettings) error {
+	public := maps.Clone(env)
+	if settings.DaggerCloudTokenEnv != "" {
+		if public[DaggerEngineEnvironment] != "cloud" || public[DaggerCloudTokenEnvironment] == "" {
+			return unsupported("environment", "a Dagger Cloud turn needs DAGGER_ENGINE=cloud and its token")
+		}
+		if strings.ContainsRune(public[DaggerCloudTokenEnvironment], 0) {
+			return unsupported("environment", "NUL value")
+		}
+		delete(public, DaggerEngineEnvironment)
+		delete(public, DaggerCloudTokenEnvironment)
+	}
+	return PublicEnvironment(public)
+}
+
+// checkDagger admits Dagger only for an sbx turn that may execute commands:
+// a host engine at an address and CLI release core accepts, or Dagger Cloud
+// with the name of the token's variable, never both.
 func checkDagger(iso Isolation, settings ExecutionSettings) error {
+	if settings.DaggerCloudTokenEnv != "" {
+		switch {
+		case settings.Dagger != nil:
+			return unsupported("dagger", "a turn runs on a host engine or on Dagger Cloud, not both")
+		case settings.Mode != agent.SandboxSbx:
+			return unsupported("dagger", "only an sbx sandbox runs Dagger")
+		case !iso.Capabilities.Execute:
+			return unsupported("dagger", "Dagger requires an execution grant")
+		case !environmentName.MatchString(settings.DaggerCloudTokenEnv):
+			return unsupported("dagger", "the Dagger Cloud token must be named by an environment variable")
+		}
+		return nil
+	}
 	d := settings.Dagger
 	if d == nil {
 		return nil
@@ -450,6 +485,8 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 	}
 	if settings.Dagger != nil {
 		grants.DaggerEngine = settings.Dagger.Engine
+	}
+	if settings.RunsDagger() {
 		// The service created the view's root repository empty so the Dagger
 		// client finds its workspace; core checks it stays empty and admits the
 		// mount without granting VCS.

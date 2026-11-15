@@ -186,27 +186,56 @@ type Role struct {
 	// size to sbx. They apply only with the sbx sandbox.
 	CPUs   int    `toml:"cpus" json:"cpus,omitempty"`
 	Memory string `toml:"memory" json:"memory,omitempty"`
-	// Dagger gives the mason's sbx sandbox the Dagger CLI and an engine on
-	// the host; nil gives neither.
-	Dagger *Dagger `toml:"dagger" json:"dagger,omitempty"`
 	// Skills are git references (<url>[@<ref>][#<sub/dir>]) of skills given
 	// to the role's Claude turns.
 	Skills []string `toml:"skills" json:"skills,omitempty"`
 }
 
-// Dagger is the Dagger CLI release installed in a sandbox and the host engine
-// it runs against.
-type Dagger struct {
-	Version string `toml:"version" json:"version"`
-	Engine  string `toml:"engine" json:"engine"`
+// masonDagger is how a mason turn in sandbox runs Dagger on the service's
+// engine, [dagger]: on a host engine, the CLI release and engine address the
+// sandbox is given; on Dagger Cloud, the variable that holds the token its own
+// CLI runs with. A mason outside sbx gets neither.
+func (c *Config) masonDagger(sandbox string) (*agent.Dagger, string) {
+	if sandbox != "sbx" {
+		return nil, ""
+	}
+	engine := c.Dagger.Resolve()
+	switch {
+	case engine.Mode == DaggerEngineCloud:
+		return nil, engine.CloudTokenEnv
+	case engine.Address != "":
+		return &agent.Dagger{Engine: engine.Address, Version: c.Dagger.Version}, ""
+	}
+	return nil, ""
 }
 
-// Settings is d as execution settings carry it; nil for nil.
-func (d *Dagger) Settings() *agent.Dagger {
-	if d == nil {
-		return nil
+// RoleExecution is how turns of role run: in the role's sandbox and image
+// with the role's skills and, for a mason in sbx, Dagger on the service's
+// engine.
+func (c *Config) RoleExecution(role string) coreadapter.ExecutionSettings {
+	r := c.Roles[role]
+	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Skills: slices.Clone(r.Skills)}
+	if role == "mason" {
+		execution.Dagger, execution.DaggerCloudTokenEnv = c.masonDagger(r.Sandbox)
 	}
-	return &agent.Dagger{Engine: d.Engine, Version: d.Version}
+	return execution
+}
+
+// validateMasonDagger checks that the service's engine is one a mason's sbx
+// sandbox can run Dagger on: Dagger Cloud, or a host engine at a known address
+// with the CLI release to install for it.
+func (c *Config) validateMasonDagger(path string) error {
+	engine := c.Dagger.Resolve()
+	switch engine.Mode {
+	case DaggerEngineCloud:
+		return nil
+	case DaggerEngineAuto:
+		return fieldError(path, "dagger.engine", "must be managed, cloud or an engine address: the mason's sbx sandbox runs Dagger on the service's engine")
+	}
+	if c.Dagger.Version == "" {
+		return fieldError(path, "dagger.version", "is required: the mason's sbx sandbox installs this Dagger CLI release to run on the service's engine")
+	}
+	return nil
 }
 
 type Project struct {
@@ -731,6 +760,10 @@ func decodeBytes(path string, data []byte, dest any, project bool) (toml.MetaDat
 // switch to false. Jev is required, so the value has no effect.
 const JevEnabledIgnored = "jev.enabled = false is ignored: Jev is always on, and without its API key it is unconfigured and every judgment falls back"
 
+// MasonDaggerIgnored warns that a top-level file has the removed
+// [roles.mason.dagger] section. The mason runs Dagger on the service's engine.
+const MasonDaggerIgnored = "roles.mason.dagger is ignored: the mason runs Dagger on the engine [dagger] selects, with its version"
+
 // legacyWarnings reads the top-level file at path again for settings that are
 // accepted and ignored but deserve a warning. A file that cannot be read has
 // none: the load already read it.
@@ -739,15 +772,27 @@ func legacyWarnings(path string) []string {
 		Jev struct {
 			Switch *bool `toml:"enabled"`
 		} `toml:"jev"`
+		Roles struct {
+			Mason struct {
+				Dagger *struct{} `toml:"dagger"`
+			} `toml:"mason"`
+		} `toml:"roles"`
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	if _, err := toml.Decode(string(data), &raw); err != nil || raw.Jev.Switch == nil || *raw.Jev.Switch {
+	if _, err := toml.Decode(string(data), &raw); err != nil {
 		return nil
 	}
-	return []string{JevEnabledIgnored}
+	var warnings []string
+	if raw.Jev.Switch != nil && !*raw.Jev.Switch {
+		warnings = append(warnings, JevEnabledIgnored)
+	}
+	if raw.Roles.Mason.Dagger != nil {
+		warnings = append(warnings, MasonDaggerIgnored)
+	}
+	return warnings
 }
 
 // typeMismatch matches the TOML decoder's message for a value of the wrong
@@ -811,8 +856,13 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 {
 			return true
 		}
-		if key[0] == "roles" && len(key) == 4 && key[2] == "dagger" {
+		// roles.mason.dagger is the removed mason engine override: accepted
+		// and ignored, with a warning.
+		if key[0] == "roles" && key[1] == "mason" && len(key) == 4 && key[2] == "dagger" {
 			return key[3] == "version" || key[3] == "engine"
+		}
+		if key[0] == "roles" && len(key) == 3 && key[2] == "dagger" {
+			return key[1] == "mason"
 		}
 		if len(key) != 3 {
 			return false
@@ -820,7 +870,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if key[0] == "profiles" {
 			return slices.Contains([]string{"agent", "model", "effort", "fallback", "timeout", "max_turns"}, key[2])
 		}
-		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "dagger", "skills"}, key[2])
+		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "skills"}, key[2])
 	}
 	// jev.enabled is the removed Jev switch: accepted and ignored.
 	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
@@ -944,28 +994,9 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 				return fieldError(path, prefix+".memory", "must be a positive integer and the unit m or g, such as 512m or 4g")
 			}
 		}
-		if r.Dagger != nil {
-			if name != "mason" {
-				return fieldError(path, prefix+".dagger", "only the mason runs Dagger")
-			}
-			if r.Sandbox != "sbx" {
-				return fieldError(path, prefix+".dagger", "dagger requires the sbx sandbox")
-			}
-			if err := agent.CheckDaggerVersion(r.Dagger.Version); err != nil {
-				return fieldError(path, prefix+".dagger.version", "must be a release such as v0.20.5")
-			}
-			if !md.IsDefined("roles", name, "dagger", "engine") {
-				engine := c.Dagger.Resolve()
-				if engine.Address == "" {
-					return fieldError(path, prefix+".dagger.engine", "is required unless dagger.engine is managed or an explicit address")
-				}
-				r.Dagger.Engine = engine.Address
-			}
-			if r.Dagger.Engine == "cloud" {
-				return fieldError(path, prefix+".dagger.engine", "masons cannot use a cloud engine")
-			}
-			if err := agent.CheckDaggerEngine(r.Dagger.Engine); err != nil {
-				return fieldError(path, prefix+".dagger.engine", "must be unix://<absolute socket path>, tcp://<host>:<port> or docker-container://<container name>")
+		if name == "mason" && r.Sandbox == "sbx" {
+			if err := c.validateMasonDagger(path); err != nil {
+				return err
 			}
 		}
 		names := map[string]bool{}
@@ -1022,7 +1053,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Dagger: r.Dagger.Settings(), Skills: slices.Clone(r.Skills)}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, c.RoleExecution(role), err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

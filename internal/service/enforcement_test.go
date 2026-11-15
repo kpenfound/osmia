@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -30,8 +31,9 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	chief.Sandbox, chief.Image, chief.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
 	cfg.Roles[trace.ChiefOfStaff] = chief
 	mason := cfg.Roles[masonRole]
-	mason.Sandbox, mason.Dagger, mason.Skills = "sbx", &config.Dagger{Version: "v0.20.5", Engine: "tcp://127.0.0.1:1234"}, []string{"https://github.com/acme/skills#skills/tdd"}
+	mason.Sandbox, mason.Skills = "sbx", []string{"https://github.com/acme/skills#skills/tdd"}
 	cfg.Roles[masonRole] = mason
+	cfg.Dagger = config.DaggerConfig{Version: "v0.20.5", Engine: "tcp://127.0.0.1:1234"}
 	must(t, os.WriteFile(filepath.Join(opts.Config.Root, "config.toml"), []byte("not toml ["), 0600))
 
 	zone := time.FixedZone("east", 5*60*60)
@@ -58,10 +60,10 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	if _, err := turns.Select(context.Background(), coreadapter.Scope{Project: string(cfg.Project.ID), Role: "classifier"}); err == nil {
 		t.Fatal("selected a view for a classifier role")
 	}
-	if execution := threadExecution(masonRole, mason); execution.Mode != "sbx" || execution.Dagger == nil || *execution.Dagger != *mason.Dagger.Settings() || !slices.Equal(execution.Skills, mason.Skills) {
+	if execution := cfg.RoleExecution(masonRole); execution.Mode != "sbx" || execution.Dagger == nil || *execution.Dagger != (agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}) || execution.DaggerCloudTokenEnv != "" || !slices.Equal(execution.Skills, mason.Skills) {
 		t.Fatalf("mason execution %+v", execution)
 	}
-	if execution := threadExecution(reviewerRole, mason); execution.Dagger != nil {
+	if execution := cfg.RoleExecution(reviewerRole); execution.RunsDagger() {
 		t.Fatalf("reviewer execution %+v", execution)
 	}
 	scope.Project = "other"

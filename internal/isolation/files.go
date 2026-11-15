@@ -188,7 +188,7 @@ func (v Views) CreateFor(ctx context.Context, source coreadapter.Workspace, path
 	if err != nil {
 		return nil, err
 	}
-	if execution.Dagger != nil {
+	if execution.RunsDagger() {
 		if err := InitRepository(ctx, view.workspace.Directory); err != nil {
 			return nil, errors.Join(err, view.Release(context.WithoutCancel(ctx)))
 		}

@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/redact"
 )
 
 // Selection comes from the service's workspace and role bindings. Narrow may
@@ -184,6 +185,12 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if err = coreadapter.PublicEnvironment(env); err != nil {
 		return result, err
 	}
+	cloud, err := coreadapter.DaggerCloudEnvironment(selected.Execution, os.Getenv)
+	if err != nil {
+		return result, err
+	}
+	redact.Register(cloud[coreadapter.DaggerCloudTokenEnvironment])
+	maps.Copy(env, cloud)
 	workspace, err := r.Workspaces.Acquire(ctx, selected.Workspace)
 	if err != nil {
 		return result, err

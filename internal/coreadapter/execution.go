@@ -44,9 +44,42 @@ type ExecutionSettings struct {
 	// Dagger gives an sbx turn that may execute commands the Dagger CLI and
 	// a host engine; nil gives neither.
 	Dagger *agent.Dagger
+	// DaggerCloudTokenEnv, for an sbx turn that may execute commands and has
+	// no host engine, names the service's variable holding the Dagger Cloud
+	// token. The turn's sandbox runs its own Dagger CLI on Dagger Cloud with
+	// DaggerCloudEnvironment. Empty is no Dagger Cloud.
+	DaggerCloudTokenEnv string
 	// Skills are the skill references of the role. Only a Claude turn is
 	// given them.
 	Skills []string
+}
+
+// RunsDagger reports whether a turn with settings runs Dagger, on a host
+// engine or on Dagger Cloud.
+func (s ExecutionSettings) RunsDagger() bool {
+	return s.Dagger != nil || s.DaggerCloudTokenEnv != ""
+}
+
+// Dagger Cloud variables a sandbox's Dagger CLI reads: the engine selection
+// and the token.
+const (
+	DaggerEngineEnvironment     = "DAGGER_ENGINE"
+	DaggerCloudTokenEnvironment = "DAGGER_CLOUD_TOKEN"
+)
+
+// DaggerCloudEnvironment is what a Dagger Cloud turn adds to its sandbox's
+// environment: DAGGER_ENGINE=cloud and the token read from the service's
+// variable settings name. It is empty for any other turn, and an error when
+// the variable is unset.
+func DaggerCloudEnvironment(settings ExecutionSettings, getenv func(string) string) (map[string]string, error) {
+	if settings.DaggerCloudTokenEnv == "" {
+		return nil, nil
+	}
+	token := getenv(settings.DaggerCloudTokenEnv)
+	if token == "" {
+		return nil, fmt.Errorf("the Dagger Cloud token variable %s is not set", settings.DaggerCloudTokenEnv)
+	}
+	return map[string]string{DaggerEngineEnvironment: "cloud", DaggerCloudTokenEnvironment: token}, nil
 }
 
 // turnSkills are the skills a turn on backend is given: the settings' skills

@@ -156,13 +156,24 @@ func TestEngineGateRetainsEveryActiveIdentity(t *testing.T) {
 
 func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 	t.Parallel()
-	for _, dagger := range []bool{false, true} {
-		t.Run(map[bool]string{false: "without Dagger", true: "with Dagger"}[dagger], func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		dagger config.DaggerConfig
+	}{
+		{"without Dagger", config.DaggerConfig{}},
+		{"with Dagger", config.DaggerConfig{Engine: "docker-container://fake", Version: "v0.20.5"}},
+		{"with Dagger Cloud", config.DaggerConfig{Engine: "cloud", CloudTokenEnv: "OSMIA_GATE_TEST_TOKEN"}},
+	} {
+		// A mason turn on Dagger Cloud uses no engine of the service's, so it
+		// holds back no restart or prune.
+		dagger := tc.dagger.Engine != "" && tc.dagger.Engine != "cloud"
+		t.Run(tc.name, func(t *testing.T) {
 			cfg, repo, clock := hardPauseRepository(t, 1)
-			if dagger {
+			if tc.dagger.Engine != "" {
 				role := cfg.Roles[masonRole]
-				role.Dagger = &config.Dagger{Engine: "docker-container://fake", Version: "v0.20.5"}
+				role.Sandbox = "sbx"
 				cfg.Roles[masonRole] = role
+				cfg.Dagger = tc.dagger
 			}
 			entered, finish := make(chan struct{}), make(chan struct{})
 			backend := turnFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
@@ -213,8 +224,9 @@ func TestEngineGateExcludesStartsDuringMaintenance(t *testing.T) {
 		t.Run(action.name, func(t *testing.T) {
 			cfg, repo, clock := hardPauseRepository(t, 1)
 			role := cfg.Roles[masonRole]
-			role.Dagger = &config.Dagger{Engine: "docker-container://fake", Version: "v0.20.5"}
+			role.Sandbox = "sbx"
 			cfg.Roles[masonRole] = role
+			cfg.Dagger = config.DaggerConfig{Engine: "docker-container://fake", Version: "v0.20.5"}
 			synctest.Test(t, func(t *testing.T) {
 				backend := turnFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "engine-turn"}, FinalResponse: "Ready"}, nil

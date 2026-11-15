@@ -342,43 +342,42 @@ func TestDaggerMasonTurnLeavesItsViewRepositoryBehind(t *testing.T) {
 	}
 }
 
-// The mason a configuration gives Dagger is the turn whose view holds the
-// repository; the roles it does not give Dagger run in views with none, and
-// Dagger on any other role is a configuration error.
-func TestConfiguredMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
+// A mason in sbx runs Dagger on the service's engine, a host engine or Dagger
+// Cloud, and its view holds the repository the Dagger CLI finds its workspace
+// by; the other roles run in views with none.
+func TestMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
 	ctx := context.Background()
-	home := t.TempDir()
-	options := fixturekit.ConfigAt(t, home)
-	file := filepath.Join(options.Root, "config.toml")
-	base, err := os.ReadFile(file)
-	must(t, err)
-	const dagger = "[roles.mason.dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n"
-	must(t, os.WriteFile(file, append(base, []byte("[roles.mason]\nsandbox = 'sbx'\n"+dagger)...), 0600))
-	cfg, err := config.Load(options)
-	must(t, err)
-	source := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("widgets\n"), 0600))
-	views := isolation.Views{Directory: t.TempDir()}
-	for role, wantRepository := range map[string]bool{"mason": true, "reviewer": false, "committee": false, "architect": false, "librarian": false} {
-		t.Run(role, func(t *testing.T) {
-			_, settings, err := cfg.Execution(role, "default")
+	for name, dagger := range map[string]string{
+		"host engine":  "[dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n",
+		"Dagger Cloud": "[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_UNITS_TEST_TOKEN'\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			options := fixturekit.ConfigAt(t, home)
+			file := filepath.Join(options.Root, "config.toml")
+			base, err := os.ReadFile(file)
 			must(t, err)
-			if (settings.Dagger != nil) != wantRepository {
-				t.Fatalf("execution settings %+v", settings)
-			}
-			view, err := views.CreateFor(ctx, coreadapter.Workspace{Directory: source, Access: coreadapter.ReadWrite}, []string{"README"}, settings)
+			must(t, os.WriteFile(file, append(base, []byte("[roles.mason]\nsandbox = 'sbx'\n"+dagger)...), 0600))
+			cfg, err := config.Load(options)
 			must(t, err)
-			defer view.Release(ctx)
-			_, err = os.Lstat(filepath.Join(view.Workspace().Directory, ".git", "HEAD"))
-			if (err == nil) != wantRepository {
-				t.Fatalf("the %s view's repository: %v", role, err)
+			source := t.TempDir()
+			must(t, os.WriteFile(filepath.Join(source, "README"), []byte("widgets\n"), 0600))
+			views := isolation.Views{Directory: t.TempDir()}
+			for role, wantRepository := range map[string]bool{"mason": true, "reviewer": false, "committee": false, "architect": false, "librarian": false} {
+				_, settings, err := cfg.Execution(role, "default")
+				must(t, err)
+				if settings.RunsDagger() != wantRepository {
+					t.Fatalf("%s execution settings %+v", role, settings)
+				}
+				view, err := views.CreateFor(ctx, coreadapter.Workspace{Directory: source, Access: coreadapter.ReadWrite}, []string{"README"}, settings)
+				must(t, err)
+				_, err = os.Lstat(filepath.Join(view.Workspace().Directory, ".git", "HEAD"))
+				must(t, view.Release(ctx))
+				if (err == nil) != wantRepository {
+					t.Fatalf("the %s view's repository: %v", role, err)
+				}
 			}
 		})
-	}
-	reviewer := append(base, []byte("[roles.reviewer]\nsandbox = 'sbx'\n"+strings.Replace(dagger, "mason", "reviewer", 1))...)
-	must(t, os.WriteFile(file, reviewer, 0600))
-	if _, err := config.Load(options); err == nil {
-		t.Fatal("Dagger on the reviewer loaded")
 	}
 }
 

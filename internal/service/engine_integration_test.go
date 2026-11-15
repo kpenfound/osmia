@@ -220,7 +220,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
 	o := fixture(t)
 	files := configFiles(t, o)
-	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n[roles.mason.dagger]\nversion = 'v0.20.5'\n"
+	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
 	files.write(t, top, files.projectText)
 	must(t, os.Remove(fake.Version))
 	s, c := start(t, o)
@@ -228,7 +228,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 		t.Fatalf("startup did not create managed engine: %s", fake.Commands(t))
 	}
 	must(t, os.WriteFile(fake.DockerCommands, nil, 0600))
-	settings := threadExecution(masonRole, s.current().Roles[masonRole])
+	settings := s.current().RoleExecution(masonRole)
 	if settings.Dagger == nil || settings.Dagger.Engine != "docker-container://osmia-dagger-engine" {
 		t.Fatalf("mason default: %+v", settings)
 	}
