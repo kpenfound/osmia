@@ -210,6 +210,14 @@ func idByte(b byte) bool {
 // check refuses is an ordinary result, {"stored":false,"reason":...}, so the
 // chief of staff reads why; a stored one is {"stored":true,"revision":n}.
 func Tool(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) (coreadapter.Tool, error) {
+	return ToolHolding(repository, agent, scope, now, nil)
+}
+
+// ToolHolding is Tool for a service that holds some open owner gates back
+// from the owner while Jev decides them: held names those gates, which the
+// status check does not count as waiting on the owner. It is read before the
+// status is stored, not inside the store's own lock.
+func ToolHolding(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, held func() []trace.OwnerGate) (coreadapter.Tool, error) {
 	if repository == nil || now == nil {
 		return coreadapter.Tool{}, errors.New("status tool requires a trace and a clock")
 	}
@@ -229,7 +237,17 @@ func Tool(repository *trace.Repository, agent string, scope coreadapter.Scope, n
 		if err := d.Decode(new(any)); err != io.EOF {
 			return nil, errors.New("status input must be one object")
 		}
-		revision, err := repository.SetStatus(ctx, agent, scope, content, now(), Check)
+		check := Check
+		if held != nil {
+			if hold := held(); len(hold) > 0 {
+				check = func(c trace.StatusContent, known []string, gates []trace.OwnerGate) error {
+					return Check(c, known, slices.DeleteFunc(slices.Clone(gates), func(g trace.OwnerGate) bool {
+						return slices.ContainsFunc(hold, func(h trace.OwnerGate) bool { return h.Kind == g.Kind && h.Reference == g.Reference })
+					}))
+				}
+			}
+		}
+		revision, err := repository.SetStatus(ctx, agent, scope, content, now(), check)
 		var rejected *trace.StatusRejected
 		if errors.As(err, &rejected) {
 			return json.Marshal(struct {

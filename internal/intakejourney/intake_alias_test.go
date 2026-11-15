@@ -167,14 +167,7 @@ type objectionDecisionRequest = intake.ObjectionDecisionRequest
 
 var serviceActor = intake.ServiceActor
 
-const questionAssessmentTask = intake.QuestionAssessmentTask
-const questionAssessmentVersion = intake.QuestionAssessmentVersion
 
-const amendmentQuestion = intake.AmendmentQuestion
-const conflictQuestion = intake.ConflictQuestion
-const scopeQuestion = intake.ScopeQuestion
-const noRuling = intake.NoRuling
-const questionAdvice = intake.QuestionAdvice
 
 const reviewerRole = intakefixture.ReviewerRole
 

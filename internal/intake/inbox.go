@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -201,8 +202,15 @@ func (s *Controller) ProjectInbox(ctx context.Context, active *Project) ([]Inbox
 		gone[w.Workstream] = w.State == AbandonedState
 	}
 	for _, e := range escalations {
-		if e.State == trace.QuestionEscalated && !gone[e.Workstream] {
-			out.Entries = append(out.Entries, InboxView(e))
+		if e.State != trace.QuestionEscalated || gone[e.Workstream] {
+			continue
+		}
+		card, open, err := s.EscalationCard(repository, e, InboxView(e))
+		if err != nil {
+			return nil, failed
+		}
+		if open {
+			out.Entries = append(out.Entries, card)
 		}
 	}
 	for _, w := range statuses {
@@ -266,7 +274,7 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		return nil, err
 	}
 	if w.State == InShedState || w.State == SketchedState {
-		if err := add(RatificationEntry(repository, w.Workstream)); err != nil {
+		if err := add(s.ratificationEntry(repository, w.Workstream)); err != nil {
 			return nil, err
 		}
 	}
@@ -274,7 +282,7 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		if gate.Kind != UnitContested {
 			continue
 		}
-		if err := add(s.ContestedEntry(repository, w.Workstream, gate.Reference)); err != nil {
+		if err := add(s.ContestedCard(repository, w.Workstream, gate.Reference)); err != nil {
 			return nil, err
 		}
 	}
@@ -288,7 +296,7 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		}
 		slices.Sort(ids)
 		for _, id := range ids {
-			if err := add(s.AmendmentEntry(repository, w.Workstream, strconv.Itoa(id))); err != nil {
+			if err := add(s.amendmentEntry(repository, w.Workstream, strconv.Itoa(id))); err != nil {
 				return nil, err
 			}
 		}
@@ -313,6 +321,13 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		if err := add(s.BaseEntry(repository, w)); err != nil {
 			return nil, err
 		}
+	}
+	if s.DiscoveryEntries != nil {
+		entries, err := s.DiscoveryEntries(repository, w.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
 	}
 	if err := add(HeldNoticesEntry(repository, w.Workstream)); err != nil {
 		return nil, err
@@ -466,7 +481,10 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 		return InboxEntry{}, false, nil
 	}
 	entries := AmendmentDissent(records)
-	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil {
+	// A plan-only amendment is the chief of staff's to decide, unless Jev's
+	// binding pick on it was refused: it is then the owner's, with that pick.
+	refused, handed := s.RefusedPick(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id))
+	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil && !handed {
 		return InboxEntry{}, false, nil
 	}
 	var options []string
@@ -489,6 +507,9 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 	}
 	e.Options = options
 	e.Recommendation = AmendmentRecommendation(entries, records, c.Round < s.Current().Shed.MaxRounds)
+	if handed {
+		CarriedCard(&e, refused, fmt.Sprintf("amendment %s", id))
+	}
 	return e, true, nil
 }
 
@@ -600,9 +621,13 @@ func (s *Controller) WorkgroupInboxRepository(ctx context.Context, project confi
 // ruleInbox records the owner's ruling on repository's own inbox entry
 // number.
 func (s *Controller) RuleInbox(ctx context.Context, repository *trace.Repository, number int, text string, unknown *APIError) (AnswerResponse, *APIError) {
+	return s.ruleInbox(ctx, repository, number, text, unknown, Deciding{})
+}
+
+func (s *Controller) ruleInbox(ctx context.Context, repository *trace.Repository, number int, text string, unknown *APIError, d Deciding) (AnswerResponse, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
 	at := s.Now()
-	entry, err := repository.Rule(ctx, number, text, OwnerActor, at, AbandonedState)
+	entry, err := repository.RuleDecided(ctx, number, text, d.Actor(), d.Judgment, at, AbandonedState)
 	switch {
 	case errors.Is(err, trace.ErrMemberRetired):
 		return AnswerResponse{}, &APIError{Code: Conflict, Message: err.Error()}

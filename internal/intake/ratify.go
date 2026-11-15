@@ -165,6 +165,14 @@ func (s *Controller) Packet(raw string) (PacketResponse, *APIError) {
 // invalid or a member has no slice. A one-workstream workgroup keeps
 // exactly today's single-workstream behaviour.
 func (s *Controller) Ratify(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError) {
+	return s.RatifyBy(ctx, raw, req, Deciding{})
+}
+
+// RatifyBy is Ratify as the given decider: the owner, or Jev deciding the
+// ratification gate of a workstream whose ratification is its own alone. A
+// workstream that belongs to a cross-repo workgroup needs the owner's group
+// approval, which Jev does not give.
+func (s *Controller) RatifyBy(ctx context.Context, raw string, req RatifyRequest, d Deciding) (RatifyResponse, *APIError) {
 	if req.Spec < 1 || req.Plan < 1 {
 		return RatifyResponse{}, &APIError{Code: Validation, Message: "ratify the revisions of the spec and the plan the packet named"}
 	}
@@ -175,6 +183,9 @@ func (s *Controller) Ratify(ctx context.Context, raw string, req RatifyRequest) 
 	id, err := repo.CrossRepoWorkgroupOf(stream)
 	if err != nil {
 		return RatifyResponse{}, &APIError{Code: Internal, Message: err.Error()}
+	}
+	if id != "" && d.Jev() {
+		return RatifyResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s belongs to workgroup %s; the owner gives its group approval", stream, id)}
 	}
 	if id != "" {
 		required, err := repo.GroupApprovalRequired(stream)
@@ -203,7 +214,10 @@ func (s *Controller) Ratify(ctx context.Context, raw string, req RatifyRequest) 
 		return RatifyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if !required {
-		return s.RatifyMember(ctx, o, asked)
+		return s.ratifyMember(ctx, o, asked, d)
+	}
+	if d.Jev() {
+		return RatifyResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s needs the owner's group approval", o.Stream)}
 	}
 	return s.RatifyWorkgroup(ctx, o, workgroup, asked, req.ProjectSpecRevision)
 }
@@ -213,6 +227,10 @@ func (s *Controller) Ratify(ctx context.Context, raw string, req RatifyRequest) 
 // reading the request directly, so a multi-member workgroup's other
 // members can be ratified at their own current pin by the same logic.
 func (s *Controller) RatifyMember(ctx context.Context, o *ShedOwner, asked shed.Pin) (RatifyResponse, *APIError) {
+	return s.ratifyMember(ctx, o, asked, Deciding{})
+}
+
+func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.Pin, d Deciding) (RatifyResponse, *APIError) {
 	latest, ratified, err := LatestRatification(o.Repository, o.Stream)
 	if err != nil {
 		return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the ratifications of workstream %s; check the trace repository", o.Stream)}
@@ -235,11 +253,13 @@ func (s *Controller) RatifyMember(ctx context.Context, o *ShedOwner, asked shed.
 		return RatifyResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is not ratified:\n- %s", o.Stream, strings.Join(refusals, "\n- "))}
 	}
 	record := shed.Ratify(o.Round, asked, entries)
+	record.DecidedBy, record.Judgment = d.By(), d.Judgment
 	content, err := shed.EncodeRatification(record)
 	if err != nil {
 		return RatifyResponse{}, &APIError{Code: Validation, Message: "the ratification cannot be recorded: " + err.Error()}
 	}
-	reason := fmt.Sprintf("the owner ratified %s after round %d", asked, o.Round)
+	o.Deciding = d
+	reason := fmt.Sprintf("%s ratified %s after round %d", d.Name(), asked, o.Round)
 	if len(record.Dispositions) > 0 {
 		reason += fmt.Sprintf(", over %s the owner disposed of", shed.Objections(len(record.Dispositions)))
 	}
@@ -410,7 +430,8 @@ func (s *Controller) Sealing(ctx context.Context, o *ShedOwner, r Ratification, 
 	if err != nil {
 		return RatifyResponse{}, failed
 	}
-	reason := fmt.Sprintf("the owner ratified %s after round %d again; sealing %d failed and the sealing is asked for again", r.Revision, r.Round, in.Seal)
+	o.Deciding = decidingOf(r.DecidedBy, r.Judgment)
+	reason := fmt.Sprintf("%s ratified %s after round %d again; sealing %d failed and the sealing is asked for again", o.Deciding.Name(), r.Revision, r.Round, in.Seal)
 	if api := o.Record(ctx, shed.RatificationDocumentID(r.Round), shed.RatificationPath(r.Round), string(content), fmt.Sprintf("ratified-%d", r.Round), reason); api != nil {
 		return RatifyResponse{}, api
 	}

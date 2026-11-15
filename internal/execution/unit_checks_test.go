@@ -41,7 +41,7 @@ func newChecksFixture(t *testing.T, key string, checks ReviewChecks) (*buildFixt
 	return f, stream, f.repository
 }
 
-func boostJev(s *Controller, p *jevtest.Provider) {
+func useJevProvider(s *Controller, p *jevtest.Provider) {
 	s.Jev = intakefixture.CheckJudge(s.Now, p)
 }
 
@@ -79,7 +79,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	report := currentReport(t, repository, stream, "resume")
 	run := onlyRun(t, repository, stream)
-	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || run.Selection.Listed != nil || run.Selection.Covered != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}) || run.Output != "CHECKS  ✔ 2 passed\n" {
+	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != string(jev.ReasonUnconfigured) || run.Selection.Listed != nil || run.Selection.Covered != nil || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}) || run.Output != "CHECKS  ✔ 2 passed\n" {
 		t.Fatalf("check run %+v", run)
 	}
 
@@ -92,7 +92,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)
 	if slices.ContainsFunc(docs, func(d trace.Document) bool { return strings.HasPrefix(d.Path, "judgments/") }) {
-		t.Fatal("a judgment was recorded with the boost off")
+		t.Fatal("a judgment was recorded with Jev unconfigured")
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	must(t, err)
@@ -104,7 +104,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 
 	req := reviewTurn(t, f, repository, stream)
-	if !strings.Contains(req.Prompt, "Check run 1 passed: every check ran: the Jev boost is off.") || !strings.Contains(req.Prompt, run.Output) || !strings.Contains(req.Prompt, run.OutputPath) {
+	if !strings.Contains(req.Prompt, "Check run 1 passed: every check ran: Jev did not select them (unconfigured: OSMIA_TEST_JEV_KEY is not set).") || !strings.Contains(req.Prompt, run.Output) || !strings.Contains(req.Prompt, run.OutputPath) {
 		t.Fatalf("review prompt lacks the check run:\n%s", req.Prompt)
 	}
 }
@@ -169,7 +169,7 @@ func TestChecksRunEveryCheckWhenDaggerRefusesTheLinksJevSelects(t *testing.T) {
 	f, stream, repository := newChecksFixture(t, "checks-refused", checks)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.92)}}}}}
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
 		t.Fatalf("unit is %s, want reviewing", got)
@@ -218,7 +218,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	f, stream, repository := newChecksFixture(t, "checks-jev", checks)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.55), "check-2": jevtest.Noul(0.45), "check-3": jevtest.Noul(0.02)}}}}}
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
 		t.Fatalf("unit is %s, want reviewing", got)
@@ -272,7 +272,7 @@ func TestChecksApplyTheConfiguredThreshold(t *testing.T) {
 	f, stream, repository := newChecksFixture(t, "checks-threshold", checks)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.55), "check-2": jevtest.Noul(0.02)}}}}}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: 0.9}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: 0.9}
 	f.s.Jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: f.s.Now}
 
 	runChecks(t, f.s, repository, stream)
@@ -335,7 +335,7 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 			c.checks.Outcomes = passing()
 			f, stream, repository := newChecksFixture(t, "fallback", c.checks)
 			p := &jevtest.Provider{Results: []jevtest.Result{c.result}}
-			boostJev(f.s, p)
+			useJevProvider(f.s, p)
 			if c.name != "no check likely" {
 				configured := f.s.Jev.Config()
 				configured.CheckFallbackPicks = 2
@@ -610,7 +610,7 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 			path := filepath.Join(f.cfg.Root.String(), "config.toml")
 			top, err := os.ReadFile(path)
 			must(t, err)
-			must(t, os.WriteFile(path, append(top, []byte("\n[jev]\nenabled = true\n"+value+"\n")...), 0600))
+			must(t, os.WriteFile(path, append(top, []byte("\n[jev]\n"+value+"\n")...), 0600))
 			loaded, err := config.Load(config.Options{Root: f.cfg.Root.String()})
 			must(t, err)
 			settings := loaded.Jev

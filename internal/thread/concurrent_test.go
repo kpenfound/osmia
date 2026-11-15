@@ -67,7 +67,7 @@ func controller(t *testing.T, r *trace.Repository, clock *testClock, turns corea
 func controllerWith(t *testing.T, r *trace.Repository, clock *testClock, turns coreadapter.Turns, schedule func(context.Context) error) *reconcile.Controller {
 	t.Helper()
 	sessions := t.TempDir()
-	d := Dispatcher{Runner: Runner{Store: r, Turns: turns, Now: clock.Now}, Prepare: func(_ context.Context, in TurnInput) (coreadapter.PreparedTurn, error) {
+	d := Dispatcher{Runner: Runner{Jev: unconfiguredJudge(), Store: r, Turns: turns, Now: clock.Now}, Prepare: func(_ context.Context, in TurnInput) (coreadapter.PreparedTurn, error) {
 		return coreadapter.PreparedTurn{SessionDirectory: sessions + "/" + in.Agent + "/" + in.Turn}, nil
 	}}
 	c, err := reconcile.New(r, reconcile.Options{Worker: "test", Now: clock.Now, RetryDelay: time.Minute, Ticks: make(chan time.Time), Schedule: schedule,

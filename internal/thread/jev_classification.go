@@ -30,8 +30,7 @@ const (
 )
 
 // maxSpans bounds the passages offered as evidence; a longer response offers
-// its last ones. maxSpanRunes bounds one passage, as it bounds a
-// classifier's evidence.
+// its last ones. maxSpanRunes bounds one passage.
 const (
 	maxSpans     = 64
 	maxSpanRunes = 500
@@ -60,8 +59,8 @@ var evidenceQuestions = map[string]string{
 func evidenceQuestion(class string) string { return "evidence-" + class }
 
 // judgeClassification asks Jev to classify response's clean mason turn and
-// reports whether it replaced the rule's classification. Any fallback leaves
-// the classification as it was.
+// reports whether it replaced the rule's classification with its own. Any
+// fallback leaves the classification as it was.
 func (r Runner) judgeClassification(ctx context.Context, req trace.TurnRequest, scope coreadapter.Scope, response *trace.TurnResponse) bool {
 	c := response.Classification
 	spans := responseSpans(c.Window)

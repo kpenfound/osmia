@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +76,7 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
-	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
+	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5, DecisionThreshold: 0.9}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
 		t.Fatalf("jev defaults: %+v", c.Jev)
 	}
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
@@ -101,10 +103,31 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestJevBoostIsOneSwitch(t *testing.T) {
-	c, err := Load(fixture(t, topConfig+"[jev]\nenabled = true\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
-	if err != nil || !c.Jev.Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
+func TestJevSettingsAlwaysEnableTheJudge(t *testing.T) {
+	c, err := Load(fixture(t, topConfig+"[jev]\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
+	if err != nil || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
 		t.Fatalf("jev: %+v %v", c.Jev, err)
+	}
+	if len(c.Warnings) != 0 {
+		t.Fatalf("warnings %q", c.Warnings)
+	}
+}
+
+// The removed [jev] enabled switch is accepted and ignored; false warns.
+func TestJevEnabledSwitchIsAcceptedAndIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		warnings []string
+	}{{"true", nil}, {"false", []string{JevEnabledIgnored}}} {
+		opts := fixture(t, topConfig+"[jev]\nenabled = "+tc.value+"\nmodel = 'jev-1.13.0'\n", projectConfig)
+		c, err := Load(opts)
+		if err != nil || !slices.Equal(c.Warnings, tc.warnings) || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" {
+			t.Fatalf("enabled = %s: warnings %q, jev %+v, err %v", tc.value, c.Warnings, c.Jev, err)
+		}
+		top, err := LoadTopLevel(opts)
+		if err != nil || !slices.Equal(top.Warnings, tc.warnings) {
+			t.Fatalf("enabled = %s: top-level warnings %q, err %v", tc.value, top.Warnings, err)
+		}
 	}
 }
 
@@ -143,6 +166,22 @@ func TestJevCheckThreshold(t *testing.T) {
 	}
 }
 
+func TestJevDecisionThreshold(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  float64
+	}{{"0.75", 0.75}, {"1", 1}} {
+		cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = "+c.value+"\n", projectConfig))
+		if err != nil || cfg.Jev.DecisionThreshold != c.want {
+			t.Fatalf("decision_threshold = %s: %+v %v", c.value, cfg, err)
+		}
+	}
+	cfg, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || cfg.Jev.DecisionThreshold != 0.9 {
+		t.Fatalf("default decision threshold = %v %v", cfg.Jev.DecisionThreshold, err)
+	}
+}
+
 func TestBudgetLimits(t *testing.T) {
 	c, err := Load(fixture(t, topConfig+"[budget]\nper_session = '5.00'\nper_unit = '40.00'\nper_day = '150.00'\n", projectConfig))
 	if err != nil || c.Budget.SessionLimitUSD() != 5 || c.Budget.PerUnit != "40.00" || c.Budget.PerDay != "150.00" {
@@ -166,21 +205,33 @@ func TestBudgetLimits(t *testing.T) {
 	}
 }
 
-func TestProjectClassifier(t *testing.T) {
-	for _, tc := range []struct{ setting, want string }{{"", ""}, {"classifier = 'default'\n", "default"}} {
-		c, err := Load(fixture(t, topConfig, projectConfig+tc.setting))
-		if err != nil || c.Project.Classifier != tc.want {
-			t.Fatalf("classifier %q: %+v %v", tc.setting, c, err)
+// A leftover classifier setting, per project or as roles.classifier, loads
+// and has no effect.
+func TestClassifierSettingsAreIgnored(t *testing.T) {
+	plain, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n"
+	for name, tc := range map[string]struct{ top, project string }{
+		"project profile":         {topConfig, projectConfig + "classifier = 'default'\n"},
+		"unknown project profile": {topConfig, projectConfig + "classifier = 'missing'\n"},
+		"role":                    {topConfig + "[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n", projectConfig},
+		"role and project":        {top, projectConfig + "classifier = 'other'\n"},
+	} {
+		c, err := Load(fixture(t, tc.top, tc.project))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got, want := c.Project, plain.Project
+		// The clone path is expanded against each fixture's own home.
+		got.Clone, want.Clone = "", ""
+		if _, ok := c.Roles["classifier"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: classifier setting took effect: %+v", name, c)
 		}
 	}
-	if _, err := Load(fixture(t, topConfig, projectConfig+"classifier = 'missing'\n")); err == nil || !strings.Contains(err.Error(), "classifier: unknown profile missing") {
-		t.Fatalf("unknown classifier: %v", err)
-	}
-	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n"
-	if _, err := Load(fixture(t, top, projectConfig+"classifier = 'other'\n")); err == nil || !strings.Contains(err.Error(), "claude classifier") {
-		t.Fatalf("incompatible classifier sandbox: %v", err)
-	}
 }
+
 func TestExplicit(t *testing.T) {
 	top := topConfig + `effort = "high"
 timeout = "2m"
@@ -328,6 +379,10 @@ func TestInvalid(t *testing.T) {
 		{"jev check threshold negative", topConfig + "[jev]\ncheck_threshold = -0.1\n", "", "jev.check_threshold"},
 		{"jev check threshold above one", topConfig + "[jev]\ncheck_threshold = 1.5\n", "", "jev.check_threshold"},
 		{"jev check threshold nan", topConfig + "[jev]\ncheck_threshold = nan\n", "", "jev.check_threshold"},
+		{"jev decision threshold zero", topConfig + "[jev]\ndecision_threshold = 0\n", "", "jev.decision_threshold"},
+		{"jev decision threshold negative", topConfig + "[jev]\ndecision_threshold = -0.1\n", "", "jev.decision_threshold"},
+		{"jev decision threshold above one", topConfig + "[jev]\ndecision_threshold = 1.01\n", "", "jev.decision_threshold"},
+		{"jev decision threshold nan", topConfig + "[jev]\ndecision_threshold = nan\n", "", "jev.decision_threshold"},
 		{"jev unknown key", topConfig + "[jev]\nclassification = true\n", "", "jev.classification"},
 		{"transcribe url scheme", topConfig + "[transcribe]\nurl = 'ftp://whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
 		{"transcribe url relative", topConfig + "[transcribe]\nurl = '/v1/audio/transcriptions'\n", "", "transcribe.url"},

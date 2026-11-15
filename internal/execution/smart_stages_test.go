@@ -66,7 +66,7 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 	want := []string{fixturekit.SmartStandalone, fixturekit.SmartPackageA, fixturekit.SmartPackageB, fixturekit.SmartUncovered}
 	slices.Sort(want)
 	p := &jevtest.Provider{Results: []jevtest.Result{breadthAnswer(), depthAnswer(), rankingAnswer(want)}}
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	runChecks(t, f.s, repo, stream)
 	run := onlyRun(t, repo, stream)
 	s := run.Selection
@@ -127,7 +127,7 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 	t.Logf("two listings plus %d scoped listings took %s in the fake", len(checks.Roots), checks.ListingTime)
 
 	// A new Judge models a restart; all three identities and answers are durable.
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	c := &checkers{masons: f.controller()}
 	ops, err := checkOperations(repo, stream)
 	must(t, err)
@@ -222,7 +222,7 @@ func TestUnitChecksStageFallbacks(t *testing.T) {
 			}
 			f, stream, repo := newChecksFixture(t, "stage-fallback", runner)
 			p := &jevtest.Provider{Results: results}
-			boostJev(f.s, p)
+			useJevProvider(f.s, p)
 			if scenario == "cool-down" {
 				// Three consecutive failures put the shared provider into cool-down.
 				for i := range 3 {
@@ -301,7 +301,7 @@ func TestUnitChecksNarrowAfterDepthFailure(t *testing.T) {
 	timeout := jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}
 	p := &jevtest.Provider{Results: []jevtest.Result{breadthAnswer(), timeout, timeout, rankingAnswer(want)}}
 	f, stream, repo := newChecksFixture(t, "depth-narrow", checks)
-	boostJev(f.s, p)
+	useJevProvider(f.s, p)
 	runChecks(t, f.s, repo, stream)
 	run := onlyRun(t, repo, stream)
 	if run.Status != ChecksPassed || !slices.Equal(run.Selection.Links, want) || !slices.Equal(checks.Runs()[0], want) || run.Selection.Candidates != len(want) || run.Selection.Levels[fixturekit.SmartTestRoot] != "go-test" || len(p.Requests()) != 4 {

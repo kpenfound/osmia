@@ -30,16 +30,18 @@ Hearsay `work` sources and the publisher agent that posts to them:
 
 | Source | Holds | Authority |
 |---|---|---|
-| **work source** | `project`, `workstream` and `update` records, plus what the chief of staff, a committee or the librarian decided | Documents and decisions are **inferred** |
+| **work source** | `project`, `workstream` and `update` records, plus what the chief of staff, a committee, the librarian or Jev decided | Documents and decisions are **inferred** |
 | **owner source** | `document` and `decision` records the owner stands behind, for the projects and workstreams the work source holds | Documents and decisions are **ratified** |
 
 **Authority comes from the source, never from the author.** Everything the owner
 decides goes to the owner source, with the owner named as `author` through the
 publisher agent, which Hearsay lists as an `attributor`. Everything the chief,
 a committee or the librarian decides goes to the work source and stays
-inferred, even when it names the owner or says `decider: owner`. A chief's relay
-of a ruling is never posted as a ruling: the ruling is posted once, from the
-owner's own gate, to the owner source. Hearsay never reads the author, the
+inferred, even when it names the owner or says `decider: owner`. A decision Jev
+made is never the owner's: it goes to the work source with no author. A chief's
+relay of a ruling is never posted as a ruling: the ruling is posted once, from
+the gate that decided it, to the owner source when the owner decided and to the
+work source when Jev did. Hearsay never reads the author, the
 attributing poster or the decider to decide a tier.
 
 ## What is posted
@@ -68,11 +70,13 @@ Nothing else from the knowledge base is posted: no subsystem notes, no
 | Record | Kind | Source |
 |---|---|---|
 | The workstream: what the owner asked for, its core state (`proposed`, `started`, `blocked`, `completed` or `abandoned`), Osmia's own state as `status`, the pull request URL and whether it merged, and the reason for a cancellation or abandonment. A workgroup member's description names the workgroup and the other members. The pull request body is not sent | `workstream` | work |
-| Each sealed spec, as one revision of the workstream's spec document. An amendment produces a new seal and so a new revision | `document` | owner |
+| Each spec sealed by the owner's ratification or by an amendment the owner or the chief of staff decided, as one revision of the workstream's spec document (`<workstream id>-spec`). An amendment produces a new seal and so a new revision | `document` | owner |
+| Each spec sealed by Jev's ratification or by an amendment Jev decided, as one revision of the workstream's Jev spec document (`<workstream id>-jev-spec`), with no author ([Jev's decisions](#jevs-decisions)) | `document` | work |
 | An owner ruling on an escalated question, with the question and its escalation: the passage in tension, the conflict and the options | `decision` | owner |
 | An amendment the owner decided, with the change, the reason and who decided | `decision` | owner |
 | A final-review finding the owner accepted at delivery instead of having it fixed | `decision` | owner |
 | A plan-only amendment, decided by the chief of staff | `decision` | work |
+| A ruling, an answer, an amendment decision or a discovery disposition that Jev decided ([Jev's decisions](#jevs-decisions)) | `decision` | work |
 
 **Chief of staff decisions** (all `decision`, work source, inferred)
 
@@ -97,15 +101,18 @@ about (`<workstream id>-ruling-<question>`, `<workstream id>-answer-<question>`,
 `<workstream id>-discovery-<discovery hash>-<revision>`,
 `<workstream id>-accepted-<review>-<finding hash>`,
 `<workstream id>-followup-<unit>`, `assumption-<hash>` and
-`<workgroup id>-change-<change>`). An id that would not fit Hearsay's grammar is
+`<workgroup id>-change-<change>`). A decision Jev made carries `jev` after the
+workstream id ([Jev's decisions](#jevs-decisions)). An id that would not fit Hearsay's grammar is
 replaced by a hash of the same inputs.
 
 - **Owner rulings.** Only the owner's own ruling, the first revision of the
-  question's ruling, is posted, on the owner source. The question is the chief
+  question's ruling, is posted, on the owner source. A ruling Jev made is posted
+  on the work source instead ([Jev's decisions](#jevs-decisions)). The question is the chief
   of staff's rephrasing the owner read, and the context carries the passage in
   tension, the conflict, what was blocked and the options put to the owner. The
   chief of staff's relay of the ruling to the askers is a later revision and is
   never posted, as a ruling or in any other form.
+- **Jev decisions.** [See below](#jevs-decisions).
 - **Chief answers.** An answer the chief of staff gave from the record is posted
   on the work source with its citations. An answer that cites a recorded code
   inspection (`inspection#…`) came from reading code and is not posted.
@@ -113,7 +120,8 @@ replaced by a hash of the same inputs.
   (also when the owner overruled objections) or rejected. A request that is not
   decided yet, a debate round and a service retirement are not. The owner's
   decisions, including the chief of staff relaying one, go to the owner source;
-  a plan-only revision the chief of staff decided goes to the work source. A
+  a plan-only revision the chief of staff decided, and any amendment Jev
+  decided, goes to the work source. A
   later approved amendment citing the same criteria revisits the earlier one and
   names it in `supersedes`.
 - **Project amendments.** The owner's ruling on an amendment to a workgroup's
@@ -139,6 +147,56 @@ replaced by a hash of the same inputs.
 A decision about a workstream links the workstream's spec document and its pull
 request URL when they exist. A decision is posted after the decision it
 supersedes, and not while that one was refused.
+
+### Jev's decisions
+
+Jev decides the owner's gates when it is confident and some of the chief of
+staff's own decisions ([how Jev decides](design.md)). A record Jev wrote carries
+`jev` as its decider and the judgment record it comes from, and the trace
+guarantees that only Jev's own actor writes such a record. The publisher reads
+that, so a decision Jev made is never posted as the owner's, whatever kind of
+decision it is. These are the kinds the publisher posts for Jev:
+
+| Jev decided | Posted as | Record id |
+|---|---|---|
+| A ruling on an escalated question | `decision`, with the question, the passage in tension, the conflict and the options | `<workstream id>-jev-ruling-<question>` |
+| An answer the chief of staff gave from the record, bound by Jev's pick | `decision` | `<workstream id>-jev-answer-<question>` |
+| An amendment, approved or declined | `decision` | `<workstream id>-jev-amendment-<amendment>` |
+| A discovery disposition that is a scope call (declined or kept as a suggestion), or that revisits one | `decision`, one per revision | `<workstream id>-jev-discovery-<discovery hash>-<revision>` |
+| A ratification, or an amendment, that sealed a spec | `document`, one revision per seal | `<workstream id>-jev-spec` |
+
+Every one of them:
+
+- **Goes to the work source and names no `author`.** The owner source holds
+  only what the owner decided, so nothing Jev decided reaches it and nothing
+  names the owner as its author. Hearsay takes authority from the source, so
+  these stay inferred.
+- **Carries `decider: chief_of_staff`.** Hearsay accepts only `owner`,
+  `chief_of_staff` and `committee`, and answers 400 to anything else, so `jev`
+  is not a decider it takes. Jev is named in the text instead: the rationale of
+  a decision begins "Decided by Jev, the decision maker for the owner, with
+  judgment `<judgment id>`; the owner did not decide it", and the document of a
+  Jev-sealed spec is named "Spec ratified by Jev".
+- **Has its own id.** The `jev` in each id keeps it apart from the owner's
+  record of the same subject: Hearsay refuses an id that another source holds
+  with a 409, and an owner ruling is `<workstream id>-ruling-<question>` on the
+  owner source. A Jev-sealed spec is a revision of `<workstream id>-jev-spec`
+  on the work source, never of `<workstream id>-spec`.
+- **Is posted once.** The chief of staff's relay of a Jev ruling to the askers
+  is a later revision of the ruling and is never posted, as it is not for an
+  owner ruling.
+
+A seal belongs to whoever decided what produced it. A seal an amendment
+produced belongs to whoever decided that amendment; a plan-only amendment the
+chief of staff decided leaves the spec with whoever ratified the seal before
+it; any other seal belongs to whoever ratified its round. Seals the owner
+ratified, or that an amendment the owner decided produced, stay on the owner
+source with the owner as author.
+
+A final-review follow-up unit records no decider, so none is Jev's and they are
+posted as the chief of staff's, as before. Contest resolutions, objection
+decisions, ratification decisions and final-review triage are not posted for
+anyone, Jev included; only the spec a ratification sealed is.
 
 **Subsystem map.** The service compares each committed revision of
 `kb/entities.json` with the one before it and posts one `update` on the project,
@@ -342,7 +400,7 @@ Roles receive the read tools `get_bundle`, `search`, `traverse`, `resolve`,
 `stance_history`, `get_l1` and `get_l0`. `traverse` follows Hearsay's typed
 graph from an entity, so a role can reach the decision log and spec documents
 around a project or workstream. Exploratory sessions receive the read tools at
-the observer class and no write tool, and the classifier receives no tools.
+the observer class and no write tool.
 External context is labelled separately from the local knowledge base, which
 every turn still receives word for word.
 

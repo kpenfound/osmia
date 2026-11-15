@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -32,8 +33,18 @@ func chiefContestPath(unit, contest string) string {
 
 // chiefDecisionDocument uses a bounded stable key; the contest already names
 // the unit, so repeating the subject could exceed the trace's key limit.
+// A non-empty judgment is the Jev judgment record behind a decision Jev's
+// binding pick called for; the decision then names Jev as its actor.
 func chiefDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
-	data, _ := json.MarshalIndent(ChiefContestDecision{Contest: contest, Decision: decision, Note: note, Turn: turn}, "", "  ")
+	return judgedDecisionDocument(repo, stream, unit, contest, decision, note, turn, at, "")
+}
+
+func judgedDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time, judgment string) trace.Document {
+	d := ChiefContestDecision{Contest: contest, Decision: decision, Note: note, Turn: turn}
+	if judgment != "" {
+		d.Actor, d.Judgment = trace.DecidedByJev, judgment
+	}
+	data, _ := json.MarshalIndent(d, "", "  ")
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.EventID(contest, "chief"), Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: chiefActor, Cause: contest}
 	return trace.Document{Header: h, Path: chiefContestPath(unit, contest), Content: string(data) + "\n"}
 }
@@ -92,6 +103,24 @@ func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 		return true, decisions[i].Note, nil
 	}
 	return false, "", nil
+}
+
+// ContestEscalated reports whether the chief of staff escalated the contest to
+// the owner, and its note. A contest the owner moved the unit into, or one the
+// chief of staff ruled on, is not an escalation.
+func ContestEscalated(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (string, bool, error) {
+	if moveContest(contest, unit) {
+		return "", false, nil
+	}
+	_, decisions, err := chiefDecisions(repo, stream, unit)
+	if err != nil {
+		return "", false, err
+	}
+	i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID && d.Decision == escalateContest })
+	if i < 0 {
+		return "", false, nil
+	}
+	return decisions[i].Note, true, nil
 }
 
 // resolveContested returns the resolve_contested tool of one claimed
@@ -187,16 +216,28 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner rules on it", contest.ID, input.Unit))
 		}
 
-		decision := chiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
-		record := func() error {
+		subject := fmt.Sprintf("contest %s of unit %s", contest.ID, input.Unit)
+		bound, why, err := jev.Require(target, stream, jev.KindContestedRuling, jev.ContestKey(contest.ID), input.Decision, subject)
+		if err != nil {
+			return nil, err
+		}
+		if why != "" {
+			return priorityRefusal(why)
+		}
+		judgment, actor := "", chiefActor
+		if bound != nil {
+			judgment, actor = bound.Judgment, trace.JevActor
+		}
+		record := func(decision trace.Document) error {
 			if bounceContest(contest, input.Unit) {
 				_, err := target.RecordDocumentsWith(ctx, []trace.Document{decision})
 				return err
 			}
 			return target.RecordDocuments(ctx, []trace.Document{decision})
 		}
+		decision := judgedDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now(), judgment)
 		if input.Decision == escalateContest {
-			if err := record(); err != nil {
+			if err := record(decision); err != nil {
 				return nil, err
 			}
 			return json.Marshal(struct {
@@ -205,14 +246,30 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 				Detail   string `json:"detail"`
 			}{true, input.Unit, "the contest is in the owner's inbox with your note"})
 		}
+		var out ContestedRulingResponse
+		var api *APIError
 		if bounceContest(contest, input.Unit) {
-			return rulingResult(s.RecordContestedRuling(ctx, target, stream, input.Unit, request, chiefActor, decision))
+			out, api = s.RecordContestedRulingJudged(ctx, target, stream, input.Unit, request, actor, judgment, decision)
+		} else {
+			if out, api = s.RecordContestedRulingJudged(ctx, target, stream, input.Unit, request, actor, judgment); api == nil {
+				if err := record(decision); err != nil {
+					return nil, err
+				}
+			}
 		}
-		out, api := s.RecordContestedRuling(ctx, target, stream, input.Unit, request, chiefActor)
-		if api == nil {
-			if err := record(); err != nil {
+		if api != nil && bound != nil && api.Code != Internal {
+			// The service refused the transition Jev's binding pick calls for.
+			// The contest goes to the owner with Jev's judgment, and Jev is not
+			// asked about it again.
+			handed := fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
+			if err := record(judgedDecisionDocument(target, stream, input.Unit, contest.ID, escalateContest, handed, scope.Turn, s.Now(), judgment)); err != nil {
 				return nil, err
 			}
+			return json.Marshal(struct {
+				Recorded bool   `json:"recorded"`
+				Unit     string `json:"unit"`
+				Detail   string `json:"detail"`
+			}{true, input.Unit, "the service could not carry out Jev's decision (" + api.Message + "); the contest is in the owner's inbox with Jev's judgment"})
 		}
 		return rulingResult(out, api)
 	}

@@ -17,6 +17,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// unconfiguredJudge is Jev without its API key: every judgment falls back and
+// nothing is sent.
+func unconfiguredJudge() *jev.Judge {
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+	return &jev.Judge{Config: func() config.Jev { return settings }, Getenv: func(string) string { return "" }}
+}
+
 // The final response is split into the sentence spans a classification
 // question offers as evidence, each bounded in rune length, with the spans
 // themselves bounded in count and blank responses yielding none.
@@ -69,47 +76,40 @@ func classification(class string, p float64, evidence map[string]string) jevtest
 func TestJevClassification(t *testing.T) {
 	const final = "Edited store.go. I cannot continue without the schema. Should I wait for it?"
 	for _, tc := range []struct {
-		name       string
-		enabled    bool
-		result     jevtest.Result
-		classifier bool
-		class      string
-		evidence   string
-		by         string
-		outcome    jev.Outcome
-		reason     jev.Reason
+		name         string
+		unconfigured bool
+		result       jevtest.Result
+		class        string
+		evidence     string
+		by           string
+		outcome      jev.Outcome
+		reason       jev.Reason
 	}{
-		{name: "disabled", result: classification("claims_done", 0.99, map[string]string{"claims_done": "span-1"}), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule},
-		{name: "disabled with classifier", classifier: true, class: "gave_up", evidence: "schema missing", by: trace.ClassifiedByClassifier},
-		{name: "question", enabled: true, result: classification("asked_in_prose", 0.92, map[string]string{"asked_in_prose": "span-3"}), classifier: true, class: "asked_in_prose", evidence: "Should I wait for it?", by: trace.ClassifiedByJev, outcome: jev.Accepted},
-		{name: "gave up", enabled: true, result: classification("gave_up", 0.95, map[string]string{"gave_up": "span-2"}), class: "gave_up", evidence: "I cannot continue without the schema.", by: trace.ClassifiedByJev, outcome: jev.Accepted},
-		{name: "unclear", enabled: true, result: classification("unclear", 0.81, nil), class: "unclear", evidence: "Jev found no question, completion claim or surrender (probability 0.81)", by: trace.ClassifiedByJev, outcome: jev.Accepted},
-		{name: "uncertain gave up", enabled: true, result: classification("gave_up", 0.85, map[string]string{"gave_up": "span-2"}), classifier: true, class: "gave_up", evidence: "schema missing", by: trace.ClassifiedByClassifier, outcome: jev.Fallback, reason: jev.ReasonDeclined},
-		{name: "uncertain class", enabled: true, result: classification("claims_done", 0.6, map[string]string{"claims_done": "span-1"}), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonDeclined},
-		{name: "no passage", enabled: true, result: classification("claims_done", 0.97, nil), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonDeclined},
-		{name: "rate limited", enabled: true, result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, classifier: true, class: "gave_up", evidence: "schema missing", by: trace.ClassifiedByClassifier, outcome: jev.Fallback, reason: jev.ReasonRateLimited},
-		{name: "unusable", enabled: true, result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindMalformed, Message: "answer missing"}}, class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonUnusable},
+		{name: "unconfigured", unconfigured: true, result: classification("claims_done", 0.99, map[string]string{"claims_done": "span-1"}), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule},
+		{name: "question", result: classification("asked_in_prose", 0.92, map[string]string{"asked_in_prose": "span-3"}), class: "asked_in_prose", evidence: "Should I wait for it?", by: trace.ClassifiedByJev, outcome: jev.Accepted},
+		{name: "gave up", result: classification("gave_up", 0.95, map[string]string{"gave_up": "span-2"}), class: "gave_up", evidence: "I cannot continue without the schema.", by: trace.ClassifiedByJev, outcome: jev.Accepted},
+		{name: "unclear", result: classification("unclear", 0.81, nil), class: "unclear", evidence: "Jev found no question, completion claim or surrender (probability 0.81)", by: trace.ClassifiedByJev, outcome: jev.Accepted},
+		{name: "uncertain gave up", result: classification("gave_up", 0.85, map[string]string{"gave_up": "span-2"}), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonDeclined},
+		{name: "uncertain class", result: classification("claims_done", 0.6, map[string]string{"claims_done": "span-1"}), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonDeclined},
+		{name: "no passage", result: classification("claims_done", 0.97, nil), class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonDeclined},
+		{name: "rate limited", result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonRateLimited},
+		{name: "unusable", result: jevtest.Result{Err: &systemone.Error{Kind: systemone.KindMalformed, Message: "answer missing"}}, class: "gave_up", evidence: "I cannot continue", by: trace.ClassifiedByRule, outcome: jev.Fallback, reason: jev.ReasonUnusable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, _, _ := setup(t)
 			req := queue(t, repo, "turn")
-			settings := config.Jev{Enabled: tc.enabled, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+			settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+			key := "key"
+			if tc.unconfigured {
+				key = ""
+			}
 			p := &jevtest.Provider{Results: []jevtest.Result{tc.result}}
 			now := func() time.Time { return timestamp.Add(time.Second) }
 			runner := Runner{Store: repo, Now: now,
 				Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "s"}, FinalResponse: final, ToolCounts: map[string]int{"file_write": 1}}, nil
 				}),
-				Jev: &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: now},
-			}
-			classified := 0
-			if tc.classifier {
-				profile := coreadapter.Profile{Backend: "fake", Timeout: time.Minute}
-				runner.ClassifierProfile = &profile
-				runner.Classifier = func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-					classified++
-					return coreadapter.SessionResult{StartedAt: timestamp, FinalResponse: `{"class":"gave_up","evidence":"schema missing"}`}, nil
-				}
+				Jev: &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return key }, Now: now},
 			}
 			q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: t.TempDir()})
 			if err != nil {
@@ -119,17 +119,14 @@ func TestJevClassification(t *testing.T) {
 			if c.Class != tc.class || c.Evidence != tc.evidence || c.By != tc.by || c.Window != final || c.ToolCounts["file_write"] != 1 {
 				t.Fatalf("classification %+v", c)
 			}
-			if want := tc.classifier && tc.by == trace.ClassifiedByClassifier; (classified > 0) != want {
-				t.Fatalf("classifier ran %d times; Jev classified %t", classified, tc.by == trace.ClassifiedByJev)
-			}
 			th, err := repo.Thread(stream, "agent")
 			if err != nil || !reflect.DeepEqual(th.Turns[0].Response.Classification, c) {
 				t.Fatalf("recorded classification %+v %v", th.Turns[0].Response, err)
 			}
 			requests := p.Requests()
-			if !tc.enabled {
+			if tc.unconfigured {
 				if len(requests) != 0 || c.Judgment != "" {
-					t.Fatalf("boost off sent %d requests, judgment %q", len(requests), c.Judgment)
+					t.Fatalf("unconfigured Jev sent %d requests, judgment %q", len(requests), c.Judgment)
 				}
 				return
 			}
@@ -157,7 +154,7 @@ func TestJevClassification(t *testing.T) {
 func TestJevClassificationAskedOnceAcrossRestart(t *testing.T) {
 	repo, root, p := setup(t)
 	req := queue(t, repo, "turn")
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
 	provider := &jevtest.Provider{Results: []jevtest.Result{classification("claims_done", 0.9, map[string]string{"claims_done": "span-1"})}}
 	judge := &jev.Judge{Config: func() config.Jev { return settings }, Provider: provider.Factory(), Getenv: func(string) string { return "key" }, Now: func() time.Time { return timestamp }}
 	scope := coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: "thread", Turn: "turn", Role: "mason"}
@@ -185,7 +182,7 @@ func TestJevClassificationAskedOnceAcrossRestart(t *testing.T) {
 func TestJevClassificationSkipsBlankResponses(t *testing.T) {
 	repo, _, _ := setup(t)
 	provider := &jevtest.Provider{Results: []jevtest.Result{{Err: errors.New("asked")}}}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
 	r := Runner{Store: repo, Jev: &jev.Judge{Config: func() config.Jev { return settings }, Provider: provider.Factory(), Getenv: func(string) string { return "key" }}}
 	response := trace.TurnResponse{Classification: &trace.TurnClassification{Class: "unclear", Evidence: "no phrase", Window: "  \n", By: trace.ClassifiedByRule}}
 	if r.judgeClassification(context.Background(), trace.TurnRequest{}, coreadapter.Scope{}, &response) || len(provider.Requests()) != 0 {

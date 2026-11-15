@@ -11,6 +11,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -51,7 +53,22 @@ func (c *contestFixture) contest(t *testing.T) trace.Transition {
 
 func (c *contestFixture) resolve(t *testing.T, input string) string {
 	t.Helper()
+	decideContest(c.repo, c.stream, "resume")
 	return intakefixture.Handle(t, c.tool, input)
+}
+
+// decideContest leaves the decide result of the unit's contest as a fallback,
+// as the decide tool does while Jev is unconfigured, unless a result is
+// recorded or the unit is not contested.
+func decideContest(repo *trace.Repository, stream config.WorkstreamID, unit string) {
+	contest, contested, err := unitContest(repo, stream, unit)
+	if err != nil || !contested {
+		return
+	}
+	key := jev.ContestKey(contest.ID)
+	if res, err := jev.Recorded(repo, stream, jev.KindContestedRuling, key); err == nil && res.Status == jev.None {
+		jevfixture.Fallback(repo, repo.Project(), stream, jev.KindContestedRuling, key)
+	}
 }
 
 func (c *contestFixture) raised(t *testing.T, contest trace.Transition) (bool, string) {

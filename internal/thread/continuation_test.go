@@ -32,7 +32,7 @@ func TestContinuationAcrossReopen(t *testing.T) {
 			ctx := context.Background()
 			repo, root, projectConfig := setup(t)
 			first := queue(t, repo, "first")
-			runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 				return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "saved"}, FinalResponse: "owned final"}, nil
 			})}
 			if _, err := runner.RunNext(ctx, stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/first"}); err != nil {
@@ -209,7 +209,7 @@ func TestInterruptedAttemptIsNeverRelaunched(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		t.Fatal("relaunched interrupted attempt")
 		return coreadapter.SessionResult{}, nil
 	})}

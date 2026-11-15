@@ -69,7 +69,7 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 				probability = 0.1
 			}
 			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability), "check-1": jevtest.Noul(.1)}}}}}
-			boostJev(f.s, provider)
+			useJevProvider(f.s, provider)
 			c := &checkers{masons: newMasonController(f.s, repo)}
 			must(t, c.Pass(context.Background()))
 			ops, err := repo.Operations(stream)
@@ -125,7 +125,7 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			f, stream, repo := newChecksFixture(t, "selection-restart", checks)
 			p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.9)}}}}}
 			if !full {
-				boostJev(f.s, p)
+				useJevProvider(f.s, p)
 			}
 			c := &checkers{masons: newMasonController(f.s, repo)}
 			must(t, c.Pass(context.Background()))
@@ -158,7 +158,7 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			}
 
 			checks.links = []string{"dag+check://different/test"}
-			boostJev(f.s, &jevtest.Provider{})
+			useJevProvider(f.s, &jevtest.Provider{})
 			finished = applyCheck(context.Background(), c, op)
 			if links := awaitCheck(t, checks.entered); !slices.Equal(firstLinks, links) {
 				t.Fatalf("restart changed check links: %v, originally %v", links, firstLinks)
@@ -193,7 +193,7 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 				probability = 0.1
 			}
 			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability)}}}}}
-			boostJev(f.s, provider)
+			useJevProvider(f.s, provider)
 			c := &checkers{masons: newMasonController(f.s, repo)}
 			must(t, c.Pass(context.Background()))
 			ops, err := repo.Operations(stream)

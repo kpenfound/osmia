@@ -188,7 +188,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 			opts.Reconciliation.RetryDelay = time.Hour
 			var calls, relays atomic.Int32
 			opts.Threads = func(repo *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-				return thread.Dispatcher{Runner: thread.Runner{Store: repo, Now: clock.Now, Turns: turnsFunc(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+				return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Now: clock.Now, Turns: turnsFunc(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					calls.Add(1)
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "session"}, FinalResponse: "Reply"}, nil
 				})}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -287,7 +287,7 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 	entered, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	recorded := make(chan error, 1)
 	opts.Threads = func(repo *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Store: repo, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			close(entered)
 			<-ctx.Done()
 			close(stopping)
@@ -429,7 +429,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 			attempt.Close()
 			must(t, repo.Close())
 			opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-				return thread.Dispatcher{Runner: thread.Runner{Store: r, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+				return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					t.Error("captured reply executed again")
 					return coreadapter.SessionResult{}, errors.New("captured reply executed again")
 				})}, Relay: func(ctx context.Context, _ trace.Thread, _ trace.QueuedTurn) error { return relay(ctx, r) }}, nil

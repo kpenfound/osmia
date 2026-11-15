@@ -126,24 +126,34 @@ func (s *Controller) RuleContested(ctx context.Context, rawStream, unit string, 
 // rulerName is how a contested ruling's actor is named to the roles it
 // resumes.
 func rulerName(actor trace.Actor) string {
-	if actor.Kind == ownerActor.Kind {
+	switch {
+	case actor.Kind == ownerActor.Kind:
 		return "owner"
+	case actor == trace.JevActor:
+		return trace.DecidedByJev
 	}
 	return "chief of staff"
 }
 
-// contestRuler returns who gave a recorded ruling.
+// contestRuler returns who gave a recorded ruling, as the roles it resumes
+// are told.
 func contestRuler(r ContestedRuling) string {
-	if r.By == "" {
+	switch r.By {
+	case "":
 		return "owner"
+	case trace.DecidedByJev:
+		return "decision maker Jev"
 	}
 	return r.By
 }
 
 // contestActor returns the trace actor of whoever gave the ruling.
 func contestActor(r ContestedRuling) trace.Actor {
-	if contestRuler(r) == "owner" {
+	switch r.By {
+	case "", "owner":
 		return ownerActor
+	case trace.DecidedByJev:
+		return trace.JevActor
 	}
 	return chiefActor
 }
@@ -152,6 +162,17 @@ func contestActor(r ContestedRuling) trace.Actor {
 // chief of staff on the owner's behalf. The rulings each contest takes, and
 // what they resume, do not depend on who gives them.
 func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor, decisions ...trace.Document) (ContestedRulingResponse, *APIError) {
+	return s.RecordContestedRulingJudged(ctx, repo, stream, unit, req, actor, "", decisions...)
+}
+
+// RecordContestedRulingJudged is RecordContestedRuling with the Jev judgment
+// the ruling comes from. A non-empty judgment is Jev deciding an owner gate:
+// the actor must be the Jev actor, the ruling names the judgment, and the
+// owner's rules apply, not the chief of staff's.
+func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor, judgment string, decisions ...trace.Document) (ContestedRulingResponse, *APIError) {
+	if judgment != "" && actor != trace.JevActor || judgment == "" && actor == trace.JevActor {
+		return ContestedRulingResponse{}, &APIError{Code: Validation, Message: "a Jev ruling is written by Jev and names its judgment"}
+	}
 	if req.Decision != "review" && req.Decision != "revise" || strings.TrimSpace(req.Note) == "" {
 		return ContestedRulingResponse{}, &APIError{Code: Validation, Message: "a contested ruling requires review or revise and a note"}
 	}
@@ -181,14 +202,14 @@ func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repo
 		if api != nil {
 			return ContestedRulingResponse{}, api
 		}
-		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ContestedRuling{Decision: req.Decision, Note: out.Move.Note, By: by, Contest: contest.ID}}, nil
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ContestedRuling{Decision: req.Decision, Note: out.Move.Note, By: by, Judgment: judgment, Contest: contest.ID}}, nil
 	}
 	if failedReview(contest, unit) {
 		// A failed review turn left no findings, so the unit can only be reviewed again.
 		if req.Decision != "review" {
 			return ContestedRulingResponse{}, &APIError{Code: Validation, Message: "the reviewer's turn failed and left no findings; use review"}
 		}
-		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), By: by, Contest: contest.ID}
+		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), By: by, Judgment: judgment, Contest: contest.ID}
 		id := trace.EventID(contest.ID, "ruling")
 		reason := fmt.Sprintf("%s ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", by, contest.ID, ruling.Note)
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.Now(), Actor: actor, Cause: contest.ID}
@@ -213,7 +234,7 @@ func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repo
 		if last.Response == nil || last.Response.ID != contest.Cause {
 			return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "contested mason turn does not match transition"}
 		}
-		ruling := ContestedRuling{Decision: "revise", Note: strings.TrimSpace(req.Note), By: by, Contest: contest.ID, ResetTurn: last.Sequence}
+		ruling := ContestedRuling{Decision: "revise", Note: strings.TrimSpace(req.Note), By: by, Judgment: judgment, Contest: contest.ID, ResetTurn: last.Sequence}
 		data, _ := json.MarshalIndent(ruling, "", "  ")
 		id := fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject(unit), last.Sequence)
 		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.Now(), Actor: actor, Cause: contest.ID}, Path: masonRulingPath(unit, last.Sequence), Content: string(data) + "\n"}
@@ -252,7 +273,7 @@ func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repo
 		}
 	}
 	if !found {
-		ruling = ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), By: by, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
+		ruling = ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), By: by, Judgment: judgment, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
 		data, _ := json.MarshalIndent(ruling, "", "  ")
 		id := fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)
 		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.Now(), Actor: actor, Cause: reviewDocument(unit)}, Path: contestedRulingPath(unit, result.Bounces), Content: string(data) + "\n"})

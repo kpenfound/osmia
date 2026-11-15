@@ -47,6 +47,7 @@ func finalChecksFixture(t *testing.T, checks checkrun.ReviewChecks) (*FinalRevie
 		Now:    func() time.Time { return fixturekit.DemoStart },
 		Step:   func(string) error { return nil },
 		Checks: checks,
+		Jev:    fixturekit.UnconfiguredJudge(func() time.Time { return fixturekit.DemoStart }),
 		AcquireReviewCheckSlot: func(context.Context, config.ProjectID, config.WorkstreamID, int, string) (func(), error) {
 			return func() {}, nil
 		},
@@ -139,7 +140,7 @@ func TestFinalChecksRunFallbackPicks(t *testing.T) {
 	git("commit", "-qm", "candidate")
 	commit := git("rev-parse", "HEAD")
 	checks := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b", "dag+check://c"}, Outcomes: fixturekit.Passing()}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: 2}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: config.DefaultJevAPIKeyEnv, Timeout: "1s", CheckThreshold: .5, CheckFallbackPicks: 2}
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}}}}
 	controller := New(Dependencies{Now: func() time.Time { return fixturekit.DemoStart }, Step: func(string) error { return nil }, Checks: checks, Jev: &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }}, AcquireReviewCheckSlot: func(context.Context, config.ProjectID, config.WorkstreamID, int, string) (func(), error) {
 		return func() {}, nil
@@ -166,7 +167,7 @@ func TestFinalCheckRetryReusesBreadthDepthAndRanking(t *testing.T) {
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"depth-0": jevtest.Choice("go-package", .8, .8, "go-test")}, Usage: systemone.Usage{CostUSD: .02, CostKnown: true}}},
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.9), "check-1": jevtest.Noul(.9), "check-2": jevtest.Noul(.9), "check-3": jevtest.Noul(.9)}, Usage: systemone.Usage{CostUSD: .03, CostKnown: true}}},
 	}}
-	settings := config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: .5}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: .5}
 	newJudge := func() *jev.Judge {
 		return &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: reviewer.S.Now}
 	}

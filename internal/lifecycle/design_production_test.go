@@ -10,6 +10,7 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	seal "github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	status "github.com/kpenfound/osmia/internal/status"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -80,7 +81,7 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent Conve
 		}
 		op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
 		must(t, err)
-		observed, err := (thread.Dispatcher{Runner: thread.Runner{Store: chief}}).Inspect(context.Background(), op)
+		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
 		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared chief dispatch applies directly without an operation retry timer", op.ID, observed, err)
 		f.logTurns(t, chief, host)
 	}

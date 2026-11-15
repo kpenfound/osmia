@@ -96,7 +96,7 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 			"check-0": jevtest.Noul(0.9), "check-1": jevtest.Noul(0.1),
 		}}})
 	}
-	boostJev(f.s, provider)
+	useJevProvider(f.s, provider)
 
 	// Owner sessions in a second local project share the factory's slots
 	// with the first project's real unit and final-review controllers.

@@ -147,15 +147,65 @@ func (e *DemoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.Sessions.Mu.Lock()
 	tools := e.Sessions.ByKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.Sessions.Mu.Unlock()
-	// A classifier turn has no scoped tool host. Session test callbacks may
-	// use a separate fake host when they need to exercise show_image.
-	if turn == nil || (tools == nil && req.Profile.Name != "classifier" && req.Profile.Name != SessionRole) {
+	// Session test callbacks may use a separate fake host when they need to
+	// exercise show_image.
+	if turn == nil || (tools == nil && req.Profile.Name != SessionRole) {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
 	return turn(ctx, req, verified, tools)
 }
 
+// decisions are the decide calls that precede a chief-of-staff outcome tool
+// call: the kind and subject of each subject the call decides.
+func decisions(name string, args map[string]any) (calls []map[string]any) {
+	text := func(key string) string { s, _ := args[key].(string); return s }
+	add := func(kind, subject string) {
+		call := map[string]any{"kind": kind, "subject": subject, "evidence": "The record supports it."}
+		if ws := text("workstream"); ws != "" && kind != "question-routing" {
+			call["workstream"] = ws
+		}
+		calls = append(calls, call)
+	}
+	switch name {
+	case "answer":
+		add("question-routing", text("question"))
+	case "route_amendment":
+		if q := text("question"); q != "" {
+			add("question-routing", q)
+		}
+	case "escalate":
+		switch ids := args["questions"].(type) {
+		case []string:
+			for _, id := range ids {
+				add("question-routing", id)
+			}
+		case []any:
+			for _, id := range ids {
+				if s, ok := id.(string); ok {
+					add("question-routing", s)
+				}
+			}
+		}
+	case "resolve_contested":
+		if owner, _ := args["owner_decided"].(bool); !owner {
+			add("contested-ruling", text("unit"))
+		}
+	case "resolve_objection":
+		add("objection", text("objection"))
+	}
+	return calls
+}
+
+// CallTool calls the tool on the session. A chief-of-staff outcome tool that
+// needs a decide result for its subject is preceded by the decide call a
+// turn makes first, when the session holds the decide tool; its refusal or
+// absence leaves the outcome tool to say so.
 func CallTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (string, error) {
+	for _, call := range decisions(name, args) {
+		if _, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: "decide", Arguments: call}); err != nil && ctx.Err() != nil {
+			return "", err
+		}
+	}
 	result, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	if err != nil {
 		return "", err

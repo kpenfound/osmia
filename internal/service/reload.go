@@ -211,6 +211,9 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		events = append(events, Event{Kind: EventSpend})
 	}
 	s.hub.Publish(events...)
+	for _, warning := range next.Warnings {
+		s.log().Warn(warning, "component", "config")
+	}
 	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0, "added", len(added), "removed", len(removed))
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }

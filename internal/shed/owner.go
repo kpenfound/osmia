@@ -97,6 +97,10 @@ type Ruling struct {
 	Objection   string      `json:"objection"`
 	Disposition Disposition `json:"disposition"`
 	Note        string      `json:"note,omitempty"`
+	// DecidedBy is empty for the owner's ruling, or trace.DecidedByJev with
+	// the Jev judgment it comes from.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 // Rulings is what the owner ruled during one round, against the revision the
@@ -130,6 +134,8 @@ func (r Rulings) check() error {
 			return errors.New("a ruling requires the objection it rules on")
 		case !slices.Contains(Dispositions, one.Disposition):
 			return fmt.Errorf("unsupported disposition %q", one.Disposition)
+		case !trace.ValidDecider(one.DecidedBy, one.Judgment) || one.DecidedBy == trace.DecidedByChief:
+			return fmt.Errorf("the ruling on objection %s names the owner or Jev with its judgment as its decider", one.Objection)
 		case seen[one.Objection]:
 			return fmt.Errorf("objection %s is ruled on twice", one.Objection)
 		}

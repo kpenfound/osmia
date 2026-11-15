@@ -59,7 +59,7 @@ func CoreEnforcement(root config.Root) Enforcement {
 // everything else, so the ceiling here is never itself the enforced set. It
 // holds the Web permission, which both narrowings set explicitly because a
 // narrowing intersects it.
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
 
 // chiefOrdinaryTools is chiefGrant's tool list without the three design-only
 // tools, so an ordinary chief-of-staff turn never reaches them.
@@ -84,12 +84,12 @@ var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 
 // chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
-	set, err := status.Tool(r, trace.ChiefOfStaff, scope, now)
+	set, err := status.ToolHolding(r, trace.ChiefOfStaff, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
 		return nil, err
 	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
+	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.decide(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
@@ -180,16 +180,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-				if scope.Role == "classifier" && scope.Project == project {
-					workspace := filepath.Join(root, "classifier", project)
-					if err := os.MkdirAll(workspace, 0700); err != nil {
-						return isolation.Selection{}, err
-					}
-					role := cfg.Roles[masonRole]
-					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image, CPUs: role.CPUs, Memory: role.Memory}}, nil
-				}
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, threadExecution(masonRole, cfg.Roles[masonRole]))
 				}
@@ -315,20 +307,6 @@ func Enforce(opts Options, e Enforcement) Options {
 			runner.OnProviderLimit = service.recordProviderLimit
 			runner.AdmitRole = service.admitRole
 			runner.Jev = service.jev
-			runner.Advise = service.questionSignals(r)
-		}
-		if cfg.Project.Classifier != "" {
-			profile, err := cfg.NamedProfile(cfg.Project.Classifier)
-			if err != nil {
-				return nil, err
-			}
-			runner.ClassifierProfile = &profile
-			runner.Classifier = func(ctx context.Context, input coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-				if err := os.MkdirAll(input.SessionDirectory, 0700); err != nil {
-					return coreadapter.SessionResult{}, err
-				}
-				return turns.Run(ctx, input)
-			}
 		}
 		runner.ResumableRoles = func(role string) bool { return role == sessionRole }
 		return thread.Dispatcher{Runner: runner,

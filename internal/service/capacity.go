@@ -156,8 +156,7 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 
 // providerCosts returns the costs of every workstream's attempts that started
 // on day, by the provider of the turn attempt each one records. Jev's costs
-// are under jev.Role; other costs no recorded attempt matches, such as a
-// classifier's, are under "".
+// are under jev.Role; other costs no recorded attempt matches are under "".
 func providerCosts(repository *trace.Repository, day calendarDay) (map[string][]trace.Cost, error) {
 	var result map[string][]trace.Cost
 	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {

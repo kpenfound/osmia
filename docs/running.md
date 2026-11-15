@@ -171,7 +171,7 @@ loads the latest text.
 
 Project management shows the project's settings, its knowledge extraction state, and the actions that affect that project. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves, configuration saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
-**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
+**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
 
 If you hand-edited the file and the service has not reloaded it, the setting shows the file's value marked **Not yet applied** beside the value in effect. Saving another setting keeps that edit in the file and puts it into effect. If the file does not load, the view shows the loader's error and offers no save until the file is fixed by hand; the loaded values stay in effect.
 
@@ -251,6 +251,17 @@ The member view is laid out like a chat client:
   ends without one. The brief is also its own entry in the feed, so you can
   reply to the chief of staff right under it; a workgroup's conversation
   shows each member's brief labelled with the member.
+  Jev, the factory's decision maker, decides some of these entries before
+  they reach you: when its confidence on a ratification, an amendment that
+  changes the approved intent, an escalated question, an escalated contested
+  unit or an escalated objection reaches `jev.decision_threshold` (0.9 by
+  default), its pick is recorded as your decision, the flow continues as if you
+  had chosen it, and the entry never appears. The feed and the trace label
+  such a decision "decided by Jev". Otherwise the entry reaches you with Jev's
+  pick and confidence as its recommendation. Delivery approval, charter
+  proposals, "no change needed" escalations, cancellation and anything that
+  needs your own words are always yours. Without Jev's API key the service
+  still runs and every entry reaches you; `osmia doctor` fails its Jev check.
   The Documents tab reads and edits the draft spec and plan before
   ratification, each save a new revision as with `osmia edit`, the dependency,
   and the debate actions; the Trace tab walks the workstream's record. The
@@ -454,10 +465,10 @@ credentials, review your session's work and move it along yourself:
   refused while the agent is mid-turn, on an empty message, when there is
   nothing to commit, or once you have ended the session.
 - **Check** `osmia session check <session>` checks the session's latest
-  commit. With the Jev boost on, it runs the same smart selection of checks
-  a unit's own check run uses for the files that changed since the
-  session's starting commit; with it off, it runs the full `dagger check`
-  the service runs before every review. Either way it tells you whether the
+  commit. It runs the same smart selection of checks a unit's own check run
+  uses for the files that changed since the session's starting commit; when
+  Jev's API key is not set or Jev does not select, it runs the full
+  `dagger check` the service runs before every review. Either way it tells you whether the
   run was smart or full, its status and exit code, and keeps its output.
   Only one check runs at a time.
 - **Push** `osmia session push <session>` sends the session's branch to the

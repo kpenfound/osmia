@@ -261,11 +261,29 @@ var ruleInterrupt func(config.WorkstreamID) error
 // recording two different owner rulings on the one batch. The checks and
 // the write hold the same lock. Text must not be blank.
 func (r *Repository) Rule(ctx context.Context, number int, text string, owner Actor, at time.Time, refused ...string) (InboxEntry, error) {
+	return r.RuleDecided(ctx, number, text, owner, "", at, refused...)
+}
+
+// RuleDecided is Rule for a decision that may be Jev's: a non-empty judgment
+// names the Jev judgment record the ruling comes from, and actor must then be
+// the Jev actor. The ruling records Jev as its decider, and the notice to the
+// chief of staff says Jev ruled, for the chief to relay as it relays the
+// owner's. A retry with the same text completes the members not yet ruled, as
+// Rule does.
+func (r *Repository) RuleDecided(ctx context.Context, number int, text string, owner Actor, judgment string, at time.Time, refused ...string) (InboxEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return InboxEntry{}, err
 	}
 	if !present(text) || at.IsZero() {
 		return InboxEntry{}, fmt.Errorf("a ruling needs text and a timestamp")
+	}
+	decidedBy := ""
+	rulerText := "The owner"
+	if judgment != "" {
+		if owner != JevActor || !key(judgment) {
+			return InboxEntry{}, fmt.Errorf("a Jev ruling is written by Jev and names its judgment")
+		}
+		decidedBy, rulerText = DecidedByJev, "Jev, the decision maker for the owner,"
 	}
 	entries, err := r.inbox()
 	if err != nil {
@@ -405,15 +423,15 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 				id := q.Asked.ID
 				h := Header{Schema: "osmia.trace.ruling", Version: Version, ID: id, Revision: 1, Project: sr.project, Workstream: ws, Unit: q.Asked.Unit,
 					At: at, Actor: owner, Cause: QuestionSubject(id) + "_" + QuestionEscalated, Depth: q.Latest.Depth + 1}
-				ruling := Ruling{Header: h, QuestionID: id, QuestionRevision: q.Latest.Revision, Decision: DecisionRuling, OwnerResponse: text}
+				ruling := Ruling{Header: h, QuestionID: id, QuestionRevision: q.Latest.Revision, Decision: DecisionRuling, OwnerResponse: text, DecidedBy: decidedBy, Judgment: judgment}
 				if err := validate(ruling); err != nil {
 					return err
 				}
 				rulings = append(rulings, ruling)
-				txs = append(txs, questionTransition(v, h, id, QuestionEscalated, QuestionRuled, fmt.Sprintf("The owner ruled on question %s, inbox entry %d", id, number)))
+				txs = append(txs, questionTransition(v, h, id, QuestionEscalated, QuestionRuled, fmt.Sprintf("%s ruled on question %s, inbox entry %d", rulerText, id, number)))
 			}
 			if ws == lastPending {
-				txs[0].Events = []Event{Notice(txs[0].Transition.ID, "ruling", fmt.Sprintf("The owner ruled on inbox entry %d, %s (questions %s): %s", number, entry.Batch, strings.Join(ids, ", "), strings.TrimSpace(text)))}
+				txs[0].Events = []Event{Notice(txs[0].Transition.ID, "ruling", fmt.Sprintf("%s ruled on inbox entry %d, %s (questions %s): %s", rulerText, number, entry.Batch, strings.Join(ids, ", "), strings.TrimSpace(text)))}
 			}
 			files, _, err := sr.stage(ctx, ws, log, v, rulings, txs...)
 			if err != nil {

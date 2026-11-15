@@ -732,7 +732,7 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 
 func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"selected", "disabled", "declined", "unavailable", "unlisted", "no_checks"} {
+	for _, mode := range []string{"selected", "unconfigured", "declined", "unavailable", "unlisted", "no_checks"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			f, stream, repo, a := newFinalFixture(t, "final-selection")
@@ -754,8 +754,8 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 				response = jevtest.Result{Err: &systemone.Error{Kind: systemone.KindUnavailable, Message: "offline"}}
 			}
 			provider := &jevtest.Provider{Results: []jevtest.Result{response}}
-			if mode != "disabled" {
-				boostJev(f.s, provider)
+			if mode != "unconfigured" {
+				useJevProvider(f.s, provider)
 			}
 			if mode == "unlisted" {
 				checks.ListErr = errors.New("listing unavailable")
@@ -795,7 +795,7 @@ func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
 			if len(starts) != 1 || !reflect.DeepEqual(starts[0].Selection, selection) {
 				t.Fatalf("start evidence: %+v", starts)
 			}
-			if mode == "disabled" || mode == "unlisted" || mode == "no_checks" {
+			if mode == "unconfigured" || mode == "unlisted" || mode == "no_checks" {
 				if len(provider.Requests()) != 0 {
 					t.Fatal("preflight fallback asked Jev")
 				}
@@ -851,7 +851,7 @@ func TestFinalReviewRunsEveryCheckWhenDaggerRefusesTheSelection(t *testing.T) {
 		{Result: CheckResult{Output: "CHECKS  ✔ 2 passed\n"}},
 	}}
 	f.s.options.reviewChecks = checks
-	boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
+	useJevProvider(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.9), "check-1": jevtest.Noul(0.1),
 	}}}}})
 	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {

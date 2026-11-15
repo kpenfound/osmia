@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -125,7 +126,7 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 		return nil
 	}
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			calls.Add(1)
 			if err := backend.hold(ctx); err != nil {
 				return coreadapter.SessionResult{}, err

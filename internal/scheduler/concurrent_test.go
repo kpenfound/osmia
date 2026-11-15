@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"maps"
 	"path/filepath"
 	"sync"
@@ -47,7 +48,7 @@ func TestConcurrentTurnsStayWithinRoleCapacity(t *testing.T) {
 		return result(p.Scope.Turn).Value, nil
 	})
 	sessions := t.TempDir()
-	d := thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: turns, Now: f.clock.Now},
+	d := thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Turns: turns, Now: f.clock.Now},
 		Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(sessions, in.Agent, in.Turn)}, nil
 		}}

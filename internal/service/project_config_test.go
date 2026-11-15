@@ -108,7 +108,6 @@ func TestProjectConfigReadReturnsTheFileSnapshot(t *testing.T) {
 		"checks_timeout":          {"15m", false},
 		"base_branch":             {"main", true},
 		"landing":                 {"commit-per-unit", true},
-		"classifier":              {"", true},
 		"name":                    {"", true},
 		"upstream_rebase":         {"6h", true},
 		"pull_request_poll":       {"10m", true},
@@ -204,7 +203,6 @@ func TestProjectConfigSavePreservesUntouchedBytes(t *testing.T) {
 
 	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) {
 		v.ChecksTimeout = str("45m")
-		v.Classifier = str("other")
 		v.CapacityPerWorkstream = num(5)
 		v.CapacityGitOperations = num(2)
 		v.HearsayScope = str("work:main:shop")
@@ -221,7 +219,6 @@ fork = "owner/repo"
 # Where the clone lives.
 clone = "` + settingOf(t, got, "clone").Value.(string) + `"
 checks_timeout = "45m" # the default, spelled out
-classifier = "other"
 hearsay_scope = "work:main:shop"
 name = "Shop"
 hearsay_declare_repo = true
@@ -244,7 +241,7 @@ cart = "code:shop:cart"
 		t.Fatalf("file:\n%s\nwant:\n%s\noutcome %+v", disk, want, saved)
 	}
 	p := s.current().For(project).Project
-	if p.ChecksTimeout != "45m" || p.Classifier != "other" || p.Capacity.PerWorkstream != 5 || p.Capacity.GitOperations != 2 || p.HearsayScope != "work:main:shop" || !p.HearsayDeclareRepo || p.Name != "Shop" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"cart": "code:shop:cart"}) {
+	if p.ChecksTimeout != "45m" || p.Capacity.PerWorkstream != 5 || p.Capacity.GitOperations != 2 || p.HearsayScope != "work:main:shop" || !p.HearsayDeclareRepo || p.Name != "Shop" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"cart": "code:shop:cart"}) {
 		t.Fatalf("in effect: %+v", p)
 	}
 	fresh, err := config.Load(opts.Config)
@@ -271,21 +268,21 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, c, _, files := projectConfigFixture(t)
-	more := strings.Replace(files.projectText, "\n\n[preview]", "\nclassifier = \"other\"\nlanding = \"squash\"\n\n[preview]", 1)
+	more := strings.Replace(files.projectText, "\n\n[preview]", "\nlanding = \"squash\"\n\n[preview]", 1)
 	more = strings.Replace(more, "[capacity]\n", "[capacity]\nper_workstream = 5\n", 1) + "\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
 	files.write(t, files.topText, more)
 	_, err := c.Reload(ctx)
 	must(t, err)
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	if p := s.current().For(project).Project; p.Classifier != "other" || p.Capacity.PerWorkstream != 5 {
+	if p := s.current().For(project).Project; p.Landing != "squash" || p.Capacity.PerWorkstream != 5 {
 		t.Fatalf("before: %+v", p)
 	}
 
-	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Clear: []string{"classifier", "landing", "checks_timeout", "capacity.per_workstream"}, ClearHearsayEntities: []string{"a"}})
+	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Clear: []string{"landing", "checks_timeout", "capacity.per_workstream"}, ClearHearsayEntities: []string{"a"}})
 	must(t, err)
 	disk := readFile(t, files.project)
-	for _, gone := range []string{"classifier", "landing", "checks_timeout", "per_workstream", "a = "} {
+	for _, gone := range []string{"landing", "checks_timeout", "per_workstream", "a = "} {
 		if strings.Contains(disk, gone) {
 			t.Fatalf("%s is still in the file:\n%s", gone, disk)
 		}
@@ -296,10 +293,10 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 		}
 	}
 	p := s.current().For(project).Project
-	if p.Classifier != "" || p.Landing != "commit-per-unit" || p.ChecksTimeout != "15m" || p.Capacity.PerWorkstream != s.current().Capacity.PerWorkstream || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
+	if p.Landing != "commit-per-unit" || p.ChecksTimeout != "15m" || p.Capacity.PerWorkstream != s.current().Capacity.PerWorkstream || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"b": "code:b"}) {
 		t.Fatalf("defaults after clearing: %+v", p)
 	}
-	for _, name := range []string{"classifier", "landing", "checks_timeout", "capacity.per_workstream"} {
+	for _, name := range []string{"landing", "checks_timeout", "capacity.per_workstream"} {
 		if setting := settingOf(t, saved.ProjectConfigResponse, name); !*setting.Default || setting.Pending {
 			t.Fatalf("%s: %+v", name, setting)
 		}
@@ -327,7 +324,6 @@ func TestProjectConfigSaveRefusesInvalidValues(t *testing.T) {
 	}{
 		{"timeout above the bound", "checks_timeout", func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("25h") }},
 		{"timeout below the bound", "checks_timeout", func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("30s") }},
-		{"unknown classifier", "classifier", func(v *ProjectConfigEditValues) { v.Classifier = str("missing") }},
 		{"malformed upstream", "upstream", func(v *ProjectConfigEditValues) { v.Upstream = str("https://github.com/a/b.git") }},
 		{"malformed fork", "fork", func(v *ProjectConfigEditValues) { v.Fork = str("nope") }},
 		{"branch", "base_branch", func(v *ProjectConfigEditValues) { v.BaseBranch = str("a..b") }},

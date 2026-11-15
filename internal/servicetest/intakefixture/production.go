@@ -324,7 +324,7 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 		t.Logf("OWNER operation error=%v", err)
 		return
 	}
-	observation, err := (thread.Dispatcher{Runner: thread.Runner{Store: chief}}).Inspect(context.Background(), op)
+	observation, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
 	t.Logf("OWNER dispatch=%s observation=%+v error=%v; direct dispatch has no retry timer", op.ID, observation, err)
 }
 

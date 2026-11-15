@@ -71,7 +71,7 @@ func TestSessionCostCapPersistsInfrastructureFailure(t *testing.T) {
 	if _, err := repo.EnqueueTurn(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, IsError: true, ErrorSubtype: "session_cost_cap", Usage: coreadapter.Usage{CostUSD: 1, CostKnown: true}}, coreadapter.ErrSessionCostCap
 	})}
 	q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/cap"})
@@ -89,7 +89,7 @@ func TestRunnerSerialDeliveryAndProvenance(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
 	clock := func() time.Time { return timestamp.Add(time.Second) }
-	runner := Runner{Store: repo, Now: clock, Turns: fakeTurns(func(ctx context.Context, got coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: clock, Turns: fakeTurns(func(ctx context.Context, got coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		calls.Add(1)
 		if got.Prompt != first.Prompt || got.Profile != first.Profile || got.SystemPrompt != first.SystemPrompt || got.History == first.History || got.Scope.Role != "mason" || got.Scope.Turn != "first" || got.Resume != nil {
 			t.Errorf("prepared request: %#v", got)
@@ -183,7 +183,7 @@ func TestRunnerCapturesFailureAndCancellation(t *testing.T) {
 			case "signal":
 				result.Signal = 9
 			}
-			runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 				if kind == "cancelled" {
 					cancel()
 				}

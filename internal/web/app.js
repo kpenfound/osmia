@@ -481,6 +481,7 @@
           if (!streams().some(w => w.workstream === ui.selected)) {
             const member = streams().find(w => w.workgroup?.conversation?.workstream === ui.selected);
             if (member) {
+              carryOutcomes(ui.selected, member.workstream);
               ui.selected = member.workstream;
               store('selected', ui.selected);
               if (ui.view === 'design' || ui.view === 'workstream') {
@@ -669,6 +670,17 @@
   function captureOutcome(result) {
     const scope = outcomeScopes.get(result);
     return scope ? { scope, key: scope.instance() } : result;
+  }
+
+  // carryOutcomes moves the outcomes shown for one selection to the
+  // selection that replaces it, such as a started design session's start
+  // result when its conversation continues as a workgroup member.
+  function carryOutcomes(from, to) {
+    for (const scope of outcomeScopes.values()) {
+      if (scope.entries.has(from) && !scope.entries.has(to)) {
+        scope.entries.set(to, scope.entries.get(from));
+      }
+    }
   }
 
   function paintOutcome(scope) {
@@ -2169,6 +2181,7 @@
           t.from ? el('span', { 'data-field': 'from' }, t.from) : null, t.from ? ' → ' : '',
           el('strong', { 'data-field': 'to', 'data-ann': 'action' }, t.to)),
         t.reason ? el('span', { class: 'reason', 'data-field': 'reason' }, t.reason) : null,
+        t.actor === 'service:jev' ? el('span', { class: 'meta decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 
@@ -2196,7 +2209,7 @@
         selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ' · narrowed from ' + selection.listed + ' listed') : null);
     }
     const reasons = {
-      disabled: 'the Jev boost is off', declined: 'Jev declined', too_many_checks: 'too many checks',
+      unconfigured: 'Jev is unconfigured', declined: 'Jev declined', too_many_checks: 'too many checks',
       change_too_large: 'the change is too large', unlisted: 'checks could not be listed',
       no_checks: 'no check links were listed', diff_unreadable: 'the change could not be read',
       refused: 'Dagger refused the selected links'

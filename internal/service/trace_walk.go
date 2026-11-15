@@ -503,6 +503,7 @@ func (w *traceWalk) unitRulings(unit string) []TraceRuling {
 			ruling := TraceRuling{Kind: rulingContested, Ref: refOf(v), Unit: unit}
 			if err := json.Unmarshal([]byte(v.Content), &c); err == nil {
 				ruling.Decision, ruling.Owner = c.Decision, c.Note
+				ruling.DecidedBy, ruling.Judgment = contestDecider(c.By), c.Judgment
 			}
 			out = append(out, ruling)
 		case trace.Ruling:
@@ -515,7 +516,7 @@ func (w *traceWalk) unitRulings(unit string) []TraceRuling {
 }
 
 func (w *traceWalk) questionRuling(v trace.Ruling) TraceRuling {
-	ruling := TraceRuling{Kind: rulingQuestion, Ref: refOf(v), Unit: v.Unit, Decision: v.Decision, Owner: v.OwnerResponse, Answer: v.ReturnedAnswer, Citations: v.Citations}
+	ruling := TraceRuling{Kind: rulingQuestion, Ref: refOf(v), Unit: v.Unit, Decision: v.Decision, Owner: v.OwnerResponse, Answer: v.ReturnedAnswer, Citations: v.Citations, DecidedBy: trace.Decider(v.DecidedBy, questionDecider(v)), Judgment: v.Judgment}
 	for _, r := range w.records {
 		if q, ok := r.(trace.Question); ok && q.ID == v.QuestionID && q.Revision == v.QuestionRevision {
 			ref := refOf(q)
@@ -740,7 +741,7 @@ func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 		if err != nil || r.Revision != w.sealed.Revision {
 			break
 		}
-		return TraceRuling{Kind: rulingRatification, Ref: refOf(d), Decision: "ratified", Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
+		return TraceRuling{Kind: rulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
 	}
 	return TraceRuling{}, &TraceGap{Link: path, State: LinkUnavailable, Reason: fmt.Sprintf("seal %d names round %d and the trace holds no ratification of spec.md revision %d and plan.json revision %d there", w.sealed.Seal, w.sealed.Round, w.sealed.Revision.Spec, w.sealed.Revision.Plan)}
 }
@@ -1061,4 +1062,25 @@ func (w *traceWalk) commitLanding(l TraceLanding, gaps *[]TraceGap) CommitLandin
 		c.Criteria = append(c.Criteria, TraceCriterion{Criterion: criterion, Text: text})
 	}
 	return c
+}
+
+// contestDecider returns who ruled on a contested unit from a ruling's By.
+func contestDecider(by string) string {
+	switch by {
+	case "", "owner":
+		return trace.DecidedByOwner
+	case "chief of staff":
+		return trace.DecidedByChief
+	}
+	return by
+}
+
+// questionDecider returns who decided a question's ruling when the record
+// names no decider: the owner for an escalated question's ruling, the chief
+// of staff for its own answer.
+func questionDecider(v trace.Ruling) string {
+	if v.Decision == trace.DecisionRuling {
+		return trace.DecidedByOwner
+	}
+	return trace.DecidedByChief
 }

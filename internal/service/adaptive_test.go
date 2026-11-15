@@ -7,6 +7,8 @@ import (
 	json "encoding/json"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	ghlog "github.com/kpenfound/osmia/internal/ghlog"
+	jev "github.com/kpenfound/osmia/internal/jev"
+	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -95,6 +97,9 @@ func TestDiscoveryBlocksCompletionUntilAssignedWorkLands(t *testing.T) {
 	}
 	_, previous, err := c.r.candidateEvidence(context.Background(), c.stream, "resume")
 	must(t, err)
+	// The chief of staff's disposition needs a decide result; Jev left the
+	// decision to the chief.
+	jevfixture.Fallback(c.repo, c.repo.Project(), c.stream, jev.KindDiscovery, jev.DiscoveryKey(result.ID))
 	input, _ := json.Marshal(map[string]any{"id": result.ID, "revision": result.Revision, "disposition": "assigned", "unit": "resume", "reason": "This supporting change belongs to the upload outcome."})
 	assigned, err := tool.Handle(context.Background(), input)
 	must(t, err)

@@ -18,7 +18,7 @@ func TestAdviceEndsThePromptAndIsRecorded(t *testing.T) {
 	req := queue(t, repo, "advised")
 	var asked trace.TurnRequest
 	var scope coreadapter.Scope
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
 		Advise: func(_ context.Context, r trace.TurnRequest, s coreadapter.Scope) string {
 			asked, scope = r, s
 			return "Advice for this turn."
@@ -48,7 +48,7 @@ func TestStopDuringAdviceRecordsNone(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
 	ctx, stop := Stoppable(context.Background())
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
 		Advise: func(run context.Context, _ trace.TurnRequest, _ coreadapter.Scope) string {
 			stop(&Stop{pauseStop})
 			if run.Err() == nil {

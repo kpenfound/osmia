@@ -9,7 +9,7 @@ import "github.com/kpenfound/osmia/internal/config"
 // Pending says the file's value is not yet applied. When the file does not
 // load, only Name and Effective are present.
 type ProjectConfigSetting struct {
-	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities."`
+	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities."`
 	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo, or for hearsay_entities an object of local entity ID to Hearsay entity id."`
 	Default   *bool  `json:"default,omitempty" description:"True when the file leaves the setting out and Value is its default or inherited value."`
 	Effective any    `json:"effective" description:"The value in the loaded configuration."`
@@ -35,7 +35,7 @@ type ProjectConfigResponse struct {
 }
 
 // ProjectConfigValues holds the settings a save sets; an omitted setting is
-// not changed. An empty string for name, fork, classifier or hearsay_scope
+// not changed. An empty string for name, fork or hearsay_scope
 // clears it.
 type ProjectConfigValues struct {
 	Name                  *string           `json:"name,omitempty"`
@@ -44,7 +44,6 @@ type ProjectConfigValues struct {
 	Clone                 *string           `json:"clone,omitempty"`
 	BaseBranch            *string           `json:"base_branch,omitempty"`
 	Landing               *string           `json:"landing,omitempty"`
-	Classifier            *string           `json:"classifier,omitempty"`
 	UpstreamRebase        *string           `json:"upstream_rebase,omitempty"`
 	PullRequestPoll       *string           `json:"pull_request_poll,omitempty"`
 	ChecksTimeout         *string           `json:"checks_timeout,omitempty"`

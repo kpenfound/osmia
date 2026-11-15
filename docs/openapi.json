@@ -3946,6 +3946,9 @@
           "decision": {
             "type": "string"
           },
+          "judgment": {
+            "type": "string"
+          },
           "note": {
             "type": "string"
           },
@@ -4736,8 +4739,9 @@
             "format": "double",
             "type": "number"
           },
-          "enabled": {
-            "type": "boolean"
+          "decision_threshold": {
+            "format": "double",
+            "type": "number"
           },
           "model": {
             "type": "string"
@@ -4824,9 +4828,6 @@
             "$ref": "#/components/schemas/ConfigProjectCapacity"
           },
           "checks_timeout": {
-            "type": "string"
-          },
-          "classifier": {
             "type": "string"
           },
           "clone": {
@@ -5031,6 +5032,9 @@
             "type": "string"
           },
           "decision": {
+            "type": "string"
+          },
+          "judgment": {
             "type": "string"
           },
           "note": {
@@ -6463,6 +6467,9 @@
           "blocked": {
             "type": "string"
           },
+          "jev": {
+            "$ref": "#/components/schemas/InboxJev"
+          },
           "kind": {
             "type": "string"
           },
@@ -6505,6 +6512,34 @@
           },
           "workstream": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxJev": {
+        "properties": {
+          "binding": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "format": "double",
+            "type": "number"
+          },
+          "deferred": {
+            "type": "boolean"
+          },
+          "judgment": {
+            "type": "string"
+          },
+          "pick": {
+            "type": "string"
+          },
+          "refused": {
+            "type": "string"
+          },
+          "threshold": {
+            "format": "double",
+            "type": "number"
           }
         },
         "type": "object"
@@ -6868,7 +6903,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, classifier, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -6902,12 +6937,6 @@
             ]
           },
           "checks_timeout": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "classifier": {
             "type": [
               "null",
               "string"
@@ -8671,7 +8700,13 @@
             },
             "type": "array"
           },
+          "decided_by": {
+            "type": "string"
+          },
           "decision": {
+            "type": "string"
+          },
+          "judgment": {
             "type": "string"
           },
           "kind": {

@@ -49,7 +49,7 @@ func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
 }
 
 // TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction shows that the
-// Jev boost's API key is covered by redaction whichever environment
+// Jev's API key is covered by redaction whichever environment
 // variable api_key_env names, not only the default OPENROUTER_API_KEY:
 // once the service reads the key through a real request, every later log
 // write that happens to contain the key's value is redacted.
@@ -64,7 +64,7 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 	top, err := os.ReadFile(path)
 	must(t, err)
 	must(t, os.WriteFile(path, append(top, []byte(
-		"\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \""+envVar+"\"\n")...), 0600))
+		"\n[jev]\nmodel = \"jev-test\"\napi_key_env = \""+envVar+"\"\n")...), 0600))
 
 	for _, known := range redact.KnownSecrets() {
 		if known == secret {
@@ -73,7 +73,7 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 	}
 
 	_, c := start(t, opts)
-	// GET /v1/runtime reports the Jev boost's status, reading its key the
+	// GET /v1/runtime reports Jev's status, reading its key the
 	// same way a real judgment request does.
 	_, err = c.Runtime(context.Background())
 	must(t, err)

@@ -20,6 +20,7 @@ var attribution = map[string]string{
 	"answer":           "chief of staff",
 	"service_response": "service",
 	"owner_response":   "owner (copied by Osmia)",
+	"jev_response":     "Jev, the decision maker (copied by Osmia)",
 	"returned_answer":  "chief of staff relay",
 	"citations":        "chief of staff",
 	"charter_rule":     "chief of staff proposal, ratified by the owner",

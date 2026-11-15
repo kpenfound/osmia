@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/envelope"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -205,6 +206,17 @@ func (s *Controller) DecideAmendment(ctx context.Context, raw, id string, req Am
 // twice. Approval is refused while an objection blocks it, and approval or
 // overrule once the sealed spec or plan moved since the request was filed.
 func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
+	return s.RecordAmendmentDecisionBy(ctx, project, stream, repository, id, req, actor, cause, "")
+}
+
+// RecordAmendmentDecisionBy is RecordAmendmentDecision with the Jev judgment
+// the decision comes from: a non-empty judgment is Jev deciding an owner gate,
+// as the Jev actor, and the decision names the judgment. It is held to the
+// owner's rules, not the chief of staff's delegated authority.
+func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause, judgment string) (AmendmentResponse, *APIError) {
+	if judgment != "" && actor != trace.JevActor || judgment == "" && actor == trace.JevActor {
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "a Jev decision is written by Jev and names its judgment"}
+	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if !slices.Contains([]string{AmendmentApprove, AmendmentReject, AmendmentRound, AmendmentOverrule}, decision) {
@@ -251,8 +263,8 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 		return AmendmentResponse{}, failed
 	}
 	entries := AmendmentDissent(records)
-	record := AmendmentDecision{Actor: actor.ID, Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.Round, Packet: c.Packet.Revision, Spec: c.Spec.Revision, Plan: c.Plan.Revision, SealRevision: sealDoc.Revision}
-	if actor.Kind != "owner" {
+	record := AmendmentDecision{Actor: actor.ID, Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.Round, Packet: c.Packet.Revision, Spec: c.Spec.Revision, Plan: c.Plan.Revision, SealRevision: sealDoc.Revision, Judgment: judgment}
+	if actor.Kind != "owner" && judgment == "" {
 		if api := s.EngineeringRevision(repository, stream, c, current, entries, req.Note); api != nil {
 			return AmendmentResponse{}, api
 		}
@@ -293,7 +305,10 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 		to = "proposed"
 		reason = fmt.Sprintf("the owner asked for debate round %d on amendment %s after reading packet revision %d", c.Round+1, id, c.Packet.Revision)
 	}
-	if actor.Kind != "owner" {
+	switch {
+	case judgment != "":
+		reason = strings.ReplaceAll(reason, "the owner", "Jev")
+	case actor.Kind != "owner":
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
 	}
 	if record.Note != "" {
@@ -332,7 +347,7 @@ const DecideAmendmentTool = "decide_amendment"
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
 const AmendmentGuidance = "When the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
-	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide_amendment yourself with owner_decided false and explain why the revised assignments still fulfill the spec. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
+	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
 // decideAmendment returns the decide_amendment tool of one claimed
 // chief-of-staff turn. It records the same decision as POST
@@ -343,7 +358,7 @@ const AmendmentGuidance = "When the owner's message decides an amendment you pre
 func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: DecideAmendmentTool, Effect: coreadapter.ToolMemory,
 		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round) or overrule (approve over the objections that stand); note: engineering reasoning, or the owner's words when relaying an owner decision. " +
-			"Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+			"A plan-only revision needs a decide result first (kind plan-amendment), and a binding Jev decision allows only its own outcome. Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -381,11 +396,46 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 			return PriorityRefusal("this turn does not answer an owner message")
 		}
 		actor := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+		decision := AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}
+		var bound *jev.Result
+		var out AmendmentResponse
+		var api *APIError
 		if input.OwnerDecided {
 			actor = request.Actor
+		} else {
+			// The chief of staff's own decision on a plan-only amendment needs
+			// a decide result, and a confident pick allows only itself.
+			if bound, refusal, err = s.requirePlanAmendment(target, stream, input.Amendment, input.Decision); err != nil {
+				return nil, err
+			}
+			if refusal != "" {
+				return PriorityRefusal(refusal)
+			}
 		}
-		out, api := s.RecordAmendmentDecision(ctx, target.Project(), stream, target, input.Amendment,
-			AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}, actor, request.ID)
+		if bound != nil {
+			if strings.TrimSpace(input.Note) == "" {
+				return PriorityRefusal("an engineering decision requires its reasoning against approved intent")
+			}
+			out, api = s.RecordAmendmentDecisionBy(ctx, target.Project(), stream, target, input.Amendment, decision, trace.JevActor, request.ID, bound.Judgment)
+			if api != nil && api.Code != Internal {
+				// The service refused the transition Jev's binding pick calls
+				// for. The amendment goes to the owner with Jev's judgment, and
+				// Jev is not asked about it again.
+				if s.Jev != nil {
+					if err := s.Jev.Refuse(ctx, target, stream, bound.Judgment, api.Message); err != nil {
+						return nil, err
+					}
+				}
+				return json.Marshal(struct {
+					Recorded  bool   `json:"recorded"`
+					Amendment string `json:"amendment"`
+					State     string `json:"state"`
+					Detail    string `json:"detail"`
+				}{true, input.Amendment, AmendmentPresented, "the service could not carry out Jev's decision (" + api.Message + "); the amendment is in the owner's inbox with Jev's judgment"})
+			}
+		} else {
+			out, api = s.RecordAmendmentDecision(ctx, target.Project(), stream, target, input.Amendment, decision, actor, request.ID)
+		}
 		if api != nil {
 			if api.Code == Internal {
 				return nil, errors.New(api.Message)
@@ -400,6 +450,78 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		}{true, out.Amendment, out.State, out.Detail})
 	}
 	return tool
+}
+
+// PlanAmendmentSubject says why the chief of staff may not decide the
+// amendment id with Jev today, or "". An amendment that changes the approved
+// intent is the owner's, as is one with an objection that blocks it or that
+// final reviews or merged work put beyond the chief of staff's authority. It
+// is decided once, while presented against the sealed spec and plan in force.
+func (s *Controller) PlanAmendmentSubject(repository *trace.Repository, stream config.WorkstreamID, id string) (string, error) {
+	feature, err := repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return "", err
+	}
+	if feature.Value != BuildingState && feature.Value != AssembledState {
+		return fmt.Sprintf("workstream %s is %s; amendments are decided while it is building or assembled", stream, FeatureState(feature.Value)), nil
+	}
+	c, found, err := ReadAmendment(repository, stream, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return fmt.Sprintf("workstream %s has no amendment %s", stream, id), nil
+	}
+	if c.State.Value != AmendmentPresented || c.Packet.Revision == 0 {
+		return fmt.Sprintf("amendment %s of workstream %s is %s; only a presented amendment is decided", id, stream, FeatureState(c.State.Value)), nil
+	}
+	current, _, sealed, err := seal.Latest(repository, stream)
+	if err != nil {
+		return "", err
+	}
+	if !sealed {
+		return fmt.Sprintf("workstream %s has no sealed spec and plan to amend", stream), nil
+	}
+	matching, err := AmendmentSealMatches(repository, stream, c.Request.SealRevision, current)
+	if err != nil {
+		return "", err
+	}
+	if !matching {
+		return fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed; the service retires it", id), nil
+	}
+	if _, handed := s.RefusedPick(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id)); handed {
+		return fmt.Sprintf("Jev's decision on amendment %s could not be carried out; the owner decides it", id), nil
+	}
+	records, err := AmendmentRecords(repository, stream, id)
+	if err != nil {
+		return "", err
+	}
+	if api := s.EngineeringRevision(repository, stream, c, current, AmendmentDissent(records), "Assess delegated authority"); api != nil {
+		if api.Code == Internal {
+			return "", errors.New(api.Message)
+		}
+		return fmt.Sprintf("amendment %s is the owner's to decide, not the chief of staff's: %s", id, api.Message), nil
+	}
+	return "", nil
+}
+
+// requirePlanAmendment applies the shared precondition to the chief of staff's
+// own decision on amendment id: when the chief of staff may decide the
+// amendment, a decide result must exist for it, and a binding pick allows only
+// itself. An amendment the chief may not decide, or one Jev's refused pick left
+// with the owner, passes with no result; the tool's own checks refuse it.
+func (s *Controller) requirePlanAmendment(repository *trace.Repository, stream config.WorkstreamID, id, outcome string) (*jev.Result, string, error) {
+	why, err := s.PlanAmendmentSubject(repository, stream, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, handed := s.RefusedPick(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id)); handed {
+		return nil, why, nil
+	}
+	if why != "" {
+		return nil, "", nil
+	}
+	return jev.Require(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id), outcome, fmt.Sprintf("amendment %s of workstream %s", id, stream))
 }
 
 func EntryIDs(entries []shed.Entry) string {
@@ -690,6 +812,8 @@ func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 			section = "answer"
 		} else if d.Actor == AmendmentActor.ID {
 			section = "service_response"
+		} else if d.Actor == trace.DecidedByJev {
+			section = "jev_response"
 		}
 		sections = append(sections, envelope.Section{Name: section, Text: d.Note})
 	}
@@ -737,6 +861,8 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
 	} else if actor == AmendmentActor.ID {
 		reason = strings.ReplaceAll(reason, "the owner", "the service")
+	} else if actor == trace.DecidedByJev {
+		reason = strings.ReplaceAll(reason, "the owner", "Jev")
 	}
 	h := a.AmendmentHeader(resumed, stream, req.Unit, cause)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitWaiting, To: stage, Reason: reason}, Events: []trace.Event{trace.Notice(resumed, "unit", reason)}}

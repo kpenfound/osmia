@@ -28,16 +28,21 @@ type Dependencies struct {
 	MasonBundle func(context.Context, *trace.Repository, config.WorkstreamID, string) (bundle.Mason, error)
 	BlockMason  func(context.Context, *trace.Repository, config.WorkstreamID, string, string, string) error
 
-	About                    func(repository *trace.Repository) *config.Config
-	ApprovalTrace            func(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) (*trace.Repository, trace.Workgroup, error)
-	ArchivedWorkstream       func(raw string) (runtime.Archive, bool)
-	BaseEntry                func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
-	ChangeHeld               func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
-	ChangeRepositoryHeld     func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
-	ChiefContext             func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
-	ChiefOverride            func(cfg *config.Config) (string, coreadapter.Profile, error)
-	ChiefRepository          func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
-	ContestedEntry           func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
+	About                func(repository *trace.Repository) *config.Config
+	ApprovalTrace        func(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) (*trace.Repository, trace.Workgroup, error)
+	ArchivedWorkstream   func(raw string) (runtime.Archive, bool)
+	BaseEntry            func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
+	DiscoveryEntries     func(repository *trace.Repository, stream config.WorkstreamID) ([]InboxEntry, error)
+	ChangeHeld           func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
+	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
+	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
+	ChiefOverride        func(cfg *config.Config) (string, coreadapter.Profile, error)
+	ChiefRepository      func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
+	ContestedEntry       func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
+	// ContestedGate returns the gate of the contested unit's open card when Jev
+	// may decide it, or nil. A card whose unit carries a binding Jev judgment
+	// the service could not carry out returns that judgment instead.
+	ContestedGate            func(repository *trace.Repository, stream config.WorkstreamID, unit string) (*Gate, *jev.Result, error)
 	ContextFor               func(repo *trace.Repository) bundle.Provider
 	ContinueStopped          func(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error)
 	ContractGuardRefusal     func(wt *trace.Repository, g trace.Workgroup, spec trace.ProjectSpec) (string, error)

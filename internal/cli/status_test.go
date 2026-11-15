@@ -96,7 +96,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	for _, want := range []string{
 		"ready=true",
 		"Profiles:\n",
-		"Jev boost: disabled\n",
+		"Jev: unconfigured model=",
 		// Pools without a factory-wide limit never show as zero slots.
 		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
 			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +

@@ -1,7 +1,7 @@
 // Package jev asks Jev, TypeSafe's System One model, the bounded judgments of
 // Osmia's turns, and owns what Osmia does with them: judgment identity, trace
 // records, reuse after a restart, acceptance thresholds and ledger costs.
-// agentcore's jev sends the requests, with the global switch, retries,
+// agentcore's jev sends the requests, with retries,
 // cool-down and status. Nothing here runs on the scheduling path.
 package jev
 
@@ -68,6 +68,12 @@ type Judgment struct {
 	// keeps the value it was made with.
 	Acceptance string
 	Sources    []Source
+	// Occurrence ties the judgment to one subject occurrence of a decision
+	// kind. It is part of the judgment's identity and record.
+	Occurrence *Occurrence
+	// MaxBytes, when positive, bounds the request body; a larger request
+	// is recorded as a fallback without being sent.
+	MaxBytes int
 	// Request is the state and questions sent. Include only what the
 	// question needs; it is recorded in the trace.
 	Request systemone.Request
@@ -122,6 +128,8 @@ type Record struct {
 	Version int               `json:"version"`
 	// Acceptance is the judgment's configured acceptance values.
 	Acceptance string `json:"acceptance,omitempty"`
+	// Occurrence is the subject occurrence a decision judgment belongs to.
+	Occurrence *Occurrence `json:"occurrence,omitempty"`
 	// Model is the configured model; ResolvedModel the versioned model
 	// that answered.
 	Model   string   `json:"model"`
@@ -143,6 +151,10 @@ type Record struct {
 	// DurationMS how long they took.
 	Requests   int   `json:"requests,omitempty"`
 	DurationMS int64 `json:"duration_ms,omitempty"`
+	// Refused is set by a later revision of an accepted decision judgment
+	// when the service refused the transition its binding pick called for. The
+	// pick is then never applied again and the decision is the owner's.
+	Refused string `json:"refused,omitempty"`
 }
 
 // Path is where a judgment's record lives in its workstream's trace.
@@ -151,7 +163,8 @@ func Path(id string) string { return "judgments/" + id + ".json" }
 // Judge asks Jev the judgments of every project's turns. One Judge serves the
 // whole service, so an outage cools every caller down together. It must be
 // called from turn execution, never from scheduling: a judgment waits on a
-// network call. A nil Judge has the boost off.
+// network call. A Judge is always non-nil; without an API key it is
+// unconfigured and every judgment falls back.
 type Judge struct {
 	// Config returns the current settings.
 	Config func() config.Jev
@@ -204,23 +217,15 @@ func (j Judgment) validate() error {
 var traceKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // Evaluate returns the judgment's decision; repo is the trace of the
-// judgment's project. While the boost is off it returns a disabled fallback
-// and neither sends nor records anything. Otherwise the
-// judgment is identified by its cause, task, version, acceptance and exact
-// request, so the same judgment asked again, after a restart included, returns the
-// decision recorded the first time instead of asking again, and changed
-// inputs are a new judgment. Every failure is a fallback; Evaluate never
+// judgment's project. The judgment is identified by its cause, task, version,
+// acceptance and exact request, so the same judgment asked again, after a
+// restart included, returns the decision recorded the first time instead of
+// asking again, and changed inputs are a new judgment. Every failure is a fallback; Evaluate never
 // returns accepted answers it could not record. It waits for at most two
 // requests of the configured timeout, and returns when ctx ends, leaving the
 // attempt interrupted.
 func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment Judgment) Decision {
-	if j == nil {
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
-	}
 	settings := j.Config()
-	if !settings.Enabled {
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
-	}
 	if err := judgment.validate(); err != nil {
 		return Decision{Outcome: Fallback, Reason: ReasonRejected, Detail: err.Error()}
 	}
@@ -233,6 +238,9 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	if judgment.Acceptance != "" {
 		parts = append(parts, judgment.Acceptance)
 	}
+	if o := judgment.Occurrence; o != nil {
+		parts = append(parts, o.Kind, o.Key, o.Ask)
+	}
 	identity, _ := json.Marshal(parts)
 	id := fmt.Sprintf("judgment_%x", sha256.Sum256(identity))
 	stream := config.WorkstreamID(judgment.Scope.Workstream)
@@ -244,7 +252,7 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	if revision > 0 && latest.State != StateStarted {
 		return latest.decision(id, true)
 	}
-	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Acceptance: judgment.Acceptance, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
+	base := Record{Scope: judgment.Scope, Task: judgment.Task, Version: judgment.Version, Acceptance: judgment.Acceptance, Occurrence: judgment.Occurrence, Model: settings.Model, Sources: judgment.Sources, Digest: digest, RequestBytes: len(body)}
 	if len(body) <= maxRecordedRequest {
 		base.Request = body
 	}
@@ -266,12 +274,15 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		r.State, r.Reason, r.Detail = StateFallback, ReasonInterrupted, fmt.Sprintf("%d attempts were interrupted", latest.Attempt)
 		return finish(r)
 	}
+	if judgment.MaxBytes > 0 && len(body) > judgment.MaxBytes {
+		r := base
+		r.State, r.Reason, r.Detail = StateFallback, ReasonRejected, fmt.Sprintf("request is %d bytes, above the limit of %d", len(body), judgment.MaxBytes)
+		return finish(r)
+	}
 	// A judgment the provider cannot be asked now falls back without a
 	// started revision. A cool-down that begins after this check is
 	// recorded as the attempt's result instead.
 	switch status := j.core().Status(); {
-	case status.Mode == ModeDisabled:
-		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
 	case status.Mode == ModeUnconfigured:
 		r := base
 		r.State, r.Reason, r.Detail = StateFallback, ReasonUnconfigured, status.Detail
@@ -392,26 +403,22 @@ func (w *writer) cost(ctx context.Context, attempt int, u systemone.Usage) error
 	return nil
 }
 
-// Mode is the boost's state as status reports it: disabled, unconfigured
-// while its API key is not set, ready, or degraded while its latest request
-// failed or it cools down.
+// Mode is Jev's state as status reports it: unconfigured while its API key is
+// not set, ready, or degraded while its latest request failed or it cools
+// down.
 type Mode = corejev.Mode
 
 const (
-	ModeDisabled     = corejev.ModeDisabled
 	ModeUnconfigured = corejev.ModeUnconfigured
 	ModeReady        = corejev.ModeReady
 	ModeDegraded     = corejev.ModeDegraded
 )
 
-// Status reports the boost's mode, the configured model and the latest
+// Status reports Jev's mode, the configured model and the latest
 // failure since the last success.
 type Status = corejev.Status
 
-// Status reports the boost under the current settings.
+// Status reports Jev under the current settings.
 func (j *Judge) Status() Status {
-	if j == nil {
-		return Status{Mode: ModeDisabled}
-	}
 	return j.core().Status()
 }

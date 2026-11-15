@@ -141,7 +141,6 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 		"drift mason":    scope(masonRole, driftMasonAgent),
 		"unit reviewer":  scope(reviewerRole, reviewerAgent("unit")),
 		"drift reviewer": scope(reviewerRole, driftReviewerAgent),
-		"classifier":     scope("classifier", "classifier"),
 	} {
 		for backend, web := range webToolsByBackend {
 			t.Run(name+"/"+backend, func(t *testing.T) {

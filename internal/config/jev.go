@@ -20,16 +20,19 @@ const (
 // selection runs a check.
 const DefaultJevCheckThreshold = 0.5
 
+// DefaultJevDecisionThreshold is the confidence at or above which Jev's pick
+// is a decision.
+const DefaultJevDecisionThreshold = 0.9
+
 // MaxJevTimeout bounds one Jev request, so a judgment never holds a turn for
 // long.
 const MaxJevTimeout = jev.MaxTimeout
 
-// Jev configures the optional Jev boost. Enabled is the one switch for every
-// judgment Osmia asks Jev for; the other settings say how to reach it. The API
-// key is an environment reference; its value never becomes configuration or a
-// trace record.
+// Jev configures how Osmia reaches Jev, which every judgment Osmia asks for
+// goes to. The API key is an environment reference; its value never becomes
+// configuration or a trace record. Without the key Jev is unconfigured and
+// every judgment falls back.
 type Jev struct {
-	Enabled bool `toml:"enabled" json:"enabled"`
 	// URL is the base of a TypeSafe-compatible API; requests go to
 	// <url>/v1/systemone.
 	URL       string `toml:"url" json:"url"`
@@ -39,23 +42,25 @@ type Jev struct {
 	// CheckThreshold is the probability at or above which the check selection
 	// runs a check, above 0 and at most 1.
 	CheckThreshold float64 `toml:"check_threshold" json:"check_threshold"`
+	// DecisionThreshold is the confidence at or above which Jev's pick on a
+	// decision is binding, above 0 and at most 1. It applies to every
+	// decision kind and is recorded as each judgment's acceptance value.
+	DecisionThreshold float64 `toml:"decision_threshold" json:"decision_threshold"`
 	// CheckFallbackPicks runs this many highest-scored candidates when none
 	// reaches the threshold. Zero runs every check instead.
 	CheckFallbackPicks int `toml:"check_fallback_picks" json:"check_fallback_picks"`
 }
 
 func defaultJev() Jev {
-	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout, CheckThreshold: DefaultJevCheckThreshold}
+	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout, CheckThreshold: DefaultJevCheckThreshold, DecisionThreshold: DefaultJevDecisionThreshold}
 }
 
 // Settings are j as a Jev judge reads them, with the timeout parsed.
 func (j Jev) Settings() jev.Settings {
 	timeout, _ := time.ParseDuration(j.Timeout)
-	return jev.Settings{Enabled: j.Enabled, URL: j.URL, Model: j.Model, APIKeyEnv: j.APIKeyEnv, Timeout: timeout}
+	return jev.Settings{Enabled: true, URL: j.URL, Model: j.Model, APIKeyEnv: j.APIKeyEnv, Timeout: timeout}
 }
 
-// The settings are validated whether or not Jev is enabled, so turning the
-// switch on never reveals a broken setting.
 func (j Jev) validate(path string) error {
 	u, err := url.Parse(j.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -72,6 +77,9 @@ func (j Jev) validate(path string) error {
 	}
 	if !(j.CheckThreshold > 0 && j.CheckThreshold <= 1) {
 		return fieldError(path, "jev.check_threshold", "must be a probability above 0 and at most 1")
+	}
+	if !(j.DecisionThreshold > 0 && j.DecisionThreshold <= 1) {
+		return fieldError(path, "jev.decision_threshold", "must be a probability above 0 and at most 1")
 	}
 	if j.CheckFallbackPicks < 0 {
 		return fieldError(path, "jev.check_fallback_picks", "must be a non-negative integer")

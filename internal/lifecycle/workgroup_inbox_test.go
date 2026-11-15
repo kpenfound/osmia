@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -127,11 +129,18 @@ clone = "`+home2+`"
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				list, err := questions.Tools(r, agents[scope.Thread], scope, clock.Now)
+				if err != nil {
+					return nil, err
+				}
+				if scope.Role == trace.ChiefOfStaff {
+					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
+				}
+				return list, nil
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(cfg.Root.String(), "sessions", string(r.Project()), in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
@@ -529,7 +538,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	inbox, err := c.Inbox(ctx)
 	must(t, err)
 	if len(inbox.Entries) != 3 {
-		t.Fatalf("inbox before any ruling: %+v", inbox)
+		t.Fatalf("inbox before any ruling: %+v; %s", inbox, f.diagnostics(s))
 	}
 	var consolidated, entryU1, entryU2 InboxEntry
 	for _, e := range inbox.Entries {

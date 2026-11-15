@@ -50,6 +50,9 @@ type ShedOwner struct {
 	Round      int
 	Pin        shed.Pin
 	Now        func() time.Time
+	// Deciding is who the action is recorded as: the owner unless Jev decides
+	// an owner gate.
+	Deciding Deciding
 }
 
 // shedAction reads what every owner action of the shed needs and refuses a
@@ -145,13 +148,16 @@ func (o *ShedOwner) Record(ctx context.Context, id, path, content, value, reason
 	if found {
 		revision = latest.Revision + 1
 	}
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: o.Project, Workstream: o.Stream, At: o.Now(), Actor: OwnerActor, Cause: "owner-shed"}, Path: path, Content: content}
+	actor := o.Deciding.Actor()
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: o.Project, Workstream: o.Stream, At: o.Now(), Actor: actor, Cause: "owner-shed"}, Path: path, Content: content}
 	if err := o.Repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
 		return failed
 	}
 	transition := fmt.Sprintf("%s-%d", id, revision)
+	header := OwnerHeader(transition, o.Project, o.Stream, "owner-shed", o.Now())
+	header.Actor = actor
 	tx := trace.Transaction{ExpectedVersion: o.Owner.Version,
-		Transition: trace.Transition{Header: OwnerHeader(transition, o.Project, o.Stream, "owner-shed", o.Now()), Subject: OwnerSubject, From: o.Owner.Value, To: value, Reason: reason},
+		Transition: trace.Transition{Header: header, Subject: OwnerSubject, From: o.Owner.Value, To: value, Reason: reason},
 		Events:     []trace.Event{trace.Notice(transition, "owner", reason)}}
 	if _, err := o.Repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
@@ -233,6 +239,14 @@ func (s *Controller) ShedOverrule(ctx context.Context, raw string, req ShedOverr
 // rulings of the current round. Disposing of the same objection again replaces
 // the earlier disposition.
 func (s *Controller) Dispose(ctx context.Context, o *ShedOwner, objection string, disposition shed.Disposition, note, action string) (ShedResponse, *APIError) {
+	return s.DisposeBy(ctx, o, objection, disposition, note, action, Deciding{})
+}
+
+// DisposeBy is Dispose as the given decider: the owner, or Jev deciding an
+// escalated objection at the gate, whose ruling then names Jev and its
+// judgment.
+func (s *Controller) DisposeBy(ctx context.Context, o *ShedOwner, objection string, disposition shed.Disposition, note, action string, d Deciding) (ShedResponse, *APIError) {
+	o.Deciding = d
 	entries, err := Dissent(o.Repository, o.Stream)
 	if err != nil {
 		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.Stream)}
@@ -240,6 +254,9 @@ func (s *Controller) Dispose(ctx context.Context, o *ShedOwner, objection string
 	i := slices.IndexFunc(entries, func(e shed.Entry) bool { return e.ID == objection })
 	if i < 0 {
 		return ShedResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("no objection %s stands in workstream %s; read the dissent record with osmia status", objection, o.Stream)}
+	}
+	if d.Jev() && entries[i].Disposition != "" {
+		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s of workstream %s is already ruled %s", objection, o.Stream, entries[i].Disposition)}
 	}
 	rounds, err := shed.AllRulings(o.Repository, o.Stream)
 	if err != nil {
@@ -251,13 +268,13 @@ func (s *Controller) Dispose(ctx context.Context, o *ShedOwner, objection string
 			rulings = r
 		}
 	}
-	ruling := shed.Ruling{Objection: objection, Disposition: disposition, Note: strings.TrimSpace(note)}
+	ruling := shed.Ruling{Objection: objection, Disposition: disposition, Note: strings.TrimSpace(note), DecidedBy: d.By(), Judgment: d.Judgment}
 	rulings.Rulings = append(slices.DeleteFunc(slices.Clone(rulings.Rulings), func(r shed.Ruling) bool { return r.Objection == ruling.Objection }), ruling)
 	content, err := shed.EncodeRulings(rulings)
 	if err != nil {
 		return ShedResponse{}, &APIError{Code: Validation, Message: "the ruling cannot be recorded: " + err.Error()}
 	}
-	reason := fmt.Sprintf("the owner %s objection %s of %s in round %d, against %s", disposition, ruling.Objection, entries[i].Member, o.Round, rulings.Revision)
+	reason := fmt.Sprintf("%s %s objection %s of %s in round %d, against %s", d.Name(), disposition, ruling.Objection, entries[i].Member, o.Round, rulings.Revision)
 	if ruling.Note != "" {
 		reason += ": " + ruling.Note
 	}

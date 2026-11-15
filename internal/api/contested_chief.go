@@ -8,4 +8,8 @@ type ChiefContestDecision struct {
 	Note     string `json:"note"`
 	// Turn is the chief-of-staff turn that decided.
 	Turn string `json:"turn"`
+	// Actor is empty for the chief of staff's own decision, or "jev" with the
+	// Jev judgment record it comes from.
+	Actor    string `json:"actor,omitempty"`
+	Judgment string `json:"judgment,omitempty"`
 }

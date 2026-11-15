@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,10 +28,6 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 	top := filepath.Join(before.Root, "config.toml")
 	proj := filepath.Join(before.Root, "projects", string(project), "config.toml")
 	other := "p_00000000000000000000000000000009"
-	otherProfile := "[profiles.other]\nagent = \"codex\"\nmodel = \"other\"\n"
-	if !strings.Contains(files.topText, otherProfile) {
-		t.Fatalf("the fixture has no other profile:\n%s", files.topText)
-	}
 	activating := func(id string) string {
 		return "version = 1\nactive_projects = [\"" + id + "\"]\n" + files.topText[len("version = 1\nactive_projects = [\""+string(project)+"\"]\n"):]
 	}
@@ -48,11 +43,6 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 		{"project edit", files.topText, files.projectText + "landing = \"squash\"\n", []ConfigFile{{Path: top, State: ConfigUnchanged}, {Path: proj, Project: project, State: ConfigChanged}}},
 		{"invalid project", files.topText + "[capacity]\nmasons = 7\n", files.projectText + "landing = \"sideways\"\n", []ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigInvalid, Reason: "landing: expected commit-per-unit or squash"}}},
 		{"invalid top level", files.topText + "[capacity]\nmasons = 0\n", files.projectText + "landing = \"squash\"\n", []ConfigFile{{Path: top, State: ConfigInvalid, Reason: "capacity.masons: must be positive"}, {Path: proj, Project: project, State: ConfigChanged}}},
-		// Each file passes on its own, but the project's classifier names a
-		// profile the edited top level no longer has, so a reload fails on
-		// the project file.
-		{"valid alone, invalid together", strings.Replace(files.topText, otherProfile, "", 1), files.projectText + "classifier = \"other\"\n",
-			[]ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigInvalid, Reason: "classifier: unknown profile other"}}},
 		{"another active project", activating(other), files.projectText,
 			[]ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigUnchanged}, {Path: filepath.Join(before.Root, "projects", other, "config.toml"), State: ConfigInvalid, Reason: "cannot be read"}}},
 	} {

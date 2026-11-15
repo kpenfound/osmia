@@ -16,7 +16,7 @@ const disjointPlan = `{"version": 1, "units": [
 
 func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "")
+	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
 	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
 	return f, fake
 }

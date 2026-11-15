@@ -169,7 +169,7 @@ func (f *shedFixture) awaitQueuedFollowUp(t *testing.T, stream config.Workstream
 func TestDriftCadenceDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 2\n", independentPlan, "", func(opts *Options) {
+	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 2\n", independentPlan, func(opts *Options) {
 		appendMasonConfig(t, opts, "\n[mason]\nmax_clean_turns = 5\n")
 	})
 	defer func() { f.stop(t) }()

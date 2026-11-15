@@ -33,13 +33,25 @@ const (
 	deciderChief = "chief_of_staff"
 )
 
+// decider is who made a decision Hearsay is told about.
+type decider int
+
+const (
+	// byChief is the zero value: the chief of staff's own decision.
+	byChief decider = iota
+	byOwner
+	byJev
+)
+
 // publishedDecision is one Hearsay decision before it is routed to a source. An owner
-// decision goes to the owner source with the owner as author; every other
-// decision is the chief of staff's, goes to the work source and names no
-// author. workstream is empty for a decision about the project as a whole.
+// decision goes to the owner source with the owner as author. The chief of
+// staff's and Jev's go to the work source and name no author, and Jev's names
+// Jev and its judgment in its text. workstream is empty for a decision about
+// the project as a whole.
 type publishedDecision struct {
 	id         string
-	owner      bool
+	by         decider
+	judgment   string
 	workstream config.WorkstreamID
 
 	context, outcome, rationale string
@@ -50,11 +62,47 @@ type publishedDecision struct {
 	created, updated                    time.Time
 }
 
+// decider is the value of the record's decider field. Hearsay accepts only
+// owner, chief_of_staff and committee and takes authority from the source, so a
+// decision Jev made is posted as the chief of staff's and names Jev in its text.
 func (d publishedDecision) decider() string {
-	if d.owner {
+	if d.by == byOwner {
 		return deciderOwner
 	}
 	return deciderChief
+}
+
+// source is the Hearsay source that holds the decision: the owner source for
+// the owner's decisions and the work source for every other.
+func (d publishedDecision) source(in *publishInputs) string {
+	if d.by == byOwner {
+		return in.ownerSource
+	}
+	return in.workSource
+}
+
+// jevDecider returns who decided a record that names its decider and the Jev
+// judgment it comes from. A record that names Jev without a judgment is not
+// one Jev made.
+func jevDecider(by, judgment string) bool {
+	return by == trace.DecidedByJev && trace.ValidDecider(by, judgment)
+}
+
+// jevNote opens a rationale with the statement that Jev decided and the
+// judgment it came from, so the decision is never read as the owner's.
+func jevNote(judgment, rest string) string {
+	note := fmt.Sprintf("Decided by Jev, the decision maker for the owner, with judgment %s; the owner did not decide it.", judgment)
+	if rest = strings.TrimSpace(rest); rest != "" {
+		note += " " + rest
+	}
+	return note
+}
+
+// jevID is the id of a decision Jev made: the workstream, "jev", the kind and
+// the subject, so no owner or chief decision about the same subject can hold
+// it on another source.
+func jevID(workstream config.WorkstreamID, kind string, parts ...string) string {
+	return decisionID(append([]string{string(workstream), "jev", kind}, parts...)...)
 }
 
 // decisionID derives a decision's id from the Osmia ids it is about. The ids
@@ -112,10 +160,7 @@ func decisionRecords(in *publishInputs) []hearsay.Record {
 // decisionRecord is the record of one decision. byID resolves the decision it
 // supersedes to the source that holds it.
 func (in *publishInputs) decisionRecord(d publishedDecision, byID map[string]publishedDecision) hearsay.Record {
-	source := in.workSource
-	if d.owner {
-		source = in.ownerSource
-	}
+	source := d.source(in)
 	parent := in.projectRef()
 	if d.workstream != "" {
 		parent = in.workstreamRef(d.workstream)
@@ -124,7 +169,7 @@ func (in *publishInputs) decisionRecord(d publishedDecision, byID map[string]pub
 	w := hearsay.Wire{Kind: hearsay.KindDecision, Project: string(in.project), Workstream: string(d.workstream), Decision: d.id,
 		Context: boundedText(d.context, decisionLimit), Outcome: boundedText(d.outcome, decisionLimit), Rationale: boundedText(d.rationale, decisionLimit),
 		Decider: d.decider(), CreatedAt: hearsay.Time(d.created), UpdatedAt: hearsay.Time(d.updated)}
-	if d.owner {
+	if d.by == byOwner {
 		w.Author = in.owner
 	}
 	for _, option := range d.rejected {
@@ -134,11 +179,7 @@ func (in *publishInputs) decisionRecord(d publishedDecision, byID map[string]pub
 	}
 	if earlier, ok := byID[d.supersedes]; ok && d.supersedes != d.id {
 		w.Supersedes = earlier.id
-		earlierSource := in.workSource
-		if earlier.owner {
-			earlierSource = in.ownerSource
-		}
-		after = append(after, hearsay.Ref(earlierSource, "decision/"+earlier.id))
+		after = append(after, hearsay.Ref(earlier.source(in), "decision/"+earlier.id))
 	}
 	if hearsay.ValidID(d.specDocument) {
 		w.SpecDocument = d.specDocument
@@ -180,8 +221,8 @@ func (st *publishStream) readDecisions(repo *trace.Repository) error {
 // links are the document and pull request every decision of the workstream
 // links to, where they exist.
 func (st *publishStream) links(in *publishInputs) (spec, pullRequest string) {
-	if len(st.sealedSpecs(in)) > 0 {
-		spec = sealedSpecDocument(st.id())
+	if documents := st.sealedSpecs(in); len(documents) > 0 {
+		spec = documents[len(documents)-1].document
 	}
 	if st.evidence.Published && isWebURL(st.evidence.Publication.URL) {
 		pullRequest = st.evidence.Publication.URL
@@ -212,11 +253,12 @@ func (st *publishStream) decisions(in *publishInputs) []publishedDecision {
 // questionRef names a question across workstreams.
 func (st *publishStream) questionRef(id string) string { return string(st.id()) + ":" + id }
 
-// questionDecisions are the owner's rulings on escalated questions and the
-// chief of staff's answers about intent or scope. The owner's ruling is the
-// first revision of the question's ruling; the chief's relay of it, a later
-// revision, is never posted as a ruling. An answer that cites a code
-// inspection is engineering and is not posted.
+// questionDecisions are the rulings on escalated questions and the chief of
+// staff's answers about intent or scope. The owner's ruling is the first
+// revision of the question's ruling, and a ruling Jev made is the first revision
+// too, written by Jev with its judgment. The chief's relay of either, a later
+// revision, is never posted as a ruling. An answer that cites a code inspection
+// is engineering and is not posted; one Jev bound is posted as Jev's.
 func (st *publishStream) questionDecisions() []publishedDecision {
 	var out []publishedDecision
 	for _, q := range st.questions {
@@ -226,7 +268,7 @@ func (st *publishStream) questionDecisions() []publishedDecision {
 				continue
 			}
 			switch {
-			case r.Revision == 1 && r.Decision == trace.DecisionRuling && r.Actor.Kind == "owner" && strings.TrimSpace(r.OwnerResponse) != "":
+			case r.Revision == 1 && r.Decision == trace.DecisionRuling && (r.Actor.Kind == "owner" || jevRuling(r)) && strings.TrimSpace(r.OwnerResponse) != "":
 				first = &st.rulings[i]
 			case r.Decision == trace.DecisionAnswer && strings.TrimSpace(r.ReturnedAnswer) != "":
 				answer = &st.rulings[i]
@@ -237,15 +279,27 @@ func (st *publishStream) questionDecisions() []publishedDecision {
 		case first != nil:
 			out = append(out, st.ownerRuling(q, *first))
 		case answer != nil && !citesCode(*answer):
-			out = append(out, publishedDecision{
+			d := publishedDecision{
 				id: decisionID(string(st.id()), "answer", q.Asked.ID), workstream: st.id(),
 				context:   "A question to the chief of staff about intent or scope: " + asked,
 				outcome:   strings.TrimSpace(answer.ReturnedAnswer),
 				rationale: "Answered by the chief of staff from the record" + citedFrom(answer.Citations) + ".",
-				question:  st.questionRef(q.Asked.ID), created: answer.At, updated: answer.At})
+				question:  st.questionRef(q.Asked.ID), created: answer.At, updated: answer.At}
+			if jevRuling(*answer) {
+				d.id, d.by, d.judgment = jevID(st.id(), "answer", q.Asked.ID), byJev, answer.Judgment
+				d.rationale = jevNote(answer.Judgment, "The answer's text is the chief of staff's, from the record"+citedFrom(answer.Citations)+".")
+			}
+			out = append(out, d)
 		}
 	}
 	return out
+}
+
+// jevRuling reports whether Jev made the decision a ruling records. The trace
+// guarantees that Jev's ruling is written by the Jev actor and that the Jev
+// actor writes no other ruling, apart from the chief of staff's relay of it.
+func jevRuling(r trace.Ruling) bool {
+	return jevDecider(r.DecidedBy, r.Judgment) && r.Actor == trace.JevActor
 }
 
 // citesCode reports whether an answer rests on a recorded code inspection.
@@ -260,17 +314,22 @@ func citedFrom(citations []string) string {
 	return ", citing " + strings.Join(citations, ", ")
 }
 
-// ownerRuling is the decision the owner made on an escalated question, with
-// the question as the owner read it and the escalation: the passage in
-// tension, the conflict and the options.
+// ownerRuling is the decision the owner, or Jev for the owner, made on an
+// escalated question, with the question as the owner read it and the
+// escalation: the passage in tension, the conflict and the options.
 func (st *publishStream) ownerRuling(q trace.QuestionState, ruling trace.Ruling) publishedDecision {
+	jev := jevRuling(ruling)
 	question := strings.TrimSpace(q.Latest.SentToOwner)
 	if question == "" {
 		question = strings.TrimSpace(q.Asked.Question)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Question: %s", question)
-	rationale := "Ruled by the owner on an escalated question."
+	ruledBy := "the owner"
+	if jev {
+		ruledBy = "Jev"
+	}
+	rationale := "Ruled by " + ruledBy + " on an escalated question."
 	if e := q.Latest.Escalation; e != nil {
 		fmt.Fprintf(&b, "\n\nPassage in tension: %s\n\nConflict: %s", strings.TrimSpace(e.Section), strings.TrimSpace(e.Conflict))
 		if blocked := strings.TrimSpace(e.Blocked); blocked != "" {
@@ -283,13 +342,18 @@ func (st *publishStream) ownerRuling(q trace.QuestionState, ruling trace.Ruling)
 			}
 		}
 		if rec := strings.TrimSpace(e.Recommendation); rec != "" {
-			rationale = fmt.Sprintf("Ruled by the owner on escalated question, inbox entry %d. The chief of staff recommended: %s", e.Inbox, rec)
+			rationale = fmt.Sprintf("Ruled by %s on escalated question, inbox entry %d. The chief of staff recommended: %s", ruledBy, e.Inbox, rec)
 		}
 	}
-	return publishedDecision{
-		id: decisionID(string(st.id()), "ruling", q.Asked.ID), owner: true, workstream: st.id(),
+	d := publishedDecision{
+		id: decisionID(string(st.id()), "ruling", q.Asked.ID), by: byOwner, workstream: st.id(),
 		context: b.String(), outcome: strings.TrimSpace(ruling.OwnerResponse), rationale: rationale,
 		question: st.questionRef(q.Asked.ID), created: ruling.At, updated: ruling.At}
+	if jev {
+		d.id, d.by, d.judgment = jevID(st.id(), "ruling", q.Asked.ID), byJev, ruling.Judgment
+		d.rationale = jevNote(ruling.Judgment, rationale)
+	}
+	return d
 }
 
 // assumptionDecisions are the judgment calls the chief of staff logged
@@ -322,7 +386,7 @@ func subject(citations []string) string {
 }
 
 // amendmentDecisions are the final decisions on the workstream's amendments:
-// the owner's, and the chief of staff's on plan-only revisions. A request
+// the owner's, Jev's, and the chief of staff's on plan-only revisions. A request
 // that is not yet decided, a debate round and a service retirement are not
 // decisions and are not posted. A later approved amendment about the same
 // criteria revisits the earlier decision.
@@ -361,9 +425,7 @@ func (st *publishStream) amendmentDecisions() []publishedDecision {
 		if final == nil {
 			continue
 		}
-		owner := final.document.Actor.Kind == "owner"
-		chief := final.document.Actor.Kind == "agent" && final.document.Actor.ID == trace.ChiefOfStaff
-		if !owner && !chief {
+		if _, ok := amendmentDecider(final.document, final.verdict); !ok {
 			continue
 		}
 		all = append(all, *final)
@@ -376,8 +438,9 @@ func (st *publishStream) amendmentDecisions() []publishedDecision {
 		req, verdict := c.request, c.verdict
 		approved := verdict.Decision == intake.AmendmentApprove || verdict.Decision == intake.AmendmentOverrule
 		change := strings.TrimSpace(req.Change)
+		by, _ := amendmentDecider(c.document, verdict)
 		d := publishedDecision{
-			id: decisionID(string(st.id()), "amendment", req.ID), owner: c.document.Actor.Kind == "owner", workstream: st.id(),
+			id: decisionID(string(st.id()), "amendment", req.ID), by: by, workstream: st.id(),
 			context: fmt.Sprintf("Amendment %s to the sealed spec and plan, citing %s.\n\nChange: %s\n\nReason: %s", req.ID, strings.Join(req.Citations, ", "), change, strings.TrimSpace(req.Reason)),
 			created: c.document.At, updated: c.document.At}
 		switch {
@@ -392,6 +455,10 @@ func (st *publishStream) amendmentDecisions() []publishedDecision {
 		if d.rationale == "" {
 			d.rationale = strings.TrimSpace(req.Reason)
 		}
+		if by == byJev {
+			d.id, d.judgment = jevID(st.id(), "amendment", req.ID), verdict.Judgment
+			d.rationale = jevNote(verdict.Judgment, d.rationale)
+		}
 		if req.QuestionID != "" {
 			d.question = st.questionRef(req.QuestionID)
 		}
@@ -403,6 +470,26 @@ func (st *publishStream) amendmentDecisions() []publishedDecision {
 		out = append(out, d)
 	}
 	return out
+}
+
+// amendmentDecider is who made a final amendment decision, and whether it is
+// one the publisher posts: the owner's, Jev's or the chief of staff's. A
+// decision Jev made is written by the Jev actor and names Jev as its actor and
+// its judgment; a record whose header and content disagree, or that names Jev
+// without a judgment, is nobody's and is not posted.
+func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (decider, bool) {
+	if !trace.ValidDecisionActor(doc) {
+		return 0, false
+	}
+	switch {
+	case doc.Actor == trace.JevActor:
+		return byJev, jevDecider(verdict.Actor, verdict.Judgment)
+	case doc.Actor.Kind == "owner":
+		return byOwner, true
+	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.ChiefOfStaff:
+		return byChief, true
+	}
+	return 0, false
 }
 
 // discovery is one revision of a discovered piece of work, as the chief of
@@ -442,6 +529,7 @@ func (st *publishStream) discoveryDecisions() []publishedDecision {
 			if !scopeCall && previous == "" {
 				continue
 			}
+			jev := jevDecider(w.DecidedBy, w.Judgment)
 			d := publishedDecision{
 				id:         decisionID(string(st.id()), "discovery", shortHash(id), fmt.Sprint(r.doc.Revision)),
 				workstream: st.id(),
@@ -458,6 +546,10 @@ func (st *publishStream) discoveryDecisions() []publishedDecision {
 				d.outcome = fmt.Sprintf("Assigned the discovered work to unit %s: %s", w.Unit, strings.TrimSpace(w.Description))
 			default:
 				d.outcome = "Reopened the discovered work as necessary: " + strings.TrimSpace(w.Description)
+			}
+			if jev {
+				d.id, d.by, d.judgment = jevID(st.id(), "discovery", shortHash(id), fmt.Sprint(r.doc.Revision)), byJev, w.Judgment
+				d.rationale = jevNote(w.Judgment, d.rationale)
 			}
 			previous = d.id
 			out = append(out, d)
@@ -499,7 +591,7 @@ func (st *publishStream) acceptedFindings() []publishedDecision {
 	for _, k := range order {
 		d := first[k]
 		out = append(out, publishedDecision{
-			id: decisionID(string(st.id()), "accepted", fmt.Sprint(k.review), shortHash(k.finding)), owner: true, workstream: st.id(),
+			id: decisionID(string(st.id()), "accepted", fmt.Sprint(k.review), shortHash(k.finding)), by: byOwner, workstream: st.id(),
 			context:  fmt.Sprintf("Final review %d found this blocking: %s", k.review, strings.TrimSpace(k.finding)),
 			outcome:  "Accepted at delivery as it is: " + strings.TrimSpace(k.finding),
 			rejected: []string{"Repair it through a plan revision before delivery"}, rationale: "The owner approved delivery and accepted the finding instead of having it fixed.",
@@ -570,7 +662,7 @@ func (st *publishStream) charterDecisions() []publishedDecision {
 			origin = p.SourceWorkstream
 		}
 		d := publishedDecision{
-			id: decisionID(string(st.id()), "charter", p.Question), owner: true,
+			id: decisionID(string(st.id()), "charter", p.Question), by: byOwner,
 			context:  fmt.Sprintf("The chief of staff drew a standing charter rule from the owner's ruling on question %s.\n\nOwner's ruling: %s\n\nProposed rule: %s", question, strings.TrimSpace(p.OwnerResponse), strings.TrimSpace(p.Rule)),
 			question: string(origin) + ":" + question, created: c.Proposed.At, updated: c.Decided.At}
 		note := strings.TrimSpace(p.Note)
@@ -644,7 +736,7 @@ func groupChangeDecisions(g trace.PublishedWorkgroup) []publishedDecision {
 		approved := c.Decision.Decision == "approve"
 		change := strings.TrimSpace(c.Request.Change)
 		d := publishedDecision{
-			id: decisionID(string(g.ID), "change", c.ID), owner: true, specDocument: workgroupSpecDocument(g.ID),
+			id: decisionID(string(g.ID), "change", c.ID), by: byOwner, specDocument: workgroupSpecDocument(g.ID),
 			created: r.at, updated: r.at}
 		var b strings.Builder
 		fmt.Fprintf(&b, "An amendment to the project spec of workgroup %s: %s", g.ID, change)

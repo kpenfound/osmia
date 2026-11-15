@@ -54,8 +54,8 @@ func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {
 	}
 	awaitFeedEvent(p, stream)
 	p.Await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-	p.AwaitText(entry+` [data-field=selection]`, "checking every check: the Jev boost is off")
-	p.AwaitText(entry+` [data-field=selection-description]`, "every check ran: the Jev boost is off")
+	p.AwaitText(entry+` [data-field=selection]`, "checking every check: Jev is unconfigured")
+	p.AwaitText(entry+` [data-field=selection-description]`, "every check ran: Jev did not select them (unconfigured")
 	p.Await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
 	assertFeedAnnotations(t, p, entry, 1)
 	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}

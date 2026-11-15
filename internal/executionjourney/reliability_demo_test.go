@@ -27,7 +27,7 @@ import (
 func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons, *atomic.Int64) {
 	t.Helper()
 	passed, prepare := countingSchedule()
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "", prepare)
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, prepare)
 	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
 	return f, fake, passed
 }

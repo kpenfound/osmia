@@ -139,6 +139,13 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	if p.Brief != nil && p.Brief.State == BriefNoneRecorded {
 		e.Question += " " + NoBriefRecorded + "."
 	}
+	if len(blocking) > 0 {
+		notes, err := TriageNotes(repository, stream, p.Report.Review)
+		if err != nil {
+			return InboxEntry{}, false, err
+		}
+		e.Question += notes
+	}
 	e.Blocked = "Publishing the pull request."
 	e.Options = []string{"approve"}
 	return e, true, nil

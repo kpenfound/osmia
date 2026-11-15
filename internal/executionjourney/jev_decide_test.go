@@ -1,0 +1,232 @@
+package executionjourney
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/cli"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const contestEvidence = "The reviewer sent the candidate back three times with the same finding and the mason has not changed it."
+
+// withJev points the service at the fake provider with Jev's key set, as a
+// service started with a key and a provider would be.
+func withJev(t *testing.T, p *jevfixture.Provider) func(*Options) {
+	t.Helper()
+	key := jevfixture.Key(t, true)
+	return func(o *Options) {
+		o.JevProvider = p.Factory()
+		file, err := os.OpenFile(filepath.Join(o.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+		must(t, err)
+		_, err = file.WriteString(jevfixture.Config(key))
+		must(t, err)
+		must(t, file.Close())
+	}
+}
+
+// chiefTurn installs the chief of staff's behaviour for the one turn whose
+// prompt carries match: it runs the script over the turn's tools. Every other
+// turn goes on as before.
+func (b *bounceFixture) chiefTurn(match string, script func(ctx context.Context, tools *mcp.ClientSession) error) {
+	b.f.engine.Mu.Lock()
+	defer b.f.engine.Mu.Unlock()
+	next := b.f.engine.Turns["*"]
+	var once atomic.Bool
+	b.f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if !strings.Contains(req.Prompt, match) || !once.CompareAndSwap(false, true) {
+			return next(ctx, req, turn, tools)
+		}
+		err := script(ctx, tools)
+		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Recorded", SessionDir: req.SessionDir, NumTurns: 1}, err
+	}
+}
+
+// rawTool calls the tool as the model does. The fixtures' callTool decides the
+// subject of an outcome tool first, which these tests must not have done for
+// them.
+func rawTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (string, error) {
+	result, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return "", err
+	}
+	var text strings.Builder
+	for _, content := range result.Content {
+		if c, ok := content.(*mcp.TextContent); ok {
+			text.WriteString(c.Text)
+		}
+	}
+	if result.IsError {
+		return "", errors.New(text.String())
+	}
+	return text.String(), nil
+}
+
+// callDecideContest is the call the chief of staff makes before it rules on the
+// contested unit.
+func callDecideContest(ctx context.Context, tools *mcp.ClientSession) (string, error) {
+	return rawTool(ctx, tools, "decide", map[string]any{"kind": "contested-ruling", "subject": bounceUnit, "evidence": contestEvidence})
+}
+
+// A confident Jev pick for a contested unit binds the chief of staff's own
+// turn in the running service. The chief calls the ruling before decide and is
+// refused, decides, is refused the ruling Jev did not pick, and records the
+// picked ruling with its own note. The unit goes on as after any ruling, and
+// the trace through the API, the CLI and the transitions say Jev decided it.
+func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
+	t.Parallel()
+	provider := &jevfixture.Provider{Confidence: 0.96, Pick: func(options []string) string {
+		if slices.Contains(options, "review") {
+			return "review"
+		}
+		return options[0]
+	}}
+	b := newBounceFixture(t, "reviews", withJev(t, provider))
+	defer b.stop(t)
+	ctx := context.Background()
+
+	contest, contested, err := unitContest(b.f.repository(), b.stream, bounceUnit)
+	must(t, err)
+	if !contested {
+		t.Fatal("the unit is not contested")
+	}
+	type outcome struct{ before, decided, against, picked string }
+	done := make(chan outcome, 1)
+	b.chiefTurn("jev rules bounce now", func(ctx context.Context, tools *mcp.ClientSession) error {
+		var o outcome
+		var err error
+		if o.before, err = rawTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "review", "note": bounceNote}); err != nil {
+			return err
+		}
+		if o.decided, err = callDecideContest(ctx, tools); err != nil {
+			return err
+		}
+		if o.against, err = rawTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "escalate", "note": "The owner should look."}); err != nil {
+			return err
+		}
+		o.picked, err = rawTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "review", "note": bounceNote})
+		done <- o
+		return err
+	})
+	_, err = b.f.c.Send(ctx, b.stream, "jev rules bounce now")
+	must(t, err)
+	got := awaitCheck(t, done)
+	if !strings.Contains(got.before, `"recorded":false`) || !strings.Contains(got.before, "decide") {
+		t.Fatalf("the ruling before decide: %s", got.before)
+	}
+	if !strings.Contains(got.decided, `"decision":"binding"`) || !strings.Contains(got.decided, `"pick":"review"`) {
+		t.Fatalf("decide: %s", got.decided)
+	}
+	if !strings.Contains(got.against, `"recorded":false`) || !strings.Contains(got.against, "Jev") {
+		t.Fatalf("the ruling Jev did not pick: %s", got.against)
+	}
+	if !strings.Contains(got.picked, `"recorded":true`) {
+		t.Fatalf("the picked ruling: %s", got.picked)
+	}
+	// The ruling takes effect: the reviewer's next turn carries the chief's note.
+	if req := awaitCheck(t, b.delivered); !strings.HasPrefix(req.Name, reviewerAgent(bounceUnit)+"-review-") {
+		t.Fatalf("the turn after the ruling: %s", req.Name)
+	}
+
+	requests := provider.Decisions()
+	if len(requests) != 1 {
+		t.Fatalf("%d decision requests", len(requests))
+	}
+	for _, option := range []string{"review", "revise", "escalate"} {
+		if !slices.Contains(jevfixture.Options(requests[0]), option) {
+			t.Fatalf("Jev was not offered %q: %v", option, jevfixture.Options(requests[0]))
+		}
+	}
+	unit, err := b.f.c.TraceUnit(ctx, b.stream, bounceUnit)
+	must(t, err)
+	var ruling *api.TraceRuling
+	for i := range unit.Rulings {
+		if unit.Rulings[i].Kind == "contested" {
+			ruling = &unit.Rulings[i]
+		}
+	}
+	if ruling == nil || ruling.Decision != "review" || ruling.DecidedBy != trace.DecidedByJev || ruling.Judgment == "" {
+		t.Fatalf("trace rulings: %+v", unit.Rulings)
+	}
+	res, err := jev.Recorded(b.f.repository(), b.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
+	must(t, err)
+	if res.Status != jev.Binding || res.Pick != "review" || res.Judgment != ruling.Judgment {
+		t.Fatalf("recorded result %+v", res)
+	}
+	byJev := 0
+	for _, tr := range allTransitions(t, b.f.s.cfg.Root, b.f.project, b.stream) {
+		if tr.Actor == trace.JevActor && tr.Subject == trace.UnitSubject(bounceUnit) {
+			byJev++
+		}
+	}
+	if byJev != 1 {
+		t.Fatalf("%d transitions of the unit by Jev", byJev)
+	}
+	root, err := config.ResolveRoot(b.f.opts.Config.Root, "")
+	must(t, err)
+	var out, diag bytes.Buffer
+	code := cli.Run(ctx, []string{"--root", root.String(), "trace", string(b.stream), "unit", bounceUnit}, strings.NewReader(""), &out, &diag)
+	if code != 0 || diag.Len() != 0 || !strings.Contains(out.String(), "contested: review (decided by Jev)\n") {
+		t.Fatalf("the CLI's trace: code=%d stderr=%s\n%s", code, diag.String(), out.String())
+	}
+}
+
+// With Jev unconfigured decide tells the chief of staff to decide, nothing goes
+// to Jev, and the chief decides as before: it escalates the contest, which
+// reaches the owner's inbox with the chief's own recommendation. The status
+// shows Jev unconfigured.
+func TestWithJevUnconfiguredTheChiefDecidesAndTheContestReachesTheOwner(t *testing.T) {
+	t.Parallel()
+	b := newBounceFixture(t, "reviews")
+	defer b.stop(t)
+	ctx := context.Background()
+
+	done := make(chan [2]string, 1)
+	const note = "The retry needs the owner's decision."
+	b.chiefTurn("escalate after decide", func(ctx context.Context, tools *mcp.ClientSession) error {
+		decided, err := callDecideContest(ctx, tools)
+		if err != nil {
+			return err
+		}
+		escalated, err := rawTool(ctx, tools, resolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "escalate", "note": note})
+		done <- [2]string{decided, escalated}
+		return err
+	})
+	_, err := b.f.c.Send(ctx, b.stream, "escalate after decide")
+	must(t, err)
+	got := awaitCheck(t, done)
+	if !strings.Contains(got[0], `"decision":"chief"`) || strings.Contains(got[0], `"decision":"binding"`) {
+		t.Fatalf("decide: %s", got[0])
+	}
+	if !strings.Contains(got[1], `"recorded":true`) {
+		t.Fatalf("escalate: %s", got[1])
+	}
+	deadline := time.Now().Add(demoTimeout)
+	var entries []InboxEntry
+	for {
+		if entries = b.f.inboxEntries(t, b.stream, InboxContested); len(entries) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(entries) != 1 || entries[0].Unit != bounceUnit || !strings.Contains(entries[0].Recommendation, note) {
+		t.Fatalf("the contested card: %+v", entries)
+	}
+	if runtime, err := b.f.c.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeUnconfigured {
+		t.Fatalf("Jev in the status: %+v %v", runtime.Jev, err)
+	}
+}

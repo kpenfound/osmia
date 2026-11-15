@@ -161,6 +161,7 @@ func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	chiefTools = decided(t, wg, host, chiefTools)
 	var routeTool coreadapter.Tool
 	for _, tool := range chiefTools {
 		if tool.Name == questions.RouteAmendmentTool {

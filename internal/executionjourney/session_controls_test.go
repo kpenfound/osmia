@@ -408,7 +408,7 @@ func TestSessionCheckRunsSmartSelectionUnderJEV(t *testing.T) {
 	// is the one selected.
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.02), "check-1": jevtest.Noul(0.92)}}}}}
-	boostJev(s, p)
+	useJevProvider(s, p)
 	run, err := c.SessionCheck(context.Background(), stream)
 	must(t, err)
 	if run.Kind != "smart" || !slices.Equal(run.Checks, []string{links[0]}) || run.Status != ChecksPassed {
@@ -425,7 +425,7 @@ func TestSessionCheckRunsFullWhenDaggerRefusesTheSelection(t *testing.T) {
 	service.InspectForTest(s.core()).SetReviewChecks(refused)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.02), "check-1": jevtest.Noul(0.92)}}}}}
-	boostJev(s, p)
+	useJevProvider(s, p)
 	run, err := c.SessionCheck(context.Background(), stream)
 	must(t, err)
 	if run.Kind != "full" || len(run.Checks) != 0 || run.Status != ChecksPassed || run.Selection.Reason != checkrun.SelectionRefused || run.Selection.Detail != message {
@@ -814,7 +814,7 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	checks := &fakeChecks{Links: []string{"dag+check://go/test"}, Outcomes: passing()}
 	service.InspectForTest(s.core()).SetReviewChecks(checks)
 	provider := &jevtest.Provider{}
-	boostJev(s, provider)
+	useJevProvider(s, provider)
 	_, err = c.SessionCheck(context.Background(), stream)
 	assertCode(t, err, Internal)
 	if !strings.Contains(err.Error(), "cannot diff the session's base and head") {
@@ -836,7 +836,7 @@ func TestSessionCheckRunsFallbackPicksAndReportsReloadedConfiguration(t *testing
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, readErr := os.ReadFile(path)
 	must(t, readErr)
-	must(t, os.WriteFile(path, append(top, []byte("\n[jev]\nenabled = true\ncheck_fallback_picks = 2\n")...), 0600))
+	must(t, os.WriteFile(path, append(top, []byte("\n[jev]\ncheck_fallback_picks = 2\n")...), 0600))
 	_, err := c.Reload(t.Context())
 	must(t, err)
 	reported, err := c.Configuration(t.Context())

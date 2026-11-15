@@ -83,7 +83,7 @@ func (f *fixture) records(t *testing.T, id string) []jev.Record {
 		if d.ID != id {
 			continue
 		}
-		if d.Path != jev.Path(id) || d.Actor != (trace.Actor{Kind: "service", ID: jev.Role}) || d.Cause != "request_1" {
+		if d.Path != jev.Path(id) || d.Actor != (trace.Actor{Kind: "service", ID: jev.Role}) || d.Cause != "request_1" && d.Cause != "refused-"+id {
 			t.Fatalf("document = %+v", d.Header)
 		}
 		var r jev.Record
@@ -104,8 +104,8 @@ func (f *fixture) costs(t *testing.T) []trace.Cost {
 	return costs
 }
 
-func enabled() config.Jev {
-	return config.Jev{Enabled: true, URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
+func testSettings() config.Jev {
+	return config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
 }
 
 func judge(settings *config.Jev, p *jevtest.Provider, key string) *jev.Judge {
@@ -158,30 +158,30 @@ func answer(confidence float64) jevtest.Result {
 	}}
 }
 
-func TestDisabledBoostSendsAndRecordsNothing(t *testing.T) {
+func TestUnconfiguredJudgeSendsNothingAndReportsItsMode(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
-	settings.Enabled = false
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
-	j := judge(&settings, p, "key")
+	j := judge(&settings, p, "")
+	if status := j.Status(); status.Mode != jev.ModeUnconfigured || status.Reason != jev.ReasonUnconfigured {
+		t.Fatalf("status = %+v", status)
+	}
 	d := j.Evaluate(context.Background(), f.repo, judgment("Done."))
-	if d.Outcome != jev.Fallback || d.Reason != jev.ReasonDisabled || d.ID != "" || len(p.Requests()) != 0 {
+	if d.Outcome != jev.Fallback || d.Reason != jev.ReasonUnconfigured || len(p.Requests()) != 0 {
 		t.Fatalf("decision = %+v, requests = %d", d, len(p.Requests()))
 	}
-	docs, _ := trace.Read[trace.Document](f.repo, streamID)
-	for _, doc := range docs {
-		if strings.HasPrefix(doc.Path, "judgments/") {
-			t.Fatalf("disabled boost recorded %s", doc.Path)
-		}
-	}
 	if len(f.costs(t)) != 0 {
-		t.Fatal("disabled boost recorded a cost")
+		t.Fatal("an unconfigured Jev recorded a cost")
+	}
+	settings = testSettings()
+	if status := judge(&settings, p, "key").Status(); status.Mode != jev.ModeReady {
+		t.Fatalf("configured status = %+v", status)
 	}
 }
 
 func TestAcceptedJudgmentIsRecordedWithItsCostAndReusedAfterRestart(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
 	j := judge(&settings, p, "key")
 	d := j.Evaluate(context.Background(), f.repo, judgment("Done."))
@@ -214,7 +214,7 @@ func TestAcceptedJudgmentIsRecordedWithItsCostAndReusedAfterRestart(t *testing.T
 
 func TestChangedInputsAreANewJudgment(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
 	j := judge(&settings, p, "key")
 	first := j.Evaluate(context.Background(), f.repo, judgment("Done."))
@@ -238,7 +238,7 @@ func TestChangedInputsAreANewJudgment(t *testing.T) {
 
 func TestLowConfidenceFallsBackKeepingTheAnswers(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	j := judge(&settings, &jevtest.Provider{Results: []jevtest.Result{answer(0.5)}}, "key")
 	d := j.Evaluate(context.Background(), f.repo, judgment("Maybe done?"))
 	if d.Outcome != jev.Fallback || d.Reason != jev.ReasonDeclined || d.Detail != "class confidence below 0.8" || d.Response == nil {
@@ -256,7 +256,7 @@ func TestLowConfidenceFallsBackKeepingTheAnswers(t *testing.T) {
 
 func TestAFailedRequestIsRecordedWithoutACost(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}}}
 	d := judge(&settings, p, "key").Evaluate(context.Background(), f.repo, judgment("Done."))
 	if d.Outcome != jev.Fallback || d.Reason != jev.ReasonTimeout || d.Response != nil {
@@ -276,7 +276,7 @@ func TestAFailedRequestIsRecordedWithoutACost(t *testing.T) {
 
 func TestACoolingProviderRecordsAFallbackWithoutStarting(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{{Err: &systemone.Error{Kind: systemone.KindRateLimited, RetryAfter: time.Minute}}}}
 	j := judge(&settings, p, "key")
 	j.Evaluate(context.Background(), f.repo, judgment("first"))
@@ -291,7 +291,7 @@ func TestACoolingProviderRecordsAFallbackWithoutStarting(t *testing.T) {
 
 func TestMissingKeyRecordsAFallbackWithoutStarting(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
 	d := judge(&settings, p, "").Evaluate(context.Background(), f.repo, judgment("Done."))
 	if d.Reason != jev.ReasonUnconfigured || len(p.Requests()) != 0 {
@@ -304,7 +304,7 @@ func TestMissingKeyRecordsAFallbackWithoutStarting(t *testing.T) {
 
 func TestInterruptedAttemptsAreDistinguishedAndBounded(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	blocking := &jevtest.Provider{Wait: jevtest.BlockUntilDone}
 	interrupt := func() jev.Decision {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -343,7 +343,7 @@ func TestInterruptedAttemptsAreDistinguishedAndBounded(t *testing.T) {
 
 func TestAnInterruptedAttemptIsRetriedOnce(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	blocking := &jevtest.Provider{Wait: jevtest.BlockUntilDone}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -363,7 +363,7 @@ func TestAnInterruptedAttemptIsRetriedOnce(t *testing.T) {
 
 func TestInvalidJudgmentsFallBackWithoutARequest(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
 	j := judge(&settings, p, "key")
 	for name, edit := range map[string]func(*jev.Judgment){
@@ -390,7 +390,7 @@ const storedRecord = `{"scope":{"Project":"p_00000000000000000000000000000001","
 
 func TestAStoredDecisionIsReusedAsRecorded(t *testing.T) {
 	f := newFixture(t)
-	settings := enabled()
+	settings := testSettings()
 	asked := judgment("Done.")
 	body, err := asked.Request.Body(settings.Model)
 	if err != nil {

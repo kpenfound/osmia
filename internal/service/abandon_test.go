@@ -2,6 +2,7 @@ package service
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	http "net/http"
 	os "os"
 	filepath "path/filepath"
@@ -189,7 +190,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 		bound.Lock()
 		live = r
 		bound.Unlock()
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
 			}}, nil
@@ -308,7 +309,7 @@ func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
 
 	turns := &adaptertest.Turns{}
 	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
-	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: turns, Now: clock.Now},
+	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Turns: turns, Now: clock.Now},
 		Prepare: func(context.Context, thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(home, "session")}, nil
 		}}, s: s, repository: repo}

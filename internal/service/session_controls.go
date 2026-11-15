@@ -327,8 +327,8 @@ func sessionCheckLock(repository *trace.Repository, stream config.WorkstreamID) 
 
 // sessionCheck checks the session head commit: a smart check selected by
 // the service's existing smart-check selection over the changes between the
-// session's base commit and its head when the service has JEV enabled, or
-// the full `dagger check` the pre-review check run uses otherwise. It
+// session's base commit and its head. When Jev is unconfigured or does not
+// select, it runs the full `dagger check` the pre-review check run uses. It
 // records the commit, whether the run was smart or full, the selected
 // checks for a smart run, status, exit code and output, and adds a thread
 // entry naming the checked commit. Only one check run per session can be in

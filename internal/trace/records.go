@@ -154,6 +154,11 @@ type Ruling struct {
 	Scope            string   `json:"scope,omitempty"`
 	Citations        []string `json:"citations,omitempty"`
 	Changes          []string `json:"changes,omitempty"`
+	// DecidedBy names who made the decision when it was not the record's
+	// own decider, and Judgment the Jev judgment record a Jev decision
+	// comes from; see ValidDecider.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
 }
 
 func (Ruling) traceRecord() {}
@@ -192,10 +197,11 @@ type TurnResponse struct {
 	Failure         string                    `json:"failure,omitempty"`
 	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
-	ClassifierUsage []coreadapter.Usage       `json:"classifier_usage,omitempty"`
+	// ClassifierUsage is the usage of classifier turns, present only on
+	// responses already stored.
+	ClassifierUsage []coreadapter.Usage `json:"classifier_usage,omitempty"`
 	// Advice is the advisory text the service added to the request's prompt
-	// when the turn ran, such as Jev signals on the chief of staff's open
-	// questions.
+	// when the turn ran.
 	Advice string `json:"advice,omitempty"`
 	// Stop is set when the service stopped the turn on purpose. A stopped
 	// turn is interrupted, not failed, and records no failure.
@@ -311,7 +317,7 @@ func validate(r Record) error {
 	case ImageReference:
 		valid = h.Revision == 1 && config.CheckWorkstreamIDs(v.Member) == nil && key(v.ImageID) && h.ID == imageIdentity(string(v.Member)+"/"+v.ImageID)
 	case Document:
-		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n"))
+		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n")) && ValidDecisionActor(v)
 	case Transition:
 		valid = key(v.Subject) && present(v.To) && present(v.Reason)
 	case Question:
@@ -319,7 +325,7 @@ func validate(r Record) error {
 	case Amendment:
 		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
-		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && ValidDecider(v.DecidedBy, v.Judgment) && validRulingActor(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
 		valid = key(v.Role) && key(v.ThreadID) && (v.Session == (coreadapter.BackendSession{}) || validSession(v.Session))
 	case TurnRequest:
@@ -469,7 +475,7 @@ func finalPath(parts []string) bool {
 	if brief, ok := strings.CutPrefix(parts[1], "brief-"); ok && strings.HasSuffix(brief, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(brief, ".json")) {
 		return true
 	}
-	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
 }
 
 func checkSelectionName(name string) bool {

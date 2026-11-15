@@ -502,8 +502,9 @@ sandbox = "sbx"
 
 All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
 An omitted `image` lets each fallback profile select its agent's default template.
-A custom template must support every agent in that role's fallback chain. The
-classifier uses the mason's sandbox and template with its own configured profile.
+A custom template must support every agent in that role's fallback chain. A
+`[roles.classifier]` table is accepted and ignored, so a configuration file that
+has one still loads.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
 
 ### Sandbox size
@@ -614,8 +615,8 @@ keeps its version checks for Codex, Claude Code and the host's Dagger release.
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
 `osmia reload`. `image` is configured per role, not inherited from a profile.
-The template supports Codex and Claude profiles, including fallback chains
-and the classifier when configuring the mason. Docker may warn about using a
+The template supports Codex and Claude profiles, including fallback chains.
+Docker may warn about using a
 Codex-based template with Claude; both agent executables are installed. Build
 under the OS account running Osmia so the service can access the local template.
 Existing sandboxes keep their installed versions.
@@ -906,7 +907,7 @@ The CLI reaches the engine through `_EXPERIMENTAL_DAGGER_RUNNER_HOST`. A
 belongs to the turn, and a `tcp` engine on the host's loopback is reached at its
 own port. The sandbox reaches either one as `host.docker.internal`, and the port
 is allowed for that sandbox alone. Cleanup removes the rule and the forward along
-with the sandbox. The classifier and other roles never receive the engine.
+with the sandbox. Other roles never receive the engine.
 
 The simplest engine is the one your own Dagger CLI provisions: run any Dagger
 command on the host, such as `dagger core version`, and name its container,
@@ -958,8 +959,7 @@ name, since that name identifies the generated plugin.
 A turn of a role with skills mounts the skill cache read-only in every
 sandbox, and Claude's `Skill` tool joins its native tools. Codex and OpenCode
 turns receive no skills, so a role whose fallback runs another agent loses its
-skills for those turns. The classifier, which shares the mason's sandbox,
-receives none.
+skills for those turns.
 
 Osmia clones a missing reference when a turn needs it, with the service's own
 `git` and credentials and without prompting. A failed clone fails the turn. A
@@ -1077,7 +1077,6 @@ landing = "commit-per-unit"
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
-classifier = "default"              # optional; omitted by default
 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
@@ -1150,14 +1149,8 @@ checks run again later, and a final review's reader is told its checks did not
 complete. Listing the check links for a Jev selection has its
 own five-minute bound. A change applies to runs that start after a reload.
 
-`classifier` names a top-level profile for clean mason turns with no accepted
-outcome. When omitted, code heuristics classify the response without a model
-call. An unknown profile is rejected. The classifier inherits the mason's
-sandbox, uses an empty read-only workspace and receives no service tools or native write, shell or web tools. A Claude
-sandbox requires a Claude classifier profile. Its attempts are limited to two,
-each with a 30 second maximum timeout. Invalid or unavailable answers retain
-the code classification. With the Jev boost on, a Jev judgment classifies the
-response first, and the classifier runs only when that judgment falls back.
+A `classifier` key in a project file is accepted and ignored, so a file that has
+one still loads.
 
 ### Reading and saving a project's settings
 
@@ -1169,7 +1162,7 @@ request needs a `Host` naming the listener.
 
 **Read.** The editable snapshot is the file on disk. The read decodes the
 current bytes once and returns, for each effective setting (`name`, `upstream`,
-`fork`, `clone`, `base_branch`, `landing`, `classifier`, `upstream_rebase`,
+`fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
 `hearsay_entities`):
@@ -1196,8 +1189,8 @@ omitted setting is unchanged) and `clear`, the names of settings whose key is
 removed so the default or inherited value applies again.
 `set.hearsay_entities` sets entries by local entity ID and
 `clear_hearsay_entities` removes entries. `set.hearsay_declare_repo` is a
-boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`,
-`classifier` or `hearsay_scope` clears it. `upstream` and `clone` are required
+boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`
+or `hearsay_scope` clears it. `upstream` and `clone` are required
 and cannot be cleared. A save runs under the same lock as a reload and a
 project add or removal:
 
@@ -1211,8 +1204,7 @@ project add or removal:
    `[capacity]` or `[hearsay_entities]` table at the end of the file. A layout
    the edit cannot change safely, such as `capacity` written as an inline table,
    is refused and the file is edited by hand.
-3. The candidate is validated with the loader's rules, including
-   `classifier` against the loaded top-level profiles. An invalid value is
+3. The candidate is validated with the loader's rules. An invalid value is
    refused as `validation` with the offending setting in `error.field` and the
    loader's message, for example `checks_timeout: must be a Go duration from 1m
    to 24h`.
@@ -1439,7 +1431,7 @@ The service exposes Hearsay read tools within role turns: `get_bundle`,
 `traverse` follows Hearsay's typed graph edges from entities, so a role can
 reach the decision log and spec documents around a project or workstream entity.
 Exploratory sessions receive the same read tools at the observer class and no
-write tool; the classifier receives no tools. Workers and the chief also receive
+write tool. Workers and the chief also receive
 `assert`, which proposes an agent learning and does not ratify an owner ruling. The endpoint, human token and agent tokens remain service-owned.
 Live Hearsay sources, identities and authority policy are configured by the
 operator in Hearsay; `osmia project memory` generates them for a project (see
@@ -1628,16 +1620,17 @@ shutting down, the next start sends the spans of that run's open pool limit
 intervals and its uptime, ended at the last time it was seen alive. With
 telemetry off the file is never written.
 
-## Optional Jev boost
+## Jev
 
-The Jev boost asks Jev, TypeSafe's System One model, bounded typed questions
-inside turns and the service's check runs. One setting turns it on or off for
-every judgment; it is off by default, and with it off Osmia makes no Jev
-request and needs no Jev credential. The other settings show their defaults:
+Jev is TypeSafe's System One model. Osmia asks it bounded typed questions
+inside turns and the service's check runs. Jev is required: there is no switch
+to turn it off. Without its API key Jev is unconfigured: the service still
+starts, every judgment takes its fallback, and check selection runs every
+check. `osmia doctor` fails its Jev check until the key is set. The settings
+show their defaults:
 
 ```toml
 [jev]
-enabled = false
 # Base URL of a TypeSafe-compatible API; requests go to <url>/v1/systemone.
 url = "https://openrouter.ai/api"
 # The model asked. An alias moves when a new version ships; name a versioned
@@ -1650,19 +1643,23 @@ timeout = "10s"
 # The probability at or above which breadth keeps a top-level check and
 # ranking selects a link, above 0 and at most 1. Tune against a versioned model.
 check_threshold = 0.5
+# The confidence at or above which Jev's pick on a decision is binding, above
+# 0 and at most 1. One value serves every decision kind.
+decision_threshold = 0.9
 # When no check reaches the threshold, run this many highest-scored links.
 # Non-negative integer; 0 (default) runs every check instead.
 check_fallback_picks = 0
 ```
 
-The settings are validated whether or not the boost is on, and apply through
-reload. The service reads the key when it makes a request; configuration
+The settings are validated and apply through reload. A leftover
+`enabled = true` or `enabled = false` from a configuration written when Jev was
+optional still loads and has no effect; `false` logs a warning when the
+service loads or reloads it. Remove the line. The service reads the key when it makes a request; configuration
 responses, sessions and trace records never contain it, and it is not sent
 through a redirect. A judgment's state, such as a unit candidate's diff for
 smart checks, is sent to the configured provider.
 
-Every judgment falls back to the workflow as it runs without Jev when the key
-is missing, the request times out, is rate limited, fails or is refused, the
+Every judgment takes its fallback when the key is missing, the request times out, is rate limited, fails or is refused, the
 response does not answer the questions as asked, or the answers fall below the
 judgment's own threshold. A transient failure is retried once. A rate limit,
 or three transient failures in a row, cools Jev down for every judgment for 30
@@ -1670,16 +1667,17 @@ seconds, doubling with each further episode up to 15 minutes or as long as the
 provider's `Retry-After` asks within that cap; judgments fall back without a
 request meanwhile.
 
-With the boost on, a clean mason turn without an outcome is classified by Jev
-before the `classifier` profile and the code rules. Jev chooses the class and
-the sentence of the response that supports it, which becomes the recorded
-evidence. A class below its threshold, a stricter one for `gave_up`, or one no
-sentence supports falls back to the classifier, then the code rules. The turn's
-classification records `by` as `jev`, `classifier` or `rule`, and a Jev class
-names its judgment, which the chief of staff's notice cites.
+A clean mason turn without an outcome is classified by Jev before the code
+rules. Jev chooses the class and the sentence of the response that supports it,
+which becomes the recorded evidence. A class below its threshold, a stricter one
+for `gave_up`, or one no sentence supports falls back to the code rules, as does
+an outage, a cool-down or a missing key. The turn's classification records `by`
+as `jev` or `rule`, and a Jev class names its judgment, which the chief of
+staff's notice cites. A fallback leaves an unclear ending a clarify
+continuation, which counts toward `mason.max_clean_turns` like any other
+classified turn, so the unit is contested once the bound is reached.
 
-With the boost on, unit, final-review and smart session check runs use three
-stages. `dagger list checks --format=link` supplies top-level checks;
+Unit, final-review and smart session check runs use three stages. `dagger list checks --format=link` supplies top-level checks;
 `dagger list checks --all --format=link` supplies expanded links, with scoped
 listings attributing them to top-level checks. Breadth asks which top-level
 checks the change could affect and uses `jev.check_threshold` to keep them.
@@ -1704,35 +1702,52 @@ scored candidates run all scored links; no usable score or 0 (the default)
 runs every check. A pick may cover a whole collection item. Picks can miss an
 affected check that a full run would catch. An explicit full session run
 stays full. The selection, summary and feed distinguish fallback picks.
-The setting is validated with the boost on or off, reported in effective
-configuration and applied through reload. Each stage records the acceptance
+The setting is validated, reported in effective configuration and applied
+through reload. Without the key, selection skips the listing and runs every
+check. Each stage records the acceptance
 values it applies; a changed value creates a new judgment.
 
 [Smart checks](smart-checks.md) describes the selection end to end: what Jev
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
 same selection on any Git working tree.
 
-With the boost on, the chief of staff's turn that delivers a question asks
-Jev, before the session starts, whether the question's honest answer would
-change the sealed spec or plan, whether answering it as it proposes would
-contradict one of the owner's rulings or the project's notices, and whether it
-asks for a standing project rule. The prompt ends with each answer that
-reaches its threshold as a signal naming its judgment and the outcome it
-argues for, and the turn's response records that text as `advice`. The chief
-of staff still chooses the outcome and explains a choice against a signal. A
-fallback, or answers below every threshold, leaves the prompt as it is with
-the boost off. A question's judgment is reused when the question is delivered
-again, and names the question, so its signals can be compared with the
-question's outcome.
+The chief of staff investigates a question, a contested unit, a committee
+objection, a plan-only amendment, a discovery or a final review's blocking
+finding first and then calls `decide` with the kind, the subject and a short
+evidence summary. The service checks from the subject's records that the chief
+may decide it today (a conflict between member charters, the owner's own
+objection and an amendment that changes approved intent are refused, with no
+request and no judgment), builds the state from the records and asks Jev to
+pick: answer, route as an amendment or escalate a question; review, revise or
+escalate a contested unit; dismiss or escalate an objection; approve or decline
+a plan-only amendment; assign, decline or retain a discovery; and, for each
+blocking finding of the current final review (subject `<review>:<finding>`, as
+the final review notice names it), whether it needs code in the next plan
+revision or is left to the owner. Jev never reads code or uses tools. A pick at
+or above `[jev] decision_threshold` is binding: the outcome tool (`answer`,
+`route_amendment`, `escalate`, `resolve_contested`, `resolve_objection`,
+`decide_amendment`, `record_discovery`, `triage_finding`) then records only that
+outcome, with the chief's own text, and the decision is shown as decided by
+Jev. A pick below the threshold, or a fallback, leaves the decision with the
+chief. The outcome tools refuse a subject `decide` has not been called for; a
+disposition the owner gave and the chief relays needs none. The result belongs
+to the subject occurrence (the question, the contest, the objection, the
+amendment, the discovery or the finding of one final review), is reused when
+`decide` is called again, and survives a restart. A finding triaged as needing
+code is stated in the next plan revision the chief files with `route_amendment`,
+and one left to the owner is shown on the delivery card with the chief's
+reason. When the service refuses the transition a binding pick calls for, the
+item goes to the owner's inbox with Jev's judgment (a discovery as a
+`discovery` entry, an amendment as its amendment card, a finding on the
+delivery card) and Jev is not asked again.
 
-While the boost is on, each judgment is recorded under its workstream in
+Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
 and its usage is a ledger cost under the `jev` role. A judgment asked again
 with the same inputs, after a restart included, returns the recorded decision.
-`osmia status` reports the boost as `disabled`, `unconfigured`, `ready` or
-`degraded`, with the latest failure and any cool-down, and its spend appears
-as the `jev` provider in today's usage. `osmia doctor` warns when the boost is
-on without its key.
+`osmia status` reports Jev as `unconfigured`, `ready` or `degraded`, with the
+latest failure and any cool-down, and its spend appears as the `jev` provider
+in today's usage. `osmia doctor` fails when the key is not set.
 
 ### Resolution, retention and shared lifecycle
 

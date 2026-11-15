@@ -168,3 +168,17 @@ func (s *Service) chiefThread(ctx context.Context, repository *trace.Repository,
 	}
 	return t, err == nil, err
 }
+
+// triageTool is the chief-only tool that records the triage of a blocking
+// finding of a final review.
+const triageTool = delivery.TriageToolName
+
+// triageFinding returns the triage_finding tool of one chief-of-staff turn.
+func (c *runtimeControls) triageFinding(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return delivery.TriageToolOf(func() *delivery.Controller {
+		if s := c.service.Load(); s != nil {
+			return s.delivery()
+		}
+		return nil
+	}, repo, scope)
+}

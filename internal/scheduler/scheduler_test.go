@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -151,7 +152,7 @@ func (f *fixture) controllerWith(t *testing.T, repo *trace.Repository, turns cor
 	s, err := New(repo, options)
 	must(t, err)
 	sessions := t.TempDir()
-	d := thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: turns, Now: f.clock.Now},
+	d := thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Turns: turns, Now: f.clock.Now},
 		Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(sessions, in.Agent, in.Turn)}, nil
 		}}

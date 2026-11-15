@@ -11,9 +11,14 @@ import (
 	testing "testing"
 	time "time"
 
+	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	jev "github.com/kpenfound/osmia/internal/jev"
+	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
+	service "github.com/kpenfound/osmia/internal/service"
 	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // chiefDecides records the chief of staff's decision on one committee
@@ -65,6 +70,13 @@ func (f *shedFixture) chiefObjectionTool(t *testing.T, stream config.WorkstreamI
 
 var decideWith = intakefixture.DecideWith
 
+// objectionDecided leaves the decide result of the objection as a fallback, as
+// the decide tool does while Jev is unconfigured.
+func (f *shedFixture) objectionDecided(t *testing.T, stream config.WorkstreamID, objection string) {
+	t.Helper()
+	jevfixture.Fallback(f.repository(), f.project, stream, jev.KindObjection, jev.ObjectionKey(objection))
+}
+
 // The committee's objections go to the chief of staff before the owner: the
 // ratification reaches the owner's inbox only once each one is decided, a
 // charter veto the chief of staff dismisses no longer blocks and is not put
@@ -95,6 +107,15 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	}
 
 	tool := f.chiefObjectionTool(t, stream)
+	// The tool records nothing before decide, nor on another objection's result.
+	if out := decideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
+		t.Fatalf("dismissing before decide: %s", out)
+	}
+	f.objectionDecided(t, stream, advice)
+	if out := decideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "call decide") {
+		t.Fatalf("dismissing on another objection's result: %s", out)
+	}
+	f.objectionDecided(t, stream, veto)
 	for input, want := range map[string]string{
 		`{"objection":"` + veto + `","decision":"dismiss","note":" "}`:     "a note is required",
 		`{"objection":"nobody-r1-1","decision":"escalate","note":"Look."}`: "no objection nobody-r1-1 stands",
@@ -166,10 +187,145 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 
 	objected, err := f.c.ShedObject(ctx, stream, "Name the upload limits.")
 	must(t, err)
+	// The owner's own objection is refused before Jev is asked: no judgment is
+	// recorded for it.
+	if _, _, api := f.s.intake().ObjectionSubject(f.repository(), stream, objected.Objection); api == nil || !strings.Contains(api.Message, "the owner's own") {
+		t.Fatalf("the owner's objection is eligible: %+v", api)
+	}
+	if res, err := jev.Recorded(f.repository(), stream, jev.KindObjection, jev.ObjectionKey(objected.Objection)); err != nil || res.Status != jev.None {
+		t.Fatalf("a judgment was recorded for the owner's objection: %+v %v", res, err)
+	}
 	if out := decideWith(t, tool, `{"objection":"`+objected.Objection+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "the owner's own") {
 		t.Fatalf("the chief of staff decided the owner's objection: %s", out)
 	}
 	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || len(entries[0].Options) != 0 {
 		t.Fatalf("inbox entries with the owner's objection %+v", entries)
+	}
+}
+
+// A confident pick for an objection binds resolve_objection to the picked
+// outcome with the chief's own note, and the decision is recorded as Jev's with
+// its judgment. The binding holds in a later turn and after a restart with no
+// new request.
+func TestAConfidentObjectionPickBindsTheChiefsDecision(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 2, 1)
+	defer f.stop(t)
+	p := &faults{}
+	veto := shed.ObjectionID(1, committeeAgent(1), 1)
+	advice := shed.ObjectionID(1, committeeAgent(2), 1)
+	f.member(1, 1, 1, objects(p, shed.Charter, "spec#2", "charter#1"))
+	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
+	f.script(replyTurnID(1, 1), nil, answers(p, "Each upload is one small change with its own test.", veto, advice))
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	p.Check(t)
+
+	provider := &jevtest.Provider{Results: []jevtest.Result{jevfixture.Pick("dismiss", 0.96, "escalate")}}
+	judge := jevfixture.Answering(f.clock.Now, provider)
+	res := jevfixture.Decide(judge, f.repository(), f.project, stream, jev.KindObjection, jev.ObjectionKey(veto), "dismiss", "escalate")
+	if res.Status != jev.Binding || res.Pick != "dismiss" {
+		t.Fatalf("result %+v", res)
+	}
+	tool := f.chiefObjectionTool(t, stream)
+	if out := decideWith(t, tool, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "Jev decided dismiss") || !strings.Contains(out, res.Judgment) {
+		t.Fatalf("escalating against the pick: %s", out)
+	}
+	for _, e := range f.dissent(t, stream) {
+		if e.ID == veto && (e.Escalated || e.Disposition != "") {
+			t.Fatalf("a refused decision changed the objection: %+v", e)
+		}
+	}
+	// The binding is read from the records on every call, so a later call sees
+	// the same pick.
+	again := tool
+	if out := decideWith(t, again, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, "Jev decided dismiss") {
+		t.Fatalf("a later turn: %s", out)
+	}
+	dismissal := "The architect's reply shows each unit is one small change with its own test."
+	if out := decideWith(t, again, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) {
+		t.Fatalf("dismissing as picked: %s", out)
+	}
+	rounds, err := shed.AllChiefDecisions(f.repository(), stream)
+	must(t, err)
+	var recorded shed.ChiefDecision
+	for _, r := range rounds {
+		for _, d := range r.Decisions {
+			if d.Objection == veto {
+				recorded = d
+			}
+		}
+	}
+	if recorded.Decision != shed.Dismiss || recorded.Note != dismissal || recorded.DecidedBy != trace.DecidedByJev || recorded.Judgment != res.Judgment {
+		t.Fatalf("the recorded decision %+v", recorded)
+	}
+	if len(provider.Requests()) != 1 {
+		t.Fatalf("%d requests", len(provider.Requests()))
+	}
+}
+
+// chiefDecideTool claims a chief-of-staff turn of the workstream and returns
+// the service's decide tool.
+func (f *shedFixture) chiefDecideTool(t *testing.T, stream config.WorkstreamID, turn string) coreadapter.Tool {
+	t.Helper()
+	repo := f.repository()
+	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, f.clock.Now, intakefixture.ChiefTurnInput{
+		Turn: turn, Prompt: "Debate concluded.", Actor: serviceActor, Cause: "fixture", Token: "token-" + turn, Directory: turn,
+	})
+	return service.InspectForTest(f.s.Service).DecideTool(repo, scope)
+}
+
+// decide asks the decide tool about the objection.
+func decideObjection(t *testing.T, tool coreadapter.Tool, objection string) string {
+	t.Helper()
+	return decideWith(t, tool, `{"kind":"objection","subject":"`+objection+`","evidence":"The architect's reply answers it."}`)
+}
+
+// A conflict between member charters and the owner's own objection are the
+// owner's: decide refuses them as ordinary results with no request to Jev and
+// no judgment, and an objection the chief of staff may decide is judged.
+func TestDecideRefusesObjectionsThatAreTheOwners(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 2, 1)
+	defer f.stop(t)
+	p := &faults{}
+	veto := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Charter, "spec#2", "charter#1"))
+	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
+	f.script(replyTurnID(1, 1), nil, answers(p, "Each upload is one small change with its own test.", veto))
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	p.Check(t)
+
+	repo := f.repository()
+	records, err := shed.Records(repo, stream)
+	must(t, err)
+	conflict := shed.ObjectionID(1, committeeAgent(3), 1)
+	data, err := shed.Encode(shed.Record{Version: shed.Version, Round: 1, Member: committeeAgent(3), Revision: records[0].Revision, Concessions: []shed.Concession{},
+		Objections: []shed.Objection{{ID: conflict, Kind: shed.CharterConflict, Part: "spec#1", Argument: "Two projects' charters conflict.", Citations: []string{"charter#1", "p_other/charter#1"}}}})
+	must(t, err)
+	must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, committeeAgent(3)), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: committeeAgent(3)}, Cause: "test"}, Path: shed.Path(1, committeeAgent(3)), Content: string(data)}}))
+	objected, err := f.c.ShedObject(context.Background(), stream, "Name the upload limits.")
+	must(t, err)
+
+	provider := &jevtest.Provider{Results: []jevtest.Result{jevfixture.Pick("dismiss", 0.96, "escalate")}}
+	service.InspectForTest(f.s.Service).SetJudge(jevfixture.Answering(f.clock.Now, provider))
+	decide := f.chiefDecideTool(t, stream, "events_2")
+	for objection, want := range map[string]string{conflict: "conflict between member charters", objected.Objection: "the owner's own"} {
+		if out := decideObjection(t, decide, objection); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, want) {
+			t.Fatalf("decide %s: %s, want a refusal saying %q", objection, out, want)
+		}
+		if res, err := jev.Recorded(repo, stream, jev.KindObjection, jev.ObjectionKey(objection)); err != nil || res.Status != jev.None {
+			t.Fatalf("a judgment is recorded for %s: %+v %v", objection, res, err)
+		}
+	}
+	if len(provider.Requests()) != 0 {
+		t.Fatalf("%d requests for objections that are the owner's", len(provider.Requests()))
+	}
+	if out := decideObjection(t, decide, veto); !strings.Contains(out, `"decision":"binding"`) || !strings.Contains(out, `"pick":"dismiss"`) {
+		t.Fatalf("decide the committee's objection: %s", out)
+	}
+	if len(provider.Requests()) != 1 {
+		t.Fatalf("%d requests", len(provider.Requests()))
 	}
 }

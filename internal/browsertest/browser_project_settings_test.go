@@ -280,19 +280,19 @@ func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testi
 	}
 
 	f.p.SetValue(settingInput("checks_timeout"), "30m")
-	f.p.SetValue(settingInput("classifier"), "no-such-profile")
+	f.p.SetValue(settingInput("landing"), "sideways")
 	f.p.Click("#project-config [type=submit]")
 	managementOutcome(f.p, settingsResult(), "error")
-	f.p.AwaitText(settingsResult(), "classifier")
-	f.p.Await("both fields of the draft kept", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '30m' && document.querySelector(`+quote(settingInput("classifier"))+`).value === 'no-such-profile'`)
+	f.p.AwaitText(settingsResult(), "landing")
+	f.p.Await("both fields of the draft kept", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '30m' && document.querySelector(`+quote(settingInput("landing"))+`).value === 'sideways'`)
 	if f.disk() != f.before {
 		t.Fatalf("a refused save changed the file:\n%s", f.disk())
 	}
 
-	f.p.SetValue(settingInput("classifier"), "")
+	f.p.SetValue(settingInput("landing"), "squash")
 	f.p.Click("#project-config [type=submit]")
 	managementOutcome(f.p, settingsResult(), "ok")
-	if p := f.effective(); p.ChecksTimeout != "30m" || p.Classifier != "" {
+	if p := f.effective(); p.ChecksTimeout != "30m" || p.Landing != "squash" {
 		t.Fatalf("the corrected draft in effect: %+v", p)
 	}
 }

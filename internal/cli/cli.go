@@ -836,7 +836,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				fmt.Fprintf(stdout, "Packet revision %d:\n%s", view.Revision, view.Packet)
 			}
 			if d := view.Decision; d != nil {
-				fmt.Fprintf(stdout, "Decision: %s on packet revision %d\n", d.Decision, d.Packet)
+				fmt.Fprintf(stdout, "Decision: %s on packet revision %d%s\n", d.Decision, d.Packet, decidedByJev(d.Actor))
 			}
 			return 0
 		}
@@ -1158,7 +1158,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s\n", result.Unit, result.Workstream, result.Ruling.Decision)
+		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s%s\n", result.Unit, result.Workstream, result.Ruling.Decision, decidedByJev(result.Ruling.By))
 		return 0
 	}
 	if cmd == "move" && len(a) == 3 {
@@ -1706,9 +1706,9 @@ func showRuntime(w io.Writer, rt wire.RuntimeResponse) {
 	diagnostics(w, rt.Diagnostics)
 }
 
-// showJev prints the Jev boost's mode and, when it is not ready, why.
+// showJev prints Jev's mode and, when it is not ready, why.
 func showJev(w io.Writer, s jev.Status) {
-	line := "Jev boost: " + string(s.Mode)
+	line := "Jev: " + string(s.Mode)
 	if s.Model != "" {
 		line += " model=" + s.Model
 	}
@@ -2069,6 +2069,8 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case wire.InboxNotices:
 			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the chief of staff's answer", stream))
+		case wire.InboxDiscovery:
+			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the chief of staff records it", stream))
 		}
 	}
 }

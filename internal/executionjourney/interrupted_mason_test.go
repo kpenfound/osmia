@@ -88,7 +88,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
 			var passed atomic.Int64
-			f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, "", func(opts *Options) {
+			f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, func(opts *Options) {
 				opts.schedulePassed = func() { passed.Add(1) }
 			})
 			defer func() { f.stop(t) }()
@@ -187,7 +187,7 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan, "")
+			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan)
 			defer func() { f.stop(t) }()
 			var mu sync.Mutex
 			var prompts []string
@@ -241,7 +241,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan, "")
+			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan)
 			defer func() { f.stop(t) }()
 			stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "restart-"+backend)[0]
 			if got := backendOf(t, f, stream); got != backend {
@@ -319,7 +319,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	t.Parallel()
 	var passed atomic.Int64
-	f, _ := newMasonFixtureWith(t, config.WorkspacesJujutsu, "masons = 1\n", validPlan, "", func(opts *Options) {
+	f, _ := newMasonFixtureWith(t, config.WorkspacesJujutsu, "masons = 1\n", validPlan, func(opts *Options) {
 		opts.schedulePassed = func() { passed.Add(1) }
 	})
 	defer func() { f.stop(t) }()

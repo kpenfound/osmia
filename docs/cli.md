@@ -298,7 +298,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   show revision identifiers, provenance, evidence and explicit gaps. `--json`
   returns the complete typed response. Delivered and abandoned workstreams
   remain readable. A missing selector returns `not_found` (exit 4); malformed
-  input returns `validation` (exit 4).
+  input returns `validation` (exit 4). A ratification, ruling or other decision
+  Jev made carries `jev` as its `decided_by` and names its judgment; the
+  command prints it as `(decided by Jev)` after the decision.
 - `send <workstream-id> <message>` sends a message to the workstream's shared workgroup chief
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
@@ -359,6 +361,26 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   `loop.max_sessions` sessions without progress, is answered with `resume`. Decided entries, superseded packet revisions and entries of an
   abandoned workstream are left out. Without a project or a trace the inbox is
   empty.
+
+  Jev decides some of these gates itself. When a ratification, an amendment
+  that changes the approved intent, an escalated question, an escalated
+  contested unit or an escalated objection reaches its gate, the service asks
+  Jev once, in a worker of its own, with what the card shows and only the
+  options that need none of your words: `ratify`; `approve` or `reject`; one of
+  the options the chief of staff wrote; `review`; `dismissed` or `overruled`.
+  When Jev's confidence reaches `jev.decision_threshold` its pick is recorded as
+  the decision, with Jev as its actor and a link to its judgment, the flow
+  continues as if you had chosen it and the entry never reaches the inbox.
+  Reading the inbox, the status or the open decisions never asks Jev and never
+  records a decision; they leave out a gate while its judgment is pending. When
+  Jev answers below the threshold, defers or falls back, the entry reaches you
+  as usual and is not judged again; its recommendation is Jev's pick with its
+  confidence (the entry's `jev` field) when Jev gave one, and the chief of
+  staff's when it did not. A confident pick the service cannot carry out, such
+  as a ratification of a plan that stopped validating, also leaves the entry
+  with you, showing Jev's judgment. Delivery approval, charter proposals and
+  conflicts between charters, a project that needs no change, cancellation, your
+  own objections and anything that needs your own words are never sent to Jev.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
   the chief of staff then rephrases it for every asker of the entry, whose
@@ -593,7 +615,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
 - `amendment <workstream-id> <n>` shows amendment `n` of a building or
   assembled workstream: its state, the debate round it reached, the packet the
   chief of staff presented (when available) with its revision, and the latest
-  decision with its actor.
+  decision with its actor, labelled `(decided by Jev)` when Jev made it.
   `amendment <workstream-id> <n> <approve|reject|round|overrule> [note]`
   decides it. Cards recommend `approve` or `do not approve yet` using these
   amendment decisions; ratification packets still recommend `ratify`.
@@ -893,11 +915,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   worktree with nothing to commit (`validation`, exit 4). The client sends a
   new request key with each command, so a request the API retries produces
   one commit rather than a second one.
-- `session check <session-id>` checks the session's latest commit. With the
-  Jev boost on, it runs the same smart-check selection a unit's own check run
+- `session check <session-id>` checks the session's latest commit. With
+  Jev configured, it runs the same smart-check selection a unit's own check run
   uses, scoped to what changed between the session's starting commit and its
-  head; with the boost off, it runs the full `dagger check` the service runs
-  before every review. The output names the run number, the checked commit,
+  head; without Jev's API key, or when Jev does not select, it runs the full
+  `dagger check` the service runs before every review. The output names the run number, the checked commit,
   whether the run was smart or full (with its selected checks when smart),
   its status and exit code. Only one check per session runs at a time; a
   second request while one is still running, or one sent after the session
@@ -1064,7 +1086,7 @@ the root and the configuration directly, the way `serve` does.
 | Group | Checks |
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
-| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
+| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
 | `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
@@ -1115,6 +1137,7 @@ root
 config
   ✓ config.toml                                 /home/kyle/.config/osmia/config.toml (2 profiles, 1 active projects)
   ✓ project p_0123456789abcdef0123456789abcdef  widgets (acme/widgets)
+  ✓ jev                                        Jev is configured with OPENROUTER_API_KEY set for ~typesafe/jev-latest
 
 toolchain
   ✓ git                                         /usr/bin/git (git version 2.50.1)
@@ -1136,7 +1159,7 @@ state
   ✓ widgets trace                               /home/kyle/.local/share/osmia/projects/p_0123456789abcdef0123456789abcdef (3 workstreams)
   ✓ runtime.json                                /home/kyle/.local/share/osmia/runtime.json
 
-15 checks: 13 passed, 1 warnings, 1 failed
+16 checks: 14 passed, 1 warnings, 1 failed
 ```
 
 `--json` prints the checks as a JSON array of `group`, `name`, `status`

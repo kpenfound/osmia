@@ -41,12 +41,10 @@ type Runner struct {
 	// says, for any role: that generic resume mechanism predates this field
 	// and stays identical for every role. Nil (every role but session,
 	// in production) means neither widening applies.
-	ResumableRoles    func(string) bool
-	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
-	ClassifierProfile *coreadapter.Profile
-	// Jev classifies clean mason responses first while the boost is on; a
-	// fallback leaves them to the classifier, then the code rules. Nil has
-	// the boost off.
+	ResumableRoles func(string) bool
+	// Jev classifies clean mason responses first; a fallback, which is every
+	// judgment while Jev is unconfigured, leaves them to the code rules. It
+	// must not be nil.
 	Jev *jev.Judge
 	// Advise returns advisory text for a claimed turn, which the turn's
 	// prompt ends with and its response records, or "" for none. It runs
@@ -121,8 +119,8 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	}
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)
-		if response.Classification != nil && !r.judgeClassification(ctx, req, prepared.Scope, &response) && r.Classifier != nil && r.ClassifierProfile != nil {
-			r.classify(ctx, prepared, &response)
+		if response.Classification != nil {
+			r.judgeClassification(ctx, req, prepared.Scope, &response)
 		}
 	}
 	q.Response = &response

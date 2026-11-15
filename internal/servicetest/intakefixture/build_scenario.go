@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -213,6 +214,7 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
 	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.Now)
 	Must(t, err)
+	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
 	if i < 0 {
 		t.Fatal("the chief of staff has no answer tool")
@@ -471,21 +473,15 @@ func SeedBuild(t *testing.T, stop func(*testing.T), cfg func() *config.Config, r
 	return record(t, repository, key, graph, backend, base), repository
 }
 
-// ConfigureMasonThreads sets workspace/capacity inputs and classifier selection for the fake workers.
-func ConfigureMasonThreads(t *testing.T, root, backend, capacity, classifier string, original func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)) func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) {
+// ConfigureMasonThreads sets workspace and capacity inputs for the fake workers and returns original.
+func ConfigureMasonThreads(t *testing.T, root, backend, capacity string, original func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)) func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) {
 	t.Helper()
 	OnWorkspaces(t, root, backend)
 	path := filepath.Join(root, "config.toml")
 	data, err := os.ReadFile(path)
 	Must(t, err)
 	Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
-	if classifier == "" {
-		return original
-	}
-	return func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
-		cfg.Project.Classifier = classifier
-		return original(r, cfg)
-	}
+	return original
 }
 
 // ScriptMasons installs the first worker turns and failing clarification turns.

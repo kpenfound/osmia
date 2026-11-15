@@ -14,6 +14,7 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -272,7 +273,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "route_amendment", "set_status", "triage_finding")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// The chief of staff reads the workstream's documents in its view.
@@ -297,6 +298,9 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			events["questions"]++
 			if !strings.Contains(req.Prompt, "asked by the reviewer: "+chiefDemoQuestion) {
 				problem("the questions were not delivered together", req.Prompt)
+			}
+			for _, id := range []string{"1", "2"} {
+				use(ctx, session, "decide", "decide", map[string]any{"kind": "question-routing", "subject": id, "evidence": "The chief of staff investigated the question."})
 			}
 			use(ctx, session, "chief", "answer", map[string]any{"question": "1", "text": chiefDemoAnswer, "citations": []string{"charter#1"}})
 			use(ctx, session, "chief", "escalate", map[string]any{"questions": []string{"2"}, "rephrasing": "May the upload API's response change?",
@@ -422,7 +426,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 					continue
 				}
 				in, decodeErr := thread.DecodeTurn(op.Operation)
-				observed, inspectErr := (thread.Dispatcher{Runner: thread.Runner{Store: r}}).Inspect(ctx, op.Operation)
+				observed, inspectErr := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r}}).Inspect(ctx, op.Operation)
 				outcome, failure := "", ""
 				if op.Result != nil {
 					outcome = op.Result.Outcome
@@ -777,6 +781,10 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("set_status results: %v", st)
 	}
 	delete(results, "status")
+	if d := results["decide"]; len(d) != 2 || !strings.Contains(d[0], `"decision"`) || !strings.Contains(d[1], `"decision"`) {
+		t.Fatalf("decide results: %v", d)
+	}
+	delete(results, "decide")
 	if !reflect.DeepEqual(results, wantResults) {
 		t.Fatalf("tool results:\n%v\nwant\n%v", results, wantResults)
 	}

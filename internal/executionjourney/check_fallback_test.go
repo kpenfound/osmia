@@ -30,7 +30,7 @@ func appendConfig(t *testing.T, opts *Options, extra string) {
 // injected and extra appended to the service configuration.
 func newFallbackChecksFixture(t *testing.T, key, extra string, local, cloud ReviewChecks) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, "", func(opts *Options) { appendConfig(t, opts, extra) })
+	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(opts *Options) { appendConfig(t, opts, extra) })
 	f.s.setReviewChecks(local)
 	service.InspectForTest(f.s.core()).SetCloudChecks(cloud)
 	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))

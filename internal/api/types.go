@@ -646,8 +646,8 @@ type RuntimeResponse struct {
 	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode.
 	Projects []ProjectRuntime `json:"projects"`
-	// Jev reports the optional Jev boost. Every mode but ready means its
-	// judgments fall back.
+	// Jev reports Jev's mode. Every mode but ready means its judgments fall
+	// back.
 	Jev         jev.Status   `json:"jev"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
@@ -1077,6 +1077,9 @@ const (
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
 	InboxBase         = "base"
+	// InboxDiscovery is a discovered piece of work whose disposition Jev
+	// decided but the service could not carry out, so it is the owner's.
+	InboxDiscovery = "discovery"
 	// InboxProjectCreation reports a project creation that cannot finish
 	// without the owner. Its answer retries the creation; it never adopts or
 	// deletes a repository.
@@ -1116,6 +1119,25 @@ type InboxEntry struct {
 	OpenedAt       time.Time           `json:"opened_at"`
 	Asked          []InboxQuestion     `json:"asked"`
 	Answer         InboxAnswer         `json:"answer"`
+	// Jev is what Jev decided about the entry when the decision came to the
+	// owner after all: an answer below the threshold, a deferral, or a pick
+	// the service refused. Recommendation then says it in words.
+	Jev *InboxJev `json:"jev,omitempty"`
+}
+
+// InboxJev is Jev's recorded result for an inbox entry. Pick is the option it
+// chose, empty when it deferred, and Confidence its confidence against
+// Threshold. Binding says the pick reached the threshold, so only a refusal
+// brought the entry to the owner, and Refused is why the service refused it.
+// Judgment names the judgment record.
+type InboxJev struct {
+	Pick       string  `json:"pick,omitempty"`
+	Confidence float64 `json:"confidence"`
+	Threshold  float64 `json:"threshold"`
+	Deferred   bool    `json:"deferred,omitempty"`
+	Binding    bool    `json:"binding,omitempty"`
+	Refused    string  `json:"refused,omitempty"`
+	Judgment   string  `json:"judgment"`
 }
 
 // InboxAnswer is the existing endpoint that answers an inbox entry, or that

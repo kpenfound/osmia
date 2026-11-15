@@ -36,7 +36,7 @@ func newChecksFixture(t *testing.T, key string, checks ReviewChecks) (*shedFixtu
 	return f, stream, repository
 }
 
-func boostJev(s *Service, p *jevtest.Provider) {
+func useJevProvider(s *Service, p *jevtest.Provider) {
 	s.jev = intakefixture.CheckJudge(s.now, p)
 	service.InspectForTest(s.core()).SetJudge(s.jev)
 }

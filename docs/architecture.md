@@ -89,7 +89,7 @@ See
 | Execution boundary | Scoped file views, tool grants (including the `Web` permission), environment, sandbox verification | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) |
 | Target workspaces | Service-owned Git and Jujutsu operations | [workspace](../internal/workspace) |
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
-| Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its switch, retries and cool-down | [jev](../internal/jev) |
+| Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its retries and cool-down | [jev](../internal/jev) |
 
 The service uses a pinned `agentcore` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions
@@ -153,7 +153,7 @@ planning roles hold it: the design session, the exploratory session, the
 architect on every turn path (including a workgroup's project-spec draft and
 delta amendment turns), the ordinary chief of staff and the committee in plan
 and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers, the
-librarian, the foreman and the classifier never do, whatever a service grant
+librarian and the foreman never do, whatever a service grant
 says, and no configuration key changes that. A role that holds it keeps its
 read-only view and its service tools, gains no write, shell or `Network`
 grant, and is told in its system prompt that web content is evidence rather
@@ -171,8 +171,9 @@ match the reduced grant exactly or the turn is refused.
 A Jev judgment is a bounded question that turn code, or a unit's check run,
 asks through the service's `jev.Judge`, never scheduling code: a judgment waits
 on a network call. The
-Judge is one per service, reads the `[jev]` settings on each call, and is
-nil-safe, so code without one behaves as if the boost were off. The
+Judge is one per service and reads the `[jev]` settings on each call. It is
+never nil: without Jev's API key it is unconfigured, and every judgment takes
+its fallback. The
 [design](design.md#96-jev-judgments) defines what a judgment may decide.
 Turn code that informs a session, rather than replacing its result, uses the
 thread runner's `Advise` hook: it runs after the turn is claimed and before
@@ -191,8 +192,8 @@ holding the task's thresholds. Two rules keep recorded decisions meaningful:
   the owner configures, such as the check selection's, goes in the judgment's
   `Acceptance` value instead, which is part of its identity and record.
 - Use the answers only when the decision is `Accepted`. A fallback, whatever
-  its reason, takes the path the workflow takes with the boost off, so that
-  path must exist and be the one tested with Jev disabled. A declined
+  its reason, takes the path the workflow takes without Jev's answer, so that
+  path must exist and be the one tested with an unconfigured Jev. A declined
   fallback still carries the answers for evaluation; they must not drive the
   workflow.
 

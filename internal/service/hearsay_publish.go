@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -17,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -349,29 +352,53 @@ func charterRecords(in *publishInputs) []hearsay.Record {
 
 const charterDocument = "charter"
 
-// sealedSpecDocument is the ID of a workstream's spec document. Document ids
-// are project-wide, so it carries the workstream's.
+// sealedSpecDocument is the ID of a workstream's spec document of the seals
+// the owner ratified. Document ids are project-wide, so it carries the
+// workstream's. jevSpecDocument is the ID of the document of the seals Jev
+// ratified, which the owner source never holds.
 func sealedSpecDocument(id config.WorkstreamID) string { return string(id) + "-spec" }
+func jevSpecDocument(id config.WorkstreamID) string    { return string(id) + "-jev-spec" }
 
-// sealedSpecRecords posts each seal of a workstream as a revision of the
-// workstream's spec document on the owner source: the spec revision the seal
-// ratified. A seal awaiting its workgroup's approval is not yet ratified.
+// sealedSpecRecords posts each seal of a workstream as a revision of a spec
+// document: the spec revision the seal ratified. A seal the owner ratified is a
+// revision of the workstream's spec document on the owner source, with the
+// owner as author. A seal Jev ratified, or that a Jev-decided amendment
+// produced, is a revision of its own document on the work source, inferred and
+// with no author, and the owner source never holds it. A seal awaiting its
+// workgroup's approval is not yet ratified.
 func sealedSpecRecords(in *publishInputs) []hearsay.Record {
 	var out []hearsay.Record
 	for _, st := range in.streams {
 		id := st.id()
-		versions := st.sealedSpecs(in)
-		if len(versions) == 0 || !hearsay.ValidID(sealedSpecDocument(id)) {
-			continue
+		var owned, jev []hearsay.Wire
+		for _, v := range st.sealedSpecs(in) {
+			if v.by == byJev {
+				jev = append(jev, v.wire)
+			} else {
+				owned = append(owned, v.wire)
+			}
 		}
-		out = append(out, hearsay.Record{Source: in.ownerSource, Key: "document/" + sealedSpecDocument(id), Tier: hearsay.TierRecord, After: []string{in.workstreamRef(id)}, Versions: versions})
+		if len(owned) > 0 && hearsay.ValidID(sealedSpecDocument(id)) {
+			out = append(out, hearsay.Record{Source: in.ownerSource, Key: "document/" + sealedSpecDocument(id), Tier: hearsay.TierRecord, After: []string{in.workstreamRef(id)}, Versions: owned})
+		}
+		if len(jev) > 0 && hearsay.ValidID(jevSpecDocument(id)) {
+			out = append(out, hearsay.Record{Source: in.workSource, Key: "document/" + jevSpecDocument(id), Tier: hearsay.TierRecord, After: []string{in.workstreamRef(id)}, Versions: jev})
+		}
 	}
 	return out
 }
 
+// sealedSpec is one seal's spec document revision, the document it belongs to
+// and who ratified it.
+type sealedSpec struct {
+	wire     hearsay.Wire
+	document string
+	by       decider
+}
+
 // sealedSpecs is the workstream's spec document revisions, one per seal,
-// oldest first.
-func (st *publishStream) sealedSpecs(in *publishInputs) []hearsay.Wire {
+// oldest first. The owner's carry the owner as author. Jev's name no author.
+func (st *publishStream) sealedSpecs(in *publishInputs) []sealedSpec {
 	if !st.approved {
 		return nil
 	}
@@ -388,8 +415,9 @@ func (st *publishStream) sealedSpecs(in *publishInputs) []hearsay.Wire {
 		numbers = append(numbers, n)
 	}
 	slices.Sort(numbers)
-	var versions []hearsay.Wire
-	var created time.Time
+	ratifiers := st.sealRatifiers(numbers, latest)
+	var versions []sealedSpec
+	var ownerCreated, jevCreated time.Time
 	for _, n := range numbers {
 		d := latest[n]
 		parsed, _ := seal.Parse([]byte(d.Content))
@@ -397,13 +425,139 @@ func (st *publishStream) sealedSpecs(in *publishInputs) []hearsay.Wire {
 		if !ok {
 			continue
 		}
-		if created.IsZero() {
-			created = d.At
+		w := hearsay.Wire{Kind: hearsay.KindDocument, Project: string(in.project), Workstream: string(st.id()), UpdatedAt: hearsay.Time(d.At)}
+		v := sealedSpec{by: ratifiers[n]}
+		name := "Spec: " + specTitle(spec, string(st.id()))
+		if v.by == byJev {
+			if jevCreated.IsZero() {
+				jevCreated = d.At
+			}
+			w.Document, w.CreatedAt = jevSpecDocument(st.id()), hearsay.Time(jevCreated)
+			name = "Spec ratified by Jev: " + specTitle(spec, string(st.id()))
+		} else {
+			if ownerCreated.IsZero() {
+				ownerCreated = d.At
+			}
+			w.Document, w.CreatedAt, w.Author = sealedSpecDocument(st.id()), hearsay.Time(ownerCreated), in.owner
 		}
-		versions = append(versions, hearsay.Wire{Kind: hearsay.KindDocument, Project: string(in.project), Workstream: string(st.id()), Document: sealedSpecDocument(st.id()),
-			Name: boundedText("Spec: "+specTitle(spec, string(st.id())), 200), Body: spec, Author: in.owner, CreatedAt: hearsay.Time(created), UpdatedAt: hearsay.Time(d.At)})
+		w.Name, w.Body = boundedText(name, 200), spec
+		v.wire, v.document = w, w.Document
+		versions = append(versions, v)
 	}
 	return versions
+}
+
+// sealRatifiers says who ratified each seal. A seal an amendment produced
+// belongs to whoever decided the amendment, and a plan-only amendment the chief
+// of staff decided leaves the spec with whoever ratified the seal before it.
+// Any other seal belongs to whoever ratified its round. A seal is Jev's only
+// when the record that made it says so, by the trace's own guarantee that Jev
+// writes it.
+func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Document) map[int]decider {
+	byAmendment := map[int]decider{}
+	inherits := map[int]bool{}
+	applied := map[string]trace.Document{}
+	for _, d := range st.documents {
+		if id, ok := amendmentOf(d.Path, "application.json"); ok && d.Revision >= applied[id].Revision {
+			applied[id] = d
+		}
+	}
+	// A workgroup's amendment is the owner's decision.
+	for _, d := range st.documents {
+		if !strings.HasPrefix(d.Path, "tools/amendment-group-") || !strings.HasSuffix(d.Path, "-application.json") {
+			continue
+		}
+		var a amendment.Application
+		if json.Unmarshal([]byte(d.Content), &a) == nil && a.To.Seal > 0 {
+			byAmendment[a.To.Seal] = byOwner
+		}
+	}
+	for id, doc := range applied {
+		var a amendment.Application
+		if json.Unmarshal([]byte(doc.Content), &a) != nil || a.To.Seal < 1 {
+			continue
+		}
+		by, ok := st.amendmentDeciderOf(id)
+		switch {
+		case !ok:
+		case by == byChief:
+			inherits[a.To.Seal] = true
+		default:
+			byAmendment[a.To.Seal] = by
+		}
+	}
+	out := map[int]decider{}
+	previous := byOwner
+	for _, n := range numbers {
+		by := byOwner
+		switch {
+		case byAmendment[n] != byChief:
+			by = byAmendment[n]
+		case inherits[n]:
+			by = previous
+		default:
+			by = st.roundRatifier(latest[n])
+		}
+		out[n], previous = by, by
+	}
+	return out
+}
+
+// roundRatifier is who ratified the round a seal records: Jev when the round's
+// ratification names Jev with its judgment, and the owner otherwise.
+func (st *publishStream) roundRatifier(sealDoc trace.Document) decider {
+	parsed, err := seal.Parse([]byte(sealDoc.Content))
+	if err != nil {
+		return byOwner
+	}
+	var latest trace.Document
+	for _, d := range st.documents {
+		if d.Path == shed.RatificationPath(parsed.Round) && d.Revision >= latest.Revision {
+			latest = d
+		}
+	}
+	if latest.Revision == 0 {
+		return byOwner
+	}
+	var r shed.Ratification
+	if json.Unmarshal([]byte(latest.Content), &r) != nil || !trace.ValidDecisionActor(latest) {
+		return byOwner
+	}
+	if jevDecider(r.DecidedBy, r.Judgment) && latest.Actor == trace.JevActor {
+		return byJev
+	}
+	return byOwner
+}
+
+// amendmentDeciderOf is who made the final decision on an amendment.
+func (st *publishStream) amendmentDeciderOf(id string) (decider, bool) {
+	var final trace.Document
+	var verdict intake.AmendmentDecision
+	for _, d := range st.documents {
+		if d.Path != intake.AmendmentDecisionPath(id) || d.Revision < final.Revision {
+			continue
+		}
+		var v intake.AmendmentDecision
+		if json.Unmarshal([]byte(d.Content), &v) != nil || v.Decision == intake.AmendmentRound {
+			continue
+		}
+		final, verdict = d, v
+	}
+	if final.Revision == 0 {
+		return 0, false
+	}
+	return amendmentDecider(final, verdict)
+}
+
+// amendmentOf returns the amendment a document of the given file name under
+// amendments/<id>/ belongs to.
+func amendmentOf(path, file string) (string, bool) {
+	rest, ok := strings.CutPrefix(path, "amendments/")
+	if !ok {
+		return "", false
+	}
+	id, name, ok := strings.Cut(rest, "/")
+	return id, ok && name == file && id != ""
 }
 
 // specRevision is the content of one recorded revision of spec.md.

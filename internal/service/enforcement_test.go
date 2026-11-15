@@ -55,12 +55,8 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil || !slices.Equal(selection.Execution.Skills, chief.Skills) {
 		t.Fatalf("execution %+v", selection.Execution)
 	}
-	// The classifier runs in the mason's sandbox without a shell, so it is
-	// not given the mason's Dagger engine or skills.
-	classifier, err := turns.Select(context.Background(), coreadapter.Scope{Project: string(cfg.Project.ID), Role: "classifier"})
-	must(t, err)
-	if classifier.Execution.Mode != "sbx" || classifier.Execution.Dagger != nil || len(classifier.Execution.Skills) != 0 {
-		t.Fatalf("classifier execution %+v", classifier.Execution)
+	if _, err := turns.Select(context.Background(), coreadapter.Scope{Project: string(cfg.Project.ID), Role: "classifier"}); err == nil {
+		t.Fatal("selected a view for a classifier role")
 	}
 	if execution := threadExecution(masonRole, mason); execution.Mode != "sbx" || execution.Dagger == nil || *execution.Dagger != *mason.Dagger.Settings() || !slices.Equal(execution.Skills, mason.Skills) {
 		t.Fatalf("mason execution %+v", execution)

@@ -39,7 +39,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 					}
 					answers[checkselect.Question(i)] = jevtest.Noul(probability)
 				}
-				boostJev(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
+				useJevProvider(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
 				if mode == "picks" {
 					settings := f.s.jev.Config()
 					settings.CheckFallbackPicks = selected
@@ -56,7 +56,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			p.AwaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
 			selection := "checking " + strconv.Itoa(selected) + " of " + strconv.Itoa(judged)
 			if mode == "full" {
-				selection = "checking every check: the Jev boost is off"
+				selection = "checking every check: Jev is unconfigured"
 				if len(ran) != 0 {
 					t.Fatalf("full run selected links: %v", ran)
 				}
@@ -84,7 +84,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			awaitFeedEvent(p, stream)
 			p.Await("the check result", `document.querySelector(`+quote(entry)+`)?.dataset.state === `+quote(state))
 			if mode == "full" {
-				selection = "every check ran: the Jev boost is off"
+				selection = "every check ran: Jev is unconfigured"
 				p.AwaitText(entry+` [data-field=flaky-note]`, "Flaky")
 				p.AwaitText(entry+` [data-field=flaky]`, checks.links[0])
 			} else {

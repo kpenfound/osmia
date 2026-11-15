@@ -36,7 +36,7 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 	queue(t, repo, "second")
 	calls := 0
 	d := Dispatcher{
-		Runner: Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		Runner: Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			calls++
 			if p.SessionDirectory != "/owned/"+p.Scope.Turn {
 				t.Errorf("preparation not applied: %+v", p)
@@ -92,7 +92,7 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 func TestDispatcherRejectsInvalidOperations(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
-	d := Dispatcher{Runner: Runner{Store: repo, Now: time.Now, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	d := Dispatcher{Runner: Runner{Jev: unconfiguredJudge(), Store: repo, Now: time.Now, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		t.Fatal("invalid operation ran")
 		return coreadapter.SessionResult{}, nil
 	})}, Prepare: func(context.Context, TurnInput) (coreadapter.PreparedTurn, error) {
@@ -140,7 +140,7 @@ func TestDispatcherRelayRunsOnCompletionAndRetriesAfterAFailure(t *testing.T) {
 	failing := true
 	failure := errors.New("relay unavailable")
 	d := Dispatcher{
-		Runner:  Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: turns},
+		Runner:  Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: turns},
 		Prepare: prepare,
 		Relay: func(_ context.Context, th trace.Thread, q trace.QueuedTurn) error {
 			calls++
@@ -179,7 +179,7 @@ func TestDispatcherRecoversCapturedAndReservedTurns(t *testing.T) {
 	req := queue(t, repo, "first")
 	queue(t, repo, "second")
 	at := timestamp.Add(time.Second)
-	runner := Runner{Store: repo, Now: func() time.Time { return at }}
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return at }}
 	q, err := repo.ClaimTurn(ctx, stream, "agent", "token", "/owned", at)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestDispatcherRecoversCapturedAndReservedTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	d := Dispatcher{Runner: Runner{Store: repo, Now: func() time.Time { return at }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	d := Dispatcher{Runner: Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return at }, Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		t.Fatal("captured turn relaunched")
 		return coreadapter.SessionResult{}, nil
 	})}}

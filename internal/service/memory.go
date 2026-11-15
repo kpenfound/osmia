@@ -16,7 +16,7 @@ import (
 )
 
 // memoryTurns adds authenticated context tools to the existing role boundary.
-// Narrowed turns retain their narrower grants, and classifiers receive none.
+// Narrowed turns retain their narrower grants.
 // Exploratory sessions receive only the read tools, at the observer class.
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
 	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
@@ -31,9 +31,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	defaultScope := cfg.HearsayScope()
 	external := cfg.Hearsay.URL != "" && defaultScope != ""
 	for role, grant := range turns.Grants {
-		if role == "classifier" {
-			continue
-		}
 		grant.Tools = slices.Clone(grant.Tools)
 		if role != sessionRole && !slices.Contains(grant.Tools, projectContextTool) {
 			grant.Tools = append(grant.Tools, projectContextTool)
@@ -56,9 +53,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 			if err != nil {
 				return nil, err
 			}
-		}
-		if scope.Role == "classifier" {
-			return tools, nil
 		}
 		if scope.Role != sessionRole && !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
 			tools = append(tools, projectContext(repo, scope))

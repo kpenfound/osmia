@@ -44,7 +44,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 			listed := 115
 			selection := CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a", "dag://b", "dag://c"}, Candidates: 113, Listed: &listed, FallbackPicks: 3}
 			if status == ChecksSuperseded {
-				selection = checkrun.FullSelection("disabled", "the boost is off")
+				selection = checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set")
 			}
 			started, chosen, finished := demoStart, demoStart.Add(time.Minute), demoStart.Add(2*time.Minute)
 			feedDocument(t, repo, stream, checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, chosen, UnitCheckSelection{Unit: "upload", Run: 1, Selection: selection, StartedAt: started})
@@ -280,7 +280,7 @@ func TestEventStreamAnnouncesFeedCheckAndReviewRecords(t *testing.T) {
 		revision int
 		value    any
 	}{
-		{checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, UnitCheckSelection{Unit: "upload", Run: 1, Selection: checkrun.FullSelection("disabled", "boost off"), StartedAt: at}},
+		{checkSelectionDocument("upload", 1), checkSelectionPath("upload", 1), 1, UnitCheckSelection{Unit: "upload", Run: 1, Selection: checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set"), StartedAt: at}},
 		{checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, StartedAt: at, FinishedAt: at}},
 		{finalCheckAttemptDocument(1, 1), finalCheckAttemptPath(1, 1), 1, FinalCheckAttempt{Review: 1, Attempt: 1, StartedAt: at}},
 		{finalChecksDocument(1), finalChecksPath(1), 1, FinalCheckRun{Review: 1, Attempt: 1, Status: ChecksIncomplete, Error: "timeout", StartedAt: at, FinishedAt: at}},

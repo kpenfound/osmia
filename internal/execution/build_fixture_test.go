@@ -62,6 +62,7 @@ func newBuildFixture(t *testing.T, key string) *buildFixture {
 		},
 
 		Now:       f.clock.Now,
+		Jev:       fixturekit.UnconfiguredJudge(f.clock.Now),
 		Effective: func() (runtime.State, []runtime.Diagnostic) { return runtime.State{}, nil },
 		About:     func(*trace.Repository) *config.Config { return u.cfg },
 		RoleExecution: func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
