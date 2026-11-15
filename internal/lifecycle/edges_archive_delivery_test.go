@@ -21,9 +21,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// serial: beside other parallel tests its recovery after the restart can
-// stall until the test times out; the cause is not yet found.
 func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const merged = "aabbccddeeff0011223344556677889900aabbccdd"
 	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}

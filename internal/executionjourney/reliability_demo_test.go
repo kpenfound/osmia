@@ -237,11 +237,16 @@ func TestReliabilityDemonstration(t *testing.T) {
 	if budgetPause.Mode != "soft" || budgetPause.Source != runtime.PauseDailyBudget || !strings.HasPrefix(budgetPause.Reason, "Daily budget reached: known spend on 2026-09-16 is USD 1.25 of the USD 1.00 per-day budget; dispatch resumes at the next local day; ") || !strings.HasSuffix(budgetPause.Reason, " attempt(s) have unknown cost, so actual spend may be higher") {
 		t.Fatalf("budget pause %+v", budgetPause)
 	}
-	st, err := c.Statuses(ctx)
-	must(t, err)
-	if b := st.DailyBudget; b == nil || b.Day != "2026-09-16" || b.SpendUSD != "1.25" || b.LimitUSD != "1.00" || !b.LowerBound || b.UnknownCosts == 0 {
-		t.Fatalf("daily budget status %+v", st.DailyBudget)
-	}
+	// A status read can answer from an earlier snapshot while its refresh
+	// is slow, so each status assertion waits for a view that reflects it.
+	var st StatusResponse
+	eventually(t, "status never showed the daily budget", func() bool {
+		var err error
+		st, err = c.Statuses(ctx)
+		must(t, err)
+		b := st.DailyBudget
+		return b != nil && b.Day == "2026-09-16" && b.SpendUSD == "1.25" && b.LimitUSD == "1.00" && b.LowerBound && b.UnknownCosts != 0
+	})
 	budgetWait := UnitDispatch{Reason: DeferPaused, Pause: &runtime.Pause{Target: factoryTarget}, Message: "Waits while a factory pause is in force, set by daily-budget."}
 	eventually(t, "audit never waited for the budget pause", func() bool {
 		return reflect.DeepEqual(unitStatus(t, f, stream, "audit"), f.deferred(t, stream, "audit", budgetWait))
@@ -373,11 +378,11 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("resume's sessions ran on %v: %+v", resumeBackends, resumeAttempts)
 	}
 	mu.Unlock()
-	st, err = c.Statuses(ctx)
-	must(t, err)
-	if st.Profiles[masonRole] != (EffectiveProfile{Name: "other", Source: "provider_fallback", Reason: "Provider claude usage limit (rejected)"}) {
-		t.Fatalf("mason profile under the usage limit: %+v", st.Profiles[masonRole])
-	}
+	eventually(t, "status never showed the mason's fallback profile under the usage limit", func() bool {
+		st, err = c.Statuses(ctx)
+		must(t, err)
+		return st.Profiles[masonRole] == (EffectiveProfile{Name: "other", Source: "provider_fallback", Reason: "Provider claude usage limit (rejected)"})
+	})
 	if l := st.ProviderLimits; len(l) != 1 || l[0].Backend != agent.AgentClaude || l[0].Status != "rejected" || l[0].Kind != "five_hour" || !l[0].ResetsAt.Equal(resumeLimitResets) {
 		t.Fatalf("provider limits %+v", st.ProviderLimits)
 	}
@@ -451,11 +456,11 @@ func TestReliabilityDemonstration(t *testing.T) {
 	if p, ok := factoryPauseOf(t, c); ok {
 		t.Fatalf("the budget paused the factory again after the restart: %+v", p)
 	}
-	st, err = c.Statuses(ctx)
-	must(t, err)
-	if st.Profiles[masonRole].Source != "provider_fallback" || st.DailyBudget == nil || st.DailyBudget.SpendUSD != "1.25" {
-		t.Fatalf("status after the restart: profiles %+v, daily budget %+v", st.Profiles, st.DailyBudget)
-	}
+	eventually(t, "status after the restart lost the fallback profile or the daily budget", func() bool {
+		st, err = c.Statuses(ctx)
+		must(t, err)
+		return st.Profiles[masonRole].Source == "provider_fallback" && st.DailyBudget != nil && st.DailyBudget.SpendUSD == "1.25"
+	})
 	if cfg, err := c.Configuration(ctx); err != nil || cfg.Digest != reloaded.Digest {
 		t.Fatalf("configuration after the restart: %v, digest %s, want %s", err, cfg.Digest, reloaded.Digest)
 	}

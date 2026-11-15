@@ -30,6 +30,9 @@ func (d *finalReviewer) driver() *delivery.FinalReviewer {
 	return &delivery.FinalReviewer{S: c, Repository: d.repository}
 }
 func (d *finalReviewer) Pass(ctx context.Context) error { return d.driver().Pass(ctx) }
+func (d *finalReviewer) request(ctx context.Context, stream config.WorkstreamID) error {
+	return d.driver().Request(ctx, stream)
+}
 func (d *finalReviewer) governing(ctx context.Context, stream config.WorkstreamID) (finalReviewInput, seal.Seal, error) {
 	return d.driver().Governing(ctx, stream)
 }
