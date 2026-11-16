@@ -370,12 +370,12 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
 		accept      bool
 		label       string
 	}{
-		{"open", "", false, "Open pull request"},
-		{"draft", `"draft_pull_request":true`, false, "Open draft pull request"},
+		{"ready", "", false, "Mark ready for review"},
+		{"draft", `"draft_pull_request":true`, false, "Mark ready for review"},
 		{"update", `"maintenance":true`, false, "Update pull request"},
 		{"update wins over draft", `"maintenance":true,"draft_pull_request":true`, false, "Update pull request"},
-		{"accept open", "", true, "Accept findings and open pull request"},
-		{"accept draft", `"draft_pull_request":true`, true, "Accept findings and open draft pull request"},
+		{"accept ready", "", true, "Accept findings and mark ready for review"},
+		{"accept draft", `"draft_pull_request":true`, true, "Accept findings and mark ready for review"},
 		{"accept update", `"maintenance":true`, true, "Accept findings and update pull request"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -398,7 +398,7 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
     Preview: preview.querySelector('summary').textContent,
     Open: preview.open,
     Title: card.querySelector('[data-field=title]').textContent,
-    Note: card.querySelector('[data-field=authorization]').textContent.startsWith('Approving authorizes publication'),
+    Note: card.querySelector('[data-field=authorization]').textContent.startsWith('Approving puts the description'),
     SameForm: card.querySelector('form').contains(card.querySelector('button[type=submit]')) &&
       card.querySelector('form').contains(card.querySelector('[data-field=authorization]')),
   };
@@ -409,7 +409,7 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
 			f.p.eval(`window.confirms = 0; window.confirm = () => { window.confirms++; return true; }; window.alert = window.confirm`, nil)
 			f.p.click(submit)
 			f.p.awaitGone("the approved delivery", deliveryCard)
-			f.p.awaitOutcome("Approved the delivery of final review 1")
+			f.p.awaitOutcome("Approved marking final review 1")
 			body := map[string]any{"review": float64(1), "review_revision": float64(2), "commit": testPins.commit, "draft_hash": testPins.hash}
 			if tc.accept {
 				body["accept_blocking"] = true
@@ -519,5 +519,34 @@ func TestBrowserDeliveryStaleDraftConflictReadsThePresentationAgain(t *testing.T
 	got := f.got()
 	if len(got) != 2 || got[1].Body["draft_hash"] != "hash-two" {
 		t.Fatalf("requests: %+v", got)
+	}
+}
+
+// The delivery card names the pull request being marked ready, shows the
+// recorded check result and says when a merge-order dependency keeps the
+// pull request a draft after approval.
+func TestBrowserDeliveryCardShowsTheCheckResultAndThePullRequest(t *testing.T) {
+	t.Parallel()
+	extra := `"checks":{"state":"failed","summary":"Checks failed: go-test"},` +
+		`"publication":{"status":"opened","pull_request":42,"url":"https://github.com/acme/app/pull/42"},"draft_pull_request":true`
+	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", extra))
+	f.p.await("the check result", `document.querySelector(`+quote(deliveryCard+"[data-field=checks]")+`)`)
+	var shown struct {
+		Checks, State, PullRequest, Link, Note string
+	}
+	f.p.eval(`(() => {
+  const card = document.querySelector(`+quote(deliveryCard)+`);
+  const checks = card.querySelector('[data-field=checks]');
+  const pr = card.querySelector('[data-field=pull-request]');
+  return {
+    Checks: checks.textContent,
+    State: checks.dataset.checksState,
+    PullRequest: pr.textContent,
+    Link: pr.querySelector('a').href,
+    Note: card.querySelector('[data-field=draft-note]').textContent,
+  };
+})()`, &shown)
+	if shown.Checks != "Checks failed: go-test" || shown.State != "failed" || shown.PullRequest != "Pull request #42" || shown.Link != "https://github.com/acme/app/pull/42" || !strings.Contains(shown.Note, "stays a draft") {
+		t.Fatalf("the delivery card: %+v", shown)
 	}
 }

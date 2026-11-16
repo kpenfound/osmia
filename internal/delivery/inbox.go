@@ -15,11 +15,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// publicationEntry is a pending publication the service holds because it has
-// no credential to open the pull request, opened when it was asked for, or
-// one whose last publicationEscalation or more attempts failed in a row,
-// opened at the first of them. It takes no decision: it leaves the inbox
-// once an attempt succeeds or the publication is refused.
+// PublicationEntry is an owner approval to mark the pull request ready that
+// the service holds because it has no credential to update the pull request,
+// opened when it was asked for, or one whose last publicationEscalation or
+// more attempts failed in a row, opened at the first of them. It takes no
+// decision: it leaves the inbox once an attempt succeeds or the request is
+// refused.
 func (s *Controller) PublicationEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
 	if !strings.HasPrefix(w.Subjects[PublicationSubject].Value, "requested-") {
 		return InboxEntry{}, false, nil
@@ -46,8 +47,8 @@ func (s *Controller) PublicationEntry(repository *trace.Repository, w trace.Work
 			e := decision(InboxPublication, stream, record.Transition.At, "/delivery/"+string(stream), map[string]any{})
 			e.Answer.Method = http.MethodGet
 			e.Revision = in.Approval
-			e.Question = fmt.Sprintf("Publishing owner approval %d waits for a GitHub token. The service was started without GITHUB_TOKEN, so it pushes nothing and opens no pull request.", in.Approval)
-			e.Blocked = "Publishing the pull request. Restart osmia serve with GITHUB_TOKEN set to a token that can open pull requests on " + in.Upstream + ", or merge " + featureBranch(stream) + " into upstream yourself and record it with osmia merged " + string(stream) + "."
+			e.Question = fmt.Sprintf("Marking the pull request ready for review (owner approval %d) waits for a GitHub token. The service was started without GITHUB_TOKEN, so it changes no pull request.", in.Approval)
+			e.Blocked = "Marking the pull request ready for review. Restart osmia serve with GITHUB_TOKEN set to a token that can edit pull requests on " + in.Upstream + ", mark the pull request ready on GitHub yourself, or merge " + featureBranch(stream) + " into upstream yourself and record it with osmia merged " + string(stream) + "."
 			return e, true, nil
 		}
 		var first, last trace.OperationAction
@@ -62,8 +63,8 @@ func (s *Controller) PublicationEntry(repository *trace.Repository, w trace.Work
 		e := decision(InboxPublication, stream, first.At, "/delivery/"+string(stream), map[string]any{})
 		e.Answer.Method = http.MethodGet
 		e.Revision = in.Approval
-		e.Question = fmt.Sprintf("Publishing owner approval %d has failed %d times in a row. Last failure: %s", in.Approval, failures, last.Failure)
-		e.Blocked = fmt.Sprintf("Publishing the pull request. The service tries again at %s, waiting longer after each failure, and this entry closes once an attempt succeeds.", record.RetryAt.UTC().Format(time.RFC3339))
+		e.Question = fmt.Sprintf("Marking the pull request ready for review (owner approval %d) has failed %d times in a row. Last failure: %s", in.Approval, failures, last.Failure)
+		e.Blocked = fmt.Sprintf("Marking the pull request ready for review. The service tries again at %s, waiting longer after each failure, and this entry closes once an attempt succeeds.", record.RetryAt.UTC().Format(time.RFC3339))
 		return e, true, nil
 	}
 	return InboxEntry{}, false, nil
@@ -95,9 +96,10 @@ func FinalChecksEntry(repository *trace.Repository, w trace.WorkstreamStatus) (I
 	return e, true, nil
 }
 
-// deliveryEntry is an assembled workstream's final report while it can be
-// approved and no approval of it stands: none is recorded, it is stale, or
-// its publication was refused.
+// DeliveryEntry is the "Mark ready for review" decision: an assembled
+// workstream's final report, its recorded check result and its brief while
+// the draft pull request can be marked ready and no approval of it stands:
+// none is recorded, it is stale, or marking it ready was refused.
 func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	p, api := s.PresentDelivery(ctx, repository.Project(), stream, repository)
 	switch {
@@ -132,9 +134,12 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	if title == "" {
 		title = "workstream " + string(stream)
 	}
-	e.Question = fmt.Sprintf("Deliver %s? Final review %d of commit %s found nothing blocking.", title, p.Report.Review, p.Report.Commit)
+	e.Question = fmt.Sprintf("Mark ready for review: %s? Final review %d of commit %s found nothing blocking.", title, p.Report.Review, p.Report.Commit)
 	if len(blocking) > 0 {
-		e.Question = fmt.Sprintf("Deliver %s as it is? Final review %d of commit %s has blocking findings: %s. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows.", title, p.Report.Review, p.Report.Commit, strings.Join(blocking, "; "))
+		e.Question = fmt.Sprintf("Mark ready for review: %s as it is? Final review %d of commit %s has blocking findings: %s. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows.", title, p.Report.Review, p.Report.Commit, strings.Join(blocking, "; "))
+	}
+	if p.Checks != nil {
+		e.Question += " " + p.Checks.Summary + "."
 	}
 	if p.Brief != nil && p.Brief.State == BriefNoneRecorded {
 		e.Question += " " + NoBriefRecorded + "."
@@ -146,7 +151,7 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 		}
 		e.Question += notes
 	}
-	e.Blocked = "Publishing the pull request."
+	e.Blocked = "Marking the pull request ready for review."
 	e.Options = []string{"approve"}
 	return e, true, nil
 }

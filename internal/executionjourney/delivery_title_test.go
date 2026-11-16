@@ -201,16 +201,11 @@ func TestPublicationPublishesALegacyApprovalWithTheDerivedTitle(t *testing.T) {
 	if len(p.pulls.Prs) != 1 || p.pulls.Prs[0].Title != wantTitle {
 		t.Fatalf("pull request %+v, want the title derived from the legacy approval's description", p.pulls.Prs)
 	}
-	records, err := publications(p.repository, p.stream)
-	must(t, err)
-	if last := records[len(records)-1]; last.Title != wantTitle {
-		t.Fatalf("publication record %+v, want the derived title", last)
-	}
-	// A retry still matches the pull request it already opened with that
-	// derived title: it is not treated as mismatched and recreated.
+	// A retry still matches the pull request it already updated with that
+	// derived title: it is not treated as mismatched and updated again.
 	again, err := p.publisher().Apply(ctx, op)
-	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 {
-		t.Fatalf("retry of a legacy publication %+v, %v, %d pull requests", again, err, p.pulls.Creates)
+	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 || p.pulls.Updates != 1 {
+		t.Fatalf("retry of a legacy publication %+v, %v, %d pull requests, %d updates", again, err, p.pulls.Creates, p.pulls.Updates)
 	}
 }
 

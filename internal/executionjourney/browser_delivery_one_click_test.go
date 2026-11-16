@@ -81,8 +81,8 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
-	p.AwaitText(card+"[data-field=kind]", "Delivery")
-	if label := awaitOneClickCard(t, p, card); label != "Open pull request" {
+	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
+	if label := awaitOneClickCard(t, p, card); label != "Mark ready for review" {
 		t.Fatalf("the button reads %q", label)
 	}
 	description, messages := previewOf(p, card)
@@ -95,7 +95,7 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 	}
 	recordApprovals(p)
 	p.Click(card + "button[type=submit]")
-	p.AwaitOutcome("Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
 	sent := approvalsSent(p)
 	if len(sent) != 1 {
@@ -118,12 +118,11 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 	}
 }
 
-// A delivery approved through the API with an edited description and
-// commit messages, whose publication was refused, is offered again. The page
-// previews the earlier edited text, and approving from it sends no text, so
-// the recorded approval holds the text the preview showed. The refusal is
-// recorded the way a refused publication records it, before the service
-// starts.
+// A delivery approved through the API with an edited description, whose
+// marking ready was refused, is offered again. The page previews the earlier
+// edited text, and approving from it sends no text, so the recorded approval
+// holds the text the preview showed. The refusal is recorded the way a
+// refused marking records it, before the service starts.
 func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -134,11 +133,8 @@ func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 		t.Fatal(api)
 	}
 	edited := "Edited description of the pull request.\n"
-	messages := append(presented.Messages[:0:0], presented.Messages...)
-	for i := range messages {
-		messages[i].Message = "Edited commit message " + messages[i].Commit[:7] + "\n"
-	}
-	first, api := f.s.approveDelivery(ctx, string(ws), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &edited, Messages: messages})
+	messages := presented.Messages
+	first, api := f.s.approveDelivery(ctx, string(ws), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &edited})
 	if api != nil {
 		t.Fatal(api)
 	}
@@ -166,7 +162,7 @@ func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
-	p.AwaitText(card+"[data-field=kind]", "Delivery")
+	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
 	awaitOneClickCard(t, p, card)
 	description, previewed := previewOf(p, card)
 	var want []string
@@ -178,7 +174,7 @@ func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 	}
 	recordApprovals(p)
 	p.Click(card + "button[type=submit]")
-	p.AwaitOutcome("Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
 	sent := approvalsSent(p)
 	if len(sent) != 1 {

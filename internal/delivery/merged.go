@@ -62,7 +62,7 @@ func (s *Controller) MergedOutside(ctx context.Context, repository *trace.Reposi
 	waiting := 0
 	if k, ok := strings.CutPrefix(publication.Value, "requested-"); ok {
 		if pulls.Credentialed(s.PullRequests) {
-			return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the publication of owner approval %s of workstream %s may still open a pull request; record the merge once osmia delivery shows its outcome", k, stream)}
+			return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("marking the pull request of workstream %[2]s ready under owner approval %[1]s may still be applied; record the merge once osmia delivery shows its outcome", k, stream)}
 		}
 		if waiting, err = strconv.Atoi(k); err != nil {
 			return MergeResponse{}, failed

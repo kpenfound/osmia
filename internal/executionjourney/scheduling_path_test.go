@@ -610,7 +610,7 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 
 func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 	t.Parallel()
-	for _, point := range []string{"publish-pushed", "publish-opened"} {
+	for _, point := range []string{"draft-pushed", "draft-opened"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			p := newPublicationFixture(t, "commit-per-unit")
@@ -656,8 +656,8 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 			}
 			p.pulls.Mu.Lock()
 			defer p.pulls.Mu.Unlock()
-			if p.pulls.Creates != 1 || len(p.pulls.Prs) != 1 {
-				t.Fatalf("PR effects creates=%d PRs=%d", p.pulls.Creates, len(p.pulls.Prs))
+			if p.pulls.Creates != 1 || p.pulls.Updates != 0 || p.pulls.Readies != 1 || len(p.pulls.Prs) != 1 {
+				t.Fatalf("PR effects creates=%d updates=%d readies=%d PRs=%d", p.pulls.Creates, p.pulls.Updates, p.pulls.Readies, len(p.pulls.Prs))
 			}
 			repo, err := trace.Open(p.s.cfg.Root, p.s.cfg.Project)
 			must(t, err)

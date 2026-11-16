@@ -3159,7 +3159,7 @@
     ratification: 'Ratification',
     contested: 'Contested unit',
     amendment: 'Amendment',
-    delivery: 'Delivery',
+    delivery: 'Mark ready for review',
     publication: 'Publication failing',
     checks: 'Checks not completing',
     drift: 'Drift held',
@@ -3351,11 +3351,11 @@
     }
     if (entry.kind === 'delivery') {
       // The body is the entry's pinned identity alone: the service then
-      // publishes the text the card previews.
+      // puts the text the card previews on the pull request.
       d.pending = true;
       block(d.submit, true);
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), body,
-        (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.',
+        (out) => 'Approved marking final review ' + out.review + ' of ' + workstreamName(entry.workstream) + ' ready for review.',
         undefined, decisionKey(entry)).finally(() => {
         d.pending = false;
         block(d.submit, !presented(d.entry, detailOf(d.entry)));
@@ -3460,7 +3460,7 @@
       // collapsed as the owner left it.
       d.preview = el('details', { 'data-field': 'preview' }, el('summary', {}, 'What will be published'));
       fields.push(d.preview);
-      fields.push(el('p', { class: 'meta', 'data-field': 'authorization' }, 'Approving authorizes publication with your Git identity, signature and sign-off. Agent co-author trailers are removed.'));
+      fields.push(el('p', { class: 'meta', 'data-field': 'authorization' }, 'Approving puts the description above on the draft pull request, with the brief\'s "Before you ship" items, and marks the pull request ready for review.'));
     } else {
       d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
       fields.push(el('label', {}, 'Note', d.note));
@@ -3539,7 +3539,10 @@
     d.detail.replaceChildren(...[
       renderDeliveryBrief(view),
       el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
+      renderPullRequest(view),
+      view.draft_pull_request ? el('p', { class: 'meta', 'data-field': 'draft-note' }, 'A merge-order dependency has not merged. Approving records your decision and the pull request stays a draft.') : null,
       view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
+      renderDeliveryChecks(view),
       findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
         el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
         f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null))),
@@ -3561,13 +3564,29 @@
     d.submit.textContent = deliveryLabel(d.entry, view);
   }
 
+  // renderPullRequest names the draft pull request the decision is about: the
+  // pull request of the latest recorded push.
+  function renderPullRequest(view) {
+    const p = view.publication;
+    if (!p || !p.pull_request) return null;
+    return el('p', { class: 'meta', 'data-field': 'pull-request' }, 'Pull request ',
+      p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, '#' + p.pull_request) : '#' + p.pull_request);
+  }
+
+  // renderDeliveryChecks is the check result block of a delivery card: the
+  // result recorded for the commit the final review read.
+  function renderDeliveryChecks(view) {
+    const c = view.checks;
+    if (!c) return null;
+    return el('p', { 'data-field': 'checks', 'data-checks-state': c.state }, c.summary);
+  }
+
   // deliveryLabel names what approving the entry's delivery does: it updates
-  // the pull request of a delivered workstream being maintained, opens a
-  // draft pull request while a merge-order dependency has not merged, and
-  // opens a pull request otherwise. Accepting the final review's blocking
-  // findings comes first in the label.
+  // the pull request of a delivered workstream being maintained and marks
+  // the draft pull request ready for review otherwise. Accepting the final
+  // review's blocking findings comes first in the label.
   function deliveryLabel(entry, view) {
-    const action = view && view.maintenance ? 'update pull request' : view && view.draft_pull_request ? 'open draft pull request' : 'open pull request';
+    const action = view && view.maintenance ? 'update pull request' : 'mark ready for review';
     if (entry.answer.body.accept_blocking) {
       return 'Accept findings and ' + action;
     }

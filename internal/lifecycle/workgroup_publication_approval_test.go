@@ -21,7 +21,7 @@ func TestWorkgroupPublicationRequiresItsOwnDeliveryApproval(t *testing.T) {
 
 	// The fixture has a completed group ratification and final review, but
 	// neither grants permission to publish this member's pull request.
-	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, "Depends on owner/other#77."); err != nil || reason != "no owner delivery approval is recorded" {
+	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, "Depends on owner/other#77."); err != nil || reason != "the owner has not marked the pull request ready for review" {
 		t.Fatalf("group ratification delivery gate: %q, %v", reason, err)
 	}
 	must(t, p.publisher().Pass(ctx))

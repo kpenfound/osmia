@@ -167,8 +167,8 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		};
 	})()`, nil)
 	p.SelectWorkstream(ws)
-	p.AwaitText(card+"[data-field=kind]", "Delivery")
-	p.AwaitText(card+"[data-field=question]", "Deliver Resumable uploads? Final review 1 of commit "+report.Commit)
+	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
+	p.AwaitText(card+"[data-field=question]", "Mark ready for review: Resumable uploads? Final review 1 of commit "+report.Commit)
 	p.AwaitText(card+"[data-field=options]", "Options: approve")
 	p.AwaitText(card+"[data-field=pins]", pins(1, first))
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
@@ -205,7 +205,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	// The draft as it stands is approved as drafted, and the page sends
 	// the pinned identity alone.
 	p.Click(approve)
-	p.AwaitOutcome("Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
 	pinned := func(revision int, presented DeliveryPresentation) map[string]any {
 		return map[string]any{"review": 1.0, "review_revision": float64(revision), "commit": report.Commit, "draft_hash": presented.DraftHash}
@@ -234,7 +234,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.AwaitText(card+"[data-field=pins]", pins(3, third))
 	drafted(third)
 	p.Click(approve)
-	p.AwaitOutcomes("Approved the delivery of final review 1", 2)
+	p.AwaitOutcomes("Approved marking final review 1", 2)
 	p.AwaitGone("the approved delivery", card)
 	if body := sent(); !reflect.DeepEqual(body, pinned(3, third)) {
 		t.Fatalf("the approval the page sent: %v", body)
@@ -289,7 +289,7 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	p.AwaitText(card+"[data-field=kind]", "Publication failing")
 	p.AwaitText(card+"[data-field=question]", "Last failure: Effect returned error: ")
 	p.AwaitText(card+"[data-field=question]", refusal)
-	p.AwaitText(card+"[data-field=blocked]", "Waiting on it: Publishing the pull request.")
+	p.AwaitText(card+"[data-field=blocked]", "Waiting on it: Marking the pull request ready for review.")
 	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
 	var answerable bool
 	p.Eval(`document.querySelector(`+quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+quote(card+"[data-field=pins]")+`) !== null`, &answerable)

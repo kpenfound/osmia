@@ -269,11 +269,11 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// 6. The owner approves the drafted description on the page. Publication
 	// waits for the pause, and runs once the owner resumes the workstream.
 	p.ClosePopovers()
-	p.AwaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
+	p.AwaitText(card+"[data-field=question]", "Mark ready for review: Resumable uploads?")
 	p.Await("the drafted description", `document.querySelector(`+quote(card+"[data-field=preview] [data-field=description]")+`)?.textContent === `+quote(presented.Draft))
 	p.Await("the approval enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
 	p.Click(card + "button[type=submit]")
-	p.AwaitOutcome("Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
 	var approval DeliveryApproval
 	must(t, json.Unmarshal([]byte(ownerDocument(deliveryDocument).Content), &approval))

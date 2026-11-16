@@ -30,6 +30,10 @@ const BriefWaiting = api.BriefWaiting
 
 type DeliveryApproval = api.DeliveryApproval
 
+type DeliveryChecks = api.DeliveryChecks
+
+type DeliveryReady = api.DeliveryReady
+
 type DeliveryBrief = api.DeliveryBrief
 
 type DeliveryDecision = api.DeliveryDecision

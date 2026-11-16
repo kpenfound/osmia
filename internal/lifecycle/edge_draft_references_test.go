@@ -68,7 +68,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if api != nil {
 		t.Fatal(api)
 	}
-	if !presented.DraftPullRequest || !strings.Contains(presented.Draft, "opens as a draft") {
+	if !presented.DraftPullRequest || !strings.Contains(presented.Draft, "stays a draft") {
 		t.Fatalf("a pending merge-order dependency must present a draft pull request that the description states: %v, %s", presented.DraftPullRequest, presented.Draft)
 	}
 	if encoded, err := json.Marshal(presented); err != nil || !strings.Contains(string(encoded), `"draft_pull_request":true`) {
@@ -80,7 +80,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 		t.Fatalf("approval accepted an omitted upstream reference: %v", api)
 	}
 	approval := pub.approve(t, nil)
-	for _, text := range []string{"depends on owner/other#77", "must merge first", "opens as a draft"} {
+	for _, text := range []string{"depends on owner/other#77", "must merge first", "stays a draft"} {
 		if !strings.Contains(approval.Description, text) {
 			t.Fatalf("approved description omits %q: %s", text, approval.Description)
 		}
@@ -90,13 +90,22 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("draft publication: %+v, %v", result, err)
 	}
+	// The approval is recorded and applied, and the pull request stays a draft
+	// until the dependency has merged.
+	if got := pub.feature(t); got != DeliveredState {
+		t.Fatalf("the dependent is %s after its approval", got)
+	}
+	if state, err := repository.Workflow(stream, "publication"); err != nil || state.Value != "published-1" {
+		t.Fatalf("the approval's outcome %+v: %v", state, err)
+	}
+	must(t, pub.publisher().Pass(ctx))
 	pull.Mu.Lock()
 	defer pull.Mu.Unlock()
 	if len(pull.Prs) != 2 || pull.Creates != 1 || pull.Readies != 0 {
 		t.Fatalf("dependent publication: %+v; creates %d, ready calls %d", pull.Prs, pull.Creates, pull.Readies)
 	}
-	if pr := pull.Prs[1]; !pr.Draft || pr.Body != approval.Description {
-		t.Fatalf("published PR must be a draft with the approved dependency text: %+v", pr)
+	if pr := pull.Prs[1]; !pr.Draft || !strings.Contains(pr.Body, "owner/other#77") {
+		t.Fatalf("the pull request must be a draft that links the dependency: %+v", pr)
 	}
 }
 
@@ -107,7 +116,7 @@ func TestDeliveryPresentationOmitsDraftPullRequestWithoutPendingDependency(t *te
 	if api != nil {
 		t.Fatal(api)
 	}
-	if presented.DraftPullRequest || strings.Contains(presented.Draft, "opens as a draft") {
+	if presented.DraftPullRequest || strings.Contains(presented.Draft, "stays a draft") {
 		t.Fatalf("a workstream without a pending dependency presents a draft pull request: %v, %s", presented.DraftPullRequest, presented.Draft)
 	}
 	encoded, err := json.Marshal(presented)

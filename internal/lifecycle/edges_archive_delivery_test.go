@@ -201,11 +201,16 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	initialApproval := approve(first)
 	var draft DeliveryPublication
 	lifecycleAwait(t, f, "owner-approved dependent draft", func() bool {
+		state, err := down.Workflow(f.stream2, trace.FeatureSubject)
+		must(t, err)
 		var found bool
 		draft, found, err = currentOwnPublication(down, f.stream2)
 		must(t, err)
-		return found && draft.Draft && draft.Approval == 1 && draft.Reviewed == initialApproval.Commit
+		return state.Value == DeliveredState && found && draft.Draft && draft.Reviewed == initialApproval.Commit
 	})
+	if state, err := down.Workflow(f.stream2, "publication"); err != nil || state.Value != "published-1" {
+		t.Fatalf("the approval's outcome %+v: %v", state, err)
+	}
 	assertPrompts := func() {
 		t.Helper()
 		inbox, err := f.c.Inbox(ctx)
@@ -318,6 +323,13 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if ready.PullRequest != draft.PullRequest || ready.Commit == draft.Commit {
 		t.Fatalf("ready publication lost PR identity or content update: %+v", ready)
 	}
+	host.Mu.Lock()
+	for _, pr := range host.Prs {
+		if pr.Number == ready.PullRequest && (pr.Draft || pr.Body != freshApproval.Description) {
+			t.Fatalf("the pull request is not ready with the approved text: %+v", pr)
+		}
+	}
+	host.Mu.Unlock()
 	clone := f.repos[1].Clone
 	if got := strings.TrimSpace(demoGit(t, filepath.Dir(clone), "-C", clone, "show", ready.Commit+":internal/trace/dependency.txt")); got != merged {
 		t.Fatalf("published dependency=%q", got)

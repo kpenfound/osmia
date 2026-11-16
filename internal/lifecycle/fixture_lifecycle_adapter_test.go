@@ -297,6 +297,10 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 	return (&lifecycle.BaseRefresher{S: b.s.lifecycle(), Repository: b.repository}).Pass(ctx)
 }
 
+func (b *baseRefresher) ObserveDraftPullRequests(ctx context.Context) error {
+	return (&lifecycle.BaseRefresher{S: b.s.lifecycle(), Repository: b.repository}).ObserveDraftPullRequests(ctx)
+}
+
 func (b *baseRefresher) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return (&lifecycle.BaseRefresher{S: b.s.lifecycle(), Repository: b.repository}).Inspect(ctx, op)
 }

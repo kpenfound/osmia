@@ -58,6 +58,9 @@ func (b *BaseRefresher) Pass(ctx context.Context) error {
 	if err := b.ObserveArchivedPullRequests(ctx); err != nil {
 		return err
 	}
+	if err := b.ObserveDraftPullRequests(ctx); err != nil {
+		return err
+	}
 	streams, err := nonSessionWorkstreams(b.Repository)
 	if err != nil {
 		return err

@@ -5340,6 +5340,35 @@
         },
         "type": "object"
       },
+      "DeliveryChecks": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "flaky": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryDecision": {
         "properties": {
           "accept_blocking": {
@@ -5394,6 +5423,9 @@
           "brief": {
             "$ref": "#/components/schemas/DeliveryBrief"
           },
+          "checks": {
+            "$ref": "#/components/schemas/DeliveryChecks"
+          },
           "delivered": {
             "type": "boolean"
           },
@@ -5426,6 +5458,9 @@
           },
           "publication": {
             "$ref": "#/components/schemas/DeliveryPublication"
+          },
+          "ready": {
+            "$ref": "#/components/schemas/DeliveryReady"
           },
           "report": {
             "$ref": "#/components/schemas/FinalReport"
@@ -5506,6 +5541,36 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryReady": {
+        "properties": {
+          "approval": {
+            "type": "integer"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "source": {
             "type": "string"
           },
           "upstream": {

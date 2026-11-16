@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
@@ -27,10 +29,10 @@ func PublicationAction(op coreadapter.Operation) bool {
 	return op.Boundary == coreadapter.RepositoryBoundary && (op.Action == PublishAction || op.Action == publishUpstreamAction)
 }
 
-// PublishAction is the repository-boundary operation action that publishes
-// an assembled workstream's owner-approved branch and description: it pushes
-// the delivery commit to the push repository, opens one pull request against
-// the upstream base branch and records the workstream delivered.
+// PublishAction is the repository-boundary operation action that applies the
+// owner's approval to mark an assembled workstream's draft pull request ready
+// for review: it puts the approved description on the pull request, marks it
+// ready and records the workstream delivered.
 const PublishAction = "publish"
 
 const (
@@ -70,10 +72,9 @@ type PublishInput struct {
 	Maintenance    bool                `json:"maintenance,omitempty"`
 	// Draft is true while the workstream has an incoming workgroup
 	// merge_order edge whose upstream has not yet merged: the pull request
-	// this publishes opens, or stays, a draft that links the upstream pull
-	// request (spec#12). Once every such edge merges, a fresh owner
-	// approval publishes with Draft false, which marks an existing draft
-	// ready for review (spec#13).
+	// keeps its approved description, which links the upstream pull request,
+	// and stays a draft. Once every such edge merges, a fresh owner approval
+	// has Draft false and marks the pull request ready for review.
 	Draft           bool   `json:"draft,omitempty"`
 	Approval        int    `json:"approval"`
 	Commit          string `json:"commit"`
@@ -89,9 +90,10 @@ func PublishIDs(approval int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// Publisher is the publication controller. Its pass asks to publish the
-// current owner approval of every assembled workstream that is not paused;
-// its reconciler runs each publication operation.
+// Publisher is the publication controller. Its pass asks to apply the current
+// owner approval of every assembled workstream that is not paused, marking
+// its draft pull request ready for review; its reconciler runs each
+// operation.
 type Publisher struct {
 	S          *Controller
 	Repository *trace.Repository
@@ -99,8 +101,8 @@ type Publisher struct {
 
 var _ coreadapter.Reconciler = (*Publisher)(nil)
 
-// Pass asks for the publication of an assembled workstream's latest owner
-// approval once it passes the delivery gate, unless a publication of the
+// Pass asks for the application of an assembled workstream's latest owner
+// approval once it passes the delivery gate, unless an operation of the
 // workstream has neither a result nor a recorded outcome yet, or one of that
 // approval was already asked for.
 func (p *Publisher) Pass(ctx context.Context) error {
@@ -188,11 +190,13 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 		in.Base = report.Upstream.Branch
 		in.BaseWorkstream = report.Upstream.Workstream
 	}
-	if previous, found, err := CurrentOwnPublication(p.Repository, stream); err != nil {
-		return err
-	} else if found && previous.PullRequest > 0 {
-		if found && previous.Upstream == in.Upstream && (previous.Base == in.Base || in.Fork == in.Upstream && !p.S.CanonicalPublication(previous, cfg)) {
-			in.Retarget = &RetargetInput{Number: previous.PullRequest, URL: previous.URL, Base: previous.Base, Title: previous.Title, Description: previous.Description}
+	if in.Maintenance {
+		if previous, found, err := CurrentOwnPublication(p.Repository, stream); err != nil {
+			return err
+		} else if found && previous.PullRequest > 0 {
+			if found && previous.Upstream == in.Upstream && (previous.Base == in.Base || in.Fork == in.Upstream && !p.S.CanonicalPublication(previous, cfg)) {
+				in.Retarget = &RetargetInput{Number: previous.PullRequest, URL: previous.URL, Base: previous.Base, Title: previous.Title, Description: previous.Description}
+			}
 		}
 	}
 	if _, waiting, err := p.S.UnresolvedMergeOrderEdge(p.Repository, stream); err != nil {
@@ -214,15 +218,20 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 		action = publishUpstreamAction
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(p.Repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: input}
-	requestAction := "opens a pull request"
-	if in.Retarget != nil {
-		requestAction = fmt.Sprintf("updates pull request #%d", in.Retarget.Number)
+	var reason string
+	if in.Maintenance {
+		requestAction := "opens a pull request"
+		if in.Retarget != nil {
+			requestAction = fmt.Sprintf("updates pull request #%d", in.Retarget.Number)
+		}
+		reason = fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
+	} else {
+		reason = fmt.Sprintf("the owner approved description %s for %s at %s; the pull request against %s of %s gets it and is marked ready for review", in.DescriptionHash, featureBranch(stream), in.Commit, in.Base, in.Upstream)
 	}
-	reason := fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: decision.Cause}
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", in.Approval), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Publish owner approval %d", in.Approval), Operation: &op}}}
+		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Apply owner approval %d", in.Approval), Operation: &op}}}
 	if _, err := p.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -316,25 +325,31 @@ func (p *Publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("publication of owner approval %d is not recorded; it inspects the push repository and its pull requests before acting", in.Approval)}, nil
 }
 
-// Apply publishes owner approval k. The workstream must be assembled and the
+// Apply applies owner approval k. The workstream must be assembled and the
 // approval must still pass the delivery gate for the description it records:
 // the feature branch, final review and governing documents unchanged since.
-// Delivery amends the approved messages and identity and signs the outgoing
-// commits, preserving the reviewed tree and base; squash produces one commit. The service then reads the feature branch: at the delivery commit it is
-// already pushed; absent, or at a commit an earlier publication of the
-// workstream recorded, it is pushed with that commit as the expected one;
-// at any other commit the publication is refused. An existing pull request
-// must match the approved base, description and current branch tip before a
-// push, or be otherwise matching with its head still at a commit an earlier
-// publication recorded. final/publication.json records the delivery commit
-// before the push. After the push the pull request head is checked at the
-// delivery commit, and a head still at such a recorded commit leaves the
-// operation pending; if none exists, one is opened and checked. A maintenance retarget instead
-// reconciles the recorded request and updates its base and approved text. One commit then records the opened
-// publication, the workstream's move to delivered with a notice, and the
-// publication's outcome. A refusal records the reason and tells the chief of
-// staff. Git, GitHub and storage errors leave the operation pending for
-// another attempt, which inspects the push repository and pull requests again.
+//
+// For an assembled workstream it marks the draft pull request ready for
+// review (MarkReady). Nothing is pushed and no pull request is opened: the
+// draft opened with the push of the reviewed commit. A maintenance
+// operation of a delivered workstream instead amends the approved messages and
+// identity and signs the outgoing commits, preserving the reviewed tree and
+// base; squash produces one commit. The service then reads the feature
+// branch: at the delivery commit it is already pushed; absent, or at a commit
+// an earlier publication of the workstream recorded, it is pushed with that
+// commit as the expected one; at any other commit the publication is refused.
+// An existing pull request must match the approved base, description and
+// current branch tip before a push, or be otherwise matching with its head
+// still at a commit an earlier publication recorded. final/publication.json
+// records the delivery commit before the push. After the push the pull
+// request head is checked at the delivery commit, and a head still at such a
+// recorded commit leaves the operation pending; if none exists, one is opened
+// and checked. A maintenance retarget instead reconciles the recorded request
+// and updates its base and approved text. One commit then records the opened
+// publication and the operation's outcome. A refusal records the reason and
+// tells the chief of staff. Git, GitHub and storage errors leave the
+// operation pending for another attempt, which inspects the push repository
+// and pull requests again.
 func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := DecodePublish(op)
 	if err != nil {
@@ -395,6 +410,9 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	}
 	if in.Maintenance && (!report.Maintenance || report.Upstream == nil || report.Upstream.Workstream == "" && (in.Upstream != cfg.Project.Upstream || in.Base != cfg.Project.BaseBranch)) {
 		return p.Refuse(ctx, stream, in, "publication requires a fresh delivery maintenance review of its current base")
+	}
+	if !in.Maintenance {
+		return p.MarkReady(ctx, stream, op, in, approval, report, cfg)
 	}
 	g, err := featureWorkspaces(cfg, p.Repository).Of(stream)
 	if err != nil {
@@ -565,6 +583,188 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	return p.Deliver(ctx, stream, in, record)
 }
 
+// MarkReady puts the owner's approved title and description on the draft pull
+// request of the push that signed the reviewed commit, then marks it ready for
+// review and records the workstream delivered with the approval. It pushes
+// nothing and opens no pull request. The pull request must be open, against
+// the pushed base and at the pushed commit. When a merge-order dependency has
+// not merged it changes nothing on the pull request, which stays a draft, and
+// records the workstream delivered with the approval applied: the merge calls
+// for a dependency update and a fresh review of the delivered workstream, and
+// the owner's fresh approval then marks the pull request ready. A restart
+// repeats only what the pull request does not show yet, so the description is
+// updated and the pull request marked ready once.
+func (p *Publisher) MarkReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, approval DeliveryApproval, report FinalReport, cfg *config.Config) (coreadapter.OperationResult, error) {
+	client := p.S.PullRequests
+	if report.Upstream == nil {
+		return p.Refuse(ctx, stream, in, "final review records no delivery base")
+	}
+	if approval.Style != in.Style || len(approval.Messages) == 0 {
+		return p.Refuse(ctx, stream, in, "delivery messages and style require current owner approval")
+	}
+	push, found, err := PushOfCommit(p.Repository, stream, report.Commit)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if !found {
+		// The reviewed commit was never pushed to a pull request: the service
+		// held no GitHub credential at that review. It is pushed now.
+		reason, err := (&FinalReviewer{S: p.S, Repository: p.Repository}).PublishDraft(ctx, cfg, stream, op, report)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if reason != "" {
+			return p.Refuse(ctx, stream, in, reason)
+		}
+		if push, found, err = PushOfCommit(p.Repository, stream, report.Commit); err != nil {
+			return coreadapter.OperationResult{}, err
+		} else if !found {
+			return coreadapter.OperationResult{}, fmt.Errorf("the draft pull request of final review %d is not recorded", report.Review)
+		}
+	}
+	prs, err := client.Find(ctx, push.Upstream, push.Fork, push.Branch)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	i := slices.IndexFunc(prs, func(pr pulls.PullRequest) bool { return pr.Number == push.PullRequest })
+	if i < 0 {
+		return p.Refuse(ctx, stream, in, fmt.Sprintf("pull request #%d of %s is missing", push.PullRequest, push.Upstream))
+	}
+	pr := prs[i]
+	if err := RecordOwnPullRequestOutcomeFromFind(ctx, p.Repository, p.S.Now(), stream, op.ID, pr.Number, prs); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if outcome, finished := PullRequestOutcomeOf(pr); finished {
+		return p.Refuse(ctx, stream, in, fmt.Sprintf("pull request #%d of %s is %s, so it was not marked ready for review", pr.Number, push.Upstream, outcome))
+	}
+	if pr.HeadCommit != push.Commit {
+		pushes, err := Pushes(p.Repository, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if slices.ContainsFunc(pushes, func(earlier Push) bool { return earlier.Commit == pr.HeadCommit }) {
+			return coreadapter.OperationResult{}, fmt.Errorf("pull request #%d of %s is still at %s, not at the pushed %s", pr.Number, push.Upstream, pr.HeadCommit, push.Commit)
+		}
+		return p.Refuse(ctx, stream, in, fmt.Sprintf("pull request #%d of %s is at %s, which no push of this workstream made; the pushed commit is %s", pr.Number, push.Upstream, pr.HeadCommit, push.Commit))
+	}
+	if pr.Base != push.Base {
+		return p.Refuse(ctx, stream, in, fmt.Sprintf("pull request #%d of %s is against %s, not the reviewed base %s", pr.Number, push.Upstream, pr.Base, push.Base))
+	}
+	reference, unresolved, err := p.S.UnresolvedMergeOrderEdge(p.Repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if unresolved || in.Draft {
+		return p.DeliverDraft(ctx, stream, op, in, push, reference)
+	}
+	title, description := PublishedTitle(approval, stream), approval.Description
+	if pr.Title != title || pr.Body != description {
+		if _, err := client.Update(ctx, push.Upstream, pr.Number, pulls.Update{Base: pr.Base, Title: title, Body: description}); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if err := p.S.Step("ready-described"); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
+	if pr.Draft {
+		if _, err := client.Ready(ctx, push.Upstream, pr.Number); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if err := p.S.Step("ready-marked"); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
+	return p.DeliverReady(ctx, stream, op, in, push)
+}
+
+// DeliverReady records, in one commit, final/ready.json, the workstream's move
+// from assembled to delivered with a notice for the chief of staff, and the
+// outcome of the approval's operation.
+func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push) (coreadapter.OperationResult, error) {
+	at := p.S.Now()
+	ready := DeliveryReady{Source: api.ReadyByApproval, Approval: in.Approval, PullRequest: push.PullRequest, URL: push.URL, Upstream: push.Upstream, Commit: push.Commit, At: at}
+	doc, err := ReadyDocumentFor(p.Repository, stream, ready, op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	reason := fmt.Sprintf("pull request #%d (%s) is ready for review at %s, with the description the owner approved as %s revision %d", push.PullRequest, push.URL, push.Commit, DeliveryPath, in.Approval)
+	notice := fmt.Sprintf("Workstream delivered: pull request #%d is ready for review at %s.", push.PullRequest, push.URL)
+	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return p.recordApplied(ctx, stream, in, reason, []trace.Document{doc}, txs...)
+}
+
+// DeliverDraft records, in one commit, final/ready.json with Draft set, the
+// workstream's move from assembled to delivered and the outcome of an approval
+// whose pull request stays a draft
+// because the merge-order dependency reference has not merged. Nothing is
+// written to the pull request.
+func (p *Publisher) DeliverDraft(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, reference string) (coreadapter.OperationResult, error) {
+	waiting := "a merge-order dependency"
+	if reference != "" {
+		waiting = reference
+	}
+	at := p.S.Now()
+	ready := DeliveryReady{Source: api.ReadyByApproval, Approval: in.Approval, Draft: true, PullRequest: push.PullRequest, URL: push.URL, Upstream: push.Upstream, Commit: push.Commit, At: at}
+	doc, err := ReadyDocumentFor(p.Repository, stream, ready, op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	reason := fmt.Sprintf("the owner approved marking pull request #%d (%s) ready as %s revision %d; it stays a draft until %s merges", push.PullRequest, push.URL, DeliveryPath, in.Approval, waiting)
+	notice := fmt.Sprintf("Workstream delivered: pull request #%d stays a draft at %s until %s merges; once it has and the dependency update has been reviewed, the owner approves again to mark it ready.", push.PullRequest, push.URL, waiting)
+	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return p.recordApplied(ctx, stream, in, reason, []trace.Document{doc}, txs...)
+}
+
+// deliveredTransactions are the transitions of the workstream to delivered,
+// with a notice for the chief of staff, and of the publication to the
+// published outcome of the approval.
+func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, at time.Time, reason, notice string) ([]trace.Transaction, error) {
+	feature, err := p.Repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return nil, err
+	}
+	subject, err := p.Repository.Workflow(stream, PublicationSubject)
+	if err != nil {
+		return nil, err
+	}
+	transition, _ := PublishIDs(in.Approval)
+	deliveredID, err := deliveredTransitionID(p.Repository, stream, transition+"-delivered")
+	if err != nil {
+		return nil, err
+	}
+	header := func(id string) trace.Header {
+		return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: at, Actor: foremanActor, Cause: op.ID}
+	}
+	return []trace.Transaction{
+		{ExpectedVersion: feature.Version,
+			Transition: trace.Transition{Header: header(deliveredID), Subject: trace.FeatureSubject, From: feature.Value, To: DeliveredState, Reason: reason},
+			Events:     []trace.Event{trace.Notice(deliveredID, "state", notice)}},
+		{ExpectedVersion: subject.Version,
+			Transition: trace.Transition{Header: header(transition + "-published"), Subject: PublicationSubject, From: subject.Value, To: fmt.Sprintf("published-%d", in.Approval), Reason: reason}},
+	}, nil
+}
+
+// recordApplied records documents and transactions as the outcome of
+// approval k's operation; a conflict with an outcome already recorded returns
+// that outcome.
+func (p *Publisher) recordApplied(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string, docs []trace.Document, txs ...trace.Transaction) (coreadapter.OperationResult, error) {
+	if _, err := p.Repository.RecordDocumentsWith(ctx, docs, txs...); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			if recorded, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && recorded != nil {
+				return *recorded, nil
+			}
+		}
+		return coreadapter.OperationResult{}, err
+	}
+	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+}
+
 func MatchingPublicationPR(pr pulls.PullRequest, in PublishInput, branch, title, description, commit string) bool {
 	return (!in.Draft || pr.Draft) && (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Title == title && pr.Body == description
 }
@@ -717,9 +917,9 @@ func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in 
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// refuse records why the publication was refused, tells the chief of staff,
-// and returns the refusal as the operation's result. The workstream stays
-// assembled; approving delivery again asks for another publication.
+// refuse records why the approval was refused, tells the chief of staff, and
+// returns the refusal as the operation's result. The workstream stays
+// assembled; approving again asks for another application.
 func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string) (coreadapter.OperationResult, error) {
 	transition, _ := PublishIDs(in.Approval)
 	id := transition + "-refused"
@@ -727,8 +927,8 @@ func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in P
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	recorded := fmt.Sprintf("owner approval %d was not published: %s", in.Approval, reason)
-	body := fmt.Sprintf("Delivery was not published: %s. No pull request was opened; the workstream stays assembled until the owner approves delivery again.", reason)
+	recorded := fmt.Sprintf("owner approval %d was not applied: %s", in.Approval, reason)
+	body := fmt.Sprintf("The pull request was not marked ready for review: %s. The workstream stays assembled until the owner marks it ready again.", reason)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: transition}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Approval), Reason: recorded},

@@ -20,7 +20,7 @@ import (
 
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
 // through a final review with an advisory finding, which builds nothing, to
-// the owner's decision and publication.
+// the owner's decision to mark the pull request ready for review.
 func TestDeliveryDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -117,7 +117,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
-	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.feature(t) != DeliveredState {
+	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.pulls.Updates != 1 || p.pulls.Readies != 1 || p.pulls.Prs[0].Draft || p.feature(t) != DeliveredState {
 		t.Fatalf("duplicate delivery: %+v", p.pulls)
 	}
 	tip, _ := p.forkBranch(t)
@@ -134,7 +134,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	}
 	records, err := publications(p.repository, stream)
 	must(t, err)
-	if len(records) != 2 || records[1].Approval != 1 || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].DescriptionHash != approval.DescriptionHash || records[1].PullRequest != p.pulls.Prs[0].Number {
+	if len(records) != 2 || records[1].Push != 1 || records[1].Status != publicationOpened || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].PullRequest != p.pulls.Prs[0].Number {
 		t.Fatalf("publication provenance %+v", records)
 	}
 	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 1 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {
