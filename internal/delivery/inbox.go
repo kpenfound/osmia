@@ -90,8 +90,8 @@ func FinalChecksEntry(repository *trace.Repository, w trace.WorkstreamStatus) (I
 	e := decision(InboxFinalChecks, stream, latest.StartedAt, "/status/"+string(stream), map[string]any{})
 	e.Answer.Method = http.MethodGet
 	e.Revision = k
-	e.Question = fmt.Sprintf("The project's checks on the assembled branch did not complete %d times in a row, so final review %d cannot read it. Last failure: %s", n, k, latest.Error)
-	e.Blocked = fmt.Sprintf("The final review. The service runs the checks again at %s, waiting longer after each run, and this entry closes once a run completes.", latest.FinishedAt.Add(FinalCheckDelay(n)).UTC().Format(time.RFC3339))
+	e.Question = fmt.Sprintf("The project's checks on the pull request did not complete %d times in a row, so final review %d cannot read the assembled branch. Last failure: %s", n, k, latest.Error)
+	e.Blocked = fmt.Sprintf("The final review. The service reads the pull request's check statuses again at %s, waiting longer after each run, and this entry closes once a run completes.", latest.FinishedAt.Add(FinalCheckDelay(n)).UTC().Format(time.RFC3339))
 	return e, true, nil
 }
 

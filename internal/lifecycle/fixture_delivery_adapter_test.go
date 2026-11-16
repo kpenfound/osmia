@@ -52,7 +52,6 @@ func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 
 type FinalCheckRun = delivery.FinalCheckRun
 
-var finalChecksDocument = delivery.FinalChecksDocument
 
 func (s *Service) deliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return s.delivery().DeliveryPresentation(ctx, raw)
@@ -132,10 +131,6 @@ func (d *finalReviewer) followup(stream config.WorkstreamID, report FinalReport,
 
 var finalSystemPrompt = delivery.FinalSystemPrompt
 var finalPrompt = delivery.FinalPrompt
-
-func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
-	return d.driver().IncompleteChecks(stream, k, commit)
-}
 
 const ownPullRequestOutcomePath = delivery.OwnPullRequestOutcomePath
 

@@ -4211,6 +4211,68 @@
         },
         "type": "object"
       },
+      "CheckCounts": {
+        "properties": {
+          "cancelled": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CheckFailure": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CheckRerun": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/CheckFailure"
+            },
+            "type": "array"
+          },
+          "flakes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fresh": {
+            "$ref": "#/components/schemas/CheckStatusRef"
+          },
+          "original": {
+            "$ref": "#/components/schemas/CheckStatusRef"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CheckSelection": {
         "properties": {
           "breadth_judgment": {
@@ -4272,6 +4334,25 @@
               "null",
               "integer"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "CheckStatusRef": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -5850,12 +5931,21 @@
           "attempt": {
             "type": "integer"
           },
+          "counts": {
+            "$ref": "#/components/schemas/CheckCounts"
+          },
           "error": {
             "type": "string"
           },
           "failed": {
             "items": {
               "type": "string"
+            },
+            "type": "array"
+          },
+          "failed_checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckFailure"
             },
             "type": "array"
           },
@@ -5873,12 +5963,31 @@
             },
             "type": "array"
           },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "reruns": {
+            "items": {
+              "$ref": "#/components/schemas/CheckRerun"
+            },
+            "type": "array"
+          },
           "review": {
             "type": "integer"
           },
           "selection": {
             "$ref": "#/components/schemas/FeedCheckSelection",
             "description": "Absent for historical runs and failures before selection."
+          },
+          "source": {
+            "description": "Absent for results of local check runs.",
+            "enum": [
+              "pull_request"
+            ],
+            "type": "string"
           },
           "started_at": {
             "format": "date-time",
@@ -5894,6 +6003,9 @@
               "failed",
               "incomplete"
             ],
+            "type": "string"
+          },
+          "status_url": {
             "type": "string"
           },
           "trace_url": {

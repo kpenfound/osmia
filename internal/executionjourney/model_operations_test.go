@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,7 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 func TestArchitectDraftRunsBesidePassAndOtherWorkstreams(t *testing.T) {
@@ -66,119 +61,6 @@ func TestArchitectDraftRunsBesidePassAndOtherWorkstreams(t *testing.T) {
 	}
 	if state, err := f.repository().Workflow(first, trace.FeatureSubject); err != nil || state.Value != HandedState {
 		t.Fatalf("held draft state: %+v %v", state, err)
-	}
-}
-
-func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.T) {
-	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
-		t.Run(backend, func(t *testing.T) {
-			if backend == config.WorkspacesJujutsu {
-				requireJJ(t)
-			}
-			f := newDebateFixture(t, 2, 1)
-			base := f.upstream(t)
-			first, repo := seedBuild(t, f, "parallel-final-one", validPlan, backend, base)
-			a := &finalReviewer{s: f.s, repository: repo}
-			_, one := assembleBoth(t, f, repo, a, first, map[string]string{"one.go": "package feature\n"}, map[string]string{"two.go": "package feature\n"})
-			second := recordBuild(t, f, repo, "parallel-final-two", validPlan, backend, base)
-			_, two := assembleBoth(t, f, repo, a, second, map[string]string{"three.go": "package feature\n"}, map[string]string{"four.go": "package feature\n"})
-			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-			gate := t.TempDir()
-			realGit, err := exec.LookPath("git")
-			must(t, err)
-			quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
-			script := "#!/bin/sh\nadding=0\nprevious=\nfor part in \"$@\"; do\n" +
-				"if [ \"$previous\" = worktree ] && [ \"$part\" = add ]; then adding=1; fi\n" +
-				"case \"$part\" in */.replay-*) if [ \"$adding\" = 1 ]; then printf '%s\\n' \"$part\" >> " + quote(filepath.Join(gate, "scratch")) + "; fi;; esac\nprevious=$part\ndone\nexec " + quote(realGit) + " \"$@\"\n"
-			must(t, os.WriteFile(filepath.Join(gate, "git"), []byte(script), 0700))
-			t.Setenv("PATH", gate+string(os.PathListSeparator)+os.Getenv("PATH"))
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			InspectForTest(f.s).ResizeCheckSlots(1)
-			checking, reading := make(chan struct{}, 2), make(chan struct{}, 2)
-			checksRelease, modelsRelease := make(chan struct{}, 2), make(chan struct{})
-			f.s.setReviewChecks(checkFunc(func(ctx context.Context, dir string) (CheckResult, error) {
-				if data, err := os.ReadFile(filepath.Join(dir, "UPSTREAM.md")); err != nil || string(data) != "upstream\n" {
-					return CheckResult{}, fmt.Errorf("checks missed upstream: %s %v", data, err)
-				}
-				checking <- struct{}{}
-				select {
-				case <-checksRelease:
-					return CheckResult{}, nil
-				case <-ctx.Done():
-					return CheckResult{}, ctx.Err()
-				}
-			}))
-			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				reading <- struct{}{}
-				select {
-				case <-modelsRelease:
-					_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "The assembled feature satisfies the spec.", "findings": []any{}})
-					return err
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			})
-			c, err := reconcile.New(repo, reconcile.Options{Worker: "final-review-fixture", Now: f.s.now, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: a}, Concurrent: concurrentOperation, Class: operationClass, Limit: InspectForTest(f.s).ModelOperationLimit(repo, nil)})
-			must(t, err)
-			defer func() { cancel(); c.Wait() }()
-			must(t, c.Pass(ctx))
-			awaitCheck(t, checking)
-			awaitCheckSlots(t, f.s, 1, 1)
-			if got := InspectForTest(f.s).Pool().Slots(nil).Used[committeeRole]; got != 1 {
-				t.Fatalf("one checking and one waiting review use %d committee slots, want 1", got)
-			}
-			probe := func() {
-				t.Helper()
-				g, err := featureWorkspaces(f.s.cfg, repo).Of(first)
-				must(t, err)
-				if backend == config.WorkspacesJujutsu {
-					entries, err := os.ReadDir(filepath.Join(g.(*workspace.Jujutsu).Directory, ".jujutsu", ".jj", "osmia-checkpoints"))
-					if err != nil && !os.IsNotExist(err) || len(entries) > 0 {
-						t.Fatalf("checkpoint remained open at an external boundary: %v %v", entries, err)
-					}
-				}
-				finished := make(chan error, 1)
-				go func() {
-					finished <- workspace.LocalStep(ctx, "independent-local-probe", f.s.now(), []workspace.Provider{g}, func(context.Context) error { return nil })
-				}()
-				must(t, awaitCheck(t, finished))
-				must(t, c.Pass(ctx))
-			}
-			probe()
-			log, err := os.ReadFile(filepath.Join(gate, "scratch"))
-			must(t, err)
-			paths := strings.Fields(string(log))
-			if len(paths) != 2 || paths[0] == paths[1] {
-				t.Fatalf("replays did not use distinct scratch worktrees: %q", log)
-			}
-			for _, path := range paths {
-				if _, err := os.Stat(path); !os.IsNotExist(err) {
-					t.Fatalf("replay scratch remains: %s %v", path, err)
-				}
-			}
-			checksRelease <- struct{}{}
-			awaitCheck(t, reading)
-			awaitCheck(t, checking)
-			if got := InspectForTest(f.s).Pool().Slots(nil).Used[committeeRole]; got != 2 {
-				t.Fatalf("one reading and one checking review use %d committee slots, want 2", got)
-			}
-			checksRelease <- struct{}{}
-			awaitCheck(t, reading)
-			probe()
-			close(modelsRelease)
-			must(t, c.Wait())
-			for i, stream := range []config.WorkstreamID{first, second} {
-				report, found, err := latestFinalReport(repo, stream)
-				must(t, err)
-				if !found || report.Outcome != finalReviewed || report.Upstream == nil || report.Upstream.Commit != upstream || report.Operation != []coreadapter.Operation{one, two}[i].ID {
-					t.Fatalf("final report: %+v", report)
-				}
-				if docs := streamDocuments(t, repo, stream, finalReportDocument); len(docs) != 1 {
-					t.Fatalf("recorded %d final reports", len(docs))
-				}
-			}
-		})
 	}
 }
 

@@ -5,12 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/agentcore/jev/jevtest"
-	"github.com/kpenfound/agentcore/jev/systemone"
-	"github.com/kpenfound/osmia/internal/api"
-	checkrun "github.com/kpenfound/osmia/internal/checks"
-	"github.com/kpenfound/osmia/internal/jev"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -110,22 +104,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
 	var problems []error
-	checked := 0
-	f.s.options.reviewChecks = checkFunc(func(_ context.Context, dir string) (CheckResult, error) {
-		checked++
-		data, err := os.ReadFile(filepath.Join(dir, "UPSTREAM.md"))
-		if err != nil || string(data) != "upstream moved\n" {
-			return CheckResult{}, fmt.Errorf("checks missed rebased candidate: %s %v", data, err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "UPSTREAM.md"), []byte("check generated output"), 0600); err != nil {
-			return CheckResult{}, err
-		}
-		return CheckResult{Output: "all proofs passed"}, nil
-	})
 	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		if checked != 1 {
-			problems = append(problems, fmt.Errorf("the checks ran %d times before the read", checked))
-		}
 		for path, want := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan, "charter.md": shedCharter,
 			"branch/internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n", "branch/UPSTREAM.md": "upstream moved\n"} {
 			if got, err := readTool(ctx, tools, path); err != nil || got != want {
@@ -167,16 +146,13 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)
-	var run FinalCheckRun
-	runs := streamDocuments(t, repository, stream, finalChecksDocument(1))
-	if len(runs) != 1 || runs[0].Path != "final/checks-1.json" || json.Unmarshal([]byte(runs[0].Content), &run) != nil ||
-		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}) {
-		t.Fatalf("the final check run %+v", runs)
+	if runs := streamDocuments(t, repository, stream, finalChecksDocument(1)); len(runs) != 0 {
+		t.Fatalf("a service with no GitHub credential recorded check results: %+v", runs)
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
 	assertCheckGateReviewInstructions(t, reader.Turns[len(reader.Turns)-1].Request.SystemPrompt)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json; you do not run them. The run passed.") || !strings.Contains(prompt, "all proofs passed") ||
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "No check results exist for this commit") || strings.Contains(prompt, "ran checks") ||
 		!strings.Contains(prompt, "- spec#1: served by merged units resume, each reviewed against its acceptance\n- spec#2: served by merged units dedupe") || strings.Contains(prompt, "change since") {
 		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
 	}
@@ -554,107 +530,6 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	}
 }
 
-// The service runs the final review's checks before the read and records
-// every run whatever its result. A review interrupted after a run is recorded
-// reads it back on retry instead of running the checks again. A run that did
-// not complete is never read: the review waits and runs the checks again,
-// waiting longer after each run, and after maxIncompleteChecks such runs in a
-// row the owner's inbox reports them until a run completes.
-func TestFinalReviewWaitsForChecksThatComplete(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "final-checks")
-	ctx := context.Background()
-	_, op := assembleBoth(t, f, repository, a, stream,
-		map[string]string{"internal/trace/resume.go": "package trace\n"},
-		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	// A check record without captured output does not reserve an output revision.
-	prior, err := json.Marshal(FinalCheckRun{Review: 1, Commit: "another-candidate", Status: ChecksPassed})
-	must(t, err)
-	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalChecksDocument(1), Revision: 1, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: checksActor, Cause: "fixture"}, Path: finalChecksPath(1), Content: string(prior)}}))
-	rawOutput := "engine diagnostic start\n" + strings.Repeat("transport detail\n", 6000) + "engine diagnostic end\n"
-	runs, complete := 0, false
-	f.s.options.reviewChecks = checkFunc(func(context.Context, string) (CheckResult, error) {
-		runs++
-		if complete {
-			return CheckResult{Output: "all proofs passed"}, nil
-		}
-		return CheckResult{ExitCode: -1, Output: rawOutput}, errors.New("engine unreachable")
-	})
-	f.s.boundary = func(name string) error {
-		if name == "final-checks-recorded" {
-			return errors.New("the service stopped")
-		}
-		return nil
-	}
-	if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
-		t.Fatalf("the interrupted review: %v", err)
-	}
-	f.s.boundary = nil
-	read := 0
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		read++
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
-		return err
-	})
-	if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "final review 1 waits for its checks: 1 runs in a row on") || !strings.Contains(err.Error(), "engine unreachable") {
-		t.Fatalf("the review read a commit whose checks did not complete: %v", err)
-	}
-	if runs != 1 || read != 0 {
-		t.Fatalf("the checks ran %d times and the reader %d times before the wait passed", runs, read)
-	}
-	var run FinalCheckRun
-	docs := streamDocuments(t, repository, stream, finalChecksDocument(1))
-	if len(docs) != 2 || json.Unmarshal([]byte(docs[1].Content), &run) != nil || run.Status != ChecksIncomplete || run.Error != "engine unreachable" || run.Commit == "" || run.OutputRevision != 1 {
-		t.Fatalf("the final check run %+v", docs)
-	}
-	outputDocs := streamDocuments(t, repository, stream, finalChecksDocument(1)+"-output")
-	if len(outputDocs) != 1 || outputDocs[0].Content != rawOutput || outputDocs[0].Path != run.OutputPath || !run.Truncated || !strings.Contains(run.Output, "engine diagnostic start") || !strings.Contains(run.Output, "engine diagnostic end") {
-		t.Fatal("final check recovery lost captured output or diagnostics")
-	}
-	entry := func() (InboxEntry, bool) {
-		t.Helper()
-		state, err := repository.Workflow(stream, finalReviewSubject)
-		must(t, err)
-		e, open, err := finalChecksEntry(repository, trace.WorkstreamStatus{Workstream: stream, Subjects: map[string]trace.WorkflowState{finalReviewSubject: state}})
-		must(t, err)
-		return e, open
-	}
-	for n, wait := range []time.Duration{checkRetryDelay, 2 * checkRetryDelay} {
-		if _, open := entry(); open {
-			t.Fatalf("the inbox reports %d incomplete runs", n+1)
-		}
-		f.clock.At = f.clock.At.Add(wait + time.Minute)
-		if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%d runs in a row", n+2)) {
-			t.Fatalf("run %d: %v", n+2, err)
-		}
-	}
-	if runs != 3 || read != 0 {
-		t.Fatalf("the checks ran %d times and the reader %d times", runs, read)
-	}
-	e, open := entry()
-	if !open || e.Kind != InboxFinalChecks || e.Revision != 1 || !strings.Contains(e.Question, "did not complete 3 times in a row") || !strings.Contains(e.Question, "Last failure: engine unreachable") || !strings.Contains(e.Blocked, "waiting longer after each run") {
-		t.Fatalf("the inbox entry %+v, open %v", e, open)
-	}
-	complete = true
-	if _, err := a.Apply(ctx, op); err == nil {
-		t.Fatal("the checks ran again before the longer wait passed")
-	}
-	f.clock.At = f.clock.At.Add(finalCheckDelay(3) + time.Minute)
-	result, err := a.Apply(ctx, op)
-	must(t, err)
-	if result.Outcome != "succeeded" || runs != 4 || read != 1 {
-		t.Fatalf("result %+v after %d check runs and %d reads", result, runs, read)
-	}
-	reader, err := repository.Thread(stream, committeeAgent(1))
-	must(t, err)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "The run passed.") || strings.Contains(prompt, "engine unreachable") {
-		t.Fatalf("the reader's prompt:\n%s", prompt)
-	}
-	if _, open := entry(); open {
-		t.Fatal("the inbox still reports the checks once a run completed")
-	}
-}
-
 // A final review interrupted before its replay, after its rebase is
 // recorded, or after the branch moved to the rebased commit is reconciled on
 // retry: the retry's inspection observes how far the interrupted attempt
@@ -730,160 +605,7 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 	}
 }
 
-func TestFinalReviewSelectsChecksForRebasedCommit(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"selected", "unconfigured", "declined", "unavailable", "unlisted", "no_checks"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			f, stream, repo, a := newFinalFixture(t, "final-selection")
-			before, op := assembleBoth(t, f, repo, a, stream,
-				map[string]string{"internal/trace/resume.go": "package trace\n"},
-				map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream only\n"})
-			links := []string{"dag+check://go/test", "dag+check://release/version"}
-			checks := &fakeChecks{Links: links, Outcomes: passing()}
-			f.s.options.reviewChecks = checks
-			probability := 0.9
-			if mode == "declined" {
-				probability = 0.1
-			}
-			response := jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
-				"check-0": jevtest.Noul(probability), "check-1": jevtest.Noul(0.1),
-			}}}
-			if mode == "unavailable" {
-				response = jevtest.Result{Err: &systemone.Error{Kind: systemone.KindUnavailable, Message: "offline"}}
-			}
-			provider := &jevtest.Provider{Results: []jevtest.Result{response}}
-			if mode != "unconfigured" {
-				useJevProvider(f.s, provider)
-			}
-			if mode == "unlisted" {
-				checks.ListErr = errors.New("listing unavailable")
-			}
-			if mode == "no_checks" {
-				checks.Links = nil
-			}
-			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checked branch.", "findings": []any{}})
-				return err
-			})
-			_, err := a.Apply(context.Background(), op)
-			must(t, err)
-			docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
-			if len(docs) != 1 {
-				t.Fatalf("check records: %+v", docs)
-			}
-			var run FinalCheckRun
-			must(t, json.Unmarshal([]byte(docs[0].Content), &run))
-			if run.Selection == nil || run.Status != ChecksPassed || run.Commit == before {
-				t.Fatalf("final check run: %+v", run)
-			}
-			selection := run.Selection
-			var selected []string
-			if mode == "selected" {
-				selected = links[:1]
-				if selection.Mode != checkrun.SelectionSelected || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 || selection.Judgment == "" {
-					t.Fatalf("selected evidence: %+v", selection)
-				}
-			} else if selection.Mode != checkrun.SelectionFull || selection.Reason != mode || len(selection.Links) != 0 {
-				t.Fatalf("full evidence: %+v, want %s", selection, mode)
-			}
-			if runs := checks.Runs(); len(runs) != 1 || !slices.Equal(runs[0], selected) || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast", "--parallel", "4"}, selected...)) {
-				t.Fatalf("runner links %v, command %v", runs, run.Command)
-			}
-			starts := finalCheckStarts(t, repo, stream)
-			if len(starts) != 1 || !reflect.DeepEqual(starts[0].Selection, selection) {
-				t.Fatalf("start evidence: %+v", starts)
-			}
-			if mode == "unconfigured" || mode == "unlisted" || mode == "no_checks" {
-				if len(provider.Requests()) != 0 {
-					t.Fatal("preflight fallback asked Jev")
-				}
-			} else {
-				if selection.Judgment == "" || selection.Candidates != 2 || selection.Listed == nil || *selection.Listed != 2 {
-					t.Fatalf("judgment evidence: %+v", selection)
-				}
-				requests := provider.Requests()
-				if len(requests) == 0 {
-					t.Fatal("Jev was not asked")
-				}
-				state, _ := requests[0].State.(map[string]any)
-				g, err := featureWorkspaces(f.s.cfg, repo).Of(stream)
-				must(t, err)
-				diff, err := g.Diff(context.Background(), upstream, run.Commit)
-				must(t, err)
-				if state["diff"] != diff || strings.Contains(diff, "UPSTREAM.md") {
-					t.Fatalf("judged change: %+v, want %s", state, diff)
-				}
-				judgmentDocs := streamDocuments(t, repo, stream, selection.Judgment)
-				var judgment jev.Record
-				must(t, json.Unmarshal([]byte(judgmentDocs[len(judgmentDocs)-1].Content), &judgment))
-				if judgment.Scope.Project != string(repo.Project()) || judgment.Scope.Workstream != string(stream) || judgment.Scope.Thread != finalReviewSubject || !strings.Contains(judgment.Scope.Turn, run.Commit) {
-					t.Fatalf("judgment scope: %+v", judgment.Scope)
-				}
-			}
-			reader, err := repo.Thread(stream, committeeAgent(1))
-			must(t, err)
-			request := reader.Turns[len(reader.Turns)-1].Request
-			if !strings.Contains(request.Prompt, checkrun.DescribeSelection(*selection)) || strings.Contains(request.Prompt+request.SystemPrompt, "every project check") {
-				t.Fatalf("reader lacks selection: %s\n%s", request.SystemPrompt, request.Prompt)
-			}
-			entries, err := feedChecks(repo, stream)
-			must(t, err)
-			i := slices.IndexFunc(entries, func(e api.FeedEntry) bool { return e.FinalChecks != nil })
-			if i < 0 || !reflect.DeepEqual(entries[i].FinalChecks.Selection, feedSelection(selection)) || entries[i].FinalChecks.Selection.Description != checkrun.DescribeSelection(*selection) {
-				t.Fatalf("feed selection: %+v", entries)
-			}
-		})
-	}
-}
-
-func TestFinalReviewRunsEveryCheckWhenDaggerRefusesTheSelection(t *testing.T) {
-	t.Parallel()
-	f, stream, repo, a := newFinalFixture(t, "final-refused")
-	_, op := assembleBoth(t, f, repo, a, stream,
-		map[string]string{"internal/trace/resume.go": "package trace\n"},
-		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	links := []string{"dag+check://go/test", "dag+check://release/version"}
-	const message = "no checks matched pattern"
-	checks := &fakeChecks{Links: links, Outcomes: []checkOutcome{
-		{Result: CheckResult{ExitCode: 1, Output: "Error: " + message + "\n", Refusal: message}},
-		{Result: CheckResult{Output: "CHECKS  ✔ 2 passed\n"}},
-	}}
-	f.s.options.reviewChecks = checks
-	useJevProvider(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{
-		"check-0": jevtest.Noul(0.9), "check-1": jevtest.Noul(0.1),
-	}}}}})
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checked branch.", "findings": []any{}})
-		return err
-	})
-	_, err := a.Apply(context.Background(), op)
-	must(t, err)
-	docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
-	if len(docs) != 1 {
-		t.Fatalf("check records: %+v", docs)
-	}
-	var run FinalCheckRun
-	must(t, json.Unmarshal([]byte(docs[0].Content), &run))
-	if run.Status != ChecksPassed || run.Selection.Mode != checkrun.SelectionFull || run.Selection.Reason != checkrun.SelectionRefused || run.Selection.Detail != message || !slices.Equal(run.Command, checkrun.Command(nil)) {
-		t.Fatalf("final check run: %+v, selection %+v", run, run.Selection)
-	}
-	if runs := checks.Runs(); len(runs) != 2 || len(runs[0]) != 1 || runs[1] != nil {
-		t.Fatalf("runner links %q", runs)
-	}
-	if starts := finalCheckStarts(t, repo, stream); len(starts) != 1 || starts[0].Selection.Mode != checkrun.SelectionSelected {
-		t.Fatalf("start evidence: %+v", starts)
-	}
-	entries, err := feedChecks(repo, stream)
-	must(t, err)
-	i := slices.IndexFunc(entries, func(e api.FeedEntry) bool { return e.FinalChecks != nil })
-	if i < 0 || entries[i].FinalChecks.Selection.Reason != checkrun.SelectionRefused || entries[i].FinalChecks.Selection.Mode != checkrun.SelectionFull {
-		t.Fatalf("feed selection: %+v", entries)
-	}
-}
-
-func TestLegacyFinalChecksKeepRetryCountingAndDelay(t *testing.T) {
+func TestLegacyFinalChecksStillDecodeAndCount(t *testing.T) {
 	t.Parallel()
 	f, stream, repo, a := newFinalFixture(t, "legacy-final-checks")
 	at := f.clock.Now()
@@ -897,11 +619,5 @@ func TestLegacyFinalChecksKeepRetryCountingAndDelay(t *testing.T) {
 	if n != 2 || latest.Selection != nil || latest.Attempt != 0 || finalCheckDelay(n) != 2*checkRetryDelay {
 		t.Fatalf("legacy count %d: %+v", n, latest)
 	}
-	run, err := a.finalChecks(context.Background(), f.s.cfg, stream, FinalReport{Review: 1, Commit: "candidate"})
-	if err == nil || !strings.Contains(err.Error(), at.Add(2*checkRetryDelay).UTC().Format(time.RFC3339)) || !reflect.DeepEqual(run, latest) {
-		t.Fatalf("legacy retry: %+v %v", run, err)
-	}
-	if starts := finalCheckStarts(t, repo, stream); len(starts) != 0 {
-		t.Fatalf("waiting legacy run started: %+v", starts)
-	}
+
 }

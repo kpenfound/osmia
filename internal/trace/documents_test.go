@@ -651,6 +651,15 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err == nil {
 		t.Fatal("recorded a final check run without a run number")
 	}
+	rerun := unitReport("{\"push\":2}\n", 1)
+	rerun.ID, rerun.Path = "final-checks-1-push-2-rerun", "final/checks-1-push-2-rerun.json"
+	if err := r.RecordDocuments(ctx, []Document{rerun}); err != nil {
+		t.Fatal(err)
+	}
+	rerun.ID, rerun.Path = "final-checks-1-push-x-rerun", "final/checks-1-push-x-rerun.json"
+	if err := r.RecordDocuments(ctx, []Document{rerun}); err == nil {
+		t.Fatal("recorded a check rerun without a push number")
+	}
 	handback := unitReport("{\"drift\":2,\"held\":1}\n", 1)
 	handback.ID, handback.Path = "drift-handback-2", "drift/handback-2.json"
 	if err := r.RecordDocuments(ctx, []Document{handback}); err != nil {

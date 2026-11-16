@@ -128,9 +128,9 @@ requested tests exist and exercise the behaviour.
     the chosen links. Refused or non-reporting reruns leave a failed check
     standing. A lost engine session is incomplete.
 
-Unit, final-review and session check runs all use this selection. Before a
-final review, the service judges the rebased feature branch commit against
-the upstream base it sits on. Accepted judgments pass only their selected
+Unit and session check runs use this selection; the final review runs no
+local checks and reads the pull request's Dagger Cloud statuses instead.
+Accepted judgments pass only their selected
 links to Dagger; a full-run fallback records the same reason as a unit run.
 An owner's explicit full session run remains a full run.
 If the run cannot read the change's diff, it stops before executing checks.
@@ -178,10 +178,9 @@ prints no trace leaves the link empty.
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
 the links Jev selected.
-Final-review attempts record their selection in
-`final/checks-<review>-attempt-<attempt>-started.json` immediately before
-execution, and in `final/checks-<review>.json` beside the command and result.
-Older final records without a selection remain readable.
+Final review records written by older local runs, with their selection in
+`final/checks-<review>-attempt-<attempt>-started.json` and
+`final/checks-<review>.json`, remain readable.
 
 The selection has this shape:
 
@@ -252,9 +251,8 @@ checks ran out of 37 candidate links in judgment judgment_4f1c...". The web
 feed says that no check reached the threshold and the highest-scored checks
 ran, retaining selected, judged and listed counts. That sentence appears in
 the unit's transition to reviewing and its notice, in the reviewer's prompt with the check evidence, and in the verdict a
-mason receives when checks fail. The final reader's prompt and the feed's
-final-review check entry also describe the selection and its reason. Running
-final attempts show their selection as soon as start evidence is recorded.
+mason receives when checks fail. The feed's entries of older local final-review runs also describe the selection
+and its reason.
 
 When breadth succeeds, the summary adds the kept and total top-level counts
 and the chosen levels, such as "within 2 of 5 top-level checks, by go-package".
@@ -309,8 +307,8 @@ failure and stays failed.
 ## Cloud fallback
 
 With `[dagger] check_fallback = "cloud"` and an `engine` other than `cloud`
-([configuration](configuration.md#cloud-fallback-for-checks)), unit,
-final-review and session check runs retry on the Dagger Cloud engine, with the
+([configuration](configuration.md#cloud-fallback-for-checks)), unit
+and session check runs retry on the Dagger Cloud engine, with the
 token named by `cloud_token_env`, the work that cannot finish locally. With the
 key off, or with `engine = "cloud"`, none of this applies.
 
@@ -341,7 +339,7 @@ budget restarts per invocation, per group of links or per rerun, so an
 operation finishes or is cut off within about twice `checks_timeout`. The cloud
 attempt runs inside the capacity slot the operation already holds. If the
 cloud attempt does not finish either, the run is incomplete and the unit retry,
-contest and final-review backoff apply as they do without the fallback.
+and contest backoff apply as they do without the fallback.
 
 **Memory per workstream.** A link that needed cloud in a workstream, because it
 was escalated or routed there in one of that workstream's unit or final-review

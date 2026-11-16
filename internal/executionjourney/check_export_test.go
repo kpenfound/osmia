@@ -14,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -147,30 +146,6 @@ fi`, 1)), 0700))
 				run := onlyRun(t, repo, stream)
 				if checks.calls != 1 || checks.listed != 1 || run.Candidate != candidate || run.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || run.TraceURL != checks.traceURL {
 					t.Fatalf("persisted unit run %+v, runner %+v", run, checks)
-				}
-				assertCheckTraceRedacted(t, repo, stream)
-			})
-			t.Run(backend+"/"+mode+"/final", func(t *testing.T) {
-				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, nil)
-				base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-				stream, repo := seedBuild(t, f, "identity-final", validPlan, backend, base)
-				candidate := moveFeature(t, f, stream, map[string]string{"candidate.txt": "pinned candidate tree\n"})
-				moveFeature(t, f, stream, map[string]string{"candidate.txt": "newer feature tree\n"})
-				cfg := f.s.current()
-				checks := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: candidate, Branch: featureBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: f.clone}}
-				f.s.options.reviewChecks = checks
-				enableListing(f.s)
-				a := &finalReviewer{s: f.s, repository: repo}
-				run, err := a.finalChecks(context.Background(), cfg, stream, FinalReport{Review: 1, Operation: "check-export", Commit: candidate, Upstream: &seal.Base{Commit: base}})
-				must(t, err)
-				var saved FinalCheckRun
-				docs := streamDocuments(t, repo, stream, finalChecksDocument(1))
-				if len(docs) != 1 {
-					t.Fatalf("final check records: %+v", docs)
-				}
-				must(t, json.Unmarshal([]byte(docs[0].Content), &saved))
-				if checks.calls != 1 || checks.listed != 1 || saved.Commit != candidate || saved.Status != ChecksPassed || run.CIIdentityFallback != checks.fallback || saved.CIIdentityFallback != checks.fallback || saved.TraceURL != checks.traceURL || run.TraceURL != checks.traceURL {
-					t.Fatalf("persisted final run %+v, runner %+v", saved, checks)
 				}
 				assertCheckTraceRedacted(t, repo, stream)
 			})

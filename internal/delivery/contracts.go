@@ -16,8 +16,6 @@ type CheckResult = api.CheckResult
 
 type CheckSelection = api.CheckSelection
 
-const checksRole = execution.ChecksRole
-
 const ChecksIncomplete = execution.ChecksIncomplete
 
 const Conflict = api.Conflict

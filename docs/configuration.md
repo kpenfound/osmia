@@ -343,7 +343,7 @@ for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
 `capacity.checks` must be positive, defaults to 2 and limits service Dagger check
-runs across all projects and workstreams, including unit, final-review and session
+runs across all projects and workstreams, including unit and session
 runs. A run waits cancellably for a free slot in arrival order before selecting
 and running checks. Waiting does not consume `checks_timeout` or count as an
 incomplete run.
@@ -721,22 +721,21 @@ three such runs of one candidate in a row the unit is contested instead: a
 ruling of review runs its checks again, and revise returns it to its mason. One
 run at a time per workstream; a pause holds runs not yet started.
 
-Before the final read, the service uses the same [smart-check selection](smart-checks.md)
-on the rebased feature branch commit against its upstream base and runs the
-selected checks, or every check on a fallback, within `checks_timeout`. It
-records the run as `final/checks-<k>.json` for final review `k`, with the commit,
-selection, command, exit status, failed checks and the diagnostic excerpt. The complete captured output
-is recorded with it as `final/checks-<k>-output.txt`, accessible the same way.
-The final reader's prompt carries the selection and result; neither it nor a
-unit reviewer runs checks. A final run that reports no result is recorded as
-incomplete, and the read waits for checks to complete. Retries wait longer
-after each incomplete run, up to an hour, and reuse the recorded judgment for
-the same review, commit and selection inputs, including after a restart. A
-completed run is read back instead of running the checks again. The check client
-receives PATH, the service's engine selection and CLI release,
-and DOCKER_HOST when the engine uses Docker (or under auto host selection).
-It uses a temporary HOME and receives the configured Dagger Cloud token when
-applicable, without provider, GitHub or SSH credentials.
+Before the final read, the service waits for the Dagger Cloud statuses of the
+pushed commit instead of running checks: it reads nothing for 2 minutes after
+the push, then reads the commit's combined statuses at `pull_request_poll` and
+records the completed result as `final/checks-<k>.json` for final review `k`,
+with the source `pull_request`, the pull request and push, the status URL, the
+counts, the failed checks with their `dagger trace` ids and the one rerun of
+failed checks. A run with no completed "Run Dagger Checks" status within
+`checks_timeout` of the push, or with cancelled or unaccounted checks, is
+recorded as incomplete and read again after a wait that doubles with each
+further run, up to an hour. The final reader's prompt carries the result; neither
+it nor a unit reviewer runs checks. A completed result is read back instead of
+read again. The one `dagger cloud checks rerun --failed --pr <N>` of a failure
+runs from the workstream's checkout and receives PATH, a temporary HOME and
+the Dagger Cloud token `cloud_token_env` names, without engine, provider,
+GitHub or SSH credentials. Final reviews take no check slot.
 There is no command fallback.
 
 Reviewers read diffs through the `workstream_diff` tool rather than their
@@ -806,7 +805,7 @@ with a single `checks_timeout`.
 
 The key does nothing when `engine` is already `cloud`: checks keep running on
 that Cloud engine, with no separate local attempt, escalation or routing.
-Masons stay on the configured engine and do not receive the token. How unit, final-review
+Masons stay on the configured engine and do not receive the token. How unit
 and session check runs use the fallback is described under
 [Cloud fallback](smart-checks.md#cloud-fallback).
 
@@ -1152,11 +1151,13 @@ early check. Archive and failed-edge attempt timing is kept in memory and may
 reset on a process restart; durable observations and outcomes remain intact.
 
 `checks_timeout` is a Go duration string from `1m` to `24h`: how long one run
-of a unit candidate's checks, or of a final review's checks, may
-take. It defaults to `"15m"`; raise it for a repo whose `dagger check` runs
-longer. A run that outlasts it did not complete: the unit stays checking and its
-checks run again later, and a final review's reader is told its checks did not
-complete. Listing the check links for a Jev selection has its
+of a unit candidate's checks may take, and how long after a push, or after a
+rerun was requested, a final review waits for a completed "Run Dagger Checks"
+status. It defaults to `"15m"`; raise it for a repo whose `dagger check` runs
+longer. A unit run that outlasts it did not complete: the unit stays checking
+and its checks run again later. A final review's pull request status that is
+still pending after it is recorded as an incomplete run, and the statuses are
+read again later. Listing the check links for a Jev selection has its
 own five-minute bound. A change applies to runs that start after a reload.
 
 A `classifier` key in a project file is accepted and ignored, so a file that has
@@ -1687,7 +1688,7 @@ staff's notice cites. A fallback leaves an unclear ending a clarify
 continuation, which counts toward `mason.max_clean_turns` like any other
 classified turn, so the unit is contested once the bound is reached.
 
-Unit, final-review and smart session check runs use three stages. `dagger list checks --format=link` supplies top-level checks;
+Unit and smart session check runs use three stages. `dagger list checks --format=link` supplies top-level checks;
 `dagger list checks --all --format=link` supplies expanded links, with scoped
 listings attributing them to top-level checks. Breadth asks which top-level
 checks the change could affect and uses `jev.check_threshold` to keep them.

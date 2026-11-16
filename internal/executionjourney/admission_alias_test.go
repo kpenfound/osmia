@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
@@ -28,25 +26,22 @@ const RedraftAction = service.RedraftAction
 const SealAction = service.SealAction
 
 var archiveResolved = lifecycle.ArchiveResolved
-var await = intakefixture.Await
 
 const baseWaitSubject = lifecycle.BaseWaitSubject
 
 var changeHeld = lifecycle.ChangeHeld
 
-const checksRole = execution.ChecksRole
 
 var concurrentOperation = service.TestConcurrentOperation
 var conversationOperation = service.TestConversationOperation
+var jump = fixturekit.Jump
+var operationClass = service.TestOperationClass
 
 func driftOperations(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	return intakefixture.DriftOperations(t, repo, stream, DriftAction)
 }
 
 var ensureSessionThread = service.TestEnsureSessionThread
-var incompleteFinalChecks = delivery.IncompleteFinalChecks
-var jump = fixturekit.Jump
-var operationClass = service.TestOperationClass
 
 const otherStream = fixturekit.OtherStream
 
@@ -85,9 +80,6 @@ func recordUpstreamOwnPullRequest(t *testing.T, s *Service, repo *trace.Reposito
 }
 func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest UnitCheckRun, runs []UnitCheckRun) (int, error) {
 	return c.driver().IncompleteSinceEntry(stream, unit, latest, runs)
-}
-func (d *finalReviewer) rebase(stream config.WorkstreamID, k int) (FinalRebase, bool, error) {
-	return d.driver().Rebase(stream, k)
 }
 func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
 	t.Helper()

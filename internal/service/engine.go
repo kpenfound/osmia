@@ -52,6 +52,22 @@ func (s *Service) configuredCloudChecks(cfg *config.Config) ReviewChecks {
 	return DaggerChecks{Engine: string(config.DaggerEngineCloud), CloudToken: token}
 }
 
+// configuredRerun is the runner that requests a rerun of a pull request's
+// failed Cloud checks for cfg: the Dagger CLI with the token
+// dagger.cloud_token_env names, which may be unset, in which case no rerun can
+// be requested.
+func (s *Service) configuredRerun(cfg *config.Config) CloudRerunner {
+	if s.options.CloudRerun != nil {
+		return s.options.CloudRerun
+	}
+	if cfg == nil {
+		return nil
+	}
+	token := os.Getenv(cfg.Dagger.Resolve().CloudTokenEnv)
+	redact.Register(token)
+	return DaggerChecks{CloudToken: token}
+}
+
 func (s *Service) ensureEngine(ctx context.Context, cfg *config.Config) error {
 	// Read and register the token before any engine command can report an error.
 	s.configuredChecks(cfg)

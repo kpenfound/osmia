@@ -31,6 +31,8 @@ type FakePulls struct {
 	Readies int
 	Lose    bool
 	Fork    func() string
+	// Statuses, when set, answers the combined status read of a commit.
+	Statuses func(ctx context.Context, repository, commit string) (pulls.CommitStatuses, error)
 	// findErr, when set, fails every Find as a refusing host does.
 	FindErr error
 	// uncredentialed reports the client holding no credential, as GitHub

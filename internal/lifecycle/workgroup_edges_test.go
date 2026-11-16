@@ -68,19 +68,6 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	t.Helper()
 	ctx := context.Background()
 	f, stream, repository, report, repo2, upstream := newCrossRepoEdgeDependent(t)
-	checkCalls := 0
-	f.s.options.reviewChecks = checkFunc(func(_ context.Context, directory string) (CheckResult, error) {
-		checkCalls++
-		dependency, err := os.ReadFile(filepath.Join(directory, "dependency.txt"))
-		if err != nil || strings.TrimSpace(string(dependency)) != "aabbccddeeff0011223344556677889900aabbccdd" {
-			return CheckResult{}, fmt.Errorf("checks missed merged dependency reference: %q, %v", dependency, err)
-		}
-		if repair && checkCalls == 1 {
-			return CheckResult{ExitCode: 1, Output: failedReport("dag://?check=go/packages/tests/test&go-test=TestDedupe") + "TestDedupe fails after the dependency update\n"}, nil
-		}
-		return CheckResult{Output: "dependency checks pass"}, nil
-	})
-
 	// The dependent's own fork and a fake pull-request host shared by both
 	// repos, set up directly (not through newPublicationFixtureWith, which
 	// would also touch the single-project Landing convenience field that
@@ -242,11 +229,6 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !found || fresh.EdgeResolved == "" || fresh.Commit == report.Commit {
 			t.Fatalf("fresh review did not read the dependency update: %+v", fresh)
 		}
-		_, checks, err := a.incompleteChecks(stream, in.Review, fresh.Commit)
-		must(t, err)
-		if checks.Commit != fresh.Commit {
-			t.Fatalf("checks did not read the update: %+v", checks)
-		}
 		assertContext(true)
 		return fresh
 	}
@@ -265,13 +247,6 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		}
 		mergeDirectly(t, f, repository, stream, units[1].Unit.ID, map[string]string{"dedupe.go": "package demo\n\nfunc Dedupe() bool { return true }\n"})
 		fresh = runReview(false)
-	}
-	wantChecks := 1
-	if repair {
-		wantChecks = 2
-	}
-	if checkCalls != wantChecks {
-		t.Fatalf("checks ran %d times, want %d", checkCalls, wantChecks)
 	}
 
 	// Only a fresh delivery approval (the second and only other owner

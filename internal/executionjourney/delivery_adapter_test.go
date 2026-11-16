@@ -7,7 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -201,8 +200,3 @@ func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, comm
 	return d.driver().IncompleteChecks(stream, k, commit)
 }
 
-func (d *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
-	return d.driver().FinalChecks(ctx, cfg, stream, report)
-}
-
-var feedChecks = service.TestFeedChecks

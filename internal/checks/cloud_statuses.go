@@ -281,9 +281,17 @@ func ParseCloudStatusDocument(data []byte) (CloudStatusDocument, error) {
 // not pending. An error means the read or the JSON failed; the caller counts
 // the run as incomplete and never as passed.
 func ReadCloudChecks(ctx context.Context, reader pulls.StatusReader, fetcher CloudStatusFetcher, repository, commit string) (CloudResult, error) {
+	result, _, err := ReadCloudStatuses(ctx, reader, fetcher, repository, commit)
+	return result, err
+}
+
+// ReadCloudStatuses is ReadCloudChecks that also returns the statuses it
+// read, so a caller can look at the status of any one check in the same read.
+// The statuses are empty when the read itself failed.
+func ReadCloudStatuses(ctx context.Context, reader pulls.StatusReader, fetcher CloudStatusFetcher, repository, commit string) (CloudResult, pulls.CommitStatuses, error) {
 	read, err := reader.CommitStatuses(ctx, repository, commit)
 	if err != nil {
-		return CloudResult{}, err
+		return CloudResult{}, pulls.CommitStatuses{}, err
 	}
 	var doc *CloudStatusDocument
 	if run, ok := read.Status(CloudRunContext); ok && run.State != "pending" {
@@ -291,10 +299,11 @@ func ReadCloudChecks(ctx context.Context, reader pulls.StatusReader, fetcher Clo
 			d, err := fetcher.Fetch(ctx, run.TargetURL)
 			if err != nil {
 				result, _ := InterpretCloudStatuses(read, nil)
-				return result, err
+				return result, read, err
 			}
 			doc = &d
 		}
 	}
-	return InterpretCloudStatuses(read, doc)
+	result, err := InterpretCloudStatuses(read, doc)
+	return result, read, err
 }

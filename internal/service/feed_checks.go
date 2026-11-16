@@ -88,7 +88,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			// Results without start evidence (including preparation failures and
 			// legacy attempts) remain distinct by document revision.
 			key := finalCheckAttemptDocument(run.Review, run.Attempt)
-			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{TraceURL: run.TraceURL, Review: run.Review, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, FinishedAt: &run.FinishedAt}}
+			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{TraceURL: run.TraceURL, Review: run.Review, State: run.Status, Source: run.Source, PullRequest: run.PullRequest, Push: run.Push, StatusURL: run.StatusURL, Counts: run.Counts, FailedChecks: run.FailedChecks, Reruns: run.Reruns, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[key]; ok && run.Attempt > 0 {
 				entry.At = out[i].At
 				entry.FinalChecks.Attempt = run.Attempt

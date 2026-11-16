@@ -337,9 +337,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
-  an attempt publishes. A final review whose project checks did not complete
-  three times in a row is listed with the last failure and when the checks run
-  next; it takes no answer, and it leaves the inbox once a run completes. A
+  an attempt publishes. A final review whose pull request checks did not complete
+  three times in a row is listed with the last failure and when the statuses are
+  read next; it takes no answer, and it leaves the inbox once a run completes. A
   held drift rebase, whose conflict resolution review
   sent back `shed.max_bounces` times, or whose drift mason or reviewer turn
   failed or ended without a verdict, is answered with `rebase`, which

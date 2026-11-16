@@ -52,7 +52,7 @@ Capacity questions (query 1) read pool limit and slot spans. Time questions
 | `osmia.workstream.state` | root | the transition that entered the state to the one that ended it | workstream state, owner-gate waits included |
 | `osmia.unit.state` | root | the same, for a unit | unit state |
 | `invoke_agent <role>` | root | the turn's recorded start to start plus duration | agent turn |
-| `osmia.check.run` | root | the run's recorded start to finish | check run: unit, final review or session |
+| `osmia.check.run` | root | the run's recorded start to finish; a final review's result read from the pull request's statuses starts at the push (or at the previous incomplete run) and ends when the result is recorded | check run: unit, final review or session |
 | `osmia.slot.held` | root, or none | the pool granting the slot to the pool giving it back | slot held |
 | `osmia.slot.wait` | root, or none | the first capacity refusal to the end of the wait | wait for a slot |
 | `osmia.pool.limit` | `osmia.service.uptime` of the run | service start or the reload that set the limit, to the reload that changed it or shutdown | interval of constant limit of a configured pool |
