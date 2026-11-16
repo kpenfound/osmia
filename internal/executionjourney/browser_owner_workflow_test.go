@@ -52,7 +52,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{Fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch, SyncHead: true}
 	f.opts.PullRequests = prs
 	// passed counts completed reconciliation passes, so the pause-while-
 	// delivering check below waits for the scheduler to have demonstrably
@@ -287,11 +287,18 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
 		t.Fatalf("the paused workstream went on to %+v %v", feature, err)
 	}
+	// The draft opened when the workstream was assembled; the pause leaves it
+	// a draft.
 	prs.Mu.Lock()
-	opened := len(prs.Prs)
+	opened, drafts, readied := len(prs.Prs), 0, prs.Readies
+	for _, pr := range prs.Prs {
+		if pr.Draft {
+			drafts++
+		}
+	}
 	prs.Mu.Unlock()
-	if opened != 0 {
-		t.Fatalf("pull requests opened while the workstream was paused: %d, want 0", opened)
+	if opened != 1 || drafts != 1 || readied != 0 {
+		t.Fatalf("pull requests while the workstream was paused: %d, %d of them drafts, %d marked ready; want the one draft", opened, drafts, readied)
 	}
 	p.OpenPauses()
 	p.Click(shownPause + "[data-field=resume]")

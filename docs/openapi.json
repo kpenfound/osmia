@@ -5402,8 +5402,18 @@
           "pull_request": {
             "type": "integer"
           },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "remote": {
             "type": "string"
+          },
+          "review": {
+            "type": "integer"
           },
           "reviewed": {
             "type": "string"

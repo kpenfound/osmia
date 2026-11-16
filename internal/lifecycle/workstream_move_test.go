@@ -267,17 +267,19 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 	if result := settleOperation(t, p.s, p.repository, p.stream, op, reviewer); result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	if tip, _ := p.forkBranch(t); tip != before {
-		t.Fatal("the pull request changed before the owner's approval")
+	// The final review of the repaired branch pushed it to the open pull
+	// request without an approval.
+	pushed, _ := p.forkBranch(t)
+	if pushed == before || p.pulls.Creates != 1 || p.pulls.Prs[0].HeadCommit != pushed {
+		t.Fatalf("the repaired branch was not pushed to the same pull request: tip %s, was %s, creates %d, pull request %+v", pushed, before, p.pulls.Creates, p.pulls.Prs[0])
 	}
 	description := "Resumable uploads\n\nRepaired after upstream moved."
 	p.approve(t, &description)
 	if result := settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher()); result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	tip, _ := p.forkBranch(t)
-	if tip == before || p.pulls.Creates != 1 || p.pulls.Updates == 0 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
-		t.Fatalf("the repaired delivery: tip %s, creates %d, updates %d, body %q, state %s", tip, p.pulls.Creates, p.pulls.Updates, p.pulls.Prs[0].Body, p.feature(t))
+	if p.pulls.Creates != 1 || p.pulls.Updates == 0 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
+		t.Fatalf("the repaired delivery: creates %d, updates %d, body %q, state %s", p.pulls.Creates, p.pulls.Updates, p.pulls.Prs[0].Body, p.feature(t))
 	}
 }
 

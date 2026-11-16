@@ -219,7 +219,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{Fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch, SyncHead: true}
 	f.opts.PullRequests = prs
 	var passed atomic.Int64
 	f.opts.schedulePassed = func() { passed.Add(1) }

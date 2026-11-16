@@ -545,7 +545,10 @@ func (a *FinalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // The foreman then fetches the configured upstream base branch and replays
 // the feature branch onto it; final/rebase.json records the result before
 // the branch moves, so a retry moves it to the same commit. A replay that
-// conflicts leaves the branch where it was. The service then runs the selected
+// conflicts leaves the branch where it was. The service then signs the rebased
+// commit and pushes it to the pull request, opening that as a draft when the
+// workstream has none (PublishDraft); a pull request that is merged or closed
+// fails the review with the reason, and nothing is pushed. The service then runs the selected
 // checks on the rebased commit, using the full suite on selection fallback,
 // and records the run in final/checks-<k>.json, which a retry reads back.
 // The first committee member then reads the rebased branch, the check run, the sealed spec and plan and
@@ -655,6 +658,15 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return fail(reason)
 	}
 	report.Commit = rebase.Commit
+	if !in.Maintenance {
+		reason, err := a.PublishDraft(ctx, cfg, stream, op, report)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if reason != "" {
+			return fail(reason)
+		}
+	}
 	checks, err := a.FinalChecks(ctx, cfg, stream, report)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
