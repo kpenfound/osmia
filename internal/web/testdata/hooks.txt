@@ -60,7 +60,6 @@ data-field	diff
 data-field	dismissed
 data-field	error
 data-field	escalation
-data-field	extraction
 data-field	failed
 data-field	failure
 data-field	feed
