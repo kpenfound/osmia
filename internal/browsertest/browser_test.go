@@ -36,10 +36,6 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 		latest + "[data-field=note]":                         "A mason is building the upload unit.",
 		latest + "[data-field=status-agents]":                "A mason builds upload.",
 		card + "[data-field=workspaces]":                     "git workspaces",
-		card + `[data-unit-state=merged]`:                    "merged 1",
-		card + `[data-unit-state=implementing]`:              "implementing 1",
-		card + `[data-unit-state=ready]`:                     "ready 1",
-		card + `[data-unit-state=planned]`:                   "planned 1",
 		`#capacity [data-role=mason] [data-field=slots]`:     "1 / 1 slots",
 		`#capacity [data-role=mason] [data-field=waiting]`:   string(stream) + " unit audit: every slot is taken",
 		`#capacity [data-role=reviewer]`:                     "Nothing waits.",
@@ -51,6 +47,13 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 		`#pause-count`:                "1",
 	} {
 		p.AwaitText(selector, want)
+	}
+	// The header's nest tube holds one cell per unit, named for its unit and
+	// state, in place of counts per state.
+	var cells []string
+	p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-field=units] [data-unit-state]")+`)].map((c) => c.dataset.unitState + '=' + c.getAttribute('aria-label'))`, &cells)
+	if want := "merged=Unit resume: merged,implementing=Unit upload: implementing,ready=Unit audit: ready,planned=Unit index: planned"; strings.Join(cells, ",") != want {
+		t.Fatalf("the nest tube cells are %q, want %q", cells, want)
 	}
 	p.Await("the mason meter full", `document.querySelector('[data-meter=mason]').dataset.full === 'true'`)
 	// Conversation holds the latest status alone and notes no unit change or

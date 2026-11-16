@@ -810,11 +810,6 @@ button.icon.dictate-icon[aria-pressed="true"] {
   -webkit-box-orient: vertical;
 }
 
-.workstream-head .line {
-  justify-content: flex-start;
-  flex-wrap: nowrap;
-}
-
 .tabs {
   display: flex;
   grid-column: 1 / -1;
@@ -847,11 +842,215 @@ button.icon.dictate-icon[aria-pressed="true"] {
   padding-top: 1rem;
 }
 
-.unit-counts {
+/* Header: the goal, then the state, project and a copyable ID, then the
+   nest tube. */
+
+.head-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.3rem;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+.head-project {
+  overflow-wrap: anywhere;
+}
+
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.65rem 0.1rem 0.5rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  border-radius: var(--radius-pill);
+}
+
+.state-pill .glyph {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.state-pill[data-glyph="live"] {
+  color: var(--live);
+  background: var(--live-soft);
+}
+
+.state-pill[data-glyph="waiting"] {
+  color: var(--waiting);
+  background: var(--waiting-soft);
+}
+
+.state-pill[data-glyph="done"] {
+  color: var(--live);
+  background: var(--live-soft);
+}
+
+.state-pill[data-glyph="failed"] {
+  color: var(--failed);
+  background: var(--failed-soft);
+}
+
+.id-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.workstream-id {
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+
+button.copy-id {
+  padding: 0.05rem 0.5rem;
+  font-size: var(--fs-small);
+}
+
+button.copy-id[data-copied="true"] {
+  color: var(--live);
+}
+
+button.copy-id[data-copied="false"] {
+  color: var(--failed);
+}
+
+.copy-scratch {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.head-details {
+  margin-top: 0.2rem;
+  font-size: var(--fs-small);
+  color: var(--text-faint);
+}
+
+.head-details > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.head-details > p {
+  margin: 0.2rem 0 0;
+}
+
+/* The nest tube. One cell per unit, painted by the unit's state: hollow
+   before work starts, filled while it runs, blue once merged. A contested
+   unit has a heavier edge and a mark inside, so it reads without colour.
+   Each cell is a button whose hit area is larger than the cell it paints. */
+
+.nest-tube {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   margin-top: 0.35rem;
+}
+
+.nest-tube:empty {
+  display: none;
+}
+
+.cell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.5rem;
+  height: 2rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+button.cell,
+button.cell:hover,
+button.cell:active {
+  background: transparent;
+  border: 0;
+}
+
+.cell-body {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  transition: box-shadow var(--motion), background-color var(--motion);
+}
+
+button.cell:hover .cell-body {
+  box-shadow: 0 0 0 3px var(--selected);
+}
+
+.cell[data-tone="ready"] .cell-body {
+  background: var(--control);
+}
+
+.cell[data-unit-state="implementing"] .cell-body {
+  background: var(--live);
+  border-color: var(--live);
+}
+
+.cell[data-unit-state="checking"] .cell-body,
+.cell[data-unit-state="reviewing"] .cell-body {
+  background: var(--live-soft);
+  border-color: var(--live);
+}
+
+.cell[data-tone="waiting"] .cell-body {
+  background: var(--waiting-soft);
+  border-color: var(--waiting);
+}
+
+.cell[data-unit-state="approved"] .cell-body {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.cell[data-unit-state="merged"] .cell-body {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.cell[data-tone="contested"] .cell-body {
+  color: var(--failed);
+  background: var(--failed-soft);
+  border: 2px solid var(--failed);
+}
+
+.cell[data-tone="contested"] .cell-body::after {
+  content: "!";
+}
+
+.tube-readout {
+  margin-left: 0.5rem;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tube-readout[data-named="true"] .tube-name {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.tube-state {
+  margin-left: 0.5rem;
 }
 
 .thread {
@@ -1751,6 +1950,17 @@ button.danger:disabled:hover {
   }
 
   button:not(.icon, .tag, .chip, .new-button) {
+    min-height: 2.75rem;
+  }
+
+  button.cell {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .head-details > summary {
+    display: flex;
+    align-items: center;
     min-height: 2.75rem;
   }
 

@@ -1312,7 +1312,7 @@
         button.disabled = m.archived;
         button.addEventListener('click', () => select(m.workstream));
         return el('section', { class: 'member-card', 'data-member': m.workstream }, button,
-          el('div', { class: 'unit-counts', 'data-field': 'units' }, ...Object.entries(m.units || {}).map(([state, count]) => el('span', { class: 'tag' }, state + ' ' + count))),
+          memberTube(m.units),
           m.wait ? el('p', { 'data-field': 'wait' }, m.wait) : null,
           m.pr_link ? el('a', { href: m.pr_link, 'data-field': 'pr' }, 'Pull request') : null);
       }));
@@ -2877,23 +2877,122 @@
     place(c.decisions, [...(nodes.length > 0 ? [c.heading] : []), ...nodes, inboxResult]);
   }
 
-  // renderUnitCounts counts the workstream's units by state, naming them on
-  // hover.
+  // tubeTone groups the unit states into the status the nest tube paints:
+  // idle units are neutral, units a mason, check or reviewer is working on
+  // are live, a unit held back waits, and a unit past review is done. A
+  // contested unit is marked apart from its colour.
+  const tubeTones = {
+    planned: 'idle',
+    ready: 'ready',
+    implementing: 'live',
+    waiting: 'waiting',
+    checking: 'live',
+    reviewing: 'live',
+    approved: 'done',
+    contested: 'contested',
+    merged: 'done',
+  };
+
+  // nestTube draws one cell per unit, in the order given. A cell with a
+  // name is a button that opens Activity on that unit; a cell without one,
+  // as in a workgroup member's tally, only shows its state. Hovering,
+  // focusing or pressing a cell names it in the readout, and each cell
+  // carries the unit and its state as its accessible name.
+  function nestTube(cells, { linked }) {
+    const total = cells.length + (cells.length === 1 ? ' unit' : ' units');
+    const name = el('span', { class: 'tube-name' }, total);
+    const state = el('span', { class: 'tube-state' });
+    const readout = el('span', { class: 'tube-readout', 'data-field': 'unit-name', 'aria-hidden': 'true' }, name, state);
+    const show = (cell) => {
+      name.textContent = cell ? cell.name || cell.state : total;
+      state.textContent = cell && cell.name ? cell.state : '';
+      readout.dataset.named = String(cell !== null && cell.name !== '');
+    };
+    const tube = el('div', { class: 'nest-tube', 'data-field': 'units', role: 'group', 'aria-label': 'Units, ' + total },
+      ...cells.map((cell) => {
+        const label = cell.name ? 'Unit ' + cell.name + ': ' + cell.state : cell.state;
+        const body = el('span', { class: 'cell-body', 'aria-hidden': 'true' });
+        const attrs = { class: 'cell', 'data-unit-state': cell.state, 'data-tone': tubeTones[cell.state] || 'idle', 'aria-label': label };
+        if (!linked || !cell.name) {
+          return el('span', { ...attrs, role: 'img' }, body);
+        }
+        const button = el('button', { ...attrs, type: 'button', 'data-cell': cell.name }, body);
+        button.addEventListener('mouseenter', () => show(cell));
+        button.addEventListener('focus', () => show(cell));
+        button.addEventListener('pointerdown', () => show(cell));
+        button.addEventListener('mouseleave', () => show(null));
+        button.addEventListener('blur', () => show(null));
+        button.addEventListener('click', () => showActivity({ unit: cell.name }));
+        return button;
+      }), readout);
+    return tube;
+  }
+
+  // memberTube draws a workgroup member's units, which the read gives as a
+  // count per state, as a nest tube of unnamed cells.
+  function memberTube(counts) {
+    const cells = Object.entries(counts || {})
+      .sort(([a], [b]) => unitOrder.indexOf(a) - unitOrder.indexOf(b))
+      .flatMap(([state, count]) => Array.from({ length: count }, () => ({ name: '', state })));
+    return cells.length > 0 ? nestTube(cells, { linked: false }) : el('div', { class: 'nest-tube', 'data-field': 'units' });
+  }
+
+  // renderUnitCounts draws the workstream's units as a nest tube.
   function renderUnitCounts(units) {
     if (!units || units.length === 0) {
       return null;
     }
-    const byState = new Map(unitOrder.map((state) => [state, []]));
-    for (const u of units) {
-      if (!byState.has(u.state)) {
-        byState.set(u.state, []);
-      }
-      byState.get(u.state).push(u.unit);
-    }
-    return el('div', { class: 'unit-counts', 'data-field': 'units' }, ...[...byState]
-      .filter(([, names]) => names.length > 0)
-      .map(([state, names]) => el('span', { class: 'tag', 'data-unit-state': state, title: names.join(', ') }, state + ' ' + names.length)));
+    return nestTube(units.map((u) => ({ name: u.unit, state: u.state })), { linked: true });
   }
+
+  // copyText puts text on the clipboard, falling back to a selected
+  // textarea where the clipboard API is unavailable. It resolves to whether
+  // the text was copied.
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const area = el('textarea', { 'aria-hidden': 'true', tabindex: '-1', readonly: '' });
+      area.value = text;
+      area.className = 'copy-scratch';
+      document.body.append(area);
+      area.select();
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch (_) {
+        copied = false;
+      }
+      area.remove();
+      return copied;
+    }
+  }
+
+  // renderIDCopy shows the workstream ID in the mono face beside a control
+  // that copies it.
+  function renderIDCopy(id) {
+    const button = el('button', { type: 'button', class: 'quiet copy-id', 'data-copy-id': id, 'aria-label': 'Copy workstream ID' }, 'Copy');
+    let reset = 0;
+    button.addEventListener('click', async () => {
+      const copied = await copyText(id);
+      button.textContent = copied ? 'Copied' : 'Copy failed';
+      button.setAttribute('aria-label', (copied ? 'Copied' : 'Copy failed for') + ' workstream ID');
+      button.dataset.copied = String(copied);
+      clearTimeout(reset);
+      reset = setTimeout(() => {
+        button.textContent = 'Copy';
+        button.setAttribute('aria-label', 'Copy workstream ID');
+        delete button.dataset.copied;
+      }, 2000);
+    });
+    return el('span', { class: 'id-copy' }, el('code', { class: 'workstream-id', 'data-field': 'workstream-id' }, id), button);
+  }
+
+  // shownHead is the markup the header was last drawn from, so a read that
+  // changes nothing in the header leaves its elements, and a press on one,
+  // alone.
+  let shownHead = '';
 
   function renderHead(w) {
     const head = byId('workstream-head');
@@ -2914,13 +3013,24 @@
       const action = button.dataset.workstreamAction;
       button.hidden = action in offered && !offered[action];
     }
-    head.replaceChildren(...[
-      el('div', { class: 'line' },
-        el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
-        w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
-        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : ''),
-      el('div', { class: 'id meta-row' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' ', el('code', {}, w.workstream), ' ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
-      renderUnitCounts(w.units), isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null));
+    const pill = w.state ? el('span', { class: 'state-pill', 'data-field': 'state', 'data-glyph': stateGlyph(w) },
+      el('span', { class: 'glyph', 'aria-hidden': 'true', 'data-glyph': stateGlyph(w) }), w.state) : null;
+    const nodes = [
+      el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
+      el('div', { class: 'head-meta' }, pill,
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : null,
+        el('span', { class: 'head-project', 'data-field': 'project' }, repoLabel(w.project)),
+        renderIDCopy(w.workstream)),
+      renderUnitCounts(w.units),
+      el('details', { class: 'head-details' }, el('summary', {}, 'Details'),
+        el('p', { class: 'meta', 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null);
+    const markup = nodes.map((node) => node.outerHTML).join('');
+    if (markup === shownHead && head.childElementCount > 0) return;
+    shownHead = markup;
+    const open = head.querySelector('.head-details')?.open === true;
+    head.replaceChildren(...nodes);
+    if (open) head.querySelector('.head-details').open = true;
   }
 
   function renderChiefLine(w) {
