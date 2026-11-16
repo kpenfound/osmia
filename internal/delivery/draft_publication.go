@@ -266,6 +266,11 @@ func (a *FinalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, st
 	if err := publisher.RecordPublication(ctx, stream, record); err != nil {
 		return "", err
 	}
+	// The push supersedes the earlier ones: a question the owner was asked
+	// about the checks of one of them is closed.
+	if err := a.S.closeObsoleteChecksChoices(ctx, a.Repository, stream); err != nil {
+		return "", err
+	}
 	return "", a.S.Step("draft-published")
 }
 

@@ -45,6 +45,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
   upstream <workstream-id> <base-workstream-id> [--json]
+  checks <workstream-id> <keep-waiting|continue> [--json]
   archive <workstream-id> [--json]  permanently delete trace; retain title
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
@@ -270,6 +271,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon", "upstream":
 		valid = len(a) == 2
+	case "checks":
+		valid = len(a) == 2 && (a[1] == "keep-waiting" || a[1] == "continue")
 	case "packet", "ratify", "archive", "unarchive", "merged", "rebase":
 		valid = len(a) == 1
 	case "amendment":
@@ -366,7 +369,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -665,6 +668,49 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Drift rebase %d requested for workstream %s\n", result.Drift, result.Workstream)
+		return 0
+	}
+	if cmd == "checks" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		list, err := c.Inbox(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		// The answer pins the push and offer the inbox entry names, so it
+		// can only apply to the question the owner read.
+		var entry *wire.InboxEntry
+		for i, e := range list.Entries {
+			if e.Kind == wire.InboxChecksChoice && e.Workstream == id {
+				entry = &list.Entries[i]
+			}
+		}
+		if entry == nil {
+			fmt.Fprintf(stderr, "no question about the check results of workstream %s waits for you\n", id)
+			return 1
+		}
+		raw, err := json.Marshal(entry.Answer.Body)
+		if err != nil {
+			return fail(err)
+		}
+		var req wire.ChecksChoiceRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fail(err)
+		}
+		req.Decision = wire.ChecksChoiceKeepWaiting
+		if a[1] == "continue" {
+			req.Decision = wire.ChecksChoiceContinue
+		}
+		result, err := c.ChecksChoice(ctx, id, req)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Workstream %s, push %d (pull request #%d, commit %s): %s\n%s\n", result.Workstream, result.Push, result.PullRequest, result.PushedCommit, result.Decision, result.Detail)
 		return 0
 	}
 	if cmd == "upstream" {
@@ -2010,6 +2056,9 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 		case wire.InboxDelivery:
 			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
 			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
+		case wire.InboxChecksChoice:
+			block("Decided on", fmt.Sprintf("push %v (pull request #%v, commit %v)", e.Answer.Body["push"], e.Answer.Body["pull_request"], e.Answer.Body["pushed_commit"]))
+			block("Answer", fmt.Sprintf("osmia checks %s keep-waiting, or osmia checks %s continue to continue the final review without check results for this push only", stream, stream))
 		case wire.InboxPublication:
 			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")

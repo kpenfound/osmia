@@ -458,7 +458,7 @@ func unitPath(parts []string) bool {
 }
 
 // finalPath reports whether parts name a final review record of a
-// workstream, including its rebase, check runs, check reruns, review, the delivery brief
+// workstream, including its rebase, check runs, check reruns, the choice about a push's missing check results, review, the delivery brief
 // recorded for each review (brief-<review>.json), follow-ups, delivery
 // decision, publication, the marking of the pull request ready for review and the
 // owner's own merge into upstream.
@@ -466,7 +466,7 @@ func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
-	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) || finalCheckRerunName(parts[1]) {
+	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
@@ -500,6 +500,25 @@ func finalCheckRerunName(name string) bool {
 	}
 	review, push, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-rerun.json"), "-push-")
 	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+push)
+}
+
+// finalChecksChoiceName reports whether name is checks-push-<push>-choice.json,
+// the record of the choice to keep waiting for a push's check results or to
+// continue without them.
+func finalChecksChoiceName(name string) bool {
+	push, ok := strings.CutSuffix(strings.TrimPrefix(name, "checks-push-"), "-choice.json")
+	return strings.HasPrefix(name, "checks-push-") && ok && shedRound.MatchString("round-"+push)
+}
+
+// finalChecksRequestName reports whether name is
+// checks-push-<push>-request-<n>.json, the record of the n-th rerun of every
+// check of a push the chief of staff asked for.
+func finalChecksRequestName(name string) bool {
+	if !strings.HasPrefix(name, "checks-push-") || !strings.HasSuffix(name, ".json") {
+		return false
+	}
+	push, n, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-push-"), ".json"), "-request-")
+	return ok && shedRound.MatchString("round-"+push) && shedRound.MatchString("round-"+n)
 }
 
 func checkOutputName(name string) bool {

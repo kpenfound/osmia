@@ -22,6 +22,9 @@ type CloudRerunner interface {
 	// request's repository. It returns once the request is made, not when
 	// the checks finish.
 	RerunFailed(ctx context.Context, dir string, pullRequest int) error
+	// RerunAll requests the rerun of every check of the pull request, from
+	// dir, with the same return as RerunFailed.
+	RerunAll(ctx context.Context, dir string, pullRequest int) error
 }
 
 // ErrCloudRerunUnavailable is a rerun that cannot be requested because no
@@ -35,6 +38,12 @@ const maxRerunOutput = 2048
 // pull request number, without the program name.
 func RerunCommand(pullRequest int) []string {
 	return []string{"cloud", "checks", "rerun", "--failed", "--pr", strconv.Itoa(pullRequest)}
+}
+
+// RerunAllCommand is the Dagger CLI invocation that reruns every check of
+// pull request number, without the program name.
+func RerunAllCommand(pullRequest int) []string {
+	return []string{"cloud", "checks", "rerun", "--all", "--pr", strconv.Itoa(pullRequest)}
 }
 
 // CanRerun reports ErrCloudRerunUnavailable when the runner has no token.
@@ -51,6 +60,16 @@ func (d DaggerChecks) CanRerun() error {
 // Dagger Cloud and starts no engine. dir is used as it is; it is not
 // prepared or initialised.
 func (d DaggerChecks) RerunFailed(ctx context.Context, dir string, pullRequest int) error {
+	return d.rerun(ctx, dir, RerunCommand(pullRequest))
+}
+
+// RerunAll runs `dagger cloud checks rerun --all --pr <N>` in dir, under the
+// same rules as RerunFailed.
+func (d DaggerChecks) RerunAll(ctx context.Context, dir string, pullRequest int) error {
+	return d.rerun(ctx, dir, RerunAllCommand(pullRequest))
+}
+
+func (d DaggerChecks) rerun(ctx context.Context, dir string, args []string) error {
 	if err := d.CanRerun(); err != nil {
 		return err
 	}
@@ -64,7 +83,7 @@ func (d DaggerChecks) RerunFailed(ctx context.Context, dir string, pullRequest i
 	if program == "" {
 		program = "dagger"
 	}
-	cmd := exec.CommandContext(ctx, program, RerunCommand(pullRequest)...)
+	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1", "DAGGER_CLOUD_TOKEN=" + d.CloudToken}
 	var output bytes.Buffer
@@ -75,7 +94,7 @@ func (d DaggerChecks) RerunFailed(ctx context.Context, dir string, pullRequest i
 	}
 	if err != nil {
 		text := redact.Secrets(strings.TrimSpace(output.String()), redact.KnownSecrets()...)
-		return fmt.Errorf("dagger %s: %v: %s", strings.Join(RerunCommand(pullRequest), " "), err, CheckExcerpt(text, maxRerunOutput))
+		return fmt.Errorf("dagger %s: %v: %s", strings.Join(args, " "), err, CheckExcerpt(text, maxRerunOutput))
 	}
 	return nil
 }

@@ -55,6 +55,7 @@ type Dependencies struct {
 	DriftEntry               func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	Effective                func() (runtime.State, []runtime.Diagnostic)
 	FactoryContext           func(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool
+	ChecksChoiceEntry        func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	FinalChecksEntry         func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	FinalRoundsWithBlocking  func(repository *trace.Repository, stream config.WorkstreamID) (int, error)
 	FirstLiveWorkgroupMember func(g trace.Workgroup) (config.WorkstreamID, error)

@@ -2196,7 +2196,7 @@
   }
 
   function checkState(state) {
-    return state === 'incomplete' ? 'not completed' : state;
+    return state === 'incomplete' ? 'not completed' : state === 'continued' ? 'continued without results' : state;
   }
 
   function checkSelection(selection, running) {
@@ -3162,6 +3162,7 @@
     delivery: 'Mark ready for review',
     publication: 'Publication failing',
     checks: 'Checks not completing',
+    'checks-choice': 'Checks missing',
     drift: 'Drift held',
     notices: 'Notices held',
     loop: 'Loop guard',
@@ -3181,6 +3182,11 @@
     draft_hash: 'draft',
     base: 'base workstream',
     accept_blocking: 'accepts blocking findings',
+    push: 'push',
+    pull_request: 'pull request',
+    pushed_commit: 'commit',
+    operation: 'push record',
+    offer: 'offer',
   };
 
   const decisionNames = {
@@ -3188,6 +3194,8 @@
     revise: 'Revise the unit',
     approve: 'Approve',
     reject: 'Reject',
+    keep_waiting: 'Keep waiting',
+    continue: 'Continue without check results',
     round: 'Debate another round',
     overrule: 'Overrule the objections',
     upstream: 'Continue from upstream',
@@ -3395,6 +3403,10 @@
         // repository that creation made.
         send(entry.answer.method, endpoint(entry), body,
           () => 'The project was created and registered.', decisionKey(entry));
+        return;
+      case 'checks-choice':
+        send(entry.answer.method, endpoint(entry), { ...body, decision },
+          (out) => out.decision === 'continue' ? 'The final review of push ' + out.push + ' continues without check results.' : 'Still waiting for the check results of push ' + out.push + '.', decisionKey(entry));
         return;
       case 'base':
         send(entry.answer.method, endpoint(entry), body,
@@ -3673,7 +3685,7 @@
         if (entry.kind === 'base') {
           d.form.hidden = entry.options.length === 0;
           d.note.parentElement.hidden = true;
-        } else if (entry.kind === 'project-creation') {
+        } else if (entry.kind === 'project-creation' || entry.kind === 'checks-choice') {
           d.note.parentElement.hidden = true;
         }
     }

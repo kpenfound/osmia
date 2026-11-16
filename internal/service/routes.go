@@ -124,6 +124,7 @@ var Routes = []Route{
 
 	{Method: http.MethodGet, Path: api.Prefix + "/delivery/{workstream}", Summary: "Show the final report and the drafted pull request title and body", Response: api.DeliveryPresentation{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/delivery/{workstream}", Summary: "Approve delivery", Request: api.DeliveryDecision{}, Response: api.DeliveryApproval{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/checks-choice/{workstream}", Summary: "Answer the question whether a push's final review keeps waiting for check results or continues without them; refused as a conflict when the push it concerns is superseded", Request: api.ChecksChoiceRequest{}, Response: api.ChecksChoiceResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/delivery/{workstream}/merged", Summary: "Record an assembled workstream delivered by the owner's own merge into upstream", Response: api.MergeResponse{}},
 
 	{Method: http.MethodGet, Path: api.Prefix + "/trace/{workstream}", Summary: "Summarize a workstream's trace", Response: api.TraceSummary{}},

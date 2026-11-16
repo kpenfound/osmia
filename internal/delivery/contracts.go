@@ -58,6 +58,12 @@ type InboxEntry = api.InboxEntry
 
 const InboxFinalChecks = api.InboxFinalChecks
 
+const InboxChecksChoice = api.InboxChecksChoice
+
+type ChecksChoiceRequest = api.ChecksChoiceRequest
+
+type ChecksChoiceResponse = api.ChecksChoiceResponse
+
 const InboxPublication = api.InboxPublication
 
 const Internal = api.Internal

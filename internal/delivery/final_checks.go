@@ -28,7 +28,10 @@ import (
 // JSON holds, FailedChecks the failed checks with their `dagger trace` ids
 // (Failed lists their names), Flaky the originally failed checks that passed
 // their rerun, and Reruns the rerun of the push's failed checks. An
-// incomplete run reported no result, and Error says why. Records written by
+// incomplete run reported no result, and Error says why. A record with status
+// "continued" holds no result at all: the final read of the push started
+// because the owner chose to continue without check results (ContinuedBy),
+// in the choice record's revision Choice. Records written by
 // local check runs have no Source; they carry the selection, command, exit
 // status, captured output and engines of that run, and Attempt links the
 // result to its start evidence.
@@ -55,6 +58,8 @@ type FinalCheckRun struct {
 	Counts             *api.CheckCounts      `json:"counts,omitempty"`
 	FailedChecks       []api.CheckFailure    `json:"failed_checks,omitempty"`
 	Reruns             []api.CheckRerun      `json:"reruns,omitempty"`
+	ContinuedBy        string                `json:"continued_by,omitempty"`
+	Choice             int                   `json:"choice,omitempty"`
 	Failed             []string              `json:"failed,omitempty"`
 	Flaky              []string              `json:"flaky,omitempty"`
 	TraceURL           string                `json:"trace_url,omitempty"`
@@ -178,7 +183,10 @@ func (e *WaitingChecksError) Error() string {
 //     the push (or since the rerun was requested), and read again after
 //     FinalCheckDelay;
 //   - a completed failure asks Dagger Cloud once to rerun the failed checks
-//     (see rerunChecks), and only a fresh completed posting settles the push.
+//     (see rerunChecks), and only a fresh completed posting settles the push;
+//   - the owner's choice to continue without check results for the push
+//     (see AnswerChecksChoice) is recorded as a "continued" record that holds no
+//     result, and applies to that push alone.
 //
 // A completed record of the commit, from this watch or from an older local
 // run, is returned as it is. Reviews of delivered workstreams (maintenance)
@@ -216,7 +224,17 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 	} else if current.Number != push.Number {
 		return FinalCheckRun{}, fmt.Errorf("final review %d read %s, which push %d pushed; push %d supersedes it", report.Review, report.Commit, push.Number, current.Number)
 	}
+	if err := a.S.closeObsoleteChecksChoices(ctx, a.Repository, stream); err != nil {
+		return FinalCheckRun{}, err
+	}
 	watch := &finalWatch{a: a, cfg: cfg, stream: stream, report: report, push: push}
+	// The owner's choice to continue without check results applies to the
+	// push it was made about and to no other.
+	if choice, recorded, err := ReadChecksChoice(a.Repository, stream, push.Number); err != nil {
+		return FinalCheckRun{}, err
+	} else if recorded && choice.State == ChecksChoiceContinue && choice.Concerns(push) {
+		return watch.continuedChecks(ctx, choice)
+	}
 	return watch.step(ctx, incomplete, latest)
 }
 
@@ -503,12 +521,7 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 	if err := a.S.Step("final-checks-rerun-requested"); err != nil {
 		return err
 	}
-	dir := w.cfg.Project.Clone
-	if g, err := featureWorkspaces(w.cfg, a.Repository).Of(w.stream); err == nil {
-		if checkout, found, err := g.Workspace(ctx, string(w.stream)); err == nil && found && checkout.Path != "" {
-			dir = checkout.Path
-		}
-	}
+	dir := a.S.rerunDirectory(ctx, w.cfg, a.Repository, w.stream)
 	runErr := rerunner.RerunFailed(ctx, dir, w.push.PullRequest)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -558,7 +571,7 @@ func (w *finalWatch) noticeLoadMissing(ctx context.Context) error {
 	if state.Value != "" {
 		return nil
 	}
-	body := fmt.Sprintf("Dagger Cloud has posted no `load` status for commit %s of pull request #%d in %s, push %d, %s after the push, so the final review of the assembled branch has no check results to wait for. Investigate whether Cloud Checks run for this repository's pull requests. The service keeps reading the statuses.", w.push.Commit, w.push.PullRequest, w.push.Upstream, w.push.Number, a.S.Now().Sub(w.push.At).Round(time.Second))
+	body := fmt.Sprintf("Dagger Cloud has posted no `load` status for commit %s of pull request #%d in %s, push %d, %s after the push, so the final review of the assembled branch has no check results to wait for. Investigate whether Cloud Checks run for this repository's pull requests. The service keeps reading the statuses. Call %s with action poll and push %d to read them now, or with action rerun to rerun every check of the pull request. If that does not help, or the project has no Cloud Checks, call %s with push %d to ask the owner whether to keep waiting or to continue the final review without check results. Only the owner can choose to continue, and only for this push: a later push closes the question.", w.push.Commit, w.push.PullRequest, w.push.Upstream, w.push.Number, a.S.Now().Sub(w.push.At).Round(time.Second), ChecksToolName, w.push.Number, ChecksChoiceToolName, w.push.Number)
 	id := fmt.Sprintf("final-checks-%d-push-%d-load-missing", w.report.Review, w.push.Number)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: w.stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: w.report.Operation}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
@@ -639,6 +652,9 @@ func FinalCheckEvidence(run FinalCheckRun) string {
 }
 
 func pullRequestEvidence(run FinalCheckRun) string {
+	if run.Status == ChecksContinued {
+		return fmt.Sprintf("No check results exist for this commit. Dagger Cloud's checks on pull request #%d, push %d, commit %s produced no result the service could read, and the owner chose to continue the final review without check results for this push, recorded in %s. You do not run checks, and nothing here says the checks passed or failed.", run.PullRequest, run.Push, run.PushedCommit, FinalChecksPath(run.Review))
+	}
 	out := fmt.Sprintf("Dagger Cloud ran the project's checks on this branch; the service read their commit statuses on pull request #%d, push %d, commit %s, recorded in %s. You do not run checks. The result is %s.", run.PullRequest, run.Push, run.PushedCommit, FinalChecksPath(run.Review), run.Status)
 	if run.Counts != nil {
 		c := run.Counts

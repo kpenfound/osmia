@@ -58,6 +58,10 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	return s.delivery().ApproveDelivery(ctx, raw, req)
 }
 
+func (s *Service) answerChecksChoice(ctx context.Context, raw string, req ChecksChoiceRequest) (ChecksChoiceResponse, *APIError) {
+	return s.delivery().AnswerChecksChoice(ctx, raw, req)
+}
+
 var publicationAction = delivery.PublicationAction
 
 const PublishAction = delivery.PublishAction
@@ -93,6 +97,8 @@ func (s *Service) publicationEntry(repository *trace.Repository, w trace.Workstr
 }
 
 var finalChecksEntry = delivery.FinalChecksEntry
+
+var checksChoiceEntry = delivery.ChecksChoiceEntry
 
 func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	return s.delivery().DeliveryEntry(ctx, repository, stream)

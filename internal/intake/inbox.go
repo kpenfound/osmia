@@ -316,6 +316,11 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		if err := add(s.FinalChecksEntry(repository, w)); err != nil {
 			return nil, err
 		}
+		if s.ChecksChoiceEntry != nil {
+			if err := add(s.ChecksChoiceEntry(repository, w)); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if w.State != DeliveredState {
 		if err := add(s.BaseEntry(repository, w)); err != nil {

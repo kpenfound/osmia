@@ -1051,6 +1051,9 @@ const (
 	InboxDelivery     = "delivery"
 	InboxPublication  = "publication"
 	InboxFinalChecks  = "checks"
+	// InboxChecksChoice asks whether the final review of a push waits for
+	// check results that did not appear or continues without them.
+	InboxChecksChoice = "checks-choice"
 	InboxDrift        = "drift"
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
@@ -1076,7 +1079,12 @@ const (
 // approval being published and its Options are empty. A checks entry reports
 // a final review whose checks did not complete maxIncompleteChecks times in a
 // row: it takes no decision, its Revision is the final review and its Options
-// are empty. Project names the project whose workstream
+// are empty. A checks-choice entry asks whether the final review of a push
+// keeps waiting for check results that did not appear or continues without
+// them: its Options are keep_waiting and continue, its Revision is the offer
+// the answer belongs to, and its Answer body pins the push (number, pull
+// request, pushed commit and the operation that recorded it). Project names
+// the project whose workstream
 // the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	// Workgroup identifies a shared decision kept in the workgroup trace.
@@ -1385,6 +1393,40 @@ type CheckRerun struct {
 	Error       string          `json:"error,omitempty"`
 }
 
+// The owner's answers to a checks-choice entry.
+const (
+	ChecksChoiceKeepWaiting = "keep_waiting"
+	ChecksChoiceContinue    = "continue"
+)
+
+// ChecksChoiceRequest is the owner's answer to a checks-choice inbox entry:
+// keep waiting for the check results of a push, or continue its final review
+// without them. The fields but Decision are the entry's answer body, which
+// pin the push it concerns: its number, pull request, pushed commit, the
+// operation that recorded the push and the revision of the offer. An answer
+// whose pin is not the workstream's current push and open offer is refused as
+// a conflict.
+type ChecksChoiceRequest struct {
+	Push         int    `json:"push"`
+	PullRequest  int    `json:"pull_request"`
+	PushedCommit string `json:"pushed_commit"`
+	Operation    string `json:"operation"`
+	Offer        int    `json:"offer"`
+	Decision     string `json:"decision" enum:"keep_waiting,continue"`
+}
+
+// ChecksChoiceResponse reports a recorded answer to a checks-choice entry.
+type ChecksChoiceResponse struct {
+	Project      config.ProjectID    `json:"project"`
+	Workstream   config.WorkstreamID `json:"workstream"`
+	Push         int                 `json:"push"`
+	PullRequest  int                 `json:"pull_request"`
+	PushedCommit string              `json:"pushed_commit"`
+	Decision     string              `json:"decision"`
+	Detail       string              `json:"detail"`
+	At           time.Time           `json:"at"`
+}
+
 // FeedFinalChecks is one check attempt for a final review.
 // Attempt and StartedAt are absent without durable attempt start evidence;
 // such entries describe recorded results only, never running checks.
@@ -1394,23 +1436,23 @@ type CheckRerun struct {
 // checks with their trace ids and the reruns; Failed then lists the failed
 // check names. Results of local runs have none of these.
 type FeedFinalChecks struct {
-	TraceURL    string              `json:"trace_url,omitempty"`
-	Selection   *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
-	Review      int                 `json:"review"`
-	Attempt     int                 `json:"attempt,omitempty"`
-	State       string              `json:"state" enum:"running,passed,failed,incomplete"`
-	Source      string              `json:"source,omitempty" enum:"pull_request" description:"Absent for results of local check runs."`
-	PullRequest int                 `json:"pull_request,omitempty"`
-	Push        int                 `json:"push,omitempty"`
-	StatusURL   string              `json:"status_url,omitempty"`
-	Counts      *CheckCounts        `json:"counts,omitempty"`
-	FailedChecks []CheckFailure     `json:"failed_checks,omitempty"`
-	Reruns      []CheckRerun        `json:"reruns,omitempty"`
-	Failed      []string            `json:"failed,omitempty"`
-	Flaky       []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
-	Error       string              `json:"error,omitempty"`
-	StartedAt   *time.Time          `json:"started_at,omitempty"`
-	FinishedAt  *time.Time          `json:"finished_at,omitempty"`
+	TraceURL     string              `json:"trace_url,omitempty"`
+	Selection    *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
+	Review       int                 `json:"review"`
+	Attempt      int                 `json:"attempt,omitempty"`
+	State        string              `json:"state" enum:"running,passed,failed,incomplete,continued"`
+	Source       string              `json:"source,omitempty" enum:"pull_request" description:"Absent for results of local check runs."`
+	PullRequest  int                 `json:"pull_request,omitempty"`
+	Push         int                 `json:"push,omitempty"`
+	StatusURL    string              `json:"status_url,omitempty"`
+	Counts       *CheckCounts        `json:"counts,omitempty"`
+	FailedChecks []CheckFailure      `json:"failed_checks,omitempty"`
+	Reruns       []CheckRerun        `json:"reruns,omitempty"`
+	Failed       []string            `json:"failed,omitempty"`
+	Flaky        []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
+	Error        string              `json:"error,omitempty"`
+	StartedAt    *time.Time          `json:"started_at,omitempty"`
+	FinishedAt   *time.Time          `json:"finished_at,omitempty"`
 }
 
 // FeedSessionChecks summarizes one completed exploratory session check run.

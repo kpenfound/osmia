@@ -500,6 +500,16 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   approval or push; closed or merged PRs cannot be updated. The workstream
   stays delivered. `project rebase` asks the same of every eligible
   workstream of a project.
+- `checks <workstream-id> keep-waiting|continue` answers the `Checks missing`
+  inbox entry the chief of staff opened when a push's Dagger Cloud check
+  results did not appear (or the project has no Cloud Checks). `keep-waiting`
+  leaves the watch of the pull request's statuses running and records no
+  result. `continue` lets the final review of that pushed commit start
+  without check results; the final read is told that no check results exist
+  and that you chose to continue. The answer applies to the push the entry
+  names only: when a later push supersedes it the entry closes, and the
+  command fails with `conflict` (exit 5) instead of applying to the new push.
+  Only you can give the answer; the chief of staff cannot.
 - `upstream <workstream-id> <base-workstream-id>` continues a workstream
   parked on its abandoned base from upstream instead. The base is the
   abandoned workstream the inbox entry names. The service fetches the

@@ -550,6 +550,55 @@
         }
       }
     },
+    "/v1/checks-choice/{workstream}": {
+      "post": {
+        "summary": "Answer the question whether a push's final review keeps waiting for check results or continues without them; refused as a conflict when the push it concerns is superseded",
+        "operationId": "postChecksChoiceByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChecksChoiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecksChoiceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config": {
       "get": {
         "summary": "Show the loaded configuration, its disk drift and diagnostics",
@@ -4357,6 +4406,63 @@
         },
         "type": "object"
       },
+      "ChecksChoiceRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "keep_waiting",
+              "continue"
+            ],
+            "type": "string"
+          },
+          "offer": {
+            "type": "integer"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_commit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChecksChoiceResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_commit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ClearPriorityRequest": {
         "properties": {
           "project": {
@@ -6066,7 +6172,8 @@
               "running",
               "passed",
               "failed",
-              "incomplete"
+              "incomplete",
+              "continued"
             ],
             "type": "string"
           },

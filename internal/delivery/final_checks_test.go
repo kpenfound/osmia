@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -116,6 +117,7 @@ type watchFixture struct {
 	pushedAt time.Time
 	rerunLog string
 	program  string
+	scope    *coreadapter.Scope
 }
 
 func newWatchFixture(t *testing.T) *watchFixture {
@@ -142,8 +144,12 @@ func newWatchFixture(t *testing.T) *watchFixture {
 // has: nothing is remembered but the trace.
 func (f *watchFixture) newReviewer() *FinalReviewer {
 	controller := New(Dependencies{
-		Now:  f.clock.Now,
-		Step: func(string) error { return nil },
+		Now:   f.clock.Now,
+		Step:  func(string) error { return nil },
+		About: func(*trace.Repository) *config.Config { return f.cfg },
+		ConversationTrace: func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *api.APIError) {
+			return f.repo.Project(), stream, f.repo, nil
+		},
 		CloudStatuses: f.api, CloudStatusFetcher: checkrun.CloudStatusFetcher{HTTP: &http.Client{Transport: f.api}, Allow: func(u *url.URL) bool { return u.Hostname() == "dagger.cloud" }},
 		CloudRerun: checkrun.DaggerChecks{Program: f.program, CloudToken: cloudToken},
 	})
