@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"io/fs"
 	"time"
 
 	"github.com/kpenfound/agentcore/vcs"
@@ -35,6 +36,7 @@ type Provider interface {
 	ChangedPaths(ctx context.Context, base, candidate string) ([]string, error)
 	Markers(ctx context.Context, commit string, paths []string) ([]string, error)
 	StoredConflicts(ctx context.Context, commit string) ([]string, error)
+	Tree(ctx context.Context, commit string) (fs.FS, error)
 	Export(ctx context.Context, commit, dir string) error
 	ExportValidated(ctx context.Context, commit, dir string, validate func(string) error) error
 

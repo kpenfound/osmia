@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -917,6 +918,11 @@ func (j *Jujutsu) ChangedPaths(ctx context.Context, base, candidate string) ([]s
 // a conflict marker line, as Git's Markers does.
 func (j *Jujutsu) Markers(ctx context.Context, commit string, paths []string) ([]string, error) {
 	return j.git().Markers(ctx, commit, paths)
+}
+
+// Tree reads a commit's files from the clone's Git objects as Git's Tree does.
+func (j *Jujutsu) Tree(ctx context.Context, commit string) (fs.FS, error) {
+	return j.git().Tree(ctx, commit)
 }
 
 // Export writes the tracked regular files of a commit's tree into dir as

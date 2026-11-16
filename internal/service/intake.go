@@ -501,6 +501,7 @@ func (s *Service) intake() *intake.Controller {
 		ProjectFor:               s.projectFor,
 		PublicationEntry:         s.publicationEntry,
 		RefreshRuntime:           s.refreshRuntime,
+		Reseeder:                 s.reseederOf,
 		RemoteFileTool:           remoteFileTool,
 		Repository:               s.repository,
 		ProjectCreation: intake.ProjectCreation{Check: s.CheckProjectCreation, Reserve: s.ReserveProjectCreation,

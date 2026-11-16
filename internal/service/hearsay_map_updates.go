@@ -100,9 +100,13 @@ func mapUpdateID(revision int, c mapChange) string {
 	return decisionID("map", fmt.Sprint(revision), c.kind, c.id)
 }
 
-// mapCause names what caused a revision of the map: the workstream a
-// knowledge refresh folded in, or else the extraction.
+// mapCause names what caused a revision of the map: the re-seed and the
+// commit it seeded from, the workstream a knowledge refresh folded in, or
+// else the extraction.
 func (in *publishInputs) mapCause(d trace.Document) string {
+	if commit, ok := kb.ReseedCommit(d.Cause); ok {
+		return "Caused by the re-seed of the map from commit " + commit + "."
+	}
 	op, ok := in.operations[d.Cause]
 	if !ok {
 		return "Caused by a knowledge-base extraction."

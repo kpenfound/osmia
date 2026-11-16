@@ -35,6 +35,7 @@ type DebateDependencies struct {
 	Now               func() time.Time
 	Options           Execution
 	Pausing           func(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool)
+	Reseed            func(ctx context.Context, repo *trace.Repository)
 	RoleExecution     func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
 	Step              func(name string) error
 	Stoppable         func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
@@ -61,6 +62,7 @@ func (c *Controller) DebateDependencies() *DebateDependencies {
 		Now:               c.Now,
 		Options:           c.Options,
 		Pausing:           c.Pausing,
+		Reseed:            c.ReseedEntities,
 		RoleExecution:     c.RoleExecution,
 		Step:              c.Step,
 		Stoppable:         c.Stoppable,
@@ -74,6 +76,7 @@ func (c *Controller) DebateDependencies() *DebateDependencies {
 type SealerDependencies struct {
 	About       func(repository *trace.Repository) *config.Config
 	Now         func() time.Time
+	Reseed      func(ctx context.Context, repo *trace.Repository)
 	ResolveBase func(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error)
 	Step        func(name string) error
 }
@@ -82,6 +85,7 @@ func (c *Controller) SealerDependencies() *SealerDependencies {
 	return &SealerDependencies{
 		About:       c.About,
 		Now:         c.Now,
+		Reseed:      c.ReseedEntities,
 		ResolveBase: c.ResolveBase,
 		Step:        c.Step,
 	}
@@ -165,6 +169,7 @@ type DrafterDependencies struct {
 	Now                func() time.Time
 	Options            Execution
 	Pausing            func(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool)
+	Reseed             func(ctx context.Context, repo *trace.Repository)
 	RemoteFileTool     func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
 	RoleExecution      func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
 	Stoppable          func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
@@ -188,6 +193,7 @@ func (c *Controller) DrafterDependencies() *DrafterDependencies {
 		Now:                c.Now,
 		Options:            c.Options,
 		Pausing:            c.Pausing,
+		Reseed:             c.ReseedEntities,
 		RemoteFileTool:     c.RemoteFileTool,
 		RoleExecution:      c.RoleExecution,
 		Stoppable:          c.Stoppable,

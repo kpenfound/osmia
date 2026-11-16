@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -72,6 +73,8 @@ type Dependencies struct {
 	ProjectFor               func(id config.ProjectID) (config.ProjectID, *APIError)
 	PublicationEntry         func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	RefreshRuntime           func() error
+	// Reseeder returns the project's entity map re-seeder, or nil when it has none.
+	Reseeder                 func(repo *trace.Repository) *kb.Reseeder
 	RemoteFileTool           func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
 	Repository               func(id config.ProjectID) (*trace.Repository, error)
 	ProjectCreation          ProjectCreation

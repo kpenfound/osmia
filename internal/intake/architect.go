@@ -442,6 +442,10 @@ func (d *Drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
 	n := in.Draft
+	// A draft starts from the entity map of the upstream head as it is now.
+	if d.S.Reseed != nil {
+		d.S.Reseed(ctx, d.Repository)
+	}
 	// Abandoning the workstream cancels the running turn, not the recording
 	// of what it left.
 	running, cancel := context.WithCancel(ctx)

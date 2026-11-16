@@ -521,13 +521,25 @@ func HoldMasonTurn(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.C
 	return nil, ctx.Err()
 }
 
-func ExtendParallelMasons(t *testing.T, repository *trace.Repository, now time.Time, engine *fixturekit.DemoEngine, fake *FakeMasons, turnID func(string) string, actor trace.Actor) {
+// ExtendParallelMasons commits the directories internal/upload and
+// internal/audit to the clone and its upstream, so the entity map every
+// re-seed produces holds the subsystems of the parallel plans, records that
+// map, and plays the masons of their units with fake.
+func ExtendParallelMasons(t *testing.T, clone string, repository *trace.Repository, now time.Time, engine *fixturekit.DemoEngine, fake *FakeMasons, turnID func(string) string, actor trace.Actor) {
 	t.Helper()
-	mapping, err := kb.Load(repository)
-	Must(t, err)
+	home := filepath.Dir(clone)
 	for _, name := range []string{"upload", "audit"} {
-		mapping.Entities = append(mapping.Entities, kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}})
+		dir := filepath.Join(clone, "internal", name)
+		Must(t, os.MkdirAll(dir, 0o700))
+		Must(t, os.WriteFile(filepath.Join(dir, "doc.go"), []byte("package "+name+"\n"), 0o600))
+		fixturekit.DemoGit(t, home, "-C", clone, "add", filepath.Join("internal", name))
 	}
+	fixturekit.DemoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "add upload and audit")
+	fixturekit.DemoGit(t, home, "-C", clone, "push", "-q", "upstream", "HEAD:refs/heads/main")
+	tree, err := (&workspace.Git{Clone: clone}).Tree(context.Background(), "HEAD")
+	Must(t, err)
+	mapping, err := kb.SeedFS(tree)
+	Must(t, err)
 	Must(t, kb.Store(context.Background(), repository, mapping, now, actor, "fixture"))
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()

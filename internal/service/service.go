@@ -202,6 +202,8 @@ type Service struct {
 	// gateWorkers maps each active project's trace to its gate worker, so a
 	// scheduling pass can wake it.
 	gateWorkers sync.Map
+	// reseeders maps each project to the re-seeder of its entity map.
+	reseeders sync.Map
 	mu          sync.Mutex // guards cfg, projects, pending and reloadErr
 	cfg         *config.Config
 	// projects holds the runtime of every active project that has a trace, in
@@ -1166,6 +1168,7 @@ func (s *Service) launch(active *activeProject) {
 		<-publishDone
 		<-gatesDone
 		s.gateWorkers.Delete(active.repository)
+		s.reseeders.Delete(active.id)
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
 		}

@@ -564,6 +564,32 @@ func TestPublishSubsystemMapUpdatesNameTheCausingWorkstream(t *testing.T) {
 	}
 }
 
+func TestPublishSubsystemMapUpdatesNameTheReseedAndItsCommit(t *testing.T) {
+	f := newPublisherFixture(t)
+	commit := strings.Repeat("c", 40)
+	f.storeMap(testEntities(entity("api", "API", "internal/api/**")), hr(1), "fixture")
+	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**")), hr(2), kb.ReseedCause(commit))
+	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**"), entity("web", "Web", "internal/web/**")), hr(3), "operation-refresh")
+
+	in, err := collectPublishInputs(context.Background(), f.repo, f.s.current())
+	must(t, err)
+	texts := map[string]string{}
+	for _, r := range mapUpdateRecords(in) {
+		text := r.Versions[0].Text
+		for _, name := range []string{`"Store"`, `"Web"`} {
+			if strings.Contains(text, name) {
+				texts[name] = text
+			}
+		}
+	}
+	if text := texts[`"Store"`]; !strings.HasSuffix(text, "Caused by the re-seed of the map from commit "+commit+".") {
+		t.Fatalf("the re-seeded revision's update: %q", text)
+	}
+	if text := texts[`"Web"`]; !strings.HasSuffix(text, "Caused by a knowledge-base extraction.") {
+		t.Fatalf("an earlier kind of revision keeps its text: %q", text)
+	}
+}
+
 // groupInputs is the view one member project has of a workgroup's decisions.
 func groupInputs(project config.ProjectID, g trace.PublishedWorkgroup) *publishInputs {
 	return &publishInputs{owner: "owner", workSource: "osmia-work", ownerSource: "osmia-owner", project: project,

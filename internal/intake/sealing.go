@@ -321,8 +321,9 @@ func (z *Sealer) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no feature branch %s", branch)}, nil
 }
 
-// Apply seals the ratification: it fetches the upstream base branch, takes
-// the footprints of the ratified plan, creates the feature branch from the
+// Apply seals the ratification: it fetches the upstream base branch, re-seeds
+// the entity map from the fetched head, takes the footprints of the ratified
+// plan against that map, creates the feature branch from the
 // fetched commit in the service's workspace, records seal.json and moves the
 // workstream to ratified. A branch or workspace an earlier attempt created is
 // used, never made again. A fetch or branch creation that fails leaves the
@@ -366,6 +367,12 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	p, err := plan.Parse([]byte(graph.Content))
 	if err != nil {
 		return fail("the ratified plan does not parse: " + err.Error())
+	}
+	// The upstream head is fetched and the entity map re-seeded from it
+	// before the footprints resolve, so a directory that landed upstream
+	// after drafting resolves too. A failure leaves the latest recorded map.
+	if z.S.Reseed != nil {
+		z.S.Reseed(ctx, z.Repository)
 	}
 	entities, err := kb.Load(z.Repository)
 	if err != nil {

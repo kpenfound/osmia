@@ -682,20 +682,6 @@ func latestDocuments(docs []trace.Document) []trace.Document {
 	return out
 }
 
-// seedTracked seeds the entity map from the clone's tracked files alone, the
-// same input the librarian's staged copy holds.
-func seedTracked(ctx context.Context, clone string) (kb.Map, error) {
-	dir, err := os.MkdirTemp("", "osmia-seed-")
-	if err != nil {
-		return kb.Map{}, err
-	}
-	defer os.RemoveAll(dir)
-	if err := copyTracked(ctx, clone, dir); err != nil {
-		return kb.Map{}, err
-	}
-	return kb.Seed(dir)
-}
-
 // capture copies the view's output directory to the turn's directory before
 // the view is released, whatever the turn's result.
 func (e *extractor) capture(_ context.Context, scope coreadapter.Scope, view *isolation.FileView, _ coreadapter.SessionResult) error {

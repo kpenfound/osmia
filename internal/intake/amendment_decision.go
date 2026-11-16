@@ -634,6 +634,11 @@ func (a AmendmentDebate) Reseal(ctx context.Context, stream config.WorkstreamID,
 		if err != nil {
 			return unapplied("the approved plan does not parse: " + err.Error())
 		}
+		// The upstream head is fetched and the entity map re-seeded from it
+		// before the footprints resolve, as a first sealing does.
+		if a.S.Reseed != nil {
+			a.S.Reseed(ctx, a.Repository)
+		}
 		entities, err := kb.Load(a.Repository)
 		if err != nil {
 			return err

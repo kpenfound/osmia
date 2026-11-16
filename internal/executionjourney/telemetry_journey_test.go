@@ -97,7 +97,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
 	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
-	intakefixture.ExtendParallelMasons(t, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, librarianActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, librarianActor)
 	defer f.stop(t)
 	j := &telemetryJourney{f: f}
 
