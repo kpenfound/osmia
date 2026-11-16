@@ -26,7 +26,7 @@ func TestBrowserOpenSessionThroughFormListsItAsASessionAndOpensItsView(t *testin
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
-	p.Click("#sidebar-new-session")
+	p.OpenNewItem("#sidebar-new-session")
 	p.Await("the new session view", `!document.querySelector('.view[data-view="session-add"]').hidden`)
 	p.Await("the project choice", `[...document.querySelector('#session-add-form [name=project]').options].some(o => o.value === `+quote(string(projectID))+`)`)
 	p.Choose("#session-add-form [name=project]", string(projectID))

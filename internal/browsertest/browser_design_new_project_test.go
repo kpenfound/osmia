@@ -49,7 +49,7 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
 	// From the sidebar, with no project chosen: the first active project hosts it.
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.AwaitText("#design-add-form", "New project")
 	p.Click("#design-add-form [name=new_project]")
 	p.Click("#design-add-form [type=submit]")
@@ -105,7 +105,7 @@ func TestBrowserDesignFormRefusesANewProjectWithoutAnActiveProject(t *testing.T)
 
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.Click("#design-add-form [name=new_project]")
 	p.Click("#design-add-form [type=submit]")
 	p.AwaitText("#design-add-form .result", "no project is active")

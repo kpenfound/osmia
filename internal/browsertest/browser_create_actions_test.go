@@ -48,34 +48,35 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 			p.Click(cardAction)
 			p.Await("card action preselects its project", `!document.querySelector(`+quote(view)+`).hidden && document.querySelector(`+quote(view+` select[name=project]`)+`).value === `+quote(string(project)))
 		}
-		for _, entry := range []string{"header", "sidebar"} {
-			if entry == "header" {
-				p.Click("#new-workstream")
-				p.AwaitText(`#create-menu [data-open="`+action.view+`"]`, action.name)
-				p.Click(`#create-menu [data-open="` + action.view + `"]`)
-			} else {
-				p.Click("#picker-toggle")
-				p.AwaitText(`#sidebar [data-open="`+action.view+`"]`, action.name)
-				p.Click(`#sidebar [data-open="` + action.view + `"]`)
-			}
-			p.Await("the shared form and action name", `!document.querySelector(`+quote(view)+`).hidden && document.querySelector(`+quote(view+` h2`)+`).textContent === `+quote(action.name)+` && document.querySelector(`+quote(view+` [type=submit]`)+`).textContent === `+quote(action.name))
-			if action.view != "project-add" {
-				p.Await("global action asks for its project or repo", `document.querySelector(`+quote(view+` select[name=project]`)+`).value === ''`)
-				if action.view != "session-add" {
-					var got [][2]string
-					p.Eval(`[...document.querySelector(`+quote(view+` select[name=project]`)+`).options].filter(o => o.value).map(o => [o.value, o.textContent])`, &got)
-					if !reflect.DeepEqual(got, choices) {
-						t.Fatalf("%s choices: %v, want %v", action.name, got, choices)
-					}
+		p.Click("#new-workstream")
+		p.AwaitText(`#create-menu [data-open="`+action.view+`"]`, action.name)
+		p.Click(`#create-menu [data-open="` + action.view + `"]`)
+		p.Await("the shared form and action name", `!document.querySelector(`+quote(view)+`).hidden && document.querySelector(`+quote(view+` h2`)+`).textContent === `+quote(action.name)+` && document.querySelector(`+quote(view+` [type=submit]`)+`).textContent === `+quote(action.name))
+		if action.view != "project-add" {
+			p.Await("global action asks for its project or repo", `document.querySelector(`+quote(view+` select[name=project]`)+`).value === ''`)
+			if action.view != "session-add" {
+				var got [][2]string
+				p.Eval(`[...document.querySelector(`+quote(view+` select[name=project]`)+`).options].filter(o => o.value).map(o => [o.value, o.textContent])`, &got)
+				if !reflect.DeepEqual(got, choices) {
+					t.Fatalf("%s choices: %v, want %v", action.name, got, choices)
 				}
-				// A subsequent global action must clear a previous project choice too.
-				p.Choose(view+` select[name=project]`, string(project))
 			}
-			p.Await("the form fits at phone width", `document.querySelector(`+quote(view+` form`)+`).getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth`)
+			// A subsequent global action must clear a previous project choice too.
+			p.Choose(view+` select[name=project]`, string(project))
 		}
+		p.Await("the form fits at phone width", `document.querySelector(`+quote(view+` form`)+`).getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth`)
 	}
 	p.OpenView("project-add")
 	p.AwaitText("#project-add-title", "Create project")
+	// The New menu is the only place that offers the create actions: the
+	// sidebar has no create buttons, and its ids belong to the menu items.
+	p.Await("the New menu holds every create action and the only Create project", `(() => {
+		const items = [...document.querySelectorAll('#create-menu button')].map(b => [b.id, b.dataset.open]);
+		return JSON.stringify(items) === JSON.stringify([['sidebar-new', 'handin'], ['sidebar-new-design', 'design-add'], ['sidebar-new-session', 'session-add'], ['', 'project-add']]) &&
+			document.querySelectorAll('[data-open="project-add"]').length === 1 &&
+			document.querySelectorAll('#sidebar button:not([data-select], [data-select-workgroup], #picker-close, summary)').length === 0 &&
+			![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create project' && !b.closest('#create-menu') && !b.closest('form'));
+	})()`)
 	p.Click("#project-home")
 	p.Click(`[data-project="` + string(project) + `"] [data-project-action="projects"]`)
 	p.Await("the card's management entry opens project management", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))

@@ -121,7 +121,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatalf("the mason's profile select starts with %q chosen", profile)
 	}
 	p.Choose(row+"select", "other")
-	p.Click(`.view[data-view="profiles"] [data-close]`)
+	p.Click("#settings-menu [data-close]")
 	p.SelectWorkstream(quiet)
 	p.TypeInto(draft, "Half a thought")
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})

@@ -195,7 +195,7 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 	assertOutcome(p, "#design-start-result", "", "")
 	// Open a design through the page after the start, rather than reusing a
 	// fixture-only session, to cover the fresh create/navigation path too.
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.Choose("#design-add-form [name=project]", string(project))
 	p.Click("#design-add-form [type=submit]")
 	p.AwaitText("#design-add-form .result", "Opened design session")

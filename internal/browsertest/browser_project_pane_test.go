@@ -43,7 +43,7 @@ func TestBrowserProjectPaneCreatesProjectsAndScopesActions(t *testing.T) {
 	s, _ := start(t, opts)
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
-	p.Click(`[data-view="project-pane"] [data-open="project-add"]`)
+	p.OpenNewItem(`#create-menu [data-open="project-add"]`)
 	for name, value := range map[string]string{"name": "Uploads", "upstream": "owner/server", "clone": clone} {
 		p.TypeInto(`#project-add [name=`+name+`]`, value)
 	}
@@ -51,7 +51,7 @@ func TestBrowserProjectPaneCreatesProjectsAndScopesActions(t *testing.T) {
 	p.AwaitText("#project-add .result", "Registered Uploads")
 	p.Click("#project-home")
 	p.AwaitText("#project-pane", "owner/server")
-	p.Click(`[data-view="project-pane"] [data-open="project-add"]`)
+	p.OpenNewItem(`#create-menu [data-open="project-add"]`)
 	p.TypeInto("#project-add [name=name]", "Client")
 	p.TypeInto("#project-add [name=upstream]", "owner/client")
 	p.TypeInto("#project-add [name=clone]", second)

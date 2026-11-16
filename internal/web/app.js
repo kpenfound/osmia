@@ -44,6 +44,9 @@
   // nothing else prompts a render.
   const dismissCheckInterval = 1000;
 
+  // settingsSections are the sections of the Settings view; opening one
+  // shows the view on it.
+  const settingsSections = ['projects', 'priority', 'profiles', 'config', 'engine'];
   const unitOrder = ['planned', 'ready', 'implementing', 'waiting', 'checking', 'reviewing', 'approved', 'contested', 'merged'];
 
   const pauseSources = {
@@ -103,6 +106,7 @@
   // first time the page shows them.
   const ui = {
     selected: location.hash.startsWith('#workstream=') ? decodeURIComponent(location.hash.slice(12)) : stored('selected', null),
+    section: 'projects',
     view: location.hash.startsWith('#workgroup=') ? 'workgroup' : location.hash.startsWith('#workstream=') ? 'workstream' : 'project-pane',
     aboutMember: null,
     workgroup: location.hash.startsWith('#workgroup=') ? decodeURIComponent(location.hash.slice(11)) : null,
@@ -621,7 +625,7 @@
 
   function setConnection(state) {
     document.body.dataset.connection = state;
-    const label = { connecting: 'Connecting…', live: 'Live', lost: 'Reconnecting…' }[state];
+    const label = { connecting: 'Connecting…', live: 'Live', lost: 'Connection lost, reconnecting…' }[state];
     byId('connection').title = label;
     byId('connection').querySelector('.label').textContent = label;
   }
@@ -841,15 +845,16 @@
     }
   }
 
+  // openEngine starts a new opening of the Dagger engine section. Each
+  // opening owns its outcomes; results from earlier openings are discarded.
+  function openEngine() {
+    engineOpening++;
+    for (const action of ['restart', 'prune']) outcomeScopes.get(byId('engine-' + action + '-result')).entries.clear();
+    renderOutcomes();
+    readEngine(engineOpening);
+  }
+
   function setupEngine() {
-    byId('settings-menu').addEventListener('beforetoggle', event => {
-      if (event.newState !== 'open') return;
-      engineOpening++;
-      // Each opening owns its outcomes; discard results from earlier openings.
-      for (const action of ['restart', 'prune']) outcomeScopes.get(byId('engine-' + action + '-result')).entries.clear();
-      renderOutcomes();
-      readEngine(engineOpening);
-    });
     for (const action of ['restart', 'prune']) {
       byId('engine-' + action).addEventListener('click', () => {
         const opening = engineOpening;
@@ -1409,15 +1414,31 @@
       kind: el('span', { class: 'tag', 'data-field': 'kind' }, 'Session'),
       title: el('span', { class: 'title', 'data-field': 'goal' }),
       project: el('span', { 'data-field': 'project' }),
-      state: el('span', { 'data-field': 'state' }),
+      state: el('span', { class: 'glyph', 'data-field': 'state', role: 'img' }),
       signals: el('span', { class: 'signals' }),
     };
     r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
-      r.title, el('span', { class: 'sub meta-row' }, r.kind, ' ', r.project, ' ', r.state), r.signals);
+      r.state, el('span', { class: 'text' }, r.title, el('span', { class: 'sub meta-row' }, r.kind, r.project)), r.signals);
     r.button.addEventListener('click', () => select(id));
     r.node = el('li', {}, r.button);
     rows.set(id, r);
     return r;
+  }
+
+  // stateGlyph names the shape a workstream's state takes in the sidebar:
+  // live while work runs, waiting before it starts, done once it is
+  // assembled or delivered, failed once it stops without delivering, idle
+  // for a session with nothing running and archived once its history is
+  // gone. A shape accompanies the status colour, which never carries the
+  // state alone.
+  function stateGlyph(w) {
+    if (w.archived) return 'archived';
+    const state = w.state || 'handed';
+    if (state === 'delivered' || state === 'assembled') return 'done';
+    if (state === 'abandoned' || state === 'failed' || state === 'cancelled' || state === 'blocked') return 'failed';
+    if (state === 'building' || (w.agents && w.agents.length > 0)) return 'live';
+    if (w.kind === 'session' || w.kind === 'design') return 'idle';
+    return 'waiting';
   }
 
   function renderSidebar() {
@@ -1453,14 +1474,17 @@
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
-      r.state.textContent = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
+      const stateName = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
+      r.state.dataset.glyph = stateGlyph(w);
+      r.state.setAttribute('aria-label', stateName);
+      r.state.title = stateName;
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(ui.view !== 'workgroup' && current !== null && current.workstream === w.workstream));
       r.signals.replaceChildren(...[
         paused ? el('span', { class: 'paused', 'data-field': 'paused', title: 'Paused' }, 'paused') : null,
         w.agents && w.agents.length > 0 ? el('span', { class: 'working', 'data-field': 'working', title: w.agents.length + ' running' }) : null,
-        needs > 0 ? el('span', { class: 'needs', 'data-field': 'needs', title: needs + ' waiting for you' }, String(needs)) : null,
+        needs > 0 ? el('span', { class: 'needs', 'data-field': 'needs', title: needs + ' waiting for you', 'aria-label': needs + ' waiting for you' }, String(needs)) : null,
         needs === 0 && unread(w) ? el('span', { class: 'unread', 'data-field': 'unread', title: 'New activity' }) : null,
       ].filter((node) => node !== null));
       return r.node;
@@ -1515,6 +1539,77 @@
       return;
     }
     place(list, groupedEntries(work, sidebarGroups));
+  }
+
+  // renderNeedsYou lists every open inbox entry and charter proposal across
+  // the workstreams, each linking to the view that answers it. Project
+  // creations stay below as cards, where they are answered. The list is
+  // built from the inbox and charter reads the page already makes. Each
+  // item keeps its link between renders, so a focused link stays focused.
+  const needsItems = new Map();
+  const needsCount = el('span', { class: 'needs', 'data-field': 'needs-count' });
+  const needsList = el('ul', { class: 'needs-list' });
+  const needsEmpty = el('p', { class: 'meta', 'data-field': 'needs-empty' }, 'Nothing is waiting for you.');
+  const needsSection = el('section', { class: 'needs-you', 'data-field': 'needs-you', 'aria-labelledby': 'needs-you-title' },
+    el('div', { class: 'needs-head' }, el('h3', { id: 'needs-you-title' }, 'Needs you'), needsCount), needsList, needsEmpty);
+
+  function needsItem(key) {
+    let item = needsItems.get(key);
+    if (item) return item;
+    item = {
+      kind: el('span', { class: 'needs-kind', 'data-field': 'kind' }),
+      title: el('span', { class: 'needs-title', 'data-field': 'goal' }),
+      text: el('span', { class: 'needs-text', 'data-field': 'question' }),
+      project: el('span', { 'data-field': 'project' }),
+      opened: el('span', { class: 'meta', 'data-field': 'opened' }),
+      target: null,
+    };
+    item.link = el('a', { class: 'needs-link' }, item.kind, item.title, item.text,
+      el('span', { class: 'needs-where meta-row' }, item.project, item.opened));
+    item.link.addEventListener('click', event => {
+      event.preventDefault();
+      if (item.target.group) selectWorkgroup(item.target.group);
+      else select(item.target.workstream);
+    });
+    item.node = el('li', {}, item.link);
+    needsItems.set(key, item);
+    return item;
+  }
+
+  function renderNeedsYou() {
+    if (!views.inbox) return null;
+    const entries = views.inbox.entries.filter(e => e.kind !== 'project-creation' && !dismissed.has(decisionKey(e)));
+    const proposed = views.charter ? views.charter.proposals : [];
+    const wanted = [
+      ...entries.map(e => {
+        const group = e.workgroup && workgroups().some(g => g.id === e.workgroup) ? e.workgroup : '';
+        return { key: 'entry:' + decisionKey(e), kind: kinds[e.kind] || e.kind, title: group ? groupGoal(group) : workstreamName(e.workstream),
+          text: e.question, project: repoLabel(e.project), opened: e.opened_at, target: { workstream: e.workstream, group } };
+      }),
+      ...proposed.map(r => ({ key: 'proposal:' + proposalKey(r), kind: 'Charter rule', title: workstreamName(r.workstream), text: r.rule,
+        project: repoLabel(streams().find(w => w.workstream === r.workstream)?.project || ''), opened: '', target: { workstream: r.workstream, group: '' } })),
+    ];
+    const nodes = wanted.map(w => {
+      const item = needsItem(w.key);
+      item.target = w.target;
+      item.kind.textContent = w.kind;
+      item.title.textContent = w.title;
+      item.text.textContent = w.text;
+      item.project.textContent = w.project;
+      item.opened.textContent = w.opened ? when(w.opened) : '';
+      item.opened.hidden = !w.opened;
+      item.link.href = w.target.group ? '#workgroup=' + encodeURIComponent(w.target.group) : '#workstream=' + encodeURIComponent(w.target.workstream);
+      item.node.dataset.needsWorkstream = w.target.workstream;
+      return item.node;
+    });
+    for (const key of needsItems.keys()) if (!wanted.some(w => w.key === key)) needsItems.delete(key);
+    place(needsList, nodes);
+    needsCount.textContent = String(nodes.length);
+    needsCount.setAttribute('aria-label', nodes.length + ' waiting for you');
+    needsCount.hidden = nodes.length === 0;
+    needsList.hidden = nodes.length === 0;
+    needsEmpty.hidden = nodes.length > 0;
+    return needsSection;
   }
 
   let paneRendered = '';
@@ -1643,8 +1738,8 @@
     // A creation that cannot finish waits for the owner here, whether a start,
     // the CLI or the API began it.
     const creations = (views.inbox ? views.inbox.entries : []).filter((e) => e.kind === 'project-creation' && !dismissed.has(decisionKey(e))).map(renderDecision);
-    place(byId('project-pane'), [...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes]);
-    if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
+    place(byId('project-pane'), [renderNeedsYou(), ...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes].filter(node => node !== null));
+    if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'No projects yet. Use New to create one.' : 'Loading projects…'));
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
     for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
     for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
@@ -1698,6 +1793,7 @@
         popover.hidePopover();
       }
     }
+    const section = settingsSections.includes(view) ? view : view === 'settings' ? ui.section : null;
     if (['handin', 'design-add', 'session-add'].includes(view) || (view === 'projects' && project)) {
       const form = document.querySelector('[data-view="' + view + '"] form');
       const changedProject = form.elements.project.value !== project;
@@ -1705,14 +1801,18 @@
       if (view === 'handin') handinProjects = project ? [project] : [];
       if (view !== 'projects' || changedProject) form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    if (section) view = 'settings';
     const changed = ui.view !== view;
     if (changed && ['project-pane', 'workstream', 'workgroup', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
+    const engineOpened = section === 'engine' && (changed || ui.section !== 'engine');
     ui.view = view;
+    if (section) ui.section = section;
     if (changed) ui.toEnd = true;
     if (view === 'project-pane') history.replaceState(null, '', location.pathname + location.search);
     setPicker(false);
     render();
-    if (changed && !shownFeed()) byId('main').scrollTop = 0;
+    if (engineOpened) openEngine();
+    if ((changed || section) && !shownFeed()) byId('main').scrollTop = 0;
   }
 
   function setTab(tab) {
@@ -3004,6 +3104,7 @@
     if (!capacity) {
       meters.replaceChildren();
       byId('meter-total').textContent = '';
+      byId('capacity-button').dataset.full = 'false';
     } else {
       const used = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.used, 0);
       const limit = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.limit, 0);
@@ -3015,6 +3116,7 @@
           title: r.role + ': ' + poolUse(r) + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
       }));
       byId('meter-total').textContent = used + '/' + limit;
+      byId('capacity-button').dataset.full = String(capacity.roles.some((r) => boundedPool(r) && r.used >= r.limit));
       byId('capacity-button').title = used + ' of ' + limit + ' slots in use' + (local > 0 ? '; ' + local + ' architect sessions' : '');
     }
     const pauses = views.runtime ? views.runtime.effective.pauses || [] : [];
@@ -3038,6 +3140,13 @@
     for (const view of document.querySelectorAll('#main > .view')) {
       view.hidden = view.dataset.view !== ui.view;
     }
+    for (const section of document.querySelectorAll('.settings-section')) {
+      section.hidden = ui.view !== 'settings' || section.dataset.section !== ui.section;
+    }
+    for (const button of byId('settings-nav').querySelectorAll('[data-open]')) {
+      button.setAttribute('aria-current', String(ui.view === 'settings' && button.dataset.open === ui.section));
+    }
+    byId('settings-button').setAttribute('aria-current', String(ui.view === 'settings'));
   }
 
   // position places a popover under the button it belongs to.
@@ -3137,6 +3246,9 @@
     for (const button of document.querySelectorAll('[data-open]')) {
       button.addEventListener('click', () => openView(button.dataset.open));
     }
+    byId('settings-button').addEventListener('click', () => {
+      openView(ui.view === 'settings' ? ui.returnView || 'project-pane' : 'settings');
+    });
     for (const button of document.querySelectorAll('[data-close]')) {
       button.addEventListener('click', () => openView(ui.returnView || 'project-pane'));
     }

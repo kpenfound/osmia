@@ -19,21 +19,21 @@
   <h1><button type="button" id="project-home" data-open="project-pane" aria-label="Projects" title="Projects">Osmia</button></h1>
   <span id="connection" role="status" title="Connecting…"><span class="dot"></span><span class="label">Connecting…</span></span>
   <div class="tools">
-    <button type="button" id="capacity-button" class="meters" popovertarget="capacity-popover" aria-label="Capacity">
+    <button type="button" id="capacity-button" class="chip" popovertarget="capacity-popover" aria-label="Capacity">
       <span id="meters" class="meter-group"></span><span id="meter-total" class="meter-total"></span>
     </button>
-    <button type="button" id="pause-button" class="icon" popovertarget="pause-popover" aria-label="Pauses" data-paused="false">
+    <button type="button" id="pause-button" class="chip" popovertarget="pause-popover" aria-label="Pauses" data-paused="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
       <span id="pause-count" class="count"></span>
     </button>
-    <button type="button" id="activity-button" class="icon" popovertarget="activity-popover" aria-label="Backend activity" data-active="false" data-blocked="false">
+    <button type="button" id="activity-button" class="chip" popovertarget="activity-popover" aria-label="Backend activity" data-active="false" data-blocked="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2 7 4-14 2 7h6"/></svg>
       <span id="activity-count" class="count"></span>
     </button>
-    <button type="button" id="new-workstream" class="icon" aria-label="Create" title="Create" popovertarget="create-menu">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    <button type="button" id="new-workstream" class="new-button" aria-label="Create" title="Create" popovertarget="create-menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="new-label">New</span>
     </button>
-    <button type="button" id="settings-button" class="icon" popovertarget="settings-menu" aria-label="Settings" data-lit="false">
+    <button type="button" id="settings-button" class="icon" aria-label="Settings" title="Settings" aria-current="false" data-lit="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
   </div>
@@ -65,27 +65,11 @@
 </div>
 
 <div id="create-menu" class="popover menu" popover data-anchor="new-workstream">
+  <button type="button" id="sidebar-new" data-open="handin">Hand in a feature</button>
+  <button type="button" id="sidebar-new-design" data-open="design-add">Open a design session</button>
+  <button type="button" id="sidebar-new-session" data-open="session-add">Open an exploratory session</button>
+  <hr>
   <button type="button" data-open="project-add">Create project</button>
-  <button type="button" data-open="handin">Hand in a feature</button>
-  <button type="button" data-open="design-add">Open a design session</button>
-  <button type="button" data-open="session-add">Open an exploratory session</button>
-</div>
-
-<div id="settings-menu" class="popover menu" popover data-anchor="settings-button">
-  <p id="tailnet-https-status" class="meta" role="status" hidden></p>
-  <button type="button" data-open="project-add">Create project</button>
-  <button type="button" data-open="projects">Project management</button>
-  <section id="engine-controls" aria-labelledby="engine-title">
-    <h3 id="engine-title">Dagger engine</h3>
-    <div id="engine-status" role="status"></div>
-    <button type="button" id="engine-restart">Restart engine</button>
-    <p id="engine-restart-result" class="result" role="status"></p>
-    <button type="button" id="engine-prune">Prune engine cache</button>
-    <p id="engine-prune-result" class="result" role="status"></p>
-  </section>
-  <button type="button" data-open="priority">Priority</button>
-  <button type="button" data-open="profiles">Profiles and usage</button>
-  <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>
 </div>
 
 <div id="workstream-menu" class="popover menu" popover data-anchor="workstream-menu-button">
@@ -107,16 +91,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <button type="button" id="sidebar-new" class="new" data-open="handin">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Hand in a feature
-    </button>
-    <button type="button" id="sidebar-new-session" class="new" data-open="session-add">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Open an exploratory session
-    </button>
-    <button type="button" id="sidebar-new-design" class="new" data-open="design-add">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Open a design session
-    </button>
-    <button type="button" class="new" data-open="project-add">Create project</button>
     <ul id="workstream-list" class="rows"></ul>
     <details id="archived" class="archived" hidden>
       <summary>Archived <span id="archived-count" class="meta"></span></summary>
@@ -130,7 +104,7 @@
     </section>
 
     <section class="view" data-view="project-pane" aria-labelledby="project-pane-title">
-      <div class="view-head"><h2 id="project-pane-title">Projects</h2><button type="button" data-open="project-add">Create project</button></div>
+      <div class="view-head"><h2 id="project-pane-title">Projects</h2></div>
       <div id="project-pane"></div>
     </section>
 
@@ -335,82 +309,106 @@
       </form>
     </section>
 
-    <section class="view" data-view="projects" aria-labelledby="projects-title" hidden>
-      <div class="view-head"><h2 id="projects-title">Project management</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="project-edit" class="control">
-        <label>Project <select name="project" data-project-select required></select></label>
-        <p id="charter-state" class="meta" role="status"></p>
-        <h3>Project charter</h3>
-        <div class="actions"><button type="button" class="quiet" data-action="read-charter">Read charter</button></div>
-        <p id="charter-revision" class="meta"></p>
-        <p id="charter-changed" role="status" hidden>Charter changed elsewhere. Your draft and its revision are kept. Read charter to load the latest revision.</p>
-        <label>Optional guidance for agents, in addition to the repository's AGENTS.md <textarea name="content" rows="10"></textarea></label>
-        <div class="actions">
-          <button type="submit" class="primary" disabled>Save charter</button>
+    <section id="settings-menu" class="view" data-view="settings" aria-labelledby="settings-title" hidden>
+      <div class="view-head"><h2 id="settings-title">Settings</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <p id="tailnet-https-status" class="meta" role="status" hidden></p>
+      <div class="settings-layout">
+        <nav id="settings-nav" aria-label="Settings sections">
+          <button type="button" data-open="projects">Projects</button>
+          <button type="button" data-open="priority">Priority</button>
+          <button type="button" data-open="profiles">Profiles and usage</button>
+          <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>
+          <button type="button" data-open="engine">Dagger engine</button>
+        </nav>
+        <div class="settings-sections">
+          <section class="settings-section" data-view="projects" data-section="projects" aria-labelledby="projects-title" hidden>
+            <h3 id="projects-title">Projects</h3>
+            <form id="project-edit" class="control">
+              <label>Project <select name="project" data-project-select required></select></label>
+              <p id="charter-state" class="meta" role="status"></p>
+              <h3>Project charter</h3>
+              <div class="actions"><button type="button" class="quiet" data-action="read-charter">Read charter</button></div>
+              <p id="charter-revision" class="meta"></p>
+              <p id="charter-changed" role="status" hidden>Charter changed elsewhere. Your draft and its revision are kept. Read charter to load the latest revision.</p>
+              <label>Optional guidance for agents, in addition to the repository's AGENTS.md <textarea name="content" rows="10"></textarea></label>
+              <div class="actions">
+                <button type="submit" class="primary" disabled>Save charter</button>
+              </div>
+              <p class="result" role="status"></p>
+            </form>
+            <form id="project-config" class="control">
+              <h3>Project settings</h3>
+              <p id="config-file" class="meta"></p>
+              <p id="config-load-error" class="attention" role="status" hidden></p>
+              <p id="config-changed" role="status" hidden>Configuration changed elsewhere. Your draft and the version it was read at are kept. Read settings to load the latest file values.</p>
+              <div class="actions"><button type="button" class="quiet" data-action="read-config">Read settings</button></div>
+              <div id="config-fields" class="settings"></div>
+              <div class="actions">
+                <button type="submit" class="primary" disabled>Save settings</button>
+              </div>
+              <p class="result" role="status"></p>
+            </form>
+            <div class="control">
+              <div class="actions">
+                <button type="button" id="project-remove" class="danger">Remove project from active work</button>
+              </div>
+              <p id="project-result" class="result" role="status"></p>
+              <h3>Repos</h3>
+              <div id="project-repos"></div>
+            </div>
+          </section>
+          <section class="settings-section" data-view="priority" data-section="priority" aria-labelledby="priority-title" hidden>
+            <h3 id="priority-title">Priority</h3>
+            <form id="priority-form" class="control">
+              <label>Repo <select id="priority-project" name="project"></select></label>
+              <p id="priority-current" class="meta"></p>
+              <ol id="priority-list" class="priority"></ol>
+              <div class="actions">
+                <button type="submit" class="primary">Set order</button>
+                <button type="button" id="priority-clear" class="quiet">Clear order</button>
+              </div>
+              <p id="priority-result" class="result" role="status"></p>
+            </form>
+          </section>
+          <section class="settings-section" data-view="profiles" data-section="profiles" aria-labelledby="profiles-title" hidden>
+            <h3 id="profiles-title">Profiles and usage</h3>
+            <div class="control">
+              <div id="profiles" class="profiles"></div>
+              <p id="profile-result" class="result" role="status"></p>
+            </div>
+            <div class="control">
+              <h3>Provider usage</h3>
+              <ul id="providers" class="providers"></ul>
+              <p id="provider-result" class="result" role="status"></p>
+            </div>
+          </section>
+          <section class="settings-section" data-view="config" data-section="config" aria-labelledby="config-title" hidden>
+            <h3 id="config-title">Configuration</h3>
+            <div id="config" class="control">
+              <div class="line">
+                <span>Loaded <code id="digest"></code></span>
+                <button type="button" id="reload" data-lit="false">Reload</button>
+              </div>
+              <p id="drift"></p>
+              <ul id="drift-files" class="files"></ul>
+              <p id="last-error" class="attention" hidden></p>
+              <ul id="config-diagnostics" class="notes"></ul>
+              <p id="reload-result" class="result" role="status"></p>
+            </div>
+          </section>
+          <section id="engine-controls" class="settings-section" data-section="engine" aria-labelledby="engine-title" hidden>
+            <h3 id="engine-title">Dagger engine</h3>
+            <div class="control">
+              <div id="engine-status" role="status"></div>
+              <div class="actions">
+                <button type="button" id="engine-restart">Restart engine</button>
+                <button type="button" id="engine-prune">Prune engine cache</button>
+              </div>
+              <p id="engine-restart-result" class="result" role="status"></p>
+              <p id="engine-prune-result" class="result" role="status"></p>
+            </div>
+          </section>
         </div>
-        <p class="result" role="status"></p>
-      </form>
-      <form id="project-config" class="control">
-        <h3>Project settings</h3>
-        <p id="config-file" class="meta"></p>
-        <p id="config-load-error" class="attention" role="status" hidden></p>
-        <p id="config-changed" role="status" hidden>Configuration changed elsewhere. Your draft and the version it was read at are kept. Read settings to load the latest file values.</p>
-        <div class="actions"><button type="button" class="quiet" data-action="read-config">Read settings</button></div>
-        <div id="config-fields" class="settings"></div>
-        <div class="actions">
-          <button type="submit" class="primary" disabled>Save settings</button>
-        </div>
-        <p class="result" role="status"></p>
-      </form>
-      <div class="control">
-        <div class="actions">
-          <button type="button" id="project-remove" class="danger">Remove project from active work</button>
-        </div>
-        <p id="project-result" class="result" role="status"></p>
-        <h3>Repos</h3>
-        <div id="project-repos"></div>
-      </div>
-    </section>
-
-    <section class="view" data-view="priority" aria-labelledby="priority-title" hidden>
-      <div class="view-head"><h2 id="priority-title">Priority</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="priority-form" class="control">
-        <label>Repo <select id="priority-project" name="project"></select></label>
-        <p id="priority-current" class="meta"></p>
-        <ol id="priority-list" class="priority"></ol>
-        <div class="actions">
-          <button type="submit" class="primary">Set order</button>
-          <button type="button" id="priority-clear" class="quiet">Clear order</button>
-        </div>
-        <p id="priority-result" class="result" role="status"></p>
-      </form>
-    </section>
-
-    <section class="view" data-view="profiles" aria-labelledby="profiles-title" hidden>
-      <div class="view-head"><h2 id="profiles-title">Profiles and usage</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <div class="control">
-        <div id="profiles" class="profiles"></div>
-        <p id="profile-result" class="result" role="status"></p>
-      </div>
-      <div class="control">
-        <h3>Provider usage</h3>
-        <ul id="providers" class="providers"></ul>
-        <p id="provider-result" class="result" role="status"></p>
-      </div>
-    </section>
-
-    <section class="view" data-view="config" aria-labelledby="config-title" hidden>
-      <div class="view-head"><h2 id="config-title">Configuration</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <div id="config" class="control">
-        <div class="line">
-          <span>Loaded <code id="digest"></code></span>
-          <button type="button" id="reload" data-lit="false">Reload</button>
-        </div>
-        <p id="drift"></p>
-        <ul id="drift-files" class="files"></ul>
-        <p id="last-error" class="attention" hidden></p>
-        <ul id="config-diagnostics" class="notes"></ul>
-        <p id="reload-result" class="result" role="status"></p>
       </div>
     </section>
   </main>

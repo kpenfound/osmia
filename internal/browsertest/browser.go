@@ -387,13 +387,30 @@ func (p *Page) ClosePopovers() {
 	p.Eval(`document.querySelectorAll(':popover-open').forEach((e) => e.hidePopover())`, nil)
 }
 
-// openView opens one of the views the settings menu lists.
+// OpenView opens the create-project view from the New menu, or a section of
+// the Settings view: projects, priority, profiles, config or engine.
 func (p *Page) OpenView(name string) {
 	p.T.Helper()
 	p.ClosePopovers()
-	p.Click("#settings-button")
-	p.Click(`#settings-menu [data-open="` + name + `"]`)
-	p.Await("the "+name+" view", `!document.querySelector('.view[data-view="`+name+`"]').hidden`)
+	if name == "project-add" {
+		p.OpenNewItem(`#create-menu [data-open="project-add"]`)
+		p.Await("the "+name+" view", `!document.querySelector('.view[data-view="project-add"]').hidden`)
+		return
+	}
+	var open bool
+	p.Eval(`document.getElementById('settings-menu').hidden === false`, &open)
+	if !open {
+		p.Click("#settings-button")
+	}
+	p.Click(`#settings-nav [data-open="` + name + `"]`)
+	p.Await("the "+name+" settings section", `!document.querySelector('[data-section="`+name+`"]').hidden`)
+}
+
+// OpenNewItem opens the New menu and clicks one of its items.
+func (p *Page) OpenNewItem(item string) {
+	p.T.Helper()
+	p.Click("#new-workstream")
+	p.Click(item)
 }
 
 // openPauses opens the header's pause popover unless it is open.

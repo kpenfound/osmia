@@ -39,7 +39,7 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Eval(`window.notReloaded = true`, nil)
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.Choose("#design-add-form [data-project-select]", string(project))
 	p.Click("#design-add-form [type=submit]")
 	p.AwaitText("#design-add-form .result", "Opened design session")

@@ -32,7 +32,7 @@ func engineWebFixture(t *testing.T, mode string) (*Service, fixturekit.EngineCLI
 func openEngineMenu(t *testing.T, s *Service) *page {
 	t.Helper()
 	p := openOutcomePage(t, s)
-	p.Click("#settings-button")
+	p.OpenView("engine")
 	p.AwaitText("#engine-status [data-field=mode]", "managed")
 	return p
 }
@@ -74,9 +74,9 @@ func TestBrowserEngineControls(t *testing.T) {
 	}
 	p.Click("#engine-prune")
 	assertOutcome(p, "#engine-prune-result", "ok", "Engine cache pruned.")
-	// The menu remains within the phone viewport after status has expanded it.
+	// The Settings view remains within the phone viewport after status has expanded it.
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile))
-	p.Await("the cog menu fits the phone", `(() => { const r = document.getElementById('settings-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)
+	p.Await("the Settings view fits the phone", `(() => { const r = document.getElementById('settings-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; })()`)
 }
 
 func TestBrowserEngineNonManagedRefusals(t *testing.T) {
@@ -84,7 +84,7 @@ func TestBrowserEngineNonManagedRefusals(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s, fake := engineWebFixture(t, mode)
 			p := openOutcomePage(t, s)
-			p.Click("#settings-button")
+			p.OpenView("engine")
 			expected := mode
 			if strings.HasPrefix(mode, "tcp:") {
 				expected = "address"
@@ -109,7 +109,7 @@ func TestBrowserEngineNonManagedRefusals(t *testing.T) {
 	}
 }
 
-func TestBrowserEngineOutcomesBelongToMenuOpening(t *testing.T) {
+func TestBrowserEngineOutcomesBelongToSectionOpening(t *testing.T) {
 	s, _ := engineWebFixture(t, "managed")
 	p := openEngineMenu(t, s)
 	for _, action := range []string{"restart", "prune"} {
