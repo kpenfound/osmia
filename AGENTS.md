@@ -42,6 +42,7 @@
   ```
 
   `--go-test` alone selects every test with that name, in any package; add `--go-package` to pick one. `dagger list go-tests -a --go-package=internal/intakejourney` lists the intake journeys, and `-f=cli` prints each one as the flags that select it.
+- `--go-test` matches exact test names, not prefixes, and check names such as `go:stale` do not select anything. Dagger replays cached results, cached failures included, so a run that finishes in a second or two proves nothing about a changed tree. [docs/testing.md](docs/testing.md#validate-as-a-mason) covers forcing a real run, what the test container holds, lint pitfalls, run sizing and known flakes.
 - `--progress=report` names each check by its link. To rerun a failing check exactly, pass that link back to `dagger check`, quoted:
 
   ```sh

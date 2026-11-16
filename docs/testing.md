@@ -53,7 +53,78 @@ The lint link runs staticcheck over the project. There is no other route:
 masons do not validate with Docker or Compose, a copy of the tree made into a
 Git root, or a toolchain installed in the guest. The Osmia sandbox template has
 no Docker Engine, and the guest reaches the engine only through the host's
-forward ([Dagger for masons](configuration.md#dagger-for-masons)).
+forward ([Dagger for masons](configuration.md#dagger-for-masons)). If a run
+cannot load the workspace, report that blocker instead of switching routes.
+
+### Select checks
+
+- Only `--go-package` and `--go-test` select Go tests, and they combine in one
+  call. A check name such as `go:stale` selects nothing and fails with `no
+  checks matched pattern`.
+- `--go-test` matches exact test names, not prefixes. A prefix such as
+  `--go-test=TestDaggerClient` ends with `no checks selected` after a few
+  seconds.
+- A `dag+check://` link, such as the lint link, runs in a call of its own.
+  Different links cannot share one call, and the Go check's flags do not
+  combine with a link.
+- `dagger check -l` lists the checks and `dagger list go-tests -a` lists the
+  tests ([AGENTS.md](../AGENTS.md#validation)).
+
+### Cached results
+
+Dagger replays the cached result, a cached failure included, for an unchanged
+source tree and an identical selection. A run that finishes in a second or two
+is a replay and proves nothing about the current tree. To force a real run,
+change the selection (for example the whole package instead of one test) or add
+a throwaway `_test.go` file with a unique comment to the package under test, and
+delete it afterwards.
+
+### What the test container holds
+
+The Go check's test container carries only Go sources, `testdata/**` and the
+files that tests `go:embed`. It does not carry `scripts/*.sh` or `docs/*`. A
+test that needs a repository script or page embeds it, as
+`scripts/build_sandbox_test.go` does with `build-sandbox.sh` and
+`docs/telemetry_test.go` does with `telemetry.md`, or keeps its fixtures under
+`testdata`.
+
+### Lint pitfalls
+
+The lint check runs staticcheck with the checks in
+[staticcheck.conf](../staticcheck.conf). It compiles every test package, so
+changing a type or helper signature can break a test far from the change. It
+rejects:
+
+- literal U+200B or U+2028 characters in strings (ST1018);
+- a struct literal that copies every field of another struct (S1016);
+- unused functions and methods (U1000), such as a helper left without callers
+  after its last caller is deleted;
+- deprecated APIs (SA1019);
+- identical expressions on both sides of a binary operator (SA4000).
+
+### Size runs
+
+A complete `dagger check` takes well over ten minutes. Run it in the
+background and read its output file when it finishes, or select the package
+that holds the change. Selected tests take seconds. Do not wait with a
+`pgrep -f 'dagger check'` loop: it matches itself and never ends.
+
+A whole-package `--env=race` run is much longer than a plain run, so select the
+tests that exercise the concurrent code by name. After a change to the schema or
+an API type, run `dagger generate` so `docs/openapi.json` is current.
+
+### Known failures and flakes
+
+- `dagger-cli-contract` runs the real Dagger CLI in a nested Dagger session. A
+  mason sandbox whose engine does not provide nested sessions fails it while
+  connecting. Report that as an environment blocker; it says nothing about the
+  change unless the change touches `internal/checks`.
+- Under load these tests can time out or fail and then pass alone:
+  `TestProjectAddRecoversAtEachStep`, `TestLandingDemonstration`,
+  `TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader` and
+  `TestAmendOnProductionContinuedDesignThread`. Rerun them selected by name
+  before treating the failure as real.
+- A flaky browser test can point to a page bug rather than load.
 
 ## What the suite covers
 
