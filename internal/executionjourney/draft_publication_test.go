@@ -35,7 +35,7 @@ type draftFixture struct {
 
 func newDraftFixture(t *testing.T, style string) *draftFixture {
 	t.Helper()
-	f, stream, repository, a := newFinalFixture(t, "draft")
+	f, stream, repository, a := newFinalFixtureWith(t, "draft", "")
 	d := &draftFixture{f: f, stream: stream, repository: repository, a: a}
 	d.fork, d.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := d.forkBranch(t); return commit })
 	d.pulls.SyncHead = true

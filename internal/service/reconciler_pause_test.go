@@ -393,6 +393,8 @@ func stopWhileRunning(t *testing.T, s *Service, r coreadapter.Reconciler, op cor
 	}()
 	select {
 	case <-entered:
+	case err := <-done:
+		t.Fatalf("the turn did not start: %v", err)
 	case <-time.After(demoTimeout):
 		t.Fatal("the turn did not start")
 	}

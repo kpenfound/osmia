@@ -17,7 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -269,9 +268,18 @@ func newBriefJourney(t *testing.T, extra string) *briefJourney {
 	j := newBriefFixture(t, extra)
 	stream, repository := j.buildFixture().SeedGit(t, "brief")
 	j.stream, j.repository = stream, repository
+	j.host(t)
 	j.s.setSole(&activeProject{repository: repository})
 	j.assemble(t, stream, "internal/trace", "resume", "dedupe")
 	return j
+}
+
+// host gives the service a credential for a fake pull request host, so that
+// each final review pushes its commit and opens or updates the draft pull
+// request, and finds the checks of the pushed commit passed.
+func (j *briefJourney) host(t *testing.T) {
+	t.Helper()
+	j.fork, j.pulls = hostBranches(t, j.shedFixture)
 }
 
 // newBriefFixture starts the project with a chief of staff behind the real
@@ -481,17 +489,14 @@ func recordBrief(p api.DeliveryPresentation, member config.WorkstreamID, text st
 	return briefCall{Tool: "record_delivery_brief", Input: input}
 }
 
-// publish publishes the approved workstream through the stopped service and
-// returns the body of the pull request it opened. The service must be
-// stopped.
+// publish has the stopped service mark the approved workstream's draft pull
+// request ready and returns the body it now has. The service must be stopped.
 func (j *briefJourney) publish(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
-	j.fork, j.pulls = fixturekit.PublicationFork(t, j.clone, func() string { commit, _ := j.forkBranch(t); return commit })
-	j.s.options.PullRequests = j.pulls
-	// The running service asked for the publication once the owner approved;
-	// it could not carry it out without a pull request host, so the request
-	// is still pending. A publication that was not asked for is asked for now.
+	// The running service asked for the marking ready once the owner approved;
+	// it could not carry it out while stopped, so the request is still pending.
+	// One that was not asked for is asked for now.
 	var op coreadapter.Operation
 	if ops := j.operations(t); len(ops) > 0 {
 		op = ops[len(ops)-1]
@@ -500,8 +505,8 @@ func (j *briefJourney) publish(t *testing.T) string {
 	}
 	result, err := j.publisher().Apply(ctx, op)
 	must(t, err)
-	if result.Outcome != "succeeded" || len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 {
-		t.Fatalf("publication %+v: %+v", result, j.pulls)
+	if result.Outcome != "succeeded" || len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Prs[0].Draft {
+		t.Fatalf("marking ready %+v: %+v", result, j.pulls)
 	}
 	return j.pulls.Prs[0].Body
 }

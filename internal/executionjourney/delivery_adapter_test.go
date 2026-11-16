@@ -51,6 +51,10 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return d.driver().Apply(ctx, op)
 }
 
+func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
+	return d.driver().PublishDraft(ctx, cfg, stream, op, report)
+}
+
 var finalReviewNotice = delivery.FinalReviewNotice
 var briefNotice = delivery.BriefNotice
 
@@ -199,4 +203,3 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
 	return d.driver().IncompleteChecks(stream, k, commit)
 }
-

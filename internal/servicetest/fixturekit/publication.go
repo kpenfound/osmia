@@ -31,6 +31,10 @@ type FakePulls struct {
 	Readies int
 	Lose    bool
 	Fork    func() string
+	// Branches, when set, answers the tip of the named feature branch of the
+	// fork in place of Fork, for a host that holds several workstreams' pull
+	// requests.
+	Branches func(branch string) string
 	// Statuses, when set, answers the combined status read of a commit.
 	Statuses func(ctx context.Context, repository, commit string) (pulls.CommitStatuses, error)
 	// findErr, when set, fails every Find as a refusing host does.
@@ -38,6 +42,14 @@ type FakePulls struct {
 	// uncredentialed reports the client holding no credential, as GitHub
 	// without a token does.
 	Uncredentialed bool
+}
+
+// tip is the commit the fork's branch is at.
+func (c *FakePulls) tip(branch string) string {
+	if c.Branches != nil {
+		return c.Branches(branch)
+	}
+	return c.Fork()
 }
 
 func (c *FakePulls) Credentialed() bool {
@@ -58,7 +70,7 @@ func (c *FakePulls) Find(_ context.Context, repository, headRepository, branch s
 		pr := &c.Prs[i]
 		if pr.HeadRepository == headRepository && pr.Head == branch {
 			if c.SyncHead {
-				if tip := c.Fork(); tip != pr.HeadCommit && c.HeadLag > 0 {
+				if tip := c.tip(pr.Head); tip != pr.HeadCommit && c.HeadLag > 0 {
 					c.HeadLag--
 				} else {
 					pr.HeadCommit = tip
@@ -75,7 +87,7 @@ func (c *FakePulls) Create(_ context.Context, repository string, n pulls.New) (p
 	defer c.Mu.Unlock()
 	c.Creates++
 	number := 100 + len(c.Prs)
-	pr := pulls.PullRequest{Number: number, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repository, number), State: "open", Draft: n.Draft, Head: n.Head, HeadRepository: n.HeadRepository, HeadCommit: c.Fork(), Base: n.Base, Title: n.Title, Body: n.Body}
+	pr := pulls.PullRequest{Number: number, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repository, number), State: "open", Draft: n.Draft, Head: n.Head, HeadRepository: n.HeadRepository, HeadCommit: c.tip(n.Head), Base: n.Base, Title: n.Title, Body: n.Body}
 	c.Prs = append(c.Prs, pr)
 	if c.Lose {
 		c.Lose = false

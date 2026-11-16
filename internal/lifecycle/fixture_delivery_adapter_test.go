@@ -44,6 +44,10 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return d.driver().Apply(ctx, op)
 }
 
+func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
+	return d.driver().PublishDraft(ctx, cfg, stream, op, report)
+}
+
 var latestFinalReport = delivery.LatestFinalReport
 
 func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {

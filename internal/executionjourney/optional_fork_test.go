@@ -22,10 +22,19 @@ func useUpstreamForPush(t *testing.T, p *publicationFixture) {
 
 func TestPublicationWithoutForkReconcilesLostResponse(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
+	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	useUpstreamForPush(t, p)
 	ctx := context.Background()
 	main := strings.TrimSpace(demoGit(t, p.clone, "-C", p.fork, "rev-parse", "main"))
+	p.pulls.Lose = true
+	if _, err := p.tryPublishDraft(t); err == nil {
+		t.Fatal("expected lost response")
+	}
+	p.reopen(t)
+	p.publishDraft(t)
+	if p.pulls.Creates != 1 {
+		t.Fatalf("creates=%d", p.pulls.Creates)
+	}
 	p.approve(t, nil)
 	op := p.request(t)
 	in, err := decodePublish(op)
@@ -33,11 +42,6 @@ func TestPublicationWithoutForkReconcilesLostResponse(t *testing.T) {
 	if in.Fork != p.s.cfg.Project.Upstream || in.Upstream != in.Fork {
 		t.Fatal(in)
 	}
-	p.pulls.Lose = true
-	if _, err := p.publisher().Apply(ctx, op); err == nil {
-		t.Fatal("expected lost response")
-	}
-	p.reopen(t)
 	result, err := p.publisher().Apply(ctx, op)
 	must(t, err)
 	if result.Outcome != "succeeded" || p.pulls.Creates != 1 {

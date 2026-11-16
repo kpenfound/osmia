@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,15 +29,60 @@ import (
 // controller. Intake, debate and ratification are covered by lifecycle tests.
 func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
-	return newFinalFixtureWith(t, key, "")
+	f, stream, repository, a := newFinalFixtureWith(t, key, "")
+	hostFinalReviews(t, f, stream)
+	return f, stream, repository, a
 }
 
-// newFinalFixtureWith is newFinalFixture with extra configuration appended.
+// newFinalFixtureWith is newFinalFixture with extra configuration appended and
+// no pull request host, so the service holds the fixture's default clients.
 func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, extra, nil)
 	stream, repository := f.buildFixture().SeedGit(t, key)
 	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
+}
+
+// hostFinalReviews gives the service a credential for the pull request host:
+// a local bare fork of owner/dagger as the clone's origin and a fake host
+// that follows the fork's feature branch and shows a passing Cloud run for
+// every pushed commit. A final review then publishes its draft and reads the
+// result at once, as the fixtures' zero wait after a push lets it.
+func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) (string, *fakePulls) {
+	t.Helper()
+	return hostService(t, f, func() config.WorkstreamID { return stream })
+}
+
+// hostService is hostFinalReviews for a workstream the fixture creates later:
+// stream names it once it exists, for a service that starts afterwards or is
+// running.
+func hostService(t *testing.T, f *shedFixture, stream func() config.WorkstreamID) (string, *fakePulls) {
+	t.Helper()
+	var fork string
+	var pulls *fakePulls
+	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, featureBranch(stream()))
+		return tip
+	})
+	pulls.Branches = func(branch string) string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, branch)
+		return tip
+	}
+	pulls.SyncHead = true
+	f.s.options.PullRequests = pulls
+	f.opts.PullRequests = pulls
+	return fork, pulls
+}
+
+// hostRunningService is hostService for a service that is already running.
+// The service's controllers hold the pull request client it started with, so
+// it is restarted to hold the host.
+func hostRunningService(t *testing.T, f *shedFixture, stream func() config.WorkstreamID) (string, *fakePulls) {
+	t.Helper()
+	fork, pulls := hostService(t, f, stream)
+	stopQuestionJourney(t, f)
+	f.start(t)
+	return fork, pulls
 }
 
 // mergeDirectly commits files onto the feature branch as the unit's landing
@@ -146,13 +192,13 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)
-	if runs := streamDocuments(t, repository, stream, finalChecksDocument(1)); len(runs) != 0 {
-		t.Fatalf("a service with no GitHub credential recorded check results: %+v", runs)
+	if runs := streamDocuments(t, repository, stream, finalChecksDocument(1)); len(runs) != 1 || !strings.Contains(runs[0].Content, `"source": "pull_request"`) && !strings.Contains(runs[0].Content, `"source":"pull_request"`) {
+		t.Fatalf("the pull request check result of the pushed commit: %+v", runs)
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
 	assertCheckGateReviewInstructions(t, reader.Turns[len(reader.Turns)-1].Request.SystemPrompt)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "No check results exist for this commit") || strings.Contains(prompt, "ran checks") ||
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Dagger Cloud ran the project's checks") || !strings.Contains(prompt, "The result is passed.") ||
 		!strings.Contains(prompt, "- spec#1: served by merged units resume, each reviewed against its acceptance\n- spec#2: served by merged units dedupe") || strings.Contains(prompt, "change since") {
 		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
 	}

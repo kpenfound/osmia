@@ -61,6 +61,7 @@ func failFinalReview(t *testing.T, f *shedFixture, repository *trace.Repository,
 func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "move-rerun")
+	hostFinalReviews(t, f, stream)
 	f.s.setSole(&activeProject{repository: repository})
 	ctx := context.Background()
 	_, op := assembleBoth(t, f, repository, a, stream,
@@ -126,6 +127,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "chief-move")
+	hostFinalReviews(t, f, stream)
 	f.s.setSole(&activeProject{repository: repository})
 	ctx := context.Background()
 	_, op := assembleBoth(t, f, repository, a, stream,
@@ -287,7 +289,7 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 // is in flight, and never reopening a pull request that is merged or closed.
 func TestWorkstreamMoveRefusals(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
+	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	ctx := context.Background()
 	move := func(to, note string) *APIError {
 		_, api := p.s.ownerMoveWorkstream(ctx, string(p.stream), WorkstreamMoveRequest{To: to, Note: note})
@@ -302,6 +304,7 @@ func TestWorkstreamMoveRefusals(t *testing.T) {
 	if api := move(DeliveredState, "Deliver it."); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "delivered through the owner's delivery approval") {
 		t.Fatalf("an assembled workstream moved to delivered: %v", api)
 	}
+	p.publishDraft(t)
 	p.approve(t, nil)
 	publish := p.request(t)
 	if api := move(BuildingState, "Reopen it."); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "publication is in flight") {

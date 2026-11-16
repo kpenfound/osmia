@@ -20,7 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -89,8 +88,12 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 		Links:    []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web"},
 		Outcomes: []checkOutcome{{Result: CheckResult{Output: passedReport + journeyCheck + "\n"}}},
 	}
+	// The service holds a pull request credential from its first start; the
+	// host behind it is set up once the fixture has its clone.
+	hosted := &fakePulls{}
 	prepare := func(o *Options) {
 		o.reviewChecks = checks
+		o.PullRequests = hosted
 		if exporter != nil {
 			o.telemetryExporter = exporter
 		}
@@ -180,7 +183,15 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	f.engine.Mu.Unlock()
 
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "telemetry")[0]
+	// The service holds a pull request credential: its final review pushes
+	// the feature branch to a local bare fork and opens the draft there.
+	var stream config.WorkstreamID
+	hostFork, host := hostService(t, f, func() config.WorkstreamID { return stream })
+	hosted.Mu.Lock()
+	hosted.Fork, hosted.Branches, hosted.SyncHead = host.Fork, host.Branches, host.SyncHead
+	hosted.Mu.Unlock()
+	f.s.options.PullRequests, f.opts.PullRequests = hosted, hosted
+	stream = f.builtPaused(t, factory, "telemetry")[0]
 	j.stream = stream
 	var err error
 	j.created, err = f.repository().WorkstreamCreated(stream)
@@ -250,8 +261,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	f.s.setSole(&activeProject{repository: repository})
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository}
-	p.fork, p.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := p.forkBranch(t); return commit })
+	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, fork: hostFork, pulls: hosted}
 	p.approve(t, nil)
 	must(t, repository.Close())
 	f.opts.PullRequests = p.pulls
@@ -485,7 +495,10 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	kinds := map[string]int{}
 	for _, sp := range checkRuns {
 		kinds[attrOf(sp, attrKind)]++
-		if attrOf(sp, attrOutcome) != "passed" || !hasAttr(sp, attrCovered) || attrOf(sp, attrCovered) == "0" {
+		// A final review's result is read from the pull request's statuses,
+		// which select nothing, so only the other runs carry a covered count.
+		final := attrOf(sp, attrKind) == "final"
+		if attrOf(sp, attrOutcome) != "passed" || !final && (!hasAttr(sp, attrCovered) || attrOf(sp, attrCovered) == "0") || final && hasAttr(sp, attrCovered) {
 			fail("check span %v", sp.Attributes)
 		}
 	}

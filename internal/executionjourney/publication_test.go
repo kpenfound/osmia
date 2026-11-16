@@ -28,6 +28,11 @@ type publicationFixture struct {
 	report     FinalReport
 	fork       string
 	pulls      *fakePulls
+	// pushed is the commit the draft push left on the fork's feature branch,
+	// and finds how many times the host had been asked for pull requests by
+	// then.
+	pushed string
+	finds  int
 }
 
 // newPublicationFixture reviews an assembled workstream, gives the clone a
@@ -40,12 +45,45 @@ func newPublicationFixture(t *testing.T, style string) *publicationFixture {
 
 func newPublicationFixtureWith(t *testing.T, style, extra string) *publicationFixture {
 	t.Helper()
+	p := newUnpushedPublicationFixture(t, style, extra)
+	p.publishDraft(t)
+	return p
+}
+
+// newUnpushedPublicationFixture is a publication fixture whose reviewed
+// commit has no recorded push: the service has not yet signed it, pushed it or
+// opened the draft pull request.
+func newUnpushedPublicationFixture(t *testing.T, style, extra string) *publicationFixture {
+	t.Helper()
 	f, stream, repository, report := deliveryFixtureWith(t, extra)
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report}
 	p.fork, p.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := p.forkBranch(t); return commit })
 	f.s.cfg.Project.Landing = style
 	f.s.options.PullRequests = p.pulls
 	return p
+}
+
+// tryPublishDraft has the final review's publication sign the reviewed
+// commit, push it and open the draft pull request, as the review does before
+// its checks are watched, and returns why it refused and any error.
+func (p *publicationFixture) tryPublishDraft(t *testing.T) (string, error) {
+	t.Helper()
+	report := p.report
+	report.Review, report.Operation, report.Branch = 1, "operation_final_review_1", featureBranch(p.stream)
+	reason, err := (&finalReviewer{s: p.s, repository: p.repository}).PublishDraft(context.Background(), p.s.cfg, p.stream, coreadapter.Operation{ID: report.Operation}, report)
+	if err == nil && reason == "" {
+		p.pushed, _ = p.forkBranch(t)
+		p.finds = p.pulls.Finds
+	}
+	return reason, err
+}
+
+// publishDraft is tryPublishDraft for a publication that must succeed.
+func (p *publicationFixture) publishDraft(t *testing.T) {
+	t.Helper()
+	if reason, err := p.tryPublishDraft(t); err != nil || reason != "" {
+		t.Fatalf("publishing the draft: %q, %v", reason, err)
+	}
 }
 
 func (p *publicationFixture) forkBranch(t *testing.T) (string, bool) {
@@ -83,11 +121,10 @@ func (p *publicationFixture) reopen(t *testing.T) {
 	p.s.setSole(&activeProject{repository: p.repository})
 }
 
-// A workstream whose reviewed commit was never pushed, because the service
-// held no pull request credential at its final review, is signed, pushed and
-// opened as a draft when the owner marks it ready for review, which then
-// updates the draft and marks it ready.
-func TestMarkingReadyPushesAndOpensTheDraftWhenNoPushIsRecorded(t *testing.T) {
+// Marking ready for review updates the draft the final review pushed and
+// opened, marks it ready and delivers the workstream. It pushes nothing and
+// opens no pull request.
+func TestMarkingReadyUpdatesTheDraftOfThePushedCommit(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
 	ctx := context.Background()
@@ -151,6 +188,40 @@ func TestMarkingReadyPushesAndOpensTheDraftWhenNoPushIsRecorded(t *testing.T) {
 	}
 }
 
+// A reviewed commit with no recorded push is never published by marking
+// ready: the owner's approval is refused with the reason, nothing is pushed,
+// no pull request is opened or marked ready, and the workstream is not
+// delivered.
+func TestMarkingReadyRefusesAReviewedCommitWithNoRecordedPush(t *testing.T) {
+	t.Parallel()
+	for _, style := range []string{"commit-per-unit", "squash"} {
+		t.Run(style, func(t *testing.T) {
+			t.Parallel()
+			p := newUnpushedPublicationFixture(t, style, "")
+			ctx := context.Background()
+			p.approve(t, nil)
+			op := p.request(t)
+			result, err := p.publisher().Apply(ctx, op)
+			if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "records no push of the reviewed commit "+p.report.Commit) || !strings.Contains(result.Evidence, "nothing was pushed, opened or marked ready") {
+				t.Fatalf("marking ready %+v: %v", result, err)
+			}
+			if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 || p.pulls.Creates != 0 || p.pulls.Updates != 0 || p.pulls.Readies != 0 || len(p.pulls.Prs) != 0 {
+				t.Fatalf("the refused marking pushed %v, asked the host %d times, opened %d, updated %d and marked %d ready", pushed, p.pulls.Finds, p.pulls.Creates, p.pulls.Updates, p.pulls.Readies)
+			}
+			if got := p.feature(t); got != AssembledState {
+				t.Fatalf("the workstream is %s, want assembled", got)
+			}
+			if pushes, err := delivery.Pushes(p.repository, p.stream); err != nil || len(pushes) != 0 {
+				t.Fatalf("pushes %+v: %v", pushes, err)
+			}
+			transition, _ := publishIDs(1)
+			if body := noticeOf(t, p.repository, p.stream, transition+"-refused"); !strings.Contains(body, "records no push of the reviewed commit") || !strings.Contains(body, "not marked ready") {
+				t.Fatalf("refusal notice %q", body)
+			}
+		})
+	}
+}
+
 func TestMarkingReadySquashDeliversOneCommitWithTheReviewedTree(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "squash")
@@ -208,8 +279,8 @@ func TestMarkingReadyRefusesAStaleApprovalBeforeAnySideEffect(t *testing.T) {
 			if err != nil || result.Outcome != "failed" {
 				t.Fatalf("publication %+v: %v", result, err)
 			}
-			if _, exists := p.forkBranch(t); exists || p.pulls.Creates != 0 {
-				t.Fatalf("a stale approval touched the fork or pull requests: %d finds, %d creates", p.pulls.Finds, p.pulls.Creates)
+			if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds || p.pulls.Creates != 1 || p.pulls.Updates != 0 || p.pulls.Readies != 0 {
+				t.Fatalf("a stale approval touched the fork or pull requests: %d finds, %d creates, %d updates, %d ready calls", p.pulls.Finds, p.pulls.Creates, p.pulls.Updates, p.pulls.Readies)
 			}
 			if got := p.feature(t); got != AssembledState {
 				t.Fatalf("the workstream is %s", got)
@@ -227,7 +298,7 @@ func TestMarkingReadyRefusesAStaleApprovalBeforeAnySideEffect(t *testing.T) {
 // records one durable result.
 func TestMarkingReadyRecoveryRecordsOneDurableResult(t *testing.T) {
 	t.Parallel()
-	for _, point := range []string{"draft-recorded", "draft-pushed", "draft-opened", "ready-described", "ready-marked", "after-trace"} {
+	for _, point := range []string{"ready-described", "ready-marked", "after-trace"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			p := newPublicationFixture(t, "squash")
@@ -278,20 +349,22 @@ func TestMarkingReadyRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.
 		ctx := context.Background()
 		p.approve(t, nil)
 		foreign := p.report.Upstream.Commit
-		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "origin", foreign+":refs/heads/"+featureBranch(p.stream))
+		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "--force", "origin", foreign+":refs/heads/"+featureBranch(p.stream))
+		p.pulls.Prs[0].HeadCommit = foreign
 		op := p.request(t)
 		result, err := p.publisher().Apply(ctx, op)
 		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "no push of this workstream made") {
 			t.Fatalf("publication %+v: %v", result, err)
 		}
-		if tip, _ := p.forkBranch(t); tip != foreign || p.pulls.Creates != 0 || p.feature(t) != AssembledState {
-			t.Fatalf("the fork branch is at %s; %d creates; the workstream is %s", tip, p.pulls.Creates, p.feature(t))
+		if tip, _ := p.forkBranch(t); tip != foreign || p.pulls.Creates != 1 || p.pulls.Readies != 0 || p.feature(t) != AssembledState {
+			t.Fatalf("the fork branch is at %s; %d creates; %d ready calls; the workstream is %s", tip, p.pulls.Creates, p.pulls.Readies, p.feature(t))
 		}
 		must(t, p.publisher().Pass(ctx))
 		if ops := p.operations(t); len(ops) != 1 {
 			t.Fatalf("asked again without a new approval: %d", len(ops))
 		}
-		demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "branch", "-D", featureBranch(p.stream))
+		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "--force", "origin", p.pushed+":refs/heads/"+featureBranch(p.stream))
+		p.pulls.Prs[0].HeadCommit = p.pushed
 		if again := p.approve(t, nil); again.Commit != p.report.Commit {
 			t.Fatalf("approval %+v", again)
 		}
@@ -309,13 +382,14 @@ func TestMarkingReadyRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.
 		p := newPublicationFixture(t, "commit-per-unit")
 		ctx := context.Background()
 		p.approve(t, nil)
-		p.pulls.Prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: p.report.Commit, Base: "main", Body: "Someone else's description"}}
+		own := p.pulls.Prs[0]
+		p.pulls.Prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: p.pushed, Base: "main", Body: "Someone else's description"}}
 		op := p.request(t)
 		result, err := p.publisher().Apply(ctx, op)
-		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "#7") {
+		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, fmt.Sprintf("#%d", own.Number)) {
 			t.Fatalf("publication %+v: %v", result, err)
 		}
-		if tip, _ := p.forkBranch(t); p.pulls.Creates != 0 || p.pulls.Readies != 0 || p.feature(t) != AssembledState {
+		if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Creates != 1 || p.pulls.Readies != 0 || p.feature(t) != AssembledState {
 			t.Fatalf("the fork branch is at %s; %d creates; %d ready calls; the workstream is %s", tip, p.pulls.Creates, p.pulls.Readies, p.feature(t))
 		}
 	})
@@ -348,14 +422,15 @@ func assertDeliveryTree(t *testing.T, p *publicationFixture, tip string) {
 	}
 }
 
-func TestMarkingReadySigningFailureBlocksPushUntilApprovedAgain(t *testing.T) {
+// A draft publication whose commits cannot be signed pushes nothing, and
+// publishes once they can.
+func TestDraftPublicationSigningFailureBlocksPushUntilSigned(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
+	p := newUnpushedPublicationFixture(t, "squash", "")
 	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
-	result, err := p.publisher().Apply(context.Background(), p.request(t))
-	if err != nil || result.Outcome != "failed" {
-		t.Fatalf("signing failure: %+v %v", result, err)
+	reason, err := p.tryPublishDraft(t)
+	if err != nil || !strings.Contains(reason, "pre-publication amendment failed") {
+		t.Fatalf("signing failure: %q %v", reason, err)
 	}
 	if _, exists := p.forkBranch(t); exists || p.pulls.Creates != 0 {
 		t.Fatal("signing failure touched publication")
@@ -364,8 +439,9 @@ func TestMarkingReadySigningFailureBlocksPushUntilApprovedAgain(t *testing.T) {
 		t.Fatal("signing failure delivered the workstream")
 	}
 	configureDeliverySigner(t, p.clone)
+	p.publishDraft(t)
 	p.approve(t, nil)
-	result, err = p.publisher().Apply(context.Background(), p.request(t))
+	result, err := p.publisher().Apply(context.Background(), p.request(t))
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("retry: %+v %v", result, err)
 	}
@@ -425,8 +501,8 @@ func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
 		// The next attempt waits twice as long as the one before.
 		clock.Advance(wait - time.Second)
 		must(t, c.Pass(ctx))
-		if p.pulls.Finds != attempt+1 {
-			t.Fatalf("attempted %d times before the retry was due, want %d", p.pulls.Finds, attempt+1)
+		if p.pulls.Finds-p.finds != attempt+1 {
+			t.Fatalf("attempted %d times before the retry was due, want %d", p.pulls.Finds-p.finds, attempt+1)
 		}
 		clock.Advance(time.Second)
 	}
@@ -441,8 +517,9 @@ func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
 }
 
 // TestPublicationWaitsForAGitHubToken shows a service without a credential
-// holding a publication without pushing or asking the host anything, raising
-// it to the inbox at once, and publishing once it has one.
+// holding the marking ready of a pushed draft without changing or asking the
+// host anything, raising it to the inbox at once, and marking it ready once
+// it has one.
 func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -463,8 +540,8 @@ func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 		must(t, c.Pass(ctx))
 		clock.Advance(time.Hour)
 	}
-	if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 || p.pulls.Creates != 0 {
-		t.Fatalf("a publication without a credential pushed %v, found %d times and opened %d pull requests", pushed, p.pulls.Finds, p.pulls.Creates)
+	if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds || p.pulls.Creates != 1 || p.pulls.Readies != 0 {
+		t.Fatalf("a publication without a credential left the branch at %s, found %d times, opened %d pull requests and marked %d ready", tip, p.pulls.Finds-p.finds, p.pulls.Creates, p.pulls.Readies)
 	}
 	ops, err := p.repository.Operations(p.stream)
 	must(t, err)
@@ -490,7 +567,7 @@ func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 	if _, err := p.publisher().Apply(ctx, op); !errors.Is(err, errNoPullRequestCredential) {
 		t.Fatalf("an attempt without a credential: %v", err)
 	}
-	if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 {
+	if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds {
 		t.Fatal("a refused attempt pushed or asked the host")
 	}
 	p.pulls.Mu.Lock()

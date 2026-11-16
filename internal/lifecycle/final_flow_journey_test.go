@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -304,4 +305,133 @@ func (j *flowJourney) reportOf(t *testing.T, review int) (FinalReport, bool) {
 	report, found, err := latestFinalReport(j.live(), j.stream)
 	must(t, err)
 	return report, found && report.Review == review
+}
+
+// credentialNotices counts the chief of staff's notices that final review k
+// waits for a GitHub credential.
+func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
+	t.Helper()
+	entries, err := j.live().Outbox(j.stream)
+	must(t, err)
+	n := 0
+	for _, e := range entries {
+		if e.Event.ID == trace.EventID(fmt.Sprintf("final-review-%d-credential-notice", review), "chief") {
+			n++
+		}
+	}
+	return n
+}
+
+// A service started without a GitHub credential takes the assembled
+// workstream through its final rebase and holds it there: nothing is pushed,
+// no pull request is opened or read, no check record is written, the final
+// read does not start and no delivery card appears. The wait names the
+// missing GITHUB_TOKEN in the workstream's status and in one notice to the
+// chief of staff. Restarted with a credential, the same review signs and
+// pushes the commit and opens the draft once, reads no status for 2 minutes,
+// watches the statuses to a completed result and only then starts the final
+// read.
+func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T) {
+	j := newFlowJourney(t)
+	stream := j.stream
+	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+		return err
+	})
+	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
+	j.pulls.Mu.Lock()
+	j.pulls.Uncredentialed = true
+	j.pulls.Mu.Unlock()
+
+	j.start(t)
+	why := j.awaitWaiting(t, 1, time.Time{}, "GITHUB_TOKEN")
+	if !strings.Contains(why, "waits for a GitHub credential") {
+		t.Fatalf("final review 1 waits for %q", why)
+	}
+	// Time passing changes nothing: the review keeps waiting, one attempt
+	// after another, and touches neither the fork nor the host.
+	for range 3 {
+		j.step(t, 1, flowPoll, "GITHUB_TOKEN")
+	}
+	assertHeld := func() {
+		t.Helper()
+		j.pulls.Mu.Lock()
+		finds, creates, prs := j.pulls.Finds, j.pulls.Creates, len(j.pulls.Prs)
+		j.pulls.Mu.Unlock()
+		if _, pushed := j.forkBranch(t); pushed || j.pushCount(t) != 0 || finds != 0 || creates != 0 || prs != 0 || len(j.pushes(t)) != 0 {
+			t.Fatalf("without a credential: the fork holds the branch %v, %d pushes, %d finds, %d creates, %d pull requests", pushed, j.pushCount(t), finds, creates, prs)
+		}
+		if runs := j.checkRuns(t, 1); len(runs) != 0 {
+			t.Fatalf("without a credential, check records were written: %+v", runs)
+		}
+		if _, started := j.reportOf(t, 1); started {
+			t.Fatal("the final read started without a credential")
+		}
+		if reads := j.host.totalReads(); reads != 0 {
+			t.Fatalf("%d status reads without a credential", reads)
+		}
+		if entries := j.entries(t, stream); len(entries) != 0 || j.feature(t) != AssembledState {
+			t.Fatalf("delivery entries %+v, workstream %s", entries, j.feature(t))
+		}
+		if reader, err := j.live().Thread(stream, committeeAgent(1)); err == nil && len(reader.Turns) != 0 {
+			t.Fatalf("the final reader was asked %d times without a credential", len(reader.Turns))
+		}
+	}
+	assertHeld()
+	if got := j.credentialNotices(t, 1); got != 1 {
+		t.Fatalf("%d notices that the review waits for a credential", got)
+	}
+	statuses, _, apiErr := j.s.statuses()
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	waited := false
+	for _, status := range statuses {
+		if status.Workstream == stream {
+			waited = true
+			if !strings.Contains(status.Wait, "GITHUB_TOKEN") {
+				t.Fatalf("the workstream's wait is %q", status.Wait)
+			}
+		}
+	}
+	if !waited {
+		t.Fatal("the workstream is missing from the status")
+	}
+
+	// A restart with a credential retries the review through the draft
+	// publication.
+	j.pulls.Mu.Lock()
+	j.pulls.Uncredentialed = false
+	j.pulls.Mu.Unlock()
+	j.restart(t)
+	j.clock.Advance(flowPoll)
+	first := j.awaitPushes(t, 1)[0]
+	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pushCount(t) != 1 || !j.pulls.Prs[0].Draft || j.pulls.Prs[0].HeadCommit != first.Commit || first.Review != 1 {
+		t.Fatalf("%d pull requests, %d created, %d pushes, push %+v", len(j.pulls.Prs), j.pulls.Creates, j.pushCount(t), first)
+	}
+	if j.credentialNotices(t, 1) != 1 {
+		t.Fatalf("%d credential notices after the restart", j.credentialNotices(t, 1))
+	}
+	// The attempt that published waits out the 2 minutes after the push.
+	j.awaitWaiting(t, 1, first.At, "no status is read until 2m0s after the push")
+	if reads := j.host.totalReads(); reads != 0 {
+		t.Fatalf("%d status reads right after the push", reads)
+	}
+	if runs := j.checkRuns(t, 1); len(runs) != 0 {
+		t.Fatalf("a check result before the wait passed: %+v", runs)
+	}
+	if _, started := j.reportOf(t, 1); started {
+		t.Fatal("the final read started before the checks completed")
+	}
+	j.host.loaded(first.Commit)
+	passed := j.host.completed(first.Commit, "success", 3, 3, 0, 0)
+	j.clock.Advance(flowPoll)
+	run := j.awaitCheckRun(t, 1)
+	if run.Status != "passed" || run.Source != "pull_request" || run.Push != 1 || run.PushedCommit != first.Commit || run.Run == nil || run.Run.ID != passed.ID {
+		t.Fatalf("the check result %+v", run)
+	}
+	report := j.awaitReport(t, 1)
+	if report.Commit != first.Reviewed || j.pushCount(t) != 1 || j.pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.rerunCalls(t)) != 0 {
+		t.Fatalf("report %+v, %d pushes, %d pull requests, %d reruns", report, j.pushCount(t), j.pulls.Creates, len(j.rerunCalls(t)))
+	}
 }

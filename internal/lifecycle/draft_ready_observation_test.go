@@ -16,7 +16,7 @@ import (
 // and the poll leaves a draft alone.
 func TestOwnerMarkingTheDraftReadyOnTheHostIsRecordedDelivered(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "squash")
+	p := newUnpushedPublicationFixture(t, "squash", "")
 	ctx := context.Background()
 	const number, head = 100, "1111111111111111111111111111111111111111"
 	must(t, p.publisher().recordPublication(ctx, p.stream, DeliveryPublication{Push: 1, Review: p.report.Review, Operation: "final-1", Status: publicationOpened, Style: "squash", Fork: "owner/dagger", Remote: "origin", Branch: featureBranch(p.stream),

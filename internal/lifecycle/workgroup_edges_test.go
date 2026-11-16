@@ -136,6 +136,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 
 	// The dependent's own delivery approval: the first owner prompt.
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
+	pub.publishDraft(t)
 	approval := pub.approve(t, nil)
 	if !strings.Contains(approval.Description, "owner/other#77") {
 		t.Fatalf("the drafted description does not link the upstream pull request: %q", approval.Description)

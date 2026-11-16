@@ -142,7 +142,10 @@ slice, re-runs final review and presents a fresh delivery approval before
 the update is pushed and the PR is marked ready. No new owner-started
 workstream is needed for that repair; only a design gap needs escalation.
 Expected waits appear in status, such as `waiting on owner: repo-a#123 merge`,
-and create no inbox entry or notification.
+and create no inbox entry or notification. An assembled workstream whose final
+review waits because `osmia serve` was started without `GITHUB_TOKEN` shows
+`waiting on owner: final review N waits for a GitHub credential: ...`: nothing
+is pushed or opened until `serve` is restarted with the token.
 
 A workstream's pull request opens as a draft at assembly with no approval, and
 every later commit of an assembled workstream is pushed to it without one; each

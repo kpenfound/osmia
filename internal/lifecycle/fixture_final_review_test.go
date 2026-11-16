@@ -6,6 +6,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,51 @@ func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.
 	f := newDebateFixtureWith(t, 1, 1, extra, nil)
 	stream, repository := f.buildFixture().SeedGit(t, key)
 	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
+}
+
+// hostFinalReviews gives the service a credential for the pull request host:
+// a local bare fork of owner/dagger as the clone's origin and a fake host
+// that follows the fork's feature branch and shows a passing Cloud run for
+// every pushed commit. A final review then publishes its draft and reads the
+// result at once, as the fixtures' zero wait after a push lets it.
+func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) (string, *fakePulls) {
+	t.Helper()
+	return hostService(t, f, func() config.WorkstreamID { return stream })
+}
+
+// hostService is hostFinalReviews for a workstream the fixture creates later:
+// stream names it once it exists, for a service that starts afterwards or is
+// running.
+func hostService(t *testing.T, f *shedFixture, stream func() config.WorkstreamID) (string, *fakePulls) {
+	t.Helper()
+	var fork string
+	var pulls *fakePulls
+	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, featureBranch(stream()))
+		return tip
+	})
+	pulls.SyncHead = true
+	f.s.options.PullRequests = pulls
+	f.opts.PullRequests = pulls
+	return fork, pulls
+}
+
+// hostBranches is hostFinalReviews for a service that holds the pull requests
+// of several workstreams: the host follows the fork's branch of each pull
+// request's own head.
+func hostBranches(t *testing.T, f *shedFixture) (string, *fakePulls) {
+	t.Helper()
+	var fork string
+	var pulls *fakePulls
+	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string { return "" })
+	pulls.Branches = func(branch string) string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, branch)
+		return tip
+	}
+	pulls.SyncHead = true
+	f.s.options.PullRequests = pulls
+	f.opts.PullRequests = pulls
+	return fork, pulls
 }
 
 // mergeDirectly commits files onto the feature branch as the unit's landing

@@ -23,10 +23,13 @@ type repositoryPulls = fixturekit.RepositoryPulls
 
 func maintenanceFixture(t *testing.T) *publicationFixture {
 	t.Helper()
-	p := newPublicationFixture(t, "commit-per-unit")
+	// The draft is pushed inside the fixture's Approve step, after the
+	// fixture has pointed the upstream at the fork, so the delivery is the
+	// fork's own and not a delivery against the canonical upstream.
+	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	intakefixture.PrepareDeliveryMaintenance(t, intakefixture.DeliveryMaintenance{
 		Config: p.s.cfg, Repository: p.repository, Stream: p.stream, Clone: p.clone, Now: p.s.now,
-		Approve: func() { p.approve(t, nil) },
+		Approve: func() { p.publishDraft(t); p.approve(t, nil) },
 		Publish: func() (coreadapter.OperationResult, error) {
 			return p.publisher().Apply(context.Background(), p.request(t))
 		},

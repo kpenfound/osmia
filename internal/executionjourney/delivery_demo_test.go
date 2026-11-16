@@ -67,7 +67,11 @@ func TestDeliveryDemonstration(t *testing.T) {
 	}
 	f.engine.Mu.Unlock()
 
-	stream := f.builtPaused(t, factory, "delivery")[0]
+	// The service holds a pull request credential: its final review pushes the
+	// feature branch to a local bare fork and opens the draft there.
+	var stream config.WorkstreamID
+	fork, hosted := hostRunningService(t, f, func() config.WorkstreamID { return stream })
+	stream = f.builtPaused(t, factory, "delivery")[0]
 	// Move upstream after the seal. The final reviewer must inspect the
 	// rebased assembly, not the original feature tip.
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
@@ -99,13 +103,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	defer repository.Close()
 	f.s.setSole(&activeProject{repository: repository})
 	f.s.cfg.Project.Landing = "commit-per-unit"
-	home := filepath.Dir(f.clone)
-	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork}
-	p.pulls = &fakePulls{Fork: func() string { commit, _ := p.forkBranch(t); return commit }}
+	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork, pulls: hosted}
 	f.s.options.PullRequests = p.pulls
 	edited := presented.Draft + "\nOwner's delivery note.\n"
 	approval := p.approve(t, &edited)

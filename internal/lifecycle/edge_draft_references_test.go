@@ -79,6 +79,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if api == nil || api.Code != Validation || !strings.Contains(api.Message, "description must state the dependency on owner/other#77") {
 		t.Fatalf("approval accepted an omitted upstream reference: %v", api)
 	}
+	pub.publishDraft(t)
 	approval := pub.approve(t, nil)
 	for _, text := range []string{"depends on owner/other#77", "must merge first", "stays a draft"} {
 		if !strings.Contains(approval.Description, text) {

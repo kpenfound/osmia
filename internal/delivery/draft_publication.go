@@ -96,11 +96,13 @@ func PushOfCommit(repository *trace.Repository, stream config.WorkstreamID, revi
 // commit reached the branch once the pull request is verified at the pushed
 // commit. A retry reads those records, the remote branch and the pull
 // requests again, so a push and a pull request are made once. The service
-// holding no pull request credential pushes nothing.
+// holding no pull request credential pushes nothing and asks GitHub nothing:
+// it returns a MissingCredentialError, which leaves the operation pending
+// until a restart with the credential retries it.
 func (a *FinalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
 	client := a.S.PullRequests
 	if !pulls.Credentialed(client) {
-		return "", nil
+		return "", a.missingCredential(ctx, stream, report, "sign and push "+report.Commit+" and open the draft pull request")
 	}
 	if report.Upstream == nil {
 		return "final review records no delivery base", nil

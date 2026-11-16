@@ -188,6 +188,10 @@ func (e *WaitingChecksError) Error() string {
 //     (see AnswerChecksChoice) is recorded as a "continued" record that holds no
 //     result, and applies to that push alone.
 //
+// A commit with no recorded push waits for one: the review's publication
+// pushes it, and a service holding no GitHub credential returns a
+// MissingCredentialError instead of a record without a result.
+//
 // A completed record of the commit, from this watch or from an older local
 // run, is returned as it is. Reviews of delivered workstreams (maintenance)
 // push nothing and have no pull request statuses to wait for.
@@ -198,11 +202,6 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 	push, found, err := PushOfCommit(a.Repository, stream, report.Commit)
 	if err != nil {
 		return FinalCheckRun{}, err
-	}
-	if !found && !pulls.Credentialed(a.S.PullRequests) {
-		// The service holds no credential, so it pushed nothing and there is
-		// no pull request whose statuses could be read.
-		return FinalCheckRun{Review: report.Review, Operation: report.Operation, Commit: report.Commit, ExitCode: -1, Error: "the service holds no GitHub credential, so it pushed nothing and no pull request checks ran"}, nil
 	}
 	incomplete, latest, err := a.IncompleteChecks(stream, report.Review, report.Commit)
 	if err != nil {
@@ -217,6 +216,9 @@ func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, str
 		}
 	}
 	if !found {
+		if !pulls.Credentialed(a.S.PullRequests) {
+			return FinalCheckRun{}, a.missingCredential(ctx, stream, report, "push "+report.Commit+" and watch its checks")
+		}
 		return FinalCheckRun{}, fmt.Errorf("final review %d waits for its pull request: no push of %s is recorded, so there are no Dagger Cloud statuses to read", report.Review, report.Commit)
 	}
 	if current, _, err := CurrentPush(a.Repository, stream); err != nil {

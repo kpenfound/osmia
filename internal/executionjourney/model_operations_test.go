@@ -160,11 +160,14 @@ func TestFinalReviewRestartPreservesAnotherReviewsSettledJujutsuWork(t *testing.
 	for _, point := range []string{"final-rebase-recorded", "final-rebase-moved"} {
 		t.Run(point, func(t *testing.T) {
 			f := newDebateFixture(t, 2, 1)
+			var settled config.WorkstreamID
+			hostService(t, f, func() config.WorkstreamID { return settled })
 			base := f.upstream(t)
 			first, repo := seedBuild(t, f, "interrupted-final", validPlan, config.WorkspacesJujutsu, base)
 			a := &finalReviewer{s: f.s, repository: repo}
 			_, one := assembleBoth(t, f, repo, a, first, map[string]string{"one.go": "package feature\n"}, map[string]string{"two.go": "package feature\n"})
 			second := recordBuild(t, f, repo, "settled-final", validPlan, config.WorkspacesJujutsu, base)
+			settled = second
 			_, two := assembleBoth(t, f, repo, a, second, map[string]string{"three.go": "package feature\n"}, map[string]string{"four.go": "package feature\n"})
 			advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 			f.opts.reviewChecks = passingChecks

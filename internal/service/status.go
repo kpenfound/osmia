@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -299,6 +300,15 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			}
 		} else {
 			view.Wait = wait
+		}
+		if view.Wait == "" && w.Subjects[delivery.FinalReviewSubject].Value != "" {
+			if wait, err := delivery.CredentialWait(active.repository, w.Workstream); err != nil {
+				if _, ok := unreadable[w.Workstream]; !ok {
+					unreadable[w.Workstream] = Diagnostic{Field: "final_review", Code: Internal, Message: fmt.Sprintf("cannot read the final review operations of workstream %s; check the trace repository", w.Workstream)}
+				}
+			} else {
+				view.Wait = wait
+			}
 		}
 		for i := range view.Units {
 			for _, gate := range view.Gates {

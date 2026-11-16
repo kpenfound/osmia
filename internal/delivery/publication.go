@@ -586,8 +586,10 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 // MarkReady puts the owner's approved title and description on the draft pull
 // request of the push that signed the reviewed commit, then marks it ready for
 // review and records the workstream delivered with the approval. It pushes
-// nothing and opens no pull request. The pull request must be open, against
-// the pushed base and at the pushed commit. When a merge-order dependency has
+// nothing and opens no pull request: a reviewed commit with no recorded push is
+// refused with that reason, so it only ever acts on a pushed and watched
+// commit. The pull request must be open, against the pushed base and at the
+// pushed commit. When a merge-order dependency has
 // not merged it changes nothing on the pull request, which stays a draft, and
 // records the workstream delivered with the approval applied: the merge calls
 // for a dependency update and a fresh review of the delivered workstream, and
@@ -607,20 +609,7 @@ func (p *Publisher) MarkReady(ctx context.Context, stream config.WorkstreamID, o
 		return coreadapter.OperationResult{}, err
 	}
 	if !found {
-		// The reviewed commit was never pushed to a pull request: the service
-		// held no GitHub credential at that review. It is pushed now.
-		reason, err := (&FinalReviewer{S: p.S, Repository: p.Repository}).PublishDraft(ctx, cfg, stream, op, report)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if reason != "" {
-			return p.Refuse(ctx, stream, in, reason)
-		}
-		if push, found, err = PushOfCommit(p.Repository, stream, report.Commit); err != nil {
-			return coreadapter.OperationResult{}, err
-		} else if !found {
-			return coreadapter.OperationResult{}, fmt.Errorf("the draft pull request of final review %d is not recorded", report.Review)
-		}
+		return p.Refuse(ctx, stream, in, fmt.Sprintf("final review %d records no push of the reviewed commit %s to a pull request, so there is no draft pull request whose checks were watched; nothing was pushed, opened or marked ready. The final review pushes and watches the commit, and waits for a GitHub credential when the service was started without GITHUB_TOKEN", report.Review, report.Commit))
 	}
 	prs, err := client.Find(ctx, push.Upstream, push.Fork, push.Branch)
 	if err != nil {

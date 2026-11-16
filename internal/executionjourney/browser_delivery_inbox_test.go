@@ -10,8 +10,6 @@ import (
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	os "os"
-	filepath "path/filepath"
 	reflect "reflect"
 	sync "sync"
 	testing "testing"
@@ -252,7 +250,8 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 // attempt publishes.
 func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	t.Parallel()
-	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
+	f := newPublicationFixtureWith(t, "commit-per-unit", listenWeb)
+	ws, repository := f.stream, f.repository
 	ctx := context.Background()
 	presented, api := f.s.deliveryPresentation(ctx, string(ws))
 	if api != nil {
@@ -262,13 +261,9 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 		t.Fatal(api)
 	}
 	must(t, repository.Close())
-	home := filepath.Dir(f.clone)
-	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	refusal := "GitHub answered 403: Resource not accessible by personal access token"
-	f.opts.PullRequests = &fakePulls{FindErr: errors.New(refusal), Fork: func() string { return "" }}
+	f.pulls.FindErr = errors.New(refusal)
+	f.opts.PullRequests = f.pulls
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	p := openBrowser(t)

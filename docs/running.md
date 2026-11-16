@@ -407,7 +407,7 @@ the upstream base as a **draft**. You approve nothing for this, and the
 workstream stays `assembled`. The draft carries the drafted title and
 description without the brief's **Before you ship** items, which do not exist
 yet. `GITHUB_TOKEN` must be set in the service's environment: it opens the pull
-request and reads the commit statuses below; without it nothing is pushed.
+request and reads the commit statuses below. Without it the final review waits at publication: nothing is pushed or opened, the workstream stays `assembled`, no final read starts, and the status wait and a chief of staff notice name the missing `GITHUB_TOKEN`. Restart `osmia serve` with the token and the review pushes, opens the draft and watches the checks as usual.
 
 Every later commit of the workstream goes to the same pull request, draft or
 ready, with no approval: the commit of a revision for blocking findings or
