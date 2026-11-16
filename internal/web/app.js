@@ -1879,7 +1879,7 @@
           none: el('p', { class: 'meta' }, 'No workgroups yet.'), ungrouped: el('ul', { class: 'pane-streams' }), sessions: [] };
         const sections = [['design', 'Design sessions'], ['session', 'Exploratory sessions']].map(([kind, title]) => {
           const list = el('ul', { class: 'pane-streams' });
-          const node = el('section', { 'data-sessions': kind }, el('h3', {}, title), list);
+          const node = el('section', { 'data-sessions': kind }, el('h4', {}, title), list);
           row.sessions.push({ kind, list, node });
           return node;
         });
@@ -1887,7 +1887,7 @@
           el('div', { class: 'actions' }, action('Open a design session', 'design-add', p.id),
             action('Hand in a feature', 'handin', p.id),
             action('Project management', 'projects', p.id), action('Open an exploratory session', 'session-add', p.id)),
-          el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
+          el('h4', {}, 'Repos'), row.repos, el('h4', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
         paneProjects.set(p.id, row);
       }
       row.name.textContent = p.name;
@@ -3845,6 +3845,9 @@
       dialog.close('accepted');
     });
     dialog.addEventListener('close', () => {
+      // A close the browser reports after the dialog opened again belongs to
+      // the earlier opening; the new one keeps its state.
+      if (dialog.open) return;
       const done = confirming;
       confirming = null;
       if (!done) return;
@@ -4791,7 +4794,7 @@
       act(result, r.clear, () => request('DELETE', '/runtime/profile', { role }), () => role + ' runs its configured profile from its next turn.');
     });
     r.node = el('div', { class: 'role-profile', 'data-profile-role': role },
-      el('div', { class: 'line' }, el('strong', {}, role), el('span', {}, r.profile, ' ', r.source)),
+      el('div', { class: 'line' }, el('strong', { class: 'mono' }, role), el('span', {}, r.profile, ' ', r.source)),
       r.usage,
       el('div', { class: 'actions' }, r.select, r.set, r.clear));
     profileRows.set(role, r);

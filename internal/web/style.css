@@ -53,7 +53,6 @@
   --on-accent: oklch(0.2 0.04 250);
 
   --clay: oklch(0.73 0.105 52);
-  --clay-soft: oklch(0.31 0.045 52);
 
   --live: oklch(0.78 0.13 165);
   --live-soft: oklch(0.3 0.055 165);
@@ -135,6 +134,7 @@
 html,
 body {
   height: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -152,19 +152,24 @@ h1 {
   margin: 0;
   font-size: var(--fs-h1);
   font-weight: 600;
+  text-wrap: balance;
 }
 
 h2 {
+  min-width: 0;
   margin: 0;
   font-size: var(--fs-h2);
   font-weight: 600;
   line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 h3 {
   margin: 0;
   font-size: var(--fs-h3);
   font-weight: 600;
+  text-wrap: balance;
 }
 
 h4 {
@@ -187,6 +192,7 @@ ul {
 a {
   color: var(--accent);
   text-underline-offset: 0.18em;
+  touch-action: manipulation;
 }
 
 a:hover {
@@ -1241,8 +1247,12 @@ button.cell:hover .cell-body {
 .before-you-ship {
   margin: 0.5rem 0;
   padding: 0.5rem 0.8rem;
-  background: var(--clay-soft);
+  background: var(--surface-sunken);
   border-radius: var(--radius-md);
+}
+
+.before-you-ship > [data-field="before-you-ship-label"] {
+  color: var(--clay);
 }
 
 .entry .markdown {
@@ -1927,6 +1937,14 @@ label.check {
 input,
 select,
 textarea,
+button,
+summary {
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea,
 button {
   max-width: 100%;
   font: inherit;
@@ -2186,11 +2204,54 @@ details.footnote > summary::-webkit-details-marker {
 }
 
 details.footnote > summary::before {
+  font-family: var(--font-mono);
   content: "\25B8  ";
 }
 
 details.footnote[open] > summary::before {
   content: "\25BE  ";
+}
+
+.head-details > summary,
+.decision [data-field="preview"] > summary {
+  list-style: none;
+}
+
+.head-details > summary::-webkit-details-marker,
+.decision [data-field="preview"] > summary::-webkit-details-marker {
+  display: none;
+}
+
+.head-details > summary::before,
+.decision [data-field="preview"] > summary::before {
+  margin-right: 0.45em;
+  font-family: var(--font-mono);
+  content: "\25B8";
+}
+
+.head-details[open] > summary::before,
+.decision [data-field="preview"][open] > summary::before {
+  content: "\25BE";
+}
+
+/* Every other disclosure opens with the same marker as the ones above. */
+details:not(.fold, .footnote, .head-details, .archived, [data-field="preview"]) > summary:not(.event-line) {
+  list-style: none;
+  cursor: pointer;
+}
+
+details:not(.fold, .footnote, .head-details, .archived, [data-field="preview"]) > summary:not(.event-line)::-webkit-details-marker {
+  display: none;
+}
+
+details:not(.fold, .footnote, .head-details, .archived, [data-field="preview"]) > summary:not(.event-line)::before {
+  margin-right: 0.45em;
+  font-family: var(--font-mono);
+  content: "\25B8";
+}
+
+details[open]:not(.fold, .footnote, .head-details, .archived, [data-field="preview"]) > summary:not(.event-line)::before {
+  content: "\25BE";
 }
 
 details.footnote > summary:hover {
@@ -2342,20 +2403,6 @@ details.footnote > :not(summary) {
     padding: 0 0.4rem;
   }
 
-  .settings-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-  }
-
-  #settings-nav {
-    display: flex;
-    overflow-x: auto;
-    gap: 0.25rem;
-  }
-
-  #settings-nav button {
-    flex: none;
-  }
 
   .view {
     padding: 0 0.75rem;
@@ -2380,6 +2427,14 @@ details.footnote > :not(summary) {
   }
 }
 
+/* On the narrowest phones the capacity chip shows its total alone, so the
+   header's 44px controls fit one row; the bars are in its popover. */
+@media (max-width: 420px) {
+  .meter-group {
+    display: none;
+  }
+}
+
 /* Touch. Inputs are 16px so the browser does not zoom on focus, buttons
    reach 44px, and an icon button keeps its look while its hit area grows
    to 44px. */
@@ -2401,10 +2456,34 @@ details.footnote > :not(summary) {
     height: 2.75rem;
   }
 
-  .head-details > summary {
+  .head-details > summary,
+  details.footnote > summary,
+  .decision [data-field="preview"] > summary {
     display: flex;
     align-items: center;
+    min-width: 2.75rem;
     min-height: 2.75rem;
+  }
+
+  .chip,
+  .new-button {
+    justify-content: center;
+    min-width: 2.75rem;
+  }
+
+  select,
+  input:not([type="checkbox"], [type="radio"], [type="file"]),
+  label.check,
+  .moves button {
+    min-height: 2.75rem;
+  }
+
+  summary {
+    padding-block: 0.7rem;
+  }
+
+  .moves button {
+    min-width: 2.75rem;
   }
 
   button.icon::before,
@@ -2428,6 +2507,15 @@ details.footnote > :not(summary) {
   .milestone-line,
   .fold > summary {
     align-content: center;
+  }
+}
+
+/* At a short height, such as a phone on its side or with the keyboard up,
+   the workstream's header scrolls away with the page so the message field
+   and the conversation keep the screen. */
+@media (max-height: 560px) {
+  .workstream-top {
+    position: static;
   }
 }
 
@@ -2467,12 +2555,13 @@ details.footnote > :not(summary) {
   background: var(--hover);
 }
 
-.needs-title {
+.needs-link .needs-title {
   grid-column: 1;
   grid-row: 1;
   min-width: 0;
   overflow: hidden;
   font-weight: 600;
+  color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2542,6 +2631,23 @@ details.footnote > :not(summary) {
   background: var(--selected);
 }
 
+@media (max-width: 760px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  #settings-nav {
+    display: flex;
+    overflow-x: auto;
+    gap: 0.25rem;
+  }
+
+  #settings-nav button {
+    flex: none;
+  }
+}
+
 .settings-section > h3 {
   margin-bottom: 0.25rem;
 }
@@ -2558,7 +2664,9 @@ details.footnote > :not(summary) {
   border-radius: var(--radius-md);
 }
 .project-card > .actions { margin: 0.75rem 0; }
-.pane-workgroup { margin-top: 0.75rem; padding-top: 0.5rem; }
+.pane-workgroup { margin-top: 0.75rem; }
+.pane-workgroup > h4 { margin-top: 0; }
+.pane-workgroup > .id { margin: 0.25rem 0 0.5rem; }
 .pane-streams { list-style: none; padding: 0; }
 .pane-streams > li { margin: 0.5rem 0; }
 .pane-workstream { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; width: 100%; text-align: left; }
