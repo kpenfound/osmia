@@ -31,21 +31,15 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.AwaitText(`[data-select="`+string(quiet)+`"] [data-field=paused]`, "paused")
 	p.SelectWorkstream(stream)
 	for selector, want := range map[string]string{
-		card + "[data-field=goal]":                                         "Ship resumable uploads.",
-		card + "[data-field=state]":                                        "building",
-		latest + "[data-field=note]":                                       "A mason is building the upload unit.",
-		latest + "[data-field=status-agents]":                              "A mason builds upload.",
-		card + "[data-field=workspaces]":                                   "git workspaces",
-		card + `[data-unit-state=merged]`:                                  "merged 1",
-		card + `[data-unit-state=implementing]`:                            "implementing 1",
-		card + `[data-unit-state=ready]`:                                   "ready 1",
-		card + `[data-unit-state=planned]`:                                 "planned 1",
-		card + `[data-kind=transition][data-unit=upload]`:                  "Unit upload: implementing",
-		card + `[data-kind=session][data-role=mason] [data-field=session]`: "mason on upload · default · running",
-		`#capacity [data-role=mason] [data-field=slots]`:                   "1 / 1 slots",
-		`#capacity [data-role=mason] [data-field=waiting]`:                 string(stream) + " unit audit: every slot is taken",
-		`#capacity [data-role=reviewer]`:                                   "Nothing waits.",
-		`#capacity [data-role=architect] [data-field=slots]`:               "0 active (unbounded; 1 per workstream)",
+		card + "[data-field=goal]":                           "Ship resumable uploads.",
+		card + "[data-field=state]":                          "building",
+		latest + "[data-field=note]":                         "A mason is building the upload unit.",
+		latest + "[data-field=status-agents]":                "A mason builds upload.",
+		card + "[data-field=workspaces]":                     "git workspaces",
+		`#capacity [data-role=mason] [data-field=slots]`:     "1 / 1 slots",
+		`#capacity [data-role=mason] [data-field=waiting]`:   string(stream) + " unit audit: every slot is taken",
+		`#capacity [data-role=reviewer]`:                     "Nothing waits.",
+		`#capacity [data-role=architect] [data-field=slots]`: "0 active (unbounded; 1 per workstream)",
 		`#meter-total`:                "/",
 		pause + "[data-field=scope]":  "Workstream " + string(quiet),
 		pause + "[data-field=reason]": "The owner is travelling",
@@ -54,7 +48,26 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	} {
 		p.AwaitText(selector, want)
 	}
+	// The header's nest tube holds one cell per unit, named for its unit and
+	// state, in place of counts per state.
+	var cells []string
+	p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-field=units] [data-unit-state]")+`)].map((c) => c.dataset.unitState + '=' + c.getAttribute('aria-label'))`, &cells)
+	if want := "merged=Unit resume: merged,implementing=Unit upload: implementing,ready=Unit audit: ready,planned=Unit index: planned"; strings.Join(cells, ",") != want {
+		t.Fatalf("the nest tube cells are %q, want %q", cells, want)
+	}
 	p.Await("the mason meter full", `document.querySelector('[data-meter=mason]').dataset.full === 'true'`)
+	// Conversation holds the latest status alone and notes no unit change or
+	// session; Activity holds those.
+	p.Await("only the latest status and no machine event in Conversation", `document.querySelectorAll('#workstreams [data-kind=status]').length === 1 &&
+		!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
+	p.OpenActivity()
+	for selector, want := range map[string]string{
+		card + `[data-kind=transition][data-unit=upload]`:                  "Unit upload: implementing",
+		card + `[data-kind=session][data-role=mason] [data-field=session]`: "mason on upload default running",
+	} {
+		p.AwaitText(selector, want)
+	}
+	p.OpenConversation()
 	var shown bool
 	p.Eval(`document.querySelector(`+quote(card+"[data-field=attention]")+`) !== null || !document.getElementById('problems').hidden`, &shown)
 	if shown {
@@ -73,7 +86,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	noNull(card)
 	p.SelectWorkstream(quiet)
 	p.AwaitText(quietCard+"[data-field=goal]", "No status yet")
-	p.AwaitText(quietCard+"[data-field=feed]", "Nothing has happened yet.")
+	p.AwaitText(quietCard+"[data-field=feed]", "Nothing here yet.")
 	noNull(quietCard)
 	p.SelectWorkstream(stream)
 
@@ -84,7 +97,11 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=goal]`, "Ship resumable uploads with dedupe.")
 	p.AwaitText(card+"[data-field=attention]", "Rule on the upload API.")
 	p.AwaitText(latest+"[data-field=note]", "Upload waits for a ruling.")
+	p.Await("only the latest status in Conversation", `document.querySelectorAll('#workstreams [data-kind=status]').length === 1`)
+	p.OpenActivity()
 	p.AwaitText(card+`[data-kind=status][data-latest=false] [data-field=note]`, "A mason is building the upload unit.")
+	p.AwaitText(card+`[data-kind=status][data-latest=true] [data-field=note]`, "Upload waits for a ruling.")
+	p.OpenConversation()
 	p.Await("the same document", `window.notReloaded === true`)
 
 	// Laptop widths show the list beside the workstream. Phone widths
@@ -165,7 +182,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	var views []string
 	for _, path := range p.Paths() {
 		switch {
-		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg":
+		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg" || strings.HasPrefix(path, "/fonts/") && strings.HasSuffix(path, ".woff2"):
 		case strings.HasPrefix(path, Prefix+"/"):
 			views = append(views, path)
 		default:
@@ -193,7 +210,7 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
-	p.Await("the feeds read", `document.querySelector('[data-field=feed] .meta')?.textContent !== 'Reading the feed…'`)
+	p.Await("the feeds read", `document.querySelector('.feed [data-state=loading]') === null`)
 	// markSeen runs synchronously inside app.js's render(), so there is no
 	// transient window to wait out: this await is itself the readiness check.
 	p.Await("nothing marked", `document.querySelector('[data-field=unread]') === null`)

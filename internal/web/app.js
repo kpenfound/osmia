@@ -44,6 +44,9 @@
   // nothing else prompts a render.
   const dismissCheckInterval = 1000;
 
+  // settingsSections are the sections of the Settings view; opening one
+  // shows the view on it.
+  const settingsSections = ['projects', 'priority', 'profiles', 'config', 'engine'];
   const unitOrder = ['planned', 'ready', 'implementing', 'waiting', 'checking', 'reviewing', 'approved', 'contested', 'merged'];
 
   const pauseSources = {
@@ -96,21 +99,90 @@
     }
   }
 
+  // workstreamTabs are the tabs of a workstream, the first being the default.
+  const workstreamTabs = ['conversation', 'activity', 'documents', 'trace'];
+
+  // parseRoute reads the page's location hash. A hash names what the main
+  // area shows: #workstream=<id> or #workgroup=<id>, followed for a
+  // workstream by the tab, the Activity unit filter and the opened
+  // Activity entries as &tab=, &unit=, &open= and &entry=.
+  function parseRoute(hash) {
+    const [head, ...rest] = hash.replace(/^#/, '').split('&');
+    const route = { kind: '', id: '', tab: 'conversation', unit: '', open: [], entry: '' };
+    const at = head.indexOf('=');
+    const kind = head.slice(0, at);
+    if (at < 0 || (kind !== 'workstream' && kind !== 'workgroup')) return route;
+    const decode = (text) => { try { return decodeURIComponent(text); } catch { return text; } };
+    route.kind = kind;
+    route.id = decode(head.slice(at + 1));
+    for (const part of rest) {
+      const eq = part.indexOf('=');
+      const name = part.slice(0, eq);
+      const value = part.slice(eq + 1);
+      if (name === 'tab' && workstreamTabs.includes(value)) route.tab = value;
+      if (name === 'unit') route.unit = decode(value);
+      if (name === 'open') route.open = value.split(',').filter(Boolean).map(decode);
+      if (name === 'entry') route.entry = decode(value);
+    }
+    return route;
+  }
+
+  const startRoute = parseRoute(location.hash);
+
   // ui is what the owner is looking at: the selected workstream, the view
-  // the main area shows and the workstream's tab. seen holds the activity the
-  // owner last saw on each workstream. initial holds the workstreams the
-  // first status read listed, whose current activity counts as seen the
-  // first time the page shows them.
+  // the main area shows and the workstream's tab. unit, open and focus are
+  // the Activity tab's unit filter, its opened entries and the entry a
+  // milestone or link pointed at. seen holds the activity the owner last saw
+  // on each workstream. initial holds the workstreams the first status read
+  // listed, whose current activity counts as seen the first time the page
+  // shows them. navigated says the owner has opened a view since the page
+  // loaded, so the first status read no longer picks the view from the link.
   const ui = {
-    selected: location.hash.startsWith('#workstream=') ? decodeURIComponent(location.hash.slice(12)) : stored('selected', null),
-    view: location.hash.startsWith('#workgroup=') ? 'workgroup' : location.hash.startsWith('#workstream=') ? 'workstream' : 'project-pane',
+    selected: startRoute.kind === 'workstream' ? startRoute.id : stored('selected', null),
+    section: 'projects',
+    view: startRoute.kind === 'workgroup' ? 'workgroup' : startRoute.kind === 'workstream' ? 'workstream' : 'project-pane',
     aboutMember: null,
-    workgroup: location.hash.startsWith('#workgroup=') ? decodeURIComponent(location.hash.slice(11)) : null,
-    tab: 'feed',
+    workgroup: startRoute.kind === 'workgroup' ? startRoute.id : null,
+    tab: startRoute.kind === 'workstream' ? startRoute.tab : 'conversation',
+    unit: startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.unit : '',
+    open: new Set(startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.open : []),
+    focus: startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.entry : '',
+    scrollFocus: startRoute.kind === 'workstream' && startRoute.tab === 'activity' && startRoute.entry !== '',
     seen: stored('seen', {}),
     initial: null,
+    navigated: false,
     toEnd: true,
   };
+
+  // routeHash is the location hash for what the owner is looking at.
+  function routeHash() {
+    const enc = encodeURIComponent;
+    if (ui.view === 'workgroup' && ui.workgroup) return '#workgroup=' + enc(ui.workgroup);
+    if (!ui.selected || !['workstream', 'session', 'design'].includes(ui.view)) return '';
+    const parts = ['workstream=' + enc(ui.view === 'workstream' ? shown()?.workstream || ui.selected : ui.selected)];
+    if (ui.view === 'workstream') {
+      if (ui.tab !== 'conversation') parts.push('tab=' + ui.tab);
+      if (ui.tab === 'activity') {
+        if (ui.unit) parts.push('unit=' + enc(ui.unit));
+        if (ui.open.size > 0) parts.push('open=' + [...ui.open].map(enc).join(','));
+        if (ui.focus) parts.push('entry=' + enc(ui.focus));
+      }
+    }
+    return '#' + parts.join('&');
+  }
+
+  // syncRoute writes the view into the location. A change the Back button
+  // should undo, such as a new tab or filter, pushes a history entry; the
+  // rest replaces the current one.
+  function syncRoute(push = false) {
+    const hash = routeHash();
+    if (hash === '' || hash === location.hash) return;
+    if (push) {
+      history.pushState(null, '', hash);
+    } else {
+      history.replaceState(null, '', hash);
+    }
+  }
 
   // el builds an element; strings among the children become text nodes.
   function el(tag, attrs, ...children) {
@@ -132,6 +204,19 @@
 
   function byId(id) {
     return document.getElementById(id);
+  }
+
+  // metaRow lays separate facts out in a row with a gap between them. A
+  // string part becomes its own span; a node part is kept as it is, so it
+  // can carry its own data attributes. The text between parts is a space,
+  // never a separator character.
+  function metaRow(...parts) {
+    const out = [];
+    for (const part of parts.filter((p) => p !== null && p !== undefined && p !== false && p !== '')) {
+      if (out.length > 0) out.push(' ');
+      out.push(typeof part === 'string' ? el('span', {}, part) : part);
+    }
+    return el('span', { class: 'meta-row' }, ...out);
   }
 
   // Markdown is built only from text nodes and known elements. Agent HTML
@@ -473,7 +558,7 @@
             delete failures[name];
           } catch (err) {
             if (!isManagementView(name) || name.endsWith('/' + byId('project-edit').elements.project.value)) {
-              failures[name] = 'Cannot read /' + name + ': ' + err.message;
+              failures[name] = err.message;
             }
           }
         }));
@@ -487,18 +572,24 @@
               if (ui.view === 'design' || ui.view === 'workstream') {
                 ui.view = isMultiMember(member) ? 'workgroup' : 'workstream';
                 ui.workgroup = member.workgroup?.id || null;
-                ui.tab = 'feed';
-                history.replaceState(null, '', isMultiMember(member) ? '#workgroup=' + encodeURIComponent(ui.workgroup) : '#workstream=' + encodeURIComponent(ui.selected));
+                ui.tab = 'conversation';
+                ui.unit = '';
+                ui.open.clear();
+                ui.focus = '';
+                syncRoute();
               }
             }
           }
-          if (ui.initial === null && location.hash.startsWith('#workstream=')) {
+          if (ui.initial === null && !ui.navigated && startRoute.kind === 'workstream') {
             const w = streams().find(w => w.workstream === ui.selected);
             if (w) {
               ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
               if (w.kind === 'design') {
                 dirty.add('design/' + w.workstream);
                 dirty.add('design/' + w.workstream + '/conversation');
+              }
+              if (w.kind === 'session') {
+                dirty.add('sessions/' + w.workstream + '/changes');
               }
             }
           }
@@ -508,7 +599,7 @@
               startedDesignIds.add(w.workstream);
               if (ui.selected === w.workstream && ui.view === 'design') {
                 ui.view = 'workstream';
-                ui.tab = 'feed';
+                ui.tab = 'conversation';
               }
             }
           }
@@ -608,7 +699,7 @@
 
   function setConnection(state) {
     document.body.dataset.connection = state;
-    const label = { connecting: 'Connecting…', live: 'Live', lost: 'Reconnecting…' }[state];
+    const label = { connecting: 'Connecting…', live: 'Live', lost: 'Connection lost, reconnecting…' }[state];
     byId('connection').title = label;
     byId('connection').querySelector('.label').textContent = label;
   }
@@ -804,7 +895,7 @@
   async function readEngine(opening) {
     const reading = ++engineStatusRead;
     const box = byId('engine-status');
-    box.textContent = 'Reading engine status…';
+    box.replaceChildren(stateBlock('loading', 'Reading engine status…'));
     try {
       const status = await request('GET', '/engine/status');
       if (opening !== engineOpening || reading !== engineStatusRead) return;
@@ -824,19 +915,24 @@
         ].filter(Boolean).join('; ') || 'None'),
         field('cache-size', 'Cache size', status.cache_size_bytes == null ? 'Unknown' : status.cache_size_bytes.toLocaleString() + ' bytes')].filter(Boolean));
     } catch (err) {
-      if (opening === engineOpening && reading === engineStatusRead) box.textContent = err.message;
+      if (opening === engineOpening && reading === engineStatusRead) {
+        const again = el('button', { type: 'button', class: 'secondary', 'data-action': 'retry' }, 'Try again');
+        again.addEventListener('click', () => readEngine(engineOpening));
+        box.replaceChildren(stateBlock('error', 'The engine status could not be read.', err.message, again));
+      }
     }
   }
 
+  // openEngine starts a new opening of the Dagger engine section. Each
+  // opening owns its outcomes; results from earlier openings are discarded.
+  function openEngine() {
+    engineOpening++;
+    for (const action of ['restart', 'prune']) outcomeScopes.get(byId('engine-' + action + '-result')).entries.clear();
+    renderOutcomes();
+    readEngine(engineOpening);
+  }
+
   function setupEngine() {
-    byId('settings-menu').addEventListener('beforetoggle', event => {
-      if (event.newState !== 'open') return;
-      engineOpening++;
-      // Each opening owns its outcomes; discard results from earlier openings.
-      for (const action of ['restart', 'prune']) outcomeScopes.get(byId('engine-' + action + '-result')).entries.clear();
-      renderOutcomes();
-      readEngine(engineOpening);
-    });
     for (const action of ['restart', 'prune']) {
       byId('engine-' + action).addEventListener('click', () => {
         const opening = engineOpening;
@@ -928,7 +1024,7 @@
 
   // archiveLabel says who archived a workstream and how far its cleanup is.
   function archiveLabel(w) {
-    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ' · ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
+    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ', ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
   }
   function repoLabel(id) {
     return configuredRepos().find(r => r.id === id)?.label || id;
@@ -938,19 +1034,105 @@
     return w.status ? w.status.goal : w.workstream;
   }
 
+  // viewLabel names a view the way the owner thinks of it, for the banner
+  // that says a read failed.
+  function viewLabel(name) {
+    const fixed = {
+      status: 'the workstream list',
+      runtime: 'pauses and priorities',
+      config: 'the configuration',
+      inbox: 'the inbox',
+      charter: 'charter proposals',
+      activity: 'backend activity',
+    };
+    if (fixed[name]) return fixed[name];
+    const tail = name.split('/');
+    if (tail[0] === 'feed') return 'the conversation of ' + workstreamName(tail[1]);
+    if (tail[0] === 'workgroups') return 'the shared conversation';
+    if (tail[0] === 'packet') return 'the ratification packet of ' + workstreamName(tail[1]);
+    if (tail[0] === 'delivery') return 'the final report of ' + workstreamName(tail[1]);
+    if (tail[0] === 'design') return 'the design session ' + tail[1];
+    if (tail[0] === 'sessions') return 'the changes of session ' + tail[1];
+    if (tail[0] === 'projects' && tail[1] === 'charter') return 'the project charter';
+    if (tail[0] === 'projects' && tail[1] === 'config') return 'the project settings';
+    return name;
+  }
+
+  // retryReads reads the named views again, forgetting the failure each
+  // one showed so the page says it is reading until the answer arrives.
+  function retryReads(names) {
+    for (const name of names) {
+      delete failures[name];
+    }
+    render();
+    mark(names);
+  }
+
+  // retryButton is the next step an error state offers.
+  function retryButton(names, label = 'Try again') {
+    const button = el('button', { type: 'button', class: 'secondary', 'data-action': 'retry' }, label);
+    button.addEventListener('click', () => retryReads(names));
+    return button;
+  }
+
+  // openButton is the next step an empty state offers: it opens a view.
+  function openButton(label, view, primary = false) {
+    const button = el('button', { type: 'button', class: primary ? 'primary' : 'secondary', 'data-open': view }, label);
+    button.addEventListener('click', () => openView(view));
+    return button;
+  }
+
+  // stateBlock builds a designed empty, loading or error state: a mark, what
+  // is going on in a sentence, a line saying what to do next, and the
+  // actions that do it. A loading state holds the room its content takes so
+  // the page does not jump when the content arrives.
+  function stateBlock(kind, title, detail, ...actions) {
+    return el('div', { class: 'state', 'data-state': kind, role: kind === 'error' ? 'alert' : 'status' },
+      kind === 'loading'
+        ? el('span', { class: 'state-bars', 'aria-hidden': 'true' }, el('span'), el('span'), el('span'))
+        : el('span', { class: 'state-mark', 'aria-hidden': 'true' }),
+      el('p', { class: 'state-title' }, title),
+      detail ? el('p', { class: 'state-detail' }, detail) : null,
+      actions.length > 0 ? el('div', { class: 'actions' }, ...actions) : null);
+  }
+
+  // keptState returns the same state node for a key, so a list that places
+  // its nodes on every render does not rebuild a state and restart its
+  // motion.
+  const stateNodes = new Map();
+  function keptState(key, build) {
+    if (!stateNodes.has(key)) stateNodes.set(key, build());
+    return stateNodes.get(key);
+  }
+
+  // readState is the state of a view that has not arrived: reading while the
+  // read is in flight, and an error with a retry once it failed.
+  function readState(name, reading, failed, detail) {
+    return failures[name]
+      ? stateBlock('error', failed, detail || 'Check the connection, then read it again.', retryButton([name]))
+      : stateBlock('loading', reading);
+  }
+
   function renderProblems() {
-    const items = Object.values(failures);
+    const failed = Object.entries(failures);
+    const diagnostics = [];
     for (const name of ['status', 'runtime']) {
       const view = views[name];
       if (view && Array.isArray(view.diagnostics)) {
         for (const d of view.diagnostics) {
-          items.push(d.field + ': ' + d.message);
+          diagnostics.push(d.field + ': ' + d.message);
         }
       }
     }
-    const list = byId('problem-list');
-    list.replaceChildren(...items.map((text) => el('li', {}, text)));
-    byId('problems').hidden = items.length === 0;
+    byId('problems-title').textContent = failed.length > 0
+      ? (failed.length === 1 ? 'One view could not be read.' : failed.length + ' views could not be read.')
+      : 'The service reports a problem with its settings.';
+    byId('problems-retry').hidden = failed.length === 0;
+    byId('problems-retry').dataset.names = JSON.stringify(failed.map(([name]) => name));
+    byId('problem-list').replaceChildren(
+      ...failed.map(([name, message]) => el('li', { 'data-view-name': name }, el('span', {}, 'Could not read ' + viewLabel(name) + '.'), ' ', el('span', { class: 'meta' }, message))),
+      ...diagnostics.map((text) => el('li', {}, text)));
+    byId('problems').hidden = failed.length + diagnostics.length === 0;
   }
 
   // resume clears a pause the way osmia resume does.
@@ -1059,10 +1241,10 @@
       return el('li', { class: 'activity-entry', 'data-activity': e.id, 'data-blocked': String(blocked) },
         el('div', { class: 'line' },
           el('strong', { 'data-field': 'kind' }, e.kind),
-          where.length > 0 ? el('span', { class: 'tag', 'data-field': 'where' }, where.join(' · ')) : null),
+          where.length > 0 ? el('span', { class: 'meta-row', 'data-field': 'where' }, ...where.flatMap((part, i) => i > 0 ? [' ', el('span', {}, part)] : [el('span', {}, part)])) : null),
         el('div', { 'data-field': 'phase' }, e.phase + (e.progress !== null && e.progress !== undefined ? ' (' + Math.round(e.progress * 100) + '%)' : '')),
         e.failure ? el('div', { class: 'failure', 'data-field': 'failure' }, e.failure) : null,
-        el('div', { class: 'meta' }, 'Since ', when(e.started_at), blocked ? el('span', { class: 'blocked-note', 'data-field': 'blocked' }, ' · no progress since ' + when(e.last_progress)) : null));
+        el('div', { class: 'meta meta-row' }, el('span', {}, 'Since ', when(e.started_at)), blocked ? ' ' : null, blocked ? el('span', { class: 'blocked-note', 'data-field': 'blocked' }, 'No progress since ' + when(e.last_progress)) : null));
     }));
   }
 
@@ -1163,8 +1345,8 @@
     ui.workgroup = id;
     ui.aboutMember = aboutMember;
     ui.toEnd = true;
-    history.replaceState(null, '', '#workgroup=' + encodeURIComponent(id));
     openView('workgroup');
+    syncRoute();
     mark([groupFeed(id)]);
   }
 
@@ -1177,7 +1359,7 @@
     const live = !!group && groupLive(id);
     // An all-archived workgroup is gone once its shared feed cannot be read.
     if (!group || (!live && failures[groupFeed(id)])) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'This workgroup is unavailable.'));
+      box.replaceChildren(stateBlock('empty', 'This workgroup is unavailable.', 'It may have been archived. Open another workstream from the list.', openButton('Go to projects', 'project-pane')));
       return;
     }
     const c = card(id, true);
@@ -1212,7 +1394,7 @@
         const node = e.kind === 'status' ? renderStatus(e, i === latest) : e.kind === 'brief' ? renderBriefEntry(e) : renderConversationEntry(e);
         if (e.repo) node.prepend(el('span', { class: 'tag', 'data-field': 'repo' }, repoLabel(e.repo)));
         return node;
-      }))] : [el('p', { class: 'meta' }, failures[groupFeed(id)] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
+      }))] : [readState(groupFeed(id), 'Reading the conversation…', 'The conversation is unavailable.'),
         ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : [])]));
       const members = el('div', { class: 'workgroup-members', 'data-field': 'members' }, ...(feed?.members || []).map(m => {
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
@@ -1223,14 +1405,14 @@
         button.disabled = m.archived;
         button.addEventListener('click', () => select(m.workstream));
         return el('section', { class: 'member-card', 'data-member': m.workstream }, button,
-          el('div', { class: 'unit-counts', 'data-field': 'units' }, ...Object.entries(m.units || {}).map(([state, count]) => el('span', { class: 'tag' }, state + ' ' + count))),
+          memberTube(m.units),
           m.wait ? el('p', { 'data-field': 'wait' }, m.wait) : null,
           m.pr_link ? el('a', { href: m.pr_link, 'data-field': 'pr' }, 'Pull request') : null);
       }));
       const graph = group.edges?.length ? el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
         el('figcaption', {}, 'Dependencies'), ...group.edges.map(e => el('p', { 'data-edge': e.type },
           repoLabel(groupMembers(id).find(w => w.workstream === e.from)?.project || e.from) + ' → ' +
-          repoLabel(groupMembers(id).find(w => w.workstream === e.to)?.project || e.to) + ' · ' + e.type.replaceAll('_', ' ')))) : null;
+          repoLabel(groupMembers(id).find(w => w.workstream === e.to)?.project || e.to) + ', ' + e.type.replaceAll('_', ' ')))) : null;
       if (!c.summary) {
         c.summary = el('div', { class: 'workgroup-summary' });
         c.node.prepend(c.summary);
@@ -1240,7 +1422,7 @@
       c.summary.replaceChildren(members, ...(graph ? [graph] : []));
     }
     const decisions = groupInbox(id).map(e => labelGroupDecision(renderDecision(e),
-      e.workgroup ? 'Workgroup · ' + [...new Set(groupMembers(id).map(w => repoLabel(w.project)))].join(', ') : repoLabel(e.project)));
+      e.workgroup ? 'Workgroup, ' + [...new Set(groupMembers(id).map(w => repoLabel(w.project)))].join(', ') : repoLabel(e.project)));
     const proposals = groupProposals(id).map(p => labelGroupDecision(renderProposal(p),
       repoLabel(groupMembers(id).find(w => w.workstream === p.workstream)?.project)));
     place(c.decisions, [c.heading, ...decisions, ...proposals, inboxResult]);
@@ -1299,20 +1481,21 @@
   }
 
   // activity is what the owner has seen of a workstream once they look at
-  // it: its state, status and units, what waits on them and its
-  // conversation in single-member groups. Sessions alone are not activity.
-  // It is null until the feed and inbox are read.
+  // it: its status and what waits on them, and what Conversation shows, its
+  // conversation and milestones. Sessions, unit changes and check runs, which
+  // only Activity shows, are not activity here. It is null until the feed and
+  // inbox are read.
   function activity(w) {
     const feed = views['feed/' + w.workstream];
     if (!feed || !views.inbox) {
       return null;
     }
-    const conversation = isMultiMember(w) ? [] : feed.entries.filter((e) => conversationKinds.has(e.kind));
+    const entries = feedView(w.workstream).entries;
+    const conversation = entries.filter((e) => !activityKinds.has(e.kind));
     const last = conversation[conversation.length - 1];
     return JSON.stringify([
-      w.state,
       !isMultiMember(w) && w.status ? [w.status.goal, w.status.attention, w.status.note] : null,
-      (w.units || []).map((u) => u.unit + ':' + u.state).sort(),
+      entries.filter(isMilestone).map(entryKey),
       inboxOf(w.workstream).map((e) => decisionKey(e) + ':' + e.revision),
       proposalsOf(w.workstream).map((p) => p.question),
       conversation.length,
@@ -1396,21 +1579,40 @@
       kind: el('span', { class: 'tag', 'data-field': 'kind' }, 'Session'),
       title: el('span', { class: 'title', 'data-field': 'goal' }),
       project: el('span', { 'data-field': 'project' }),
-      state: el('span', { 'data-field': 'state' }),
+      state: el('span', { class: 'glyph', 'data-field': 'state', role: 'img' }),
       signals: el('span', { class: 'signals' }),
     };
     r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
-      r.title, el('span', { class: 'sub' }, r.kind, r.project, ' · ', r.state), r.signals);
+      r.state, el('span', { class: 'text' }, r.title, el('span', { class: 'sub meta-row' }, r.kind, r.project)), r.signals);
     r.button.addEventListener('click', () => select(id));
     r.node = el('li', {}, r.button);
     rows.set(id, r);
     return r;
   }
 
+  // stateGlyph names the shape a workstream's state takes in the sidebar:
+  // live while work runs, waiting before it starts, done once it is
+  // assembled or delivered, failed once it stops without delivering, idle
+  // for a session with nothing running and archived once its history is
+  // gone. A shape accompanies the status colour, which never carries the
+  // state alone.
+  function stateGlyph(w) {
+    if (w.archived) return 'archived';
+    const state = w.state || 'handed';
+    if (state === 'delivered' || state === 'assembled') return 'done';
+    if (state === 'abandoned' || state === 'failed' || state === 'cancelled' || state === 'blocked') return 'failed';
+    if (state === 'building' || (w.agents && w.agents.length > 0)) return 'live';
+    if (w.kind === 'session' || w.kind === 'design') return 'idle';
+    return 'waiting';
+  }
+
   function renderSidebar() {
     const list = byId('workstream-list');
     if (!views.status) {
-      place(list, [el('li', { class: 'meta none', 'data-field': 'loading' }, 'Loading workstreams…')]);
+      place(list, [failures.status
+        ? keptState('sidebar:error', () => el('li', { class: 'none', 'data-field': 'error' },
+          stateBlock('error', 'The workstream list could not be read.', 'Check the connection, then read it again.', retryButton(['status']))))
+        : keptState('sidebar:loading', () => el('li', { class: 'none', 'data-field': 'loading' }, stateBlock('loading', 'Loading workstreams…')))]);
       return;
     }
     const ids = new Set(streams().map((w) => w.workstream));
@@ -1440,14 +1642,17 @@
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = w.kind === 'design' ? projectName(w.project) : repoLabel(w.project);
-      r.state.textContent = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
+      const stateName = w.archived ? archiveLabel(w).toLowerCase() : (w.state || 'handed');
+      r.state.dataset.glyph = stateGlyph(w);
+      r.state.setAttribute('aria-label', stateName);
+      r.state.title = stateName;
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(ui.view !== 'workgroup' && current !== null && current.workstream === w.workstream));
       r.signals.replaceChildren(...[
         paused ? el('span', { class: 'paused', 'data-field': 'paused', title: 'Paused' }, 'paused') : null,
         w.agents && w.agents.length > 0 ? el('span', { class: 'working', 'data-field': 'working', title: w.agents.length + ' running' }) : null,
-        needs > 0 ? el('span', { class: 'needs', 'data-field': 'needs', title: needs + ' waiting for you' }, String(needs)) : null,
+        needs > 0 ? el('span', { class: 'needs', 'data-field': 'needs', title: needs + ' waiting for you', 'aria-label': needs + ' waiting for you' }, String(needs)) : null,
         needs === 0 && unread(w) ? el('span', { class: 'unread', 'data-field': 'unread', title: 'New activity' }) : null,
       ].filter((node) => node !== null));
       return r.node;
@@ -1498,10 +1703,84 @@
     place(byId('archived-list'), groupedEntries(archived, archivedSidebarGroups));
     const work = streams().filter((w) => !w.archived);
     if (work.length === 0) {
-      list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
+      place(list, [keptState(archived.length === 0 ? 'sidebar:empty' : 'sidebar:archived', () => el('li', { class: 'none', 'data-field': 'empty' },
+        archived.length === 0
+          ? stateBlock('empty', 'No workstreams yet.', 'Hand in a feature to start one.', openButton('Hand in a feature', 'handin'))
+          : stateBlock('empty', 'Every workstream is archived.', 'Hand in a feature to start new work.', openButton('Hand in a feature', 'handin'))))]);
       return;
     }
     place(list, groupedEntries(work, sidebarGroups));
+  }
+
+  // renderNeedsYou lists every open inbox entry and charter proposal across
+  // the workstreams, each linking to the view that answers it. Project
+  // creations stay below as cards, where they are answered. The list is
+  // built from the inbox and charter reads the page already makes. Each
+  // item keeps its link between renders, so a focused link stays focused.
+  const needsItems = new Map();
+  const needsCount = el('span', { class: 'needs', 'data-field': 'needs-count' });
+  const needsList = el('ul', { class: 'needs-list' });
+  const needsEmpty = el('p', { class: 'meta', 'data-field': 'needs-empty' }, 'Nothing is waiting for you.');
+  const needsSection = el('section', { class: 'needs-you', 'data-field': 'needs-you', 'aria-labelledby': 'needs-you-title' },
+    el('div', { class: 'needs-head' }, el('h3', { id: 'needs-you-title' }, 'Needs you'), needsCount), needsList, needsEmpty);
+
+  function needsItem(key) {
+    let item = needsItems.get(key);
+    if (item) return item;
+    item = {
+      kind: el('span', { class: 'needs-kind', 'data-field': 'kind' }),
+      title: el('span', { class: 'needs-title', 'data-field': 'goal' }),
+      text: el('span', { class: 'needs-text', 'data-field': 'question' }),
+      project: el('span', { 'data-field': 'project' }),
+      opened: el('span', { class: 'meta', 'data-field': 'opened' }),
+      target: null,
+    };
+    item.link = el('a', { class: 'needs-link' }, item.kind, item.title, item.text,
+      el('span', { class: 'needs-where meta-row' }, item.project, item.opened));
+    item.link.addEventListener('click', event => {
+      event.preventDefault();
+      if (item.target.group) selectWorkgroup(item.target.group);
+      else select(item.target.workstream);
+    });
+    item.node = el('li', {}, item.link);
+    needsItems.set(key, item);
+    return item;
+  }
+
+  function renderNeedsYou() {
+    if (!views.inbox) return null;
+    const entries = views.inbox.entries.filter(e => e.kind !== 'project-creation' && !dismissed.has(decisionKey(e)));
+    const proposed = views.charter ? views.charter.proposals : [];
+    const wanted = [
+      ...entries.map(e => {
+        const group = e.workgroup && workgroups().some(g => g.id === e.workgroup) ? e.workgroup : '';
+        return { key: 'entry:' + decisionKey(e), kind: kinds[e.kind] || e.kind, title: group ? groupGoal(group) : workstreamName(e.workstream),
+          text: e.question, project: repoLabel(e.project), opened: e.opened_at, target: { workstream: e.workstream, group } };
+      }),
+      ...proposed.map(r => ({ key: 'proposal:' + proposalKey(r), kind: 'Charter rule', title: workstreamName(r.workstream), text: r.rule,
+        project: repoLabel(streams().find(w => w.workstream === r.workstream)?.project || ''), opened: '', target: { workstream: r.workstream, group: '' } })),
+    ];
+    const nodes = wanted.map(w => {
+      const item = needsItem(w.key);
+      item.target = w.target;
+      item.kind.textContent = w.kind;
+      item.title.textContent = w.title;
+      item.text.textContent = w.text;
+      item.project.textContent = w.project;
+      item.opened.textContent = w.opened ? when(w.opened) : '';
+      item.opened.hidden = !w.opened;
+      item.link.href = w.target.group ? '#workgroup=' + encodeURIComponent(w.target.group) : '#workstream=' + encodeURIComponent(w.target.workstream);
+      item.node.dataset.needsWorkstream = w.target.workstream;
+      return item.node;
+    });
+    for (const key of needsItems.keys()) if (!wanted.some(w => w.key === key)) needsItems.delete(key);
+    place(needsList, nodes);
+    needsCount.textContent = String(nodes.length);
+    needsCount.setAttribute('aria-label', nodes.length + ' waiting for you');
+    needsCount.hidden = nodes.length === 0;
+    needsList.hidden = nodes.length === 0;
+    needsEmpty.hidden = nodes.length > 0;
+    return needsSection;
   }
 
   let paneRendered = '';
@@ -1578,7 +1857,7 @@
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
         row.open.disabled = g.members.length < 2 && !members.some(w => !w.archived);
         const waitingCount = waiting.length + (g.members.length > 1 ? groupProposals(g.id).length : 0);
-        row.inbox.textContent = waitingCount + ' waiting for you · Open inbox';
+        row.inbox.textContent = waitingCount + ' waiting for you, open inbox';
         row.inbox.hidden = !waitingCount;
         if (waitingCount) row.inbox.dataset.groupInbox = g.id;
         else delete row.inbox.dataset.groupInbox;
@@ -1589,8 +1868,8 @@
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
-              repoLabel(streams().find(w => w.workstream === id)?.project || id), ' · ', id))),
-            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
+              metaRow(repoLabel(streams().find(w => w.workstream === id)?.project || id), el('code', { class: 'id' }, id))))),
+            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ', ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
       });
@@ -1600,7 +1879,7 @@
           none: el('p', { class: 'meta' }, 'No workgroups yet.'), ungrouped: el('ul', { class: 'pane-streams' }), sessions: [] };
         const sections = [['design', 'Design sessions'], ['session', 'Exploratory sessions']].map(([kind, title]) => {
           const list = el('ul', { class: 'pane-streams' });
-          const node = el('section', { 'data-sessions': kind }, el('h3', {}, title), list);
+          const node = el('section', { 'data-sessions': kind }, el('h4', {}, title), list);
           row.sessions.push({ kind, list, node });
           return node;
         });
@@ -1608,14 +1887,14 @@
           el('div', { class: 'actions' }, action('Open a design session', 'design-add', p.id),
             action('Hand in a feature', 'handin', p.id),
             action('Project management', 'projects', p.id), action('Open an exploratory session', 'session-add', p.id)),
-          el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
+          el('h4', {}, 'Repos'), row.repos, el('h4', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
         paneProjects.set(p.id, row);
       }
       row.name.textContent = p.name;
       const repoKey = JSON.stringify([p.name, p.repos]);
       if (row.repoKey !== repoKey) {
         row.repoKey = repoKey;
-        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id }, el('strong', {}, repoLabel(r.id)), ' · ', r.upstream)));
+        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id, class: 'meta-row' }, el('strong', {}, repoLabel(r.id)), ' ', el('span', { class: 'meta' }, r.upstream))));
       }
       place(row.groups, groupsView);
       row.none.hidden = !!groupsView.length;
@@ -1630,8 +1909,14 @@
     // A creation that cannot finish waits for the owner here, whether a start,
     // the CLI or the API began it.
     const creations = (views.inbox ? views.inbox.entries : []).filter((e) => e.kind === 'project-creation' && !dismissed.has(decisionKey(e))).map(renderDecision);
-    place(byId('project-pane'), [...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes]);
-    if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
+    place(byId('project-pane'), [renderNeedsYou(), ...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes].filter(node => node !== null));
+    if (!projects().length) {
+      byId('project-pane').append(views.config
+        ? stateBlock('empty', 'No projects yet.', 'Create a project to register its repository, then hand in a feature.', openButton('Create project', 'project-add', true))
+        : failures.config
+          ? stateBlock('error', 'The projects could not be read.', 'Check the connection, then read them again.', retryButton(['config']))
+          : stateBlock('loading', 'Loading projects…'));
+    }
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
     for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
     for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
@@ -1650,12 +1935,18 @@
     const changed = ui.selected !== id;
     ui.selected = id;
     store('selected', id);
-    history.replaceState(null, '', '#workstream=' + encodeURIComponent(id));
     setPicker(false);
     const session = isSessionId(id);
     const design = !session && isDesignId(id);
     ui.toEnd = true;
+    if (changed) {
+      ui.unit = '';
+      ui.open.clear();
+      ui.focus = '';
+      ui.scrollFocus = false;
+    }
     openView(session ? 'session' : design ? 'design' : 'workstream');
+    syncRoute();
     if (changed) {
       clearWorkstreamForms();
     }
@@ -1680,11 +1971,13 @@
   // openView shows a view in the main area: the selected workstream or
   // session, or one of the views the header opens.
   function openView(view, project = '') {
+    ui.navigated = true;
     for (const popover of document.querySelectorAll('[popover]')) {
       if (popover.matches(':popover-open')) {
         popover.hidePopover();
       }
     }
+    const section = settingsSections.includes(view) ? view : view === 'settings' ? ui.section : null;
     if (['handin', 'design-add', 'session-add'].includes(view) || (view === 'projects' && project)) {
       const form = document.querySelector('[data-view="' + view + '"] form');
       const changedProject = form.elements.project.value !== project;
@@ -1692,24 +1985,71 @@
       if (view === 'handin') handinProjects = project ? [project] : [];
       if (view !== 'projects' || changedProject) form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    if (section) view = 'settings';
     const changed = ui.view !== view;
     if (changed && ['project-pane', 'workstream', 'workgroup', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
+    const engineOpened = section === 'engine' && (changed || ui.section !== 'engine');
     ui.view = view;
+    if (section) ui.section = section;
     if (changed) ui.toEnd = true;
     if (view === 'project-pane') history.replaceState(null, '', location.pathname + location.search);
     setPicker(false);
     render();
-    if (changed && !shownFeed()) byId('main').scrollTop = 0;
+    if (engineOpened) openEngine();
+    if ((changed || section) && !shownFeed()) byId('main').scrollTop = 0;
   }
 
+  // setTab shows a tab of the workstream. Leaving Activity drops the entry
+  // a link pointed at, and a tab other than Activity carries no filter or
+  // opened entries in the location.
   function setTab(tab) {
     const changed = ui.tab !== tab;
     ui.tab = tab;
-    if (changed && tab === 'feed') ui.toEnd = true;
+    if (changed) {
+      ui.focus = '';
+      ui.scrollFocus = false;
+      if (tab === 'conversation' || tab === 'activity') ui.toEnd = true;
+      syncRoute(true);
+    }
     render();
     if (changed && tab === 'documents') {
       readWorkstreamDocuments();
     }
+  }
+
+  // showActivity opens Activity, optionally on one unit's events or at one
+  // entry. The entry is opened, highlighted and scrolled to.
+  function showActivity({ unit = '', entry = '' } = {}) {
+    ui.unit = unit;
+    ui.focus = entry;
+    ui.scrollFocus = entry !== '';
+    ui.tab = 'activity';
+    ui.toEnd = entry === '';
+    syncRoute(true);
+    render();
+  }
+
+  // restoreRoute shows what the location hash names, after Back, Forward or
+  // an edit of the hash.
+  function restoreRoute() {
+    const route = parseRoute(location.hash);
+    if (route.kind === 'workgroup') {
+      if (ui.view !== 'workgroup' || ui.workgroup !== route.id) selectWorkgroup(route.id);
+      return;
+    }
+    if (route.kind !== 'workstream') return;
+    if (ui.selected !== route.id || ui.view === 'project-pane' || ui.view === 'settings') select(route.id);
+    if (ui.view !== 'workstream') return;
+    const activity = route.tab === 'activity';
+    ui.tab = route.tab;
+    ui.unit = activity ? route.unit : '';
+    ui.open = new Set(activity ? route.open : []);
+    ui.focus = activity ? route.entry : '';
+    ui.scrollFocus = ui.focus !== '';
+    ui.toEnd = ui.focus === '' && (route.tab === 'conversation' || activity);
+    syncRoute();
+    render();
+    if (route.tab === 'documents') readWorkstreamDocuments();
   }
 
   // inboxResult shows the outcome of the last answer to an inbox entry. It
@@ -2000,10 +2340,18 @@
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
       about: el('div', { class: 'composer-about' }),
-      // opened holds the sessions whose report the owner expanded, so a
-      // new entry does not fold them again.
-      opened: new Set(),
+      activity: el('div', { class: 'activity-log', 'data-field': 'activity-log' }),
+      activityShown: null,
+      unitFilter: el('select', { name: 'unit', 'aria-label': 'Filter by unit', 'data-field': 'unit-filter' }),
     };
+    c.unitFilter.addEventListener('change', () => {
+      ui.unit = c.unitFilter.value;
+      ui.focus = '';
+      syncRoute(true);
+      render();
+    });
+    c.activityNode = el('section', { class: 'activity', 'data-workstream': id, 'aria-label': 'Activity' },
+      el('div', { class: 'activity-bar' }, el('label', {}, el('span', {}, 'Unit'), c.unitFilter)), c.activity);
     const form = el('form', { class: 'send composer', 'data-field': 'send' },
       c.about, el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, dictationButton(), c.button)), c.result);
     form.addEventListener('submit', (event) => {
@@ -2023,7 +2371,7 @@
       el('div', { class: 'thread' }, c.entries, c.decisions, form));
     scopeOutcome(c.result, () => ui.view === (group ? 'workgroup' : 'workstream') ? (group ? ui.workgroup : shown()?.workstream) : null, [c.button]);
     setupDictation(form, c.result, () => {
-      const selected = ui.view === (group ? 'workgroup' : 'workstream') && (group || ui.tab === 'feed')
+      const selected = ui.view === (group ? 'workgroup' : 'workstream') && (group || ui.tab === 'conversation')
         ? (group ? ui.workgroup : shown()?.workstream) : null;
       return selected === id ? key : null;
     });
@@ -2064,11 +2412,12 @@
     if (e.kind === 'image') return renderImage(e, agentLabel);
     const who = { message: 'You', action: (agentLabel || 'Chief of staff') + ' acted' }[e.kind] || agentLabel || 'Chief of staff';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, who), ' · ',
-        el('span', { 'data-ann': 'when' }, when(e.at)), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, who), ' ',
+        el('span', { 'data-ann': 'when' }, when(e.at)), ' ',
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state),
-        e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, ' · ' + e.queued_reason) : null),
+        e.queued_reason ? ' ' : null,
+        e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, e.queued_reason) : null),
       el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
   }
 
@@ -2095,9 +2444,9 @@
   function renderBriefEntry(e) {
     const b = e.brief;
     return el('li', { class: 'entry', 'data-kind': 'brief', 'data-review': b.review, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card', 'data-field': 'brief' }, ...briefBody(b.text, b.before_you_ship || [], b.screenshots || [])));
   }
@@ -2119,9 +2468,9 @@
   function renderImage(e, agentLabel) {
     const image = e.image;
     return el('li', { id: 'feed-image-' + image.id, class: 'entry', 'data-kind': 'image', 'data-image': image.id, 'data-turn': e.turn, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'image'), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'image'), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       image.placeholder
         ? el('p', { class: 'meta', 'data-field': 'placeholder' }, image.placeholder)
@@ -2130,27 +2479,29 @@
   }
 
   // renderStatus shows a status the chief of staff wrote. Only the latest
-  // status's attention asks for something now.
-  function renderStatus(e, latest) {
+  // status's attention asks for something now; marked names the latest as
+  // current, where older statuses sit beside it.
+  function renderStatus(e, latest, marked = false) {
     const s = e.status;
     return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'status'), ' · ',
-        el('span', { 'data-ann': 'when' }, when(e.at))),
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'status'), ' ',
+        el('span', { 'data-ann': 'when' }, when(e.at)),
+        latest && marked ? ' ' : null, latest && marked ? el('span', { class: 'current', 'data-field': 'current' }, 'Current') : null),
       el('div', { class: 'card' },
         s.attention ? el('div', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, renderMarkdown(s.attention)) : null,
         el('div', { class: 'text', 'data-field': 'note' }, renderMarkdown(s.note)),
         s.agents.length > 0 ? el('ul', { class: 'notes', 'data-field': 'status-agents' }, ...s.agents.map((a) => el('li', {}, renderMarkdown(a)))) : null));
   }
 
-  function renderSession(e, c) {
+  function renderSession(e) {
     const s = e.session;
     const report = s.failure || s.summary;
-    const line = el('span', { 'data-field': 'session' },
-      el('strong', { 'data-ann': 'role' }, role(s.role)), s.unit ? ' on ' + s.unit : '',
-      ' · ', el('span', { 'data-field': 'profile' }, s.profile),
-      ' · ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
+    const line = el('span', { class: 'meta-row', 'data-field': 'session' },
+      el('span', {}, el('strong', { 'data-ann': 'role' }, role(s.role)), s.unit ? ' on ' + s.unit : ''),
+      ' ', el('span', { 'data-field': 'profile' }, s.profile),
+      ' ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
     const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta', 'data-ann': 'when' }, when(s.started_at))];
     const node = el('li', { id: 'feed-turn-' + s.turn, class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
     if (!report) {
@@ -2159,13 +2510,17 @@
     }
     const details = el('details', {}, el('summary', { class: 'event-line' }, ...head),
       el('div', { class: 'text', 'data-field': s.failure ? 'failure' : 'summary' }, renderMarkdown(report)));
-    details.open = c.opened.has(s.agent + '/' + s.turn);
+    const key = entryKey(e);
+    details.open = ui.open.has(key) || ui.focus === key;
     details.addEventListener('toggle', () => {
+      if (details.open === ui.open.has(key)) return;
       if (details.open) {
-        c.opened.add(s.agent + '/' + s.turn);
+        ui.open.add(key);
       } else {
-        c.opened.delete(s.agent + '/' + s.turn);
+        ui.open.delete(key);
+        if (ui.focus === key) ui.focus = '';
       }
+      syncRoute();
     });
     node.append(details);
     return node;
@@ -2181,7 +2536,7 @@
           t.from ? el('span', { 'data-field': 'from' }, t.from) : null, t.from ? ' → ' : '',
           el('strong', { 'data-field': 'to', 'data-ann': 'action' }, t.to)),
         t.reason ? el('span', { class: 'reason', 'data-field': 'reason' }, t.reason) : null,
-        t.actor === 'service:jev' ? el('span', { class: 'meta decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
+        t.actor === 'service:jev' ? el('span', { class: 'footnote decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 
@@ -2192,7 +2547,7 @@
     if (subject.startsWith('unit-') && subject.endsWith('-checks')) return 'Unit checks ' + (t.unit || subject.slice(5, -7));
     if (subject.startsWith('unit-') && t.unit && t.unit.length > 64) return 'Unit ' + t.unit;
     const label = subject.replaceAll(/[-_]/g, ' ');
-    return label.charAt(0).toUpperCase() + label.slice(1) + (t.unit ? ' · Unit ' + t.unit : '');
+    return label.charAt(0).toUpperCase() + label.slice(1) + (t.unit ? ', unit ' + t.unit : '');
   }
 
   function checkState(state) {
@@ -2203,10 +2558,10 @@
     if (!selection) return null;
     if (selection.mode === 'selected') {
       return el('p', { 'data-field': 'selection' },
-        selection.fallback_picks ? (running ? 'no check reached the threshold; checking the highest-scored checks · ' : 'no check reached the threshold; the highest-scored checks ran · ') : '', 'checking ',
+        selection.fallback_picks ? (running ? 'no check reached the threshold; checking the highest-scored checks, ' : 'no check reached the threshold; the highest-scored checks ran, ') : '', 'checking ',
         el('span', { 'data-field': 'selected' }, String(selection.selected)), ' of ',
         el('span', { 'data-field': 'judged' }, String(selection.judged)),
-        selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ' · narrowed from ' + selection.listed + ' listed') : null);
+        selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ', narrowed from ' + selection.listed + ' listed') : null);
     }
     const reasons = {
       unconfigured: 'Jev is unconfigured', declined: 'Jev declined', too_many_checks: 'too many checks',
@@ -2217,14 +2572,14 @@
     const reason = reasons[selection.reason] || (selection.reason || '').replaceAll('_', ' ');
     return el('p', { 'data-field': 'selection' }, running ? 'checking every check' : 'every check ran',
       reason ? ': ' : '', el('span', { 'data-field': 'reason' }, reason),
-      selection.detail ? el('span', { 'data-field': 'detail' }, ' · ' + selection.detail) : null);
+      selection.detail ? el('span', { 'data-field': 'detail' }, ', ' + selection.detail) : null);
   }
 
   function renderChecks(e) {
     const unit = e.kind === 'unit_checks';
     const session = e.kind === 'session_checks';
     const run = unit ? e.unit_checks : session ? e.session_checks : e.final_checks;
-    const label = unit ? 'Unit ' + run.unit + ' · check run ' + run.run : session ? 'Session · check run ' + run.run + ' · ' + run.kind : 'Final review ' + run.review + ' · checks' + (run.attempt ? ' · attempt ' + run.attempt : '');
+    const label = unit ? 'Unit ' + run.unit + ', check run ' + run.run : session ? 'Session, check run ' + run.run + ', ' + run.kind : 'Final review ' + run.review + ', checks' + (run.attempt ? ', attempt ' + run.attempt : '');
     return el('li', { class: 'entry event check-entry', 'data-kind': e.kind, 'data-unit': run.unit || '', 'data-run': run.run || '', 'data-review': run.review || '', 'data-attempt': run.attempt || '', 'data-state': run.state },
       el('div', { class: 'event-line' },
         el('span', { class: 'dot', 'aria-hidden': 'true' }),
@@ -2254,54 +2609,279 @@
         el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, r.state),
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
       r.reader ? el('p', { 'data-field': 'reader' }, 'Reader ' + r.reader,
-        r.turn ? el('a', { href: '#feed-turn-' + r.turn, 'data-field': 'turn' }, ' · turn ' + r.turn) : null) : null,
-      r.state === 'reviewed' ? el('p', { 'data-field': 'findings' },
-        el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' · ',
+        r.turn ? ' ' : null, r.turn ? sessionLink(r.turn) : null) : null,
+      r.state === 'reviewed' ? el('p', { class: 'meta-row', 'data-field': 'findings' },
+        el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' ',
         el('span', { 'data-field': 'gaps' }, r.gaps + ' uncovered criteria')) : null,
       r.failure ? el('p', { 'data-field': 'failure' }, r.failure) : null);
   }
 
-  // renderFeed shows member activity in order. Single-member groups also
-  // include the chief conversation, statuses and turns.
-  function renderFeed(c, id) {
+  // activityKinds are the feed entries Activity shows: the machine events
+  // and every status of the chief of staff. The rest of the feed is the
+  // conversation.
+  const activityKinds = new Set(['status', 'session', 'transition', 'unit_checks', 'final_checks', 'session_checks', 'final_review']);
+
+  // milestoneStates are the workstream states Conversation notes in a line.
+  const milestoneStates = new Set(['ratified', 'building', 'assembled', 'delivered']);
+
+  function isWorkstreamTransition(e) {
+    const t = e.transition;
+    return e.kind === 'transition' && (t.subject === 'feature' || (!t.subject && !t.unit));
+  }
+
+  // isMilestone reports whether Conversation shows a feed entry as a quiet
+  // line: a workstream state change to ratified, building, assembled or
+  // delivered, or the result of a final review. Sessions, unit transitions
+  // and check runs, failed or not, are never milestones.
+  function isMilestone(e) {
+    return e.kind === 'final_review' || (isWorkstreamTransition(e) && milestoneStates.has(e.transition.to));
+  }
+
+  // foldable reports whether Activity may fold an entry into a run: the
+  // routine events between statuses, milestones and final reviews.
+  function foldable(e) {
+    return activityKinds.has(e.kind) && e.kind !== 'status' && e.kind !== 'final_review' && !isMilestone(e);
+  }
+
+  // The shortest run of consecutive events that folds into one line.
+  const foldMin = 3;
+
+  // entryKey names an Activity entry in the location and the document. A
+  // session is named by its turn; the rest by a short hash of the fields that
+  // stay the same while an entry progresses.
+  function entryKey(e) {
+    if (e.kind === 'session') return 'turn-' + e.session.turn;
+    const text = feedIdentity(e);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    }
+    return 'e' + (hash >>> 0).toString(36);
+  }
+
+  // entryUnit is the plan unit an entry is about, or the empty string.
+  function entryUnit(e) {
+    return e.session?.unit || e.transition?.unit || e.unit_checks?.unit || '';
+  }
+
+  function activityHref(id, entry) {
+    return '#workstream=' + encodeURIComponent(id) + '&tab=activity' + (entry ? '&entry=' + encodeURIComponent(entry) : '');
+  }
+
+  // activityLink is a link that opens Activity at an entry of the workstream
+  // shown, in place and without a reload.
+  function activityLink(attrs, entry, ...children) {
+    const id = shown()?.workstream || ui.selected;
+    const link = el('a', { href: activityHref(id, entry), ...attrs }, ...children);
+    link.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showActivity({ entry });
+    });
+    return link;
+  }
+
+  function sessionLink(turn) {
+    return activityLink({ 'data-field': 'turn' }, 'turn-' + turn, 'turn ' + turn);
+  }
+
+  // renderMilestone shows a milestone as one quiet line that opens Activity
+  // at the entry it comes from.
+  function renderMilestone(e) {
+    const key = entryKey(e);
+    const base = { class: 'entry milestone', 'data-kind': 'milestone', 'data-milestone': e.kind === 'final_review' ? 'final_review' : e.transition.to, 'data-entry': key };
+    if (e.kind === 'final_review') {
+      const r = e.final_review;
+      return el('li', { ...base, 'data-review': r.review, 'data-state': r.state },
+        activityLink({ class: 'milestone-line', 'data-field': 'milestone' }, key,
+          el('span', { class: 'dot', 'aria-hidden': 'true' }),
+          el('strong', { 'data-ann': 'role' }, 'Final review ' + r.review),
+          el('span', { 'data-ann': 'action', 'data-field': 'outcome' }, r.state),
+          r.state === 'reviewed' ? el('span', { class: 'meta', 'data-field': 'findings' }, r.blocking + ' blocking findings, ' + r.gaps + ' uncovered criteria') : null,
+          r.failure ? el('span', { class: 'meta', 'data-field': 'failure' }, r.failure) : null,
+          el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+    }
+    return el('li', { ...base, 'data-to': e.transition.to },
+      activityLink({ class: 'milestone-line', 'data-field': 'milestone' }, key,
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-ann': 'role' }, 'Workstream'),
+        el('span', { 'data-ann': 'action', 'data-field': 'to' }, e.transition.to),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+  }
+
+  // conversationEntries are the feed entries Conversation shows, oldest
+  // first: the conversation itself, only the latest status and the
+  // milestones.
+  function conversationEntries(entries) {
+    const latest = entries.findLastIndex((e) => e.kind === 'status');
+    return entries.filter((e, i) => e.kind === 'status' ? i === latest : !activityKinds.has(e.kind) || isMilestone(e));
+  }
+
+  // renderConversation shows the workstream's conversation: what the owner
+  // and the chief of staff said, the chief's latest status, and the
+  // milestones, with the owner's command outcomes where they were taken.
+  function renderConversation(c, id) {
     const name = 'feed/' + id;
     const view = feedView(id);
     const outcomes = ownerOutcomes.get(id) || [];
-    const key = view ? JSON.stringify([view.entries, outcomes]) : (failures[name] ? 'failed' : 'reading');
+    const shown = view ? conversationEntries(view.entries) : [];
+    const key = view ? JSON.stringify([shown, outcomes]) : (failures[name] ? 'failed' : 'reading');
     if (c.shown === key) {
       return;
     }
     c.shown = key;
     if (!view) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The feed is unavailable.' : 'Reading the feed…'),
+      c.entries.replaceChildren(readState(name, 'Reading the conversation…', 'The conversation is unavailable.'),
         ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : []));
       return;
     }
-    if (view.entries.length === 0 && outcomes.length === 0) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+    if (shown.length === 0 && outcomes.length === 0) {
+      const open = el('button', { type: 'button', class: 'secondary' }, 'Open activity');
+      open.addEventListener('click', () => showActivity());
+      c.entries.replaceChildren(el('div', { 'data-field': 'empty' }, stateBlock('empty', 'Nothing here yet.', 'Write to the chief of staff below. Sessions and check runs are in Activity.', open)));
       return;
     }
-    const latest = view.entries.findLastIndex((e) => e.kind === 'status');
-    c.entries.replaceChildren(el('ol', {}, ...withOutcomes(view.entries, outcomes, (e, i) => {
-      switch (e.kind) {
-        case 'status':
-          return renderStatus(e, i === latest);
-        case 'session':
-          return renderSession(e, c);
-        case 'transition':
-          return renderTransition(e);
-        case 'unit_checks':
-        case 'final_checks':
-        case 'session_checks':
-          return renderChecks(e);
-        case 'final_review':
-          return renderFinalReview(e);
-        case 'brief':
-          return renderBriefEntry(e);
-        default:
-          return renderConversationEntry(e);
-      }
+    c.entries.replaceChildren(el('ol', {}, ...withOutcomes(shown, outcomes, (e) => {
+      if (e.kind === 'status') return renderStatus(e, true);
+      if (isMilestone(e)) return renderMilestone(e);
+      return e.kind === 'brief' ? renderBriefEntry(e) : renderConversationEntry(e);
     })));
+  }
+
+  function renderActivityEntry(e, latest) {
+    let node;
+    switch (e.kind) {
+      case 'status':
+        node = renderStatus(e, latest, true);
+        break;
+      case 'session':
+        node = renderSession(e);
+        break;
+      case 'transition':
+        node = renderTransition(e);
+        break;
+      case 'final_review':
+        node = renderFinalReview(e);
+        break;
+      default:
+        node = renderChecks(e);
+    }
+    const key = entryKey(e);
+    node.dataset.entry = key;
+    if (ui.focus === key) node.dataset.focus = 'true';
+    return node;
+  }
+
+  // foldSummary counts what a folded run holds by kind.
+  function foldSummary(run) {
+    const count = (match) => run.filter(match).length;
+    const sessions = count((e) => e.kind === 'session');
+    const changes = count((e) => e.kind === 'transition');
+    const checks = run.length - sessions - changes;
+    return [
+      sessions > 0 ? sessions + (sessions === 1 ? ' session' : ' sessions') : '',
+      changes > 0 ? changes + (changes === 1 ? ' state change' : ' state changes') : '',
+      checks > 0 ? checks + (checks === 1 ? ' check run' : ' check runs') : '',
+    ].filter(Boolean).join(', ');
+  }
+
+  // renderFold shows a run of routine events as one "N events" line that
+  // opens in place. It is open when the owner opened it or an entry the
+  // location names is in it.
+  function renderFold(run, nodes) {
+    const key = 'f' + entryKey(run[0]);
+    const inside = run.map(entryKey);
+    const forced = inside.some((k) => k === ui.focus || ui.open.has(k));
+    const details = el('details', { class: 'fold', 'data-fold': key },
+      el('summary', { class: 'event-line' },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-field': 'count' }, run.length + ' events'),
+        el('span', { 'data-field': 'fold-kinds' }, foldSummary(run)),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(run[0].at))),
+      el('ol', {}, ...nodes));
+    details.open = forced || ui.open.has(key);
+    details.addEventListener('toggle', () => {
+      if (details.open === ui.open.has(key)) return;
+      if (details.open) {
+        ui.open.add(key);
+      } else {
+        ui.open.delete(key);
+        for (const k of inside) {
+          ui.open.delete(k);
+          if (ui.focus === k) ui.focus = '';
+        }
+      }
+      syncRoute();
+    });
+    return el('li', { class: 'fold-item', 'data-kind': 'fold', 'data-count': String(run.length) }, details);
+  }
+
+  // activityUnits lists the units the unit filter offers.
+  function activityUnits(w, entries) {
+    return [...new Set([...(w.units || []).map((u) => u.unit), ...entries.map(entryUnit).filter(Boolean), ...(ui.unit ? [ui.unit] : [])])].sort();
+  }
+
+  // renderActivityTab shows every event of the workstream, oldest first,
+  // with a filter by unit. Routine runs fold into one line; older chief
+  // statuses recede behind the latest.
+  function renderActivityTab(c, w) {
+    const id = w.workstream;
+    const name = 'feed/' + id;
+    const view = feedView(id);
+    const entries = view ? view.entries.filter((e) => activityKinds.has(e.kind)) : [];
+    const units = activityUnits(w, entries);
+    const key = JSON.stringify([view ? entries : (failures[name] ? 'failed' : 'reading'), units, ui.unit, ui.focus]);
+    if (c.activityShown === key) {
+      return;
+    }
+    c.activityShown = key;
+    c.unitFilter.replaceChildren(el('option', { value: '' }, 'All units'), ...units.map((u) => el('option', { value: u }, u)));
+    c.unitFilter.value = ui.unit;
+    c.unitFilter.closest('.activity-bar').hidden = units.length === 0 && ui.unit === '';
+    if (!view) {
+      c.activity.replaceChildren(readState(name, 'Reading the activity…', 'The activity is unavailable.'));
+      return;
+    }
+    const latest = entries.findLastIndex((e) => e.kind === 'status');
+    const listed = entries.map((e, i) => ({ e, latest: i === latest })).filter(({ e }) => !ui.unit || entryUnit(e) === ui.unit);
+    if (listed.length === 0) {
+      const clear = el('button', { type: 'button', class: 'secondary', 'data-field': 'clear-filter' }, 'Show all units');
+      clear.addEventListener('click', () => { ui.unit = ''; syncRoute(true); render(); });
+      c.activity.replaceChildren(el('div', { 'data-field': 'empty' }, ui.unit
+        ? stateBlock('empty', 'No events for unit ' + ui.unit + ' yet.', 'Its sessions, state changes and check runs appear here once it runs.', clear)
+        : stateBlock('empty', 'No activity yet.', 'Sessions, state changes and check runs appear here as the work runs.')));
+      return;
+    }
+    const nodes = [];
+    let run = [];
+    const flush = () => {
+      if (run.length >= foldMin) {
+        nodes.push(renderFold(run.map((x) => x.e), run.map((x) => renderActivityEntry(x.e, x.latest))));
+      } else {
+        nodes.push(...run.map((x) => renderActivityEntry(x.e, x.latest)));
+      }
+      run = [];
+    };
+    for (const item of listed) {
+      if (foldable(item.e)) {
+        run.push(item);
+      } else {
+        flush();
+        nodes.push(renderActivityEntry(item.e, item.latest));
+      }
+    }
+    flush();
+    c.activity.replaceChildren(el('ol', {}, ...nodes));
+  }
+
+  // focusEntry scrolls to the Activity entry the location names, once.
+  function focusEntry() {
+    if (!ui.scrollFocus || ui.view !== 'workstream' || ui.tab !== 'activity' || !ui.focus) return;
+    const node = byId('workstream-activity').querySelector('[data-entry="' + CSS.escape(ui.focus) + '"]');
+    if (!node) return;
+    ui.scrollFocus = false;
+    ui.toEnd = false;
+    requestAnimationFrame(() => node.scrollIntoView({ block: 'center' }));
   }
 
   // feedView is the feed the workstream's card shows: its read feed, less the
@@ -2404,23 +2984,122 @@
     place(c.decisions, [...(nodes.length > 0 ? [c.heading] : []), ...nodes, inboxResult]);
   }
 
-  // renderUnitCounts counts the workstream's units by state, naming them on
-  // hover.
+  // tubeTone groups the unit states into the status the nest tube paints:
+  // idle units are neutral, units a mason, check or reviewer is working on
+  // are live, a unit held back waits, and a unit past review is done. A
+  // contested unit is marked apart from its colour.
+  const tubeTones = {
+    planned: 'idle',
+    ready: 'ready',
+    implementing: 'live',
+    waiting: 'waiting',
+    checking: 'live',
+    reviewing: 'live',
+    approved: 'done',
+    contested: 'contested',
+    merged: 'done',
+  };
+
+  // nestTube draws one cell per unit, in the order given. A cell with a
+  // name is a button that opens Activity on that unit; a cell without one,
+  // as in a workgroup member's tally, only shows its state. Hovering,
+  // focusing or pressing a cell names it in the readout, and each cell
+  // carries the unit and its state as its accessible name.
+  function nestTube(cells, { linked }) {
+    const total = cells.length + (cells.length === 1 ? ' unit' : ' units');
+    const name = el('span', { class: 'tube-name' }, total);
+    const state = el('span', { class: 'tube-state' });
+    const readout = el('span', { class: 'tube-readout', 'data-field': 'unit-name', 'aria-hidden': 'true' }, name, state);
+    const show = (cell) => {
+      name.textContent = cell ? cell.name || cell.state : total;
+      state.textContent = cell && cell.name ? cell.state : '';
+      readout.dataset.named = String(cell !== null && cell.name !== '');
+    };
+    const tube = el('div', { class: 'nest-tube', 'data-field': 'units', role: 'group', 'aria-label': 'Units, ' + total },
+      ...cells.map((cell) => {
+        const label = cell.name ? 'Unit ' + cell.name + ': ' + cell.state : cell.state;
+        const body = el('span', { class: 'cell-body', 'aria-hidden': 'true' });
+        const attrs = { class: 'cell', 'data-unit-state': cell.state, 'data-tone': tubeTones[cell.state] || 'idle', 'aria-label': label };
+        if (!linked || !cell.name) {
+          return el('span', { ...attrs, role: 'img' }, body);
+        }
+        const button = el('button', { ...attrs, type: 'button', 'data-cell': cell.name }, body);
+        button.addEventListener('mouseenter', () => show(cell));
+        button.addEventListener('focus', () => show(cell));
+        button.addEventListener('pointerdown', () => show(cell));
+        button.addEventListener('mouseleave', () => show(null));
+        button.addEventListener('blur', () => show(null));
+        button.addEventListener('click', () => showActivity({ unit: cell.name }));
+        return button;
+      }), readout);
+    return tube;
+  }
+
+  // memberTube draws a workgroup member's units, which the read gives as a
+  // count per state, as a nest tube of unnamed cells.
+  function memberTube(counts) {
+    const cells = Object.entries(counts || {})
+      .sort(([a], [b]) => unitOrder.indexOf(a) - unitOrder.indexOf(b))
+      .flatMap(([state, count]) => Array.from({ length: count }, () => ({ name: '', state })));
+    return cells.length > 0 ? nestTube(cells, { linked: false }) : el('div', { class: 'nest-tube', 'data-field': 'units' });
+  }
+
+  // renderUnitCounts draws the workstream's units as a nest tube.
   function renderUnitCounts(units) {
     if (!units || units.length === 0) {
       return null;
     }
-    const byState = new Map(unitOrder.map((state) => [state, []]));
-    for (const u of units) {
-      if (!byState.has(u.state)) {
-        byState.set(u.state, []);
-      }
-      byState.get(u.state).push(u.unit);
-    }
-    return el('div', { class: 'unit-counts', 'data-field': 'units' }, ...[...byState]
-      .filter(([, names]) => names.length > 0)
-      .map(([state, names]) => el('span', { class: 'tag', 'data-unit-state': state, title: names.join(', ') }, state + ' ' + names.length)));
+    return nestTube(units.map((u) => ({ name: u.unit, state: u.state })), { linked: true });
   }
+
+  // copyText puts text on the clipboard, falling back to a selected
+  // textarea where the clipboard API is unavailable. It resolves to whether
+  // the text was copied.
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const area = el('textarea', { 'aria-hidden': 'true', tabindex: '-1', readonly: '' });
+      area.value = text;
+      area.className = 'copy-scratch';
+      document.body.append(area);
+      area.select();
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch (_) {
+        copied = false;
+      }
+      area.remove();
+      return copied;
+    }
+  }
+
+  // renderIDCopy shows the workstream ID in the mono face beside a control
+  // that copies it.
+  function renderIDCopy(id) {
+    const button = el('button', { type: 'button', class: 'quiet copy-id', 'data-copy-id': id, 'aria-label': 'Copy workstream ID' }, 'Copy');
+    let reset = 0;
+    button.addEventListener('click', async () => {
+      const copied = await copyText(id);
+      button.textContent = copied ? 'Copied' : 'Copy failed';
+      button.setAttribute('aria-label', (copied ? 'Copied' : 'Copy failed for') + ' workstream ID');
+      button.dataset.copied = String(copied);
+      clearTimeout(reset);
+      reset = setTimeout(() => {
+        button.textContent = 'Copy';
+        button.setAttribute('aria-label', 'Copy workstream ID');
+        delete button.dataset.copied;
+      }, 2000);
+    });
+    return el('span', { class: 'id-copy' }, el('code', { class: 'workstream-id', 'data-field': 'workstream-id' }, id), button);
+  }
+
+  // shownHead is the markup the header was last drawn from, so a read that
+  // changes nothing in the header leaves its elements, and a press on one,
+  // alone.
+  let shownHead = '';
 
   function renderHead(w) {
     const head = byId('workstream-head');
@@ -2441,13 +3120,24 @@
       const action = button.dataset.workstreamAction;
       button.hidden = action in offered && !offered[action];
     }
-    head.replaceChildren(...[
-      el('div', { class: 'line' },
-        el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
-        w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
-        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : ''),
-      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
-      renderUnitCounts(w.units), isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null));
+    const pill = w.state ? el('span', { class: 'state-pill', 'data-field': 'state', 'data-glyph': stateGlyph(w) },
+      el('span', { class: 'glyph', 'aria-hidden': 'true', 'data-glyph': stateGlyph(w) }), w.state) : null;
+    const nodes = [
+      el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
+      el('div', { class: 'head-meta' }, pill,
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : null,
+        el('span', { class: 'head-project', 'data-field': 'project' }, repoLabel(w.project)),
+        renderIDCopy(w.workstream)),
+      renderUnitCounts(w.units),
+      el('details', { class: 'head-details' }, el('summary', {}, 'Details'),
+        el('p', { class: 'meta', 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null);
+    const markup = nodes.map((node) => node.outerHTML).join('');
+    if (markup === shownHead && head.childElementCount > 0) return;
+    shownHead = markup;
+    const open = head.querySelector('.head-details')?.open === true;
+    head.replaceChildren(...nodes);
+    if (open) head.querySelector('.head-details').open = true;
   }
 
   function renderChiefLine(w) {
@@ -2472,7 +3162,7 @@
     } else if (!c.form.isConnected) {
       c.node.querySelector('.thread').append(c.form);
     }
-    renderFeed(c, w.workstream);
+    renderConversation(c, w.workstream);
     if (ui.view !== 'workgroup') renderDecisions(c, w.workstream);
     return c.node;
   }
@@ -2507,6 +3197,9 @@
     }
     renderHead(w);
     place(box, [renderWorkstream(w)]);
+    const c = card(w.workstream);
+    if (ui.tab === 'activity') renderActivityTab(c, w);
+    place(byId('workstream-activity'), [c.activityNode]);
   }
 
   // sessionEchoes holds, per session, the owner's own sent messages by turn
@@ -2590,7 +3283,7 @@
     sessionFeedShown = key;
     const box = byId('session-feed');
     if (entries.length === 0) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+      box.replaceChildren(stateBlock('empty', 'Nothing has happened yet.', 'Message the agent below; it works in the session\'s own worktree and its answers appear here.'));
     } else {
       box.replaceChildren(el('ol', {}, ...entries.map((e) => e.kind === 'session_checks' ? renderChecks(e) : renderConversationEntry(e, 'Agent'))));
     }
@@ -2662,8 +3355,19 @@
     });
   }
 
+  // destroyConversation asks the owner to confirm, then destroys the session.
   function destroyConversation(id, design) {
-    if (!window.confirm('Permanently destroy this ' + (design ? 'design session' : 'session') + '? The session, its local branch (including unpushed commits) and all its history will be removed permanently. This cannot be undone. Pushed branches stay on the remote.')) return;
+    const button = byId(design ? 'design-destroy' : 'session-destroy');
+    confirmDanger({
+      title: 'Destroy this ' + (design ? 'design session' : 'session') + '?',
+      consequence: ['The session, its local branch (including unpushed commits) and all its history will be removed permanently. This cannot be undone.', 'Pushed branches stay on the remote.'],
+      accept: design ? 'Destroy design session' : 'Destroy session',
+      opener: button,
+      run: () => runDestroy(id, design),
+    });
+  }
+
+  function runDestroy(id, design) {
     const button = byId(design ? 'design-destroy' : 'session-destroy');
     const result = byId(design ? 'design-destroy-result' : 'session-control-result');
     act(result, button, () => request('POST', '/' + (design ? 'design' : 'sessions') + '/' + id + '/destroy'), () => {
@@ -2723,10 +3427,15 @@
 
   function renderSessionChanges(id) {
     const view = views['sessions/' + id + '/changes'];
-    byId('session-diff').textContent = view ? (view.changes || 'No uncommitted changes.') : 'Reading changes…';
+    const name = 'sessions/' + id + '/changes';
+    const diff = byId('session-diff');
+    diff.textContent = view ? (view.changes || 'No uncommitted changes.') : failures[name] ? 'The changes could not be read.' : 'Reading changes…';
+    diff.dataset.state = view ? 'ready' : failures[name] ? 'error' : 'loading';
     const list = byId('session-commits');
-    if (!view || view.commits.length === 0) {
-      list.replaceChildren(el('li', { class: 'meta' }, 'No commits yet.'));
+    if (!view && failures[name]) {
+      list.replaceChildren(el('li', {}, retryButton([name])));
+    } else if (!view || view.commits.length === 0) {
+      list.replaceChildren(el('li', { class: 'meta' }, view ? 'No commits yet. Commit the changes above to record them.' : 'No commits yet.'));
     } else {
       list.replaceChildren(...view.commits.map((c) => el('li', { 'data-commit': c.commit },
         el('code', {}, c.commit.slice(0, 10)), ' ', c.message.split('\n')[0])));
@@ -2742,7 +3451,7 @@
     if (!w) {
       byId('session-title').textContent = 'Session';
       byId('session-meta').replaceChildren();
-      byId('session-feed').replaceChildren(el('p', { class: 'meta' }, 'No session selected.'));
+      byId('session-feed').replaceChildren(stateBlock('empty', 'No session selected.', 'Open an exploratory session to chat with an agent in its own worktree.', openButton('Open an exploratory session', 'session-add', true)));
       sessionFeedShown = null;
       block(byId('session-destroy'), true);
       byId('session-diff').textContent = '';
@@ -2751,8 +3460,8 @@
     }
     byId('session-title').textContent = w.title || w.workstream;
     byId('session-meta').replaceChildren(
-      el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · profile ',
-      el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' · ',
+      el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' ', el('code', {}, w.workstream), ' profile ',
+      el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' ',
       el('span', { class: 'tag', 'data-field': 'state' }, w.state));
     renderSessionFeed(w.workstream);
     renderSessionChanges(w.workstream);
@@ -2855,7 +3564,7 @@
     box.dataset.conversation = id;
     designFeedShown = key;
     if (entries.length === 0) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+      box.replaceChildren(stateBlock('empty', 'Nothing has happened yet.', 'Describe the feature below; the design agent answers and drafts a brief.'));
     } else {
       box.replaceChildren(el('ol', {}, ...entries.map((e, index) => {
         const entry = renderConversationEntry(e, 'Design agent');
@@ -2908,7 +3617,7 @@
     act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start', { brief_revision: revision }), (out) => {
       designIds.delete(id);
       startedDesignIds.add(id);
-      ui.tab = 'feed';
+      ui.tab = 'conversation';
       select(out.workstream);
       mark(['status', 'feed/' + out.workstream]);
       return 'Started a workgroup from this brief; workstream ' + out.workstream + ' is now ' + out.state + '.';
@@ -2928,7 +3637,11 @@
     if (!design || failures[path]) {
       delete panel.dataset.revision;
       delete panel.dataset.shown;
-      box.replaceChildren(el('p', { class: 'meta' }, failures[path] || (w ? 'Reading the brief…' : 'No design session selected.')));
+      box.replaceChildren(!w
+        ? stateBlock('empty', 'No design session selected.', 'Open a design session to draft a brief with the design agent.', openButton('Open a design session', 'design-add', true))
+        : failures[path]
+          ? stateBlock('error', 'The brief could not be read.', 'Start stays off until the brief is read again.', retryButton([path]))
+          : stateBlock('loading', 'Reading the brief…'));
       return;
     }
     const key = JSON.stringify([design, design.projects.map(projectName), projectName(design.project)]);
@@ -2943,7 +3656,7 @@
       ...(design.new_project ? [renderDraftedNewProject(design.new_project)] : []),
       design.brief_revision > 0
         ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
-        : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
+        : stateBlock('empty', 'The agent has not drafted a brief yet.', 'Describe the feature to the design agent; the brief appears here as it takes shape.'));
   }
 
   // renderDraftedNewProject shows the project the brief asks Start to
@@ -2963,7 +3676,7 @@
     if (!w) {
       byId('design-title').textContent = 'Design session';
       byId('design-meta').replaceChildren();
-      byId('design-feed').replaceChildren(el('p', { class: 'meta' }, 'No design session selected.'));
+      byId('design-feed').replaceChildren(stateBlock('empty', 'No design session selected.', 'Open a design session to talk a feature through before handing it in.', openButton('Open a design session', 'design-add', true)));
       designFeedShown = null;
       block(byId('design-destroy'), true);
       return;
@@ -2973,7 +3686,7 @@
     const read = views['design/' + w.workstream]?.design;
     byId('design-title').textContent = (read ? read.title : w.title) || w.workstream;
     block(byId('design-destroy'), false);
-    byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream);
+    byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' ', el('code', {}, w.workstream));
     renderDesignFeed(w.workstream);
   }
 
@@ -2990,6 +3703,7 @@
     if (!capacity) {
       meters.replaceChildren();
       byId('meter-total').textContent = '';
+      byId('capacity-button').dataset.full = 'false';
     } else {
       const used = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.used, 0);
       const limit = capacity.roles.filter(boundedPool).reduce((n, r) => n + r.limit, 0);
@@ -3001,6 +3715,7 @@
           title: r.role + ': ' + poolUse(r) + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
       }));
       byId('meter-total').textContent = used + '/' + limit;
+      byId('capacity-button').dataset.full = String(capacity.roles.some((r) => boundedPool(r) && r.used >= r.limit));
       byId('capacity-button').title = used + ' of ' + limit + ' slots in use' + (local > 0 ? '; ' + local + ' architect sessions' : '');
     }
     const pauses = views.runtime ? views.runtime.effective.pauses || [] : [];
@@ -3024,6 +3739,13 @@
     for (const view of document.querySelectorAll('#main > .view')) {
       view.hidden = view.dataset.view !== ui.view;
     }
+    for (const section of document.querySelectorAll('.settings-section')) {
+      section.hidden = ui.view !== 'settings' || section.dataset.section !== ui.section;
+    }
+    for (const button of byId('settings-nav').querySelectorAll('[data-open]')) {
+      button.setAttribute('aria-current', String(ui.view === 'settings' && button.dataset.open === ui.section));
+    }
+    byId('settings-button').setAttribute('aria-current', String(ui.view === 'settings'));
   }
 
   // position places a popover under the button it belongs to.
@@ -3057,6 +3779,87 @@
     }
   }
 
+  // abandonWorkstream abandons a workstream with the owner's reason and,
+  // when asked, archives it straight after.
+  async function abandonWorkstream(workstream, reason, archive) {
+    const out = await request('POST', '/abandon/' + workstream, { reason });
+    if (archive) {
+      await request('POST', '/archive/' + workstream);
+    }
+    return out;
+  }
+
+  // The confirmation dialog is one native dialog, filled for the action it
+  // guards. It names the consequence, offers a quiet cancel beside the
+  // danger button, closes on Escape and returns focus to the control that
+  // opened it. The action runs only after the owner accepts.
+  let confirming = null;
+
+  // confirmDanger opens the dialog. options: title, consequence (paragraphs),
+  // accept (the danger button's label), opener (the control that gets focus
+  // back), run(reason) and optionally reason {label, hint, required}.
+  function confirmDanger(options) {
+    const dialog = byId('confirm-dialog');
+    const form = byId('confirm-form');
+    confirming = { ...options, accepted: false };
+    byId('confirm-title').textContent = options.title;
+    byId('confirm-consequence').replaceChildren(...options.consequence.map((text) => el('p', {}, text)));
+    byId('confirm-accept').textContent = options.accept;
+    const field = byId('confirm-reason-field');
+    field.hidden = !options.reason;
+    form.elements.reason.value = '';
+    form.elements.reason.setAttribute('aria-required', String(!!options.reason));
+    if (options.reason) {
+      field.querySelector('label').textContent = options.reason.label;
+      byId('confirm-reason-hint').textContent = options.reason.hint;
+    }
+    const result = byId('confirm-result');
+    result.textContent = '';
+    delete result.dataset.outcome;
+    dialog.showModal();
+    // Cancel is the safe default. A reason, when one is asked for, comes first.
+    (options.reason ? form.elements.reason : byId('confirm-cancel')).focus();
+  }
+
+  function setupConfirmDialog() {
+    const dialog = byId('confirm-dialog');
+    const form = byId('confirm-form');
+    byId('confirm-cancel').addEventListener('click', () => dialog.close('cancelled'));
+    // A press on the backdrop is a press on the dialog element itself.
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close('cancelled');
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!confirming) return;
+      const reason = form.elements.reason.value.trim();
+      if (confirming.reason && reason === '') {
+        const result = byId('confirm-result');
+        result.dataset.outcome = 'error';
+        result.textContent = confirming.reason.required;
+        form.elements.reason.focus();
+        return;
+      }
+      confirming.accepted = true;
+      confirming.reasonText = reason;
+      dialog.close('accepted');
+    });
+    dialog.addEventListener('close', () => {
+      // A close the browser reports after the dialog opened again belongs to
+      // the earlier opening; the new one keeps its state.
+      if (dialog.open) return;
+      const done = confirming;
+      confirming = null;
+      if (!done) return;
+      // The browser hands focus back to the control that was focused when the
+      // dialog opened. A menu item that has since closed cannot take it, so
+      // focus goes to the opener, unless the owner has already moved on.
+      const active = document.activeElement;
+      if (done.opener && done.opener.isConnected && (!active || active === document.body || active === dialog)) done.opener.focus();
+      if (done.accepted) done.run(done.reasonText);
+    });
+  }
+
   // workstreamAction runs an entry of the workstream's menu.
   function workstreamAction(action) {
     const w = shown();
@@ -3071,14 +3874,46 @@
       return;
     }
     if (action === 'archive') {
-      if (!window.confirm('Permanently archive ' + goal(w) + '? All workstream history, decisions, agent turns and check output will be deleted. Only its title will remain in the archived list. This cannot be undone.')) { return; }
-      const button = document.querySelector('[data-workstream-action="' + action + '"]');
-      act(inboxResult, button, () => request('POST', '/archive/' + w.workstream), (out) => {
-        if (out.archived) {
-          leaveArchived(w.workstream);
-        }
-        mark(['status', 'runtime']);
-        return 'Archived ' + goal(w) + '; it is listed under Archived. Its history will be permanently deleted.';
+      confirmDanger({
+        title: 'Archive ' + goal(w) + ' permanently?',
+        consequence: ['All workstream history, decisions, agent turns and check output will be deleted. Only its title will remain in the archived list. This cannot be undone.'],
+        accept: 'Archive permanently',
+        opener: byId('workstream-menu-button'),
+        run: () => {
+          const button = document.querySelector('[data-workstream-action="archive"]');
+          act(inboxResult, button, () => request('POST', '/archive/' + w.workstream), (out) => {
+            if (out.archived) {
+              leaveArchived(w.workstream);
+            }
+            mark(['status', 'runtime']);
+            return 'Archived ' + goal(w) + '; it is listed under Archived. Its history will be permanently deleted.';
+          });
+        },
+      });
+      return;
+    }
+    if (action === 'abandon' || action === 'abandon-archive') {
+      const archive = action === 'abandon-archive';
+      confirmDanger({
+        title: (archive ? 'Abandon and archive ' : 'Abandon ') + goal(w) + '?',
+        consequence: [
+          'Abandoning stops new turns, cancels active turns while keeping their recorded work, and releases capacity. The trace is kept. Your branch and any open pull request are not touched.',
+          ...(archive ? ['It is then archived permanently: all history, decisions, agent turns and check output are deleted and only the title remains. This cannot be undone.'] : []),
+        ],
+        reason: { label: 'Reason', hint: 'Why this work is stopping. It is recorded with the abandonment.', required: 'Give a reason for abandoning this workstream.' },
+        accept: archive ? 'Abandon and archive' : 'Abandon workstream',
+        opener: byId('workstream-menu-button'),
+        run: (reason) => {
+          const button = document.querySelector('[data-workstream-action="' + action + '"]');
+          act(inboxResult, button, () => abandonWorkstream(w.workstream, reason, archive), () => {
+            mark(['status', 'config', 'inbox', 'charter']);
+            if (!archive) {
+              return 'Abandoned ' + goal(w) + '.';
+            }
+            leaveArchived(w.workstream);
+            return 'Abandoned and archived ' + goal(w) + '.';
+          });
+        },
       });
       return;
     }
@@ -3100,18 +3935,15 @@
     }
     setTab('documents');
     const target = byId(action === 'dependency' ? 'base-form' : 'workstream-action');
-    if (action === 'abandon' || action === 'abandon-archive') {
-      target.elements.action.value = 'abandon';
-      target.elements.archive.checked = action === 'abandon-archive';
-      renderOwnerForms();
-      target.elements.note.focus();
-    } else if (action === 'debate') {
+    if (action === 'debate') {
       target.elements.action.focus();
     }
     target.scrollIntoView({ block: 'start' });
   }
 
   function setupLayout() {
+    setupConfirmDialog();
+    byId('problems-retry').addEventListener('click', () => retryReads(JSON.parse(byId('problems-retry').dataset.names || '[]')));
     byId('picker-toggle').addEventListener('click', () => {
       setPicker(document.body.dataset.picker !== 'open');
       render();
@@ -3123,6 +3955,9 @@
     for (const button of document.querySelectorAll('[data-open]')) {
       button.addEventListener('click', () => openView(button.dataset.open));
     }
+    byId('settings-button').addEventListener('click', () => {
+      openView(ui.view === 'settings' ? ui.returnView || 'project-pane' : 'settings');
+    });
     for (const button of document.querySelectorAll('[data-close]')) {
       button.addEventListener('click', () => openView(ui.returnView || 'project-pane'));
     }
@@ -3224,7 +4059,7 @@
     for (const field of [...fields, ...Object.keys(body).filter((field) => !(field in pinNames))]) {
       out.push((pinNames[field] || field) + ' ' + String(body[field]).slice(0, 12));
     }
-    return out.join(' · ');
+    return out.join(', ');
   }
 
   function decisionKey(entry) {
@@ -3376,10 +4211,10 @@
     const note = d.note.value.trim();
     const send = (method, path, body, done, dismissKey) => {
       d.pending = true;
-      for (const action of d.actions.children) block(action, true);
+      for (const choiceButton of d.node.querySelectorAll('[data-decision-choice]')) block(choiceButton, true);
       return submit(d.form, button, method, path, body, done, undefined, dismissKey).finally(() => {
         d.pending = false;
-        for (const action of d.actions.children) block(action, false);
+        for (const choiceButton of d.node.querySelectorAll('[data-decision-choice]')) block(choiceButton, false);
       });
     };
     switch (entry.kind) {
@@ -3455,8 +4290,9 @@
       head: el('div', { class: 'summary' }),
       detail: el('div', { 'data-field': 'detail' }),
       actions: el('div', { class: 'actions' }),
-      submit: el('button', { type: 'submit' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
+      submit: el('button', { type: 'submit', class: 'primary' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
       shown: null,
+      opened: {},
     };
     const fields = [];
     if (entry.kind === 'escalation') {
@@ -3493,7 +4329,7 @@
   function renderDissent(d, name) {
     const view = views[name];
     if (!view) {
-      d.detail.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The packet is unavailable.' : 'Reading the packet…'));
+      d.detail.replaceChildren(readState(name, 'Reading the packet…', 'The packet is unavailable.'));
       return [];
     }
     // The chief of staff decides the committee's objections first; the
@@ -3508,12 +4344,18 @@
         el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },
-          el('strong', {}, o.id),
+          el('strong', { class: 'mono' }, o.id),
           el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
         el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + (o.part ? ' on ' + o.part : '')),
         el('div', { 'data-field': 'argument' }, o.argument),
         o.escalation ? el('div', { class: 'meta', 'data-field': 'escalation' }, 'Chief of staff: ' + o.escalation) : null,
-        o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null))),
+        o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null,
+        // Each objection is ruled on by its own pair of buttons, which send
+        // the card's note with the objection they sit under.
+        el('div', { class: 'objection-actions', role: 'group', 'aria-label': 'Rule on ' + o.id, 'data-field': 'objection-actions' },
+          choiceButton(d, 'sustain ' + o.id, 'Sustain', 'secondary', 'Sustain ' + o.id),
+          choiceButton(d, 'overrule ' + o.id, 'Overrule', 'secondary', 'Overrule ' + o.id))))),
+      dissent.length === 0 ? null : el('p', { class: 'meta', 'data-field': 'objection-hint' }, 'Sustain, overrule and redraft send the note below.'),
       dismissed.length === 0 ? null : el('details', { 'data-field': 'dismissed' },
         el('summary', { class: 'meta' }, 'Dismissed by the chief of staff (' + dismissed.length + ')'),
         el('ul', { class: 'dissent' }, ...dismissed.map((o) => el('li', { 'data-objection': o.id },
@@ -3541,26 +4383,32 @@
     block(d.submit, !view || !!d.pending);
     d.preview.hidden = !view;
     if (!view) {
-      d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
+      d.detail.replaceChildren(el('div', { 'data-field': 'reading' }, readState(name, 'Reading the final report…', 'The final report is unavailable.')));
       return;
     }
     // The title is the one an already-approved delivery records, even if the
     // workstream's title changes later.
     const title = view.approval ? (view.approval.title || view.title) : view.title;
     const findings = view.report.findings || [];
+    // The card reads as a release note: the brief, the findings, the
+    // criteria, then what will be published, and the button last.
     d.detail.replaceChildren(...[
       renderDeliveryBrief(view),
       el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
       renderPullRequest(view),
       view.draft_pull_request ? el('p', { class: 'meta', 'data-field': 'draft-note' }, 'A merge-order dependency has not merged. Approving records your decision and the pull request stays a draft.') : null,
-      view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
       renderDeliveryChecks(view),
-      findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
-        el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
-        f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null))),
-      el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
-        el('strong', {}, c.criterion), ' ', c.text,
-        el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))),
+      view.report.summary || findings.length > 0 ? el('section', { class: 'release-section', 'data-field': 'review' },
+        el('h4', {}, 'Findings'),
+        view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
+        findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
+          el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
+          f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null)))) : null,
+      el('section', { class: 'release-section', 'data-field': 'criteria-section' },
+        el('h4', {}, 'Criteria'),
+        el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
+          el('strong', { class: 'mono' }, c.criterion), ' ', c.text,
+          el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap))))),
     ].filter((node) => node !== null));
     // What ApproveDelivery publishes when the page sends no text: the text
     // of the approval the presentation carries, and the draft otherwise.
@@ -3568,6 +4416,7 @@
     const messages = view.approval ? view.approval.messages : (view.messages || []);
     d.preview.replaceChildren(
       d.preview.querySelector('summary'),
+      el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
       el('div', { class: 'meta' }, 'Pull request description'),
       el('pre', { 'data-field': 'description' }, description),
       ...messages.flatMap((m, i) => [
@@ -3605,16 +4454,35 @@
     return action.charAt(0).toUpperCase() + action.slice(1);
   }
 
+  // recommendedChoice names the option an entry's recommendation points at:
+  // the one it opens with ("ratify: no objection stands"). With no
+  // recommendation to read, a lone option is the recommended one. A
+  // contested unit's note is the chief of staff's account, not a pick.
+  function recommendedChoice(entry) {
+    const options = entry.options || [];
+    const text = (entry.recommendation || '').trim().toLowerCase();
+    if (entry.kind !== 'contested' && text !== '') {
+      const lead = text.split(/[:.]/)[0].trim();
+      return options.find((o) => o.toLowerCase() === lead) || '';
+    }
+    return options.length === 1 ? options[0] : '';
+  }
+
+  // choiceButton is one decision of a card: primary when it is the
+  // recommendation, secondary otherwise. label is what it says and name,
+  // when given, is the longer name assistive technology reads.
+  function choiceButton(d, choice, label, variant, name) {
+    const button = el('button', { type: 'button', class: variant, 'data-decision-choice': choice, ...(name ? { 'aria-label': name } : {}) }, label);
+    block(button, !!d.pending);
+    button.addEventListener('click', () => decide(d, choice, button));
+    return button;
+  }
+
   function decisionButtons(d, options) {
     const key = JSON.stringify(options);
     if (d.actions.dataset.options === key) return;
     d.actions.dataset.options = key;
-    place(d.actions, options.map(([choice, label]) => {
-      const button = el('button', { type: 'button', 'data-decision-choice': choice }, label);
-      block(button, !!d.pending);
-      button.addEventListener('click', () => decide(d, choice, button));
-      return button;
-    }));
+    place(d.actions, options.map(([choice, label, variant]) => choiceButton(d, choice, label, variant)));
   }
 
   function renderDecision(entry) {
@@ -3626,60 +4494,81 @@
       return d.node;
     }
     d.shown = key;
+    const recommended = recommendedChoice(entry);
+    const variant = (option) => (option === recommended ? 'primary' : 'secondary');
     let options = null;
     if (entry.kind === 'escalation') {
-      options = entry.options.length === 0 ? null : el('div', { class: 'choices', 'data-field': 'options' }, 'Options:', ...entry.options.map((o) => {
-        const button = el('button', { type: 'button', 'data-field': 'option' }, o);
+      options = entry.options.length === 0 ? null : el('div', { class: 'choices', role: 'group', 'aria-label': 'Options', 'data-field': 'options' }, ...entry.options.map((o) => {
+        const button = el('button', { type: 'button', class: 'secondary', 'data-field': 'option' }, o);
         button.addEventListener('click', () => {
           d.text.value = o;
         });
         return button;
       }));
-    } else {
+    } else if (entry.options.length === 0) {
       const none = ['ratification', 'publication', 'checks', 'drift', 'notices', 'loop', 'base'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
-      options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
+      options = el('p', { class: 'meta', 'data-field': 'options' }, 'Options: ' + none);
     }
+    // The details a card carries are footnotes: closed, small and mono, and
+    // kept open or closed as the owner left them across repaints.
+    const footnote = (name, ...parts) => {
+      const note = el('details', { class: 'footnote ' + name, 'data-field': 'footnote-' + name }, ...parts);
+      note.open = !!d.opened[name];
+      note.addEventListener('toggle', () => {
+        d.opened[name] = note.open;
+      });
+      return note;
+    };
     d.head.replaceChildren(...[
-      el('div', { class: 'line' },
-        el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
-        el('span', { class: 'meta' }, when(entry.opened_at))),
+      // The question comes first; what kind of card it is and when it was
+      // raised follow in a quiet row with the footnotes.
       el('p', { class: 'question', 'data-field': 'question' }, entry.question),
+      el('div', { class: 'card-meta' },
+        el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
+        el('span', { class: 'meta', 'data-field': 'opened' }, when(entry.opened_at)),
+        // The question above is the chief of staff's rephrasing; what each
+        // role asked in its own words stays one tap away.
+        entry.asked.length === 0 ? null : footnote('asked',
+          el('summary', {}, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
+          el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
+            el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
+        ['publication', 'checks'].includes(entry.kind) ? null : footnote('revisions',
+          el('summary', {}, 'Details'),
+          el('p', { class: 'mono', 'data-field': 'pins' }, 'Answers ' + pins(entry)))),
       entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
+      entry.recommendation ? el('p', { class: 'recommendation', 'data-field': 'recommendation' }, (entry.kind === 'contested' ? 'Note: ' : 'Recommendation: ') + entry.recommendation) : null,
       options,
-      entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, (entry.kind === 'contested' ? 'Note: ' : 'Recommendation: ') + entry.recommendation) : null,
-      // The question above is the chief of staff's rephrasing; what each
-      // role asked in its own words stays one tap away.
-      entry.asked.length === 0 ? null : el('details', { class: 'asked' },
-        el('summary', { class: 'meta' }, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
-        el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
-          el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
-      ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
+    d.actions.removeAttribute('data-field');
     switch (entry.kind) {
       case 'escalation':
         d.accept.textContent = 'Accept: ' + entry.quick_reply;
-        place(d.actions, entry.quick_reply ? [d.submit, d.accept] : [d.submit]);
+        d.accept.className = 'primary';
+        d.submit.className = entry.quick_reply ? 'secondary' : 'primary';
+        place(d.actions, entry.quick_reply ? [d.accept, d.submit] : [d.submit]);
         break;
       case 'project-selection':
         place(d.actions, [d.submit]);
         break;
       case 'delivery':
         renderDelivery(d, name);
+        d.actions.setAttribute('data-field', 'options');
         place(d.actions, [d.submit]);
         break;
       case 'publication':
       case 'checks':
         break;
       case 'ratification': {
-        const dissent = renderDissent(d, name);
+        renderDissent(d, name);
+        d.actions.setAttribute('data-field', 'options');
         decisionButtons(d, [
-          ...(entry.options.includes('ratify') ? [['ratify', 'Ratify']] : []),
-          ...dissent.flatMap((o) => [['sustain ' + o.id, 'Sustain ' + o.id], ['overrule ' + o.id, 'Overrule ' + o.id]]),
-          ['redraft', 'Ask for a Redraft']]);
+          ...(entry.options.includes('ratify') ? [['ratify', 'Ratify', variant('ratify')]] : []),
+          ['redraft', 'Ask for a redraft', 'secondary']]);
         break;
       }
       default:
-        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o]));
+        d.actions.setAttribute('data-field', 'options');
+        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o, variant(o)]));
         // A parked base takes no note, and no decision here unless its own
         // base was abandoned.
         if (entry.kind === 'base') {
@@ -3905,7 +4794,7 @@
       act(result, r.clear, () => request('DELETE', '/runtime/profile', { role }), () => role + ' runs its configured profile from its next turn.');
     });
     r.node = el('div', { class: 'role-profile', 'data-profile-role': role },
-      el('div', { class: 'line' }, el('strong', {}, role), el('span', {}, r.profile, ' ', r.source)),
+      el('div', { class: 'line' }, el('strong', { class: 'mono' }, role), el('span', {}, r.profile, ' ', r.source)),
       r.usage,
       el('div', { class: 'actions' }, r.select, r.set, r.clear));
     profileRows.set(role, r);
@@ -3918,7 +4807,7 @@
       return;
     }
     const configured = views.config.effective.profiles || {};
-    const options = Object.keys(configured).sort().map((name) => [name, name + ' · ' + configured[name].agent]);
+    const options = Object.keys(configured).sort().map((name) => [name, name + ', ' + configured[name].agent]);
     const roles = Object.keys(views.runtime.profiles || {}).sort();
     for (const role of profileRows.keys()) {
       if (!roles.includes(role)) {
@@ -3929,7 +4818,7 @@
       const effective = views.runtime.profiles[role];
       const r = profileRow(role);
       const provider = configured[effective.name] ? configured[effective.name].agent : '';
-      r.profile.textContent = effective.name ? effective.name + (provider ? ' · ' + provider : '') : 'none';
+      r.profile.textContent = effective.name ? effective.name + (provider ? ', ' + provider : '') : 'none';
       r.source.textContent = profileSources[effective.source] || effective.source;
       r.source.title = effective.reason || '';
       const usage = usageOf(provider);
@@ -4255,7 +5144,7 @@
     const project = byId('project-edit').elements.project.value;
     const configured = projects().find(p => p.id === project);
     const state = configured?.charter_state;
-    byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ' · revision ' + state.revision + '.' :
+    byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ', revision ' + state.revision + '.' :
       (project ? 'Charter state not reported.' : 'Choose a project to manage its charter and repos.');
     block(byId('project-remove'), !configured);
     renderProjectConfig();
@@ -4513,14 +5402,13 @@
       const kind = action.elements.action.value;
       const workstream = action.elements.workstream.value;
       const note = action.elements.note.value.trim();
-      const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}, abandon: {reason: note}};
+      const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}};
       const archive = kind === 'abandon' && action.elements.archive.checked;
       formAction(action, event.submitter, async () => {
-        const out = await request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]);
-        if (archive) {
-          await request('POST', '/archive/' + workstream);
+        if (kind === 'abandon') {
+          return abandonWorkstream(workstream, note, archive);
         }
-        return out;
+        return request('POST', '/shed/' + kind + '/' + workstream, bodies[kind]);
       }, () => {
         if (!archive) {
           return 'Workstream action recorded.';
@@ -4679,9 +5567,13 @@
   // before treating a placeholder as a rendered feed.
   function shownFeed() {
     let key, box;
-    if (ui.view === 'workstream' && ui.tab === 'feed' && shown()) {
+    if (ui.view === 'workstream' && ui.tab === 'conversation' && shown()) {
       key = 'feed/' + shown().workstream;
       box = byId('workstreams').querySelector('.feed');
+    } else if (ui.view === 'workstream' && ui.tab === 'activity' && shown()) {
+      key = 'activity/' + shown().workstream;
+      box = byId('workstream-activity').querySelector('.activity-log');
+      return box ? { key, box, ready: !!views['feed/' + shown().workstream], end: box } : null;
     } else if (ui.view === 'workgroup') {
       key = groupFeed(ui.workgroup);
       box = byId('workgroup-content').querySelector('.feed');
@@ -4706,7 +5598,8 @@
     if (!feed) return;
     const count = feed.box.querySelectorAll(':scope > ol > li').length;
     if (!feed.ready && count === 0) return;
-    const snap = ui.toEnd || renderedFeed?.key !== feed.key || count > renderedFeed.count;
+    const pinned = ui.tab === 'activity' && ui.view === 'workstream' && ui.focus !== '';
+    const snap = !pinned && (ui.toEnd || renderedFeed?.key !== feed.key || count > renderedFeed.count);
     renderedFeed = { key: feed.key, count };
     if (!snap) return;
     ui.toEnd = false;
@@ -4717,7 +5610,7 @@
       const main = byId('main');
       // Session controls follow the chat; land at the conversation's end
       // with its composer visible, leaving those controls below it.
-      const end = feed.box.closest('.thread');
+      const end = feed.end || feed.box.closest('.thread');
       main.scrollTop += end.getBoundingClientRect().bottom - main.getBoundingClientRect().bottom;
     });
   }
@@ -4748,6 +5641,7 @@
     renderProviders();
     renderConfig();
     renderDictation();
+    focusEntry();
     snapFeed();
   }
 
@@ -4781,6 +5675,7 @@
     renderHeader();
     renderActivity();
   }, dismissCheckInterval);
+  window.addEventListener('popstate', restoreRoute);
   window.addEventListener('online', reconnectNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {

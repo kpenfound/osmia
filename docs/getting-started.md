@@ -216,7 +216,7 @@ Prefer table-driven tests.
 Save and quit. The command records your edit as the next charter revision and
 prints its number; there is nothing further to ratify, and `osmia status` then
 shows `Charter: 2 rules, revision 2`. To write the charter from a file
-instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the cog menu
+instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the Settings view
 opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
@@ -268,10 +268,13 @@ can answer it from either place:
 - **The command line.** `osmia inbox` lists the same entries, each with the
   command that answers it.
 
-On ratification, contested-unit, amendment and parked-base cards, click the
-button for your decision below the note field, where one is offered.
-**Ratify** approves the displayed revisions; **Ask for a Redraft** needs a note
-saying what should change. Contested rulings also need a note.
+Every card puts its question first. On ratification, contested-unit, amendment
+and parked-base cards, click the button for your decision below the note field,
+where one is offered; the option the recommendation names is the primary
+button and the others are secondary. **Ratify** approves the displayed
+revisions; **Ask for a redraft** needs a note saying what should change.
+Contested rulings also need a note. A closed footnote on each card holds its
+revisions and commit, and what each role asked in its own words.
 
 The decisions, in the order a workstream meets them:
 

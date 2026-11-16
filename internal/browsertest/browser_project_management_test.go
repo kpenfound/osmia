@@ -87,7 +87,7 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 
 	p.Await("grouping controls are absent", `document.querySelector('[data-open=repo-add], #project-add-repo, #repo-add') === null`)
 	p.Click("#project-home")
-	p.Click(`[data-view=project-pane] [data-open=project-add]`)
+	p.OpenNewItem(`#create-menu [data-open=project-add]`)
 	for name, value := range map[string]string{"name": "client", "upstream": "owner/client", "fork": "owner/client-fork", "clone": second} {
 		p.TypeInto("#project-add [name="+name+"]", value)
 	}
@@ -170,11 +170,11 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("project card", `document.querySelector('#project-pane [data-project-action=projects]') !== null`)
 	p.OpenView("projects")
-	p.AwaitText("#projects-title", "Project management")
-	p.Await("no outdated cog entry", `![...document.querySelectorAll('#settings-menu button')].some(b => b.textContent === 'Projects and charters')`)
+	p.AwaitText("#projects-title", "Projects")
+	p.Await("no outdated cog entry", `![...document.querySelectorAll('#settings-nav button')].some(b => b.textContent === 'Projects and charters')`)
 	p.Choose("#project-edit [name=project]", string(project))
 	p.Eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
-	p.AwaitText("#charter-state", "0 rules · revision 1.")
+	p.AwaitText("#charter-state", "0 rules, revision 1.")
 	p.Click("#project-edit [data-action=read-charter]")
 	managementOutcome(p, "#project-edit .result", "ok")
 	recordManagementWrites(p)
@@ -186,7 +186,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	must(t, err)
 	p.Await("external charter save announced on the event stream", `managementConfigEvents.some(e => e.project === `+quote(string(project))+`)`)
 	p.Await("untouched editor follows API save and its pin", `document.querySelector('#project-edit [name=content]').value === `+quote(external)+` && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(next.Revision)))
-	p.AwaitText("#charter-state", "1 rule · revision "+strconv.Itoa(next.Revision)+".")
+	p.AwaitText("#charter-state", "1 rule, revision "+strconv.Itoa(next.Revision)+".")
 	// Make an actual change, so the service must accept the new pin before
 	// recording another revision rather than simply return unchanged text.
 	const local = "1. Follow the latest owner rule.\n2. Preserve decisions.\n"

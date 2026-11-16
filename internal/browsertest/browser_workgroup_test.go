@@ -133,14 +133,20 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Await("repo-labelled decisions and both cards", `document.querySelectorAll('#workgroup-content [data-group-decision-repo]').length === 2 && [...document.querySelectorAll('#workgroup-content [data-group-decision-repo]')].every(e => e.textContent.includes('Uploads repo')) && document.querySelectorAll('#workgroup-content [data-member]').length === 2`)
 	p.AwaitText("#workgroup-content [data-kind=action]", "Shared decision 1?")
 	p.Await("the member action has a repo label", `document.querySelector('#workgroup-content [data-kind=action] [data-field=repo]') !== null`)
-	p.Await("only shared entries and the dependency graph", `document.querySelector('#workgroup-content .workgroup-graph [data-edge]') !== null && !document.querySelector('#workgroup-content .feed [data-kind=transition], #workgroup-content .feed [data-kind=session], #workgroup-content .feed [data-kind=unit_checks], #workgroup-content .feed [data-kind=final_review]')`)
+	p.Await("only shared entries and the dependency graph", `document.querySelector('#workgroup-content .workgroup-graph [data-edge]') !== null && !document.querySelector('#workgroup-content .feed [data-kind=milestone], #workgroup-content .feed [data-kind=transition], #workgroup-content .feed [data-kind=session], #workgroup-content .feed [data-kind=unit_checks], #workgroup-content .feed [data-kind=final_review]')`)
 	p.Click(`[data-open-member="` + string(stream) + `"]`)
 	p.Await("the member card opens its member", `!document.querySelector('[data-view=workstream]').hidden && location.hash === `+quote("#workstream="+string(stream)))
-	p.Await("the member actually has detail events", `document.querySelector('#workstreams [data-kind=session]') !== null && document.querySelector('#workstreams [data-kind=transition]') !== null && document.querySelector('#workstreams [data-kind=unit_checks]') !== null && document.querySelector('#workstreams [data-kind=final_review]') !== null`)
+	// The member's machine events are in its own Activity; its Conversation
+	// holds only its milestones and decisions.
+	p.OpenActivity()
+	p.Await("the member actually has detail events", `document.querySelector('#workstream-activity [data-kind=session]') !== null && document.querySelector('#workstream-activity [data-kind=transition]') !== null && document.querySelector('#workstream-activity [data-kind=unit_checks]') !== null && document.querySelector('#workstream-activity [data-kind=final_review]') !== null`)
+	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=chief_of_staff]')`)
+	p.OpenConversation()
+	p.Await("no session or check in the member's Conversation", `!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
 	p.AwaitText("#workstream-head [data-field=chief-status]", "The chief coordinates both repos.")
 	p.AwaitText("#workstream-head [data-ask-chief]", "Ask the chief about this repo")
 	p.Await("the member has only its own decisions and no chat", `!document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=action], #workstreams [data-kind=status], #workstreams [data-kind=escalation]') && document.querySelector('#workstreams [data-kind=contested]') !== null`)
-	for _, tab := range []string{"documents", "trace", "feed"} {
+	for _, tab := range []string{"documents", "trace", "activity", "conversation"} {
 		p.Click(`[data-tab="` + tab + `"]`)
 		p.Await("the member tab remains available", `document.querySelector('[data-panel="`+tab+`"]')?.hidden === false`)
 	}
@@ -403,7 +409,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 	p.AwaitText(`[data-select-workgroup="`+string(g.ID)+`"]`, "Coordinate two repositories")
 	p.Click(`[data-select-workgroup="` + string(g.ID) + `"]`)
 	p.AwaitText("#workgroup-content "+decisionCard(e), e.Question)
-	p.Await("shared decision carries repo labels", `document.querySelector('#workgroup-content [data-group-decision-repo]').textContent.startsWith('Workgroup · ')`)
+	p.Await("shared decision carries repo labels", `document.querySelector('#workgroup-content [data-group-decision-repo]').textContent.startsWith('Workgroup, ')`)
 	p.Eval(`(() => { const prior = window.fetch; window.fetch = (url,init) => { if (init?.method === 'POST') window.workgroupAnswer = {url,method:init.method,body:JSON.parse(init.body)}; return prior(url,init); }; })()`, nil)
 	holdOutcome(p, e.Answer.Path)
 	p.TypeInto(decisionCard(e)+"textarea", "Keep both repositories compatible.")

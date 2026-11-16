@@ -121,10 +121,12 @@ func decisionSelector(kind, workstream, unit string) string {
 	return fmt.Sprintf(`[data-decision="%s:p_fake:%s:0:%s:"] `, kind, workstream, unit)
 }
 
-// click clicks the first element selector matches.
+// click clicks the first element selector matches, once it is scrolled to the
+// middle of the page and so clear of the sticky message field.
 func (p *page) click(selector string) {
 	p.t.Helper()
-	p.run(chromedp.Click(selector, chromedp.ByQuery))
+	p.run(chromedp.Evaluate(`document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'})`, nil),
+		chromedp.Click(selector, chromedp.ByQuery))
 }
 
 // typeInto types text into the first field selector matches.
@@ -302,7 +304,7 @@ func TestBrowserFeedDismissingOneItemLeavesOthersUnaffected(t *testing.T) {
 	p.awaitGone("the contested unit", contested)
 	// The ratification card is untouched: still visible, with its options
 	// unchanged.
-	p.awaitText(ratification+"[data-field=options]", "Options: ratify")
+	p.awaitText(ratification+"[data-field=options]", "Ratify")
 	var gone bool
 	p.eval(`document.querySelector(`+quote(ratification)+`) === null`, &gone)
 	if gone {

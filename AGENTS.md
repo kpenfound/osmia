@@ -16,6 +16,14 @@
 - Preserve the trace, durable threads and explicit owner decisions through restarts and retries. Reconcile side effects before retrying them.
 - Reuse `github.com/kpenfound/agentcore` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
 
+## Web page design skills
+
+Masons and reviewers who change or review `internal/web` load these skills first:
+
+- Build with [.agents/skills/frontend-design/SKILL.md](.agents/skills/frontend-design/SKILL.md): plan, check the plan for generic defaults, build, then critique.
+- Review with [.agents/skills/web-design-guidelines/SKILL.md](.agents/skills/web-design-guidelines/SKILL.md): the interface checklist and its output format.
+- Build and review with [.agents/skills/osmia-design-language/SKILL.md](.agents/skills/osmia-design-language/SKILL.md): the page's tokens, type, components, nest tube, Conversation and Activity split, banned defaults and the quieter, distill and polish passes. It also records the chosen fonts and colours.
+
 ## Missing agentcore functionality
 
 - When an Osmia feature needs functionality missing from agentcore, open an upstream feature request in `kpenfound/agentcore`.

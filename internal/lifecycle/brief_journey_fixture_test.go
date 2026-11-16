@@ -370,10 +370,17 @@ func (j *briefJourney) reassemble(t *testing.T, files map[string]string) FinalRe
 // workstream at commit, and returns the image's ID. The trace must be open.
 func (j *briefJourney) capture(t *testing.T, name, commit string) string {
 	t.Helper()
-	ctx := context.Background()
 	var data bytes.Buffer
 	must(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 3, 2))))
-	img, err := j.repository.RecordImage(ctx, trace.Header{Project: j.repository.Project(), Workstream: j.stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", data.Bytes(), "turn")
+	return j.captureImage(t, name, commit, data.Bytes())
+}
+
+// captureImage records the PNG data as the capture of the workstream at
+// commit, and returns the image's ID.
+func (j *briefJourney) captureImage(t *testing.T, name, commit string, data []byte) string {
+	t.Helper()
+	ctx := context.Background()
+	img, err := j.repository.RecordImage(ctx, trace.Header{Project: j.repository.Project(), Workstream: j.stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", data, "turn")
 	must(t, err)
 	content, err := json.Marshal(map[string]any{"workstream": j.stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.stream, "commit": commit}})
 	must(t, err)

@@ -221,14 +221,16 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// The ruling reaches resume's mason, which reports; resume is reviewed
 	// and lands, and the page shows it merged.
 	f.awaitMerged(t, stream, "resume")
+	p.OpenActivity()
 	p.AwaitText(ws+`[data-kind=transition][data-unit=resume][data-to=merged]`, "Unit resume: approved → merged")
+	p.OpenConversation()
 
 	// 4. dedupe's mason gives up and the unit is contested; the owner rules
 	// revise with a note on the page.
 	f.awaitUnit(t, stream, "dedupe", UnitContested)
 	raiseFixtureContest(t, f.repository(), stream, "dedupe")
 	card = decisionCard(entry(InboxContested))
-	p.AwaitText(card+"[data-field=options]", "revise")
+	p.AwaitText(card+"[data-field=options]", "Revise the unit")
 	p.TypeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
 	p.Click(card + `[data-decision-choice="revise"]`)
 	p.AwaitOutcome("Ruled revise on unit dedupe.")

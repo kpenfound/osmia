@@ -218,17 +218,25 @@ func TestBrowserConversationWidthsAndSendIcons(t *testing.T) {
 				feed := `[data-view="` + view.name + `"] .feed`
 				p.await("long owner and agent messages", `document.querySelectorAll(`+quote(feed+` .entry .text`)+`).length === 2`)
 				var bubbles []struct {
-					Kind, Max     string
-					Width, Column float64
+					Kind, Max          string
+					Width, Column, Cap float64
 				}
-				p.eval(`Array.from(document.querySelectorAll(`+quote(feed+` .entry .text`)+`), text => ({
-     Kind:text.parentElement.dataset.kind, Max:getComputedStyle(text).maxWidth, Width:text.getBoundingClientRect().width,
-     Column:text.closest('.feed').getBoundingClientRect().width
-    }))`, &bubbles)
+				p.eval(`Array.from(document.querySelectorAll(`+quote(feed+` .entry .text`)+`), text => {
+     const probe = document.createElement('div');
+     probe.style.width = '70ch';
+     (text.querySelector('.markdown') || text).append(probe);
+     const cap = probe.getBoundingClientRect().width;
+     probe.remove();
+     return {
+      Kind:text.parentElement.dataset.kind, Max:getComputedStyle(text).maxWidth, Width:(text.querySelector('.markdown p') || text).getBoundingClientRect().width,
+      Column:text.closest('.feed').getBoundingClientRect().width, Cap:cap
+     };
+    })`, &bubbles)
 				for _, bubble := range bubbles {
 					t.Logf("%s bubble: %+v", view.name, bubble)
-					if size.width == 1920 && bubble.Width < .6*m.Content {
-						t.Fatalf("long message is too narrow: %+v", bubble)
+					// Prose stops at a reading width of about 70ch, however wide the pane.
+					if !phone && (bubble.Width > bubble.Cap+1 || bubble.Width < .5*bubble.Cap) {
+						t.Fatalf("long message is not held to the reading width: %+v", bubble)
 					}
 					if phone && bubble.Kind == "message" && (bubble.Max != "92%" || bubble.Width > .92*bubble.Column+1) {
 						t.Fatalf("phone bubble limit: %+v", bubble)

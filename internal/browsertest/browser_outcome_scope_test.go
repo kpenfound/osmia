@@ -195,7 +195,7 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 	assertOutcome(p, "#design-start-result", "", "")
 	// Open a design through the page after the start, rather than reusing a
 	// fixture-only session, to cover the fresh create/navigation path too.
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.Choose("#design-add-form [name=project]", string(project))
 	p.Click("#design-add-form [type=submit]")
 	p.AwaitText("#design-add-form .result", "Opened design session")
@@ -318,7 +318,7 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 		p.Eval(`({text: document.querySelector(`+quote(selector)+`).textContent, state: document.querySelector(`+quote(selector)+`).dataset.outcome})`, &out)
 		recorded[selector] = out
 	}
-	p.Click("[data-tab=feed]")
+	p.Click("[data-tab=conversation]")
 	p.SelectWorkstream(quiet)
 	for selector := range recorded {
 		assertOutcome(p, selector, "", "")
@@ -348,12 +348,13 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Click("[data-tab=trace]")
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
-	p.Click("[data-tab=feed]")
-	p.Eval(`window.confirm = () => true`, nil)
+	p.Click("[data-tab=conversation]")
 	url := "/v1/archive/" + string(quiet)
 	holdOutcome(p, url)
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="archive"]`)
+	p.Await("the archive dialog", `document.getElementById('confirm-dialog').open`)
+	p.Click("#confirm-accept")
 	p.Await("the real archive response held", `typeof releaseOutcome[`+quote(url)+`] === 'function' && outcomeResponses[`+quote(url)+`].archived`)
 	// Only the status event has moved the displayed workstream: the archive
 	// callback has not yet selected its successor or produced its final text.
@@ -385,7 +386,7 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Click("[data-tab=trace]")
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
-	p.Click("[data-tab=feed]")
+	p.Click("[data-tab=conversation]")
 	assertFallbackOutcomes := func() {
 		t.Helper()
 		assertOutcome(p, "#inbox-result", menuState, menuText)

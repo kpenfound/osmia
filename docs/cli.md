@@ -1196,7 +1196,7 @@ check failed and 0 when only warnings are present.
 `[dagger]` configuration. Status reports the mode, address, reachability, running
 and configured versions, any mismatch with the host CLI, the Docker host for
 managed and explicit container engines (without URL user information), and cache size when
-available. Status works in every engine mode. The web cog menu shows the same
+available. Status works in every engine mode. The web Settings view's Dagger engine section shows the same
 status and offers restart and prune, with the service’s refusal reason when an
 action cannot run. Each unit, final and session check entry in the owner’s feed
 links to its Dagger Cloud trace when the run recorded one.

@@ -31,7 +31,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(quiet)
-	p.AwaitText(card+"[data-field=feed]", "Nothing has happened yet.")
+	p.AwaitText(card+"[data-field=feed]", "Nothing here yet.")
 	p.Eval(`window.notReloaded = true`, nil)
 
 	// An empty message is refused on the page and never sent.
@@ -121,7 +121,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatalf("the mason's profile select starts with %q chosen", profile)
 	}
 	p.Choose(row+"select", "other")
-	p.Click(`.view[data-view="profiles"] [data-close]`)
+	p.Click("#settings-menu [data-close]")
 	p.SelectWorkstream(quiet)
 	p.TypeInto(draft, "Half a thought")
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
@@ -240,7 +240,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.Choose(row+"select", "other")
 	p.Click(row + "[data-field=set]")
 	p.AwaitText("#profile-result", "mason runs other")
-	p.AwaitText(row+"[data-field=profile]", "other · codex")
+	p.AwaitText(row+"[data-field=profile]", "other, codex")
 	p.AwaitText(row+"[data-field=source]", "owner override")
 	p.AwaitText(row+"[data-field=usage]", "codex: USD")
 	p.AwaitText(`#providers [data-provider=codex] [data-field=spend]`, "USD")
@@ -394,9 +394,17 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	// Work in progress is abandoned with a reason and archived.
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="abandon-archive"]`)
-	p.Await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
-	p.TypeInto("#workstream-action [name=note]", "Superseded by the upload design.")
-	p.Click("#workstream-action [type=submit]")
+	p.Await("the dialog names the abandonment and the archive, and the page stays on Conversation", `(() => {
+		const dialog = document.getElementById('confirm-dialog');
+		return dialog.open && dialog.textContent.includes('cannot be undone') && dialog.textContent.includes('Abandoning stops new turns') &&
+			document.getElementById('confirm-accept').textContent === 'Abandon and archive' &&
+			document.querySelector('[data-panel=documents]').hidden && document.querySelector('[data-tab=conversation]').getAttribute('aria-selected') === 'true';
+	})()`)
+	// A reason is required: the dialog stays open and says so.
+	p.Click("#confirm-accept")
+	p.AwaitText("#confirm-result", "Give a reason")
+	p.TypeInto("#confirm-reason", "Superseded by the upload design.")
+	p.Click("#confirm-accept")
 	p.Await("the next workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
 	p.Await("quiet in the archived group", `document.querySelector('#archived-list `+row+`') !== null && document.querySelector('#workstream-list `+row+`') === null`)
 	p.AwaitText("#archived-count", "1")
@@ -424,20 +432,32 @@ func TestBrowserArchiveWarnsBeforePermanentDeletion(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(quiet)
-	p.Eval(`window.confirm = message => { window.archiveWarning = message; return false; }`, nil)
+	p.Eval(`window.nativeConfirms = 0; window.confirm = () => { window.nativeConfirms++; return true; }`, nil)
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="archive"]`)
-	p.Await("permanent deletion warning", `window.archiveWarning.includes('check output') && window.archiveWarning.includes('cannot be undone')`)
+	p.Await("permanent deletion warning in the page", `(() => {
+		const dialog = document.getElementById('confirm-dialog');
+		return dialog.open && dialog.textContent.includes('check output') && dialog.textContent.includes('cannot be undone') &&
+			document.getElementById('confirm-accept').classList.contains('danger') && document.querySelector('[data-panel=documents]').hidden;
+	})()`)
+	p.Click("#confirm-cancel")
+	p.Await("the dialog closed and focus on the menu button", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
 	status, err := f.c.Status(ctx, quiet)
 	must(t, err)
 	if status.Archived {
 		t.Fatal("cancelled archive took effect")
 	}
-	p.Eval(`window.confirm = () => true`, nil)
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="archive"]`)
+	p.Await("the dialog open again", `document.getElementById('confirm-dialog').open`)
+	p.Click("#confirm-accept")
 	p.Await("archive selects the next workstream with its own outcome", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream))+` && document.getElementById('inbox-result').textContent === ''`)
 	p.Await("archived title retained", `document.querySelector('#archived-list [data-select="`+string(quiet)+`"]') !== null`)
+	var native int
+	p.Eval(`window.nativeConfirms`, &native)
+	if native != 0 {
+		t.Fatalf("archive called window.confirm %d times", native)
+	}
 }
 
 func TestBrowserConversationShowsEarlierBackgroundTurn(t *testing.T) {

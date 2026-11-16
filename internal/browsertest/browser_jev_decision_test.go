@@ -68,7 +68,8 @@ func TestBrowserLabelsAJevRatificationDecidedByJev(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
-	feed := `#workstreams [data-field=feed] `
+	p.OpenActivity()
+	feed := `#workstream-activity `
 	p.Await("the ratification labelled as Jev's", `[...document.querySelectorAll(`+quote(feed+"[data-kind=transition]")+`)].some(n => n.dataset.to === 'ratified-1' && n.querySelector('[data-field=decided-by]') !== null && n.querySelector('[data-field=decided-by]').textContent === 'decided by Jev')`)
 	if entries := entriesOf(t, c, intake.InboxRatification); len(entries) != 0 {
 		t.Fatalf("ratification gate remains: %+v", entries)

@@ -35,7 +35,7 @@ func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamI
 // sideways. The fixture's status, session and unit-transition cards cover
 // those three kinds; sending a message and its answer on the quiet
 // workstream covers the message and response kinds.
-func TestBrowserFeedAnnotationFitsAtPhoneWidth(t *testing.T) {
+func TestBrowserEntryAnnotationFitsAtPhoneWidth(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
@@ -45,15 +45,19 @@ func TestBrowserFeedAnnotationFitsAtPhoneWidth(t *testing.T) {
 
 	streamCard := `[data-workstream="` + string(stream) + `"] `
 	p.SelectWorkstream(stream)
-	p.AwaitText(streamCard+"[data-field=feed]", "Unit upload: implementing")
-	assertFeedAnnotations(t, p, streamCard+".entry", 4)
+	p.AwaitText(streamCard+"[data-field=feed]", "Workstream")
+	assertFeedAnnotations(t, p, streamCard+"[data-field=feed] .entry", 2)
+	p.OpenActivity()
+	p.AwaitText(streamCard+"[data-field=activity-log]", "Unit upload: implementing")
+	assertFeedAnnotations(t, p, streamCard+"[data-field=activity-log] .entry", 4)
+	p.OpenConversation()
 
 	quietCard := `[data-workstream="` + string(quiet) + `"] `
 	p.SelectWorkstream(quiet)
-	p.AwaitText(quietCard+"[data-field=feed]", "Nothing has happened yet.")
+	p.AwaitText(quietCard+"[data-field=feed]", "Nothing here yet.")
 	f.sendAndAnswer(t, p, quiet, "Keep the mobile layout narrow.", "Noted; the layout stays narrow.")
 	p.AwaitText(quietCard+"[data-kind=response]", "Noted; the layout stays narrow.")
-	assertFeedAnnotations(t, p, quietCard+".entry", 2)
+	assertFeedAnnotations(t, p, quietCard+"[data-field=feed] .entry", 2)
 }
 
 // At a laptop width, every feed card still shows its role, action and
@@ -61,7 +65,7 @@ func TestBrowserFeedAnnotationFitsAtPhoneWidth(t *testing.T) {
 // where the fix is checked not to have changed the desktop layout: the
 // annotation still reads left to right on one line because there is room
 // for it, since the CSS only wraps the annotation when it does not fit.
-func TestBrowserFeedAnnotationShowsAtLaptopWidth(t *testing.T) {
+func TestBrowserEntryAnnotationShowsAtLaptopWidth(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
 	f := newPageFixture(t)
@@ -71,13 +75,17 @@ func TestBrowserFeedAnnotationShowsAtLaptopWidth(t *testing.T) {
 
 	streamCard := `[data-workstream="` + string(stream) + `"] `
 	p.SelectWorkstream(stream)
-	p.AwaitText(streamCard+"[data-field=feed]", "Unit upload: implementing")
-	assertFeedAnnotations(t, p, streamCard+".entry", 4)
+	p.AwaitText(streamCard+"[data-field=feed]", "Workstream")
+	assertFeedAnnotations(t, p, streamCard+"[data-field=feed] .entry", 2)
+	p.OpenActivity()
+	p.AwaitText(streamCard+"[data-field=activity-log]", "Unit upload: implementing")
+	assertFeedAnnotations(t, p, streamCard+"[data-field=activity-log] .entry", 4)
+	p.OpenConversation()
 
 	quietCard := `[data-workstream="` + string(quiet) + `"] `
 	p.SelectWorkstream(quiet)
-	p.AwaitText(quietCard+"[data-field=feed]", "Nothing has happened yet.")
+	p.AwaitText(quietCard+"[data-field=feed]", "Nothing here yet.")
 	f.sendAndAnswer(t, p, quiet, "Keep the desktop layout readable.", "Noted; the desktop layout stays readable.")
 	p.AwaitText(quietCard+"[data-kind=response]", "Noted; the desktop layout stays readable.")
-	assertFeedAnnotations(t, p, quietCard+".entry", 2)
+	assertFeedAnnotations(t, p, quietCard+"[data-field=feed] .entry", 2)
 }

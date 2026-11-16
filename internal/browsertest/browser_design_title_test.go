@@ -120,7 +120,7 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.Click("#sidebar-new-design")
+	p.OpenNewItem("#sidebar-new-design")
 	p.Choose("#design-add-form [data-project-select]", string(home))
 	p.Click("#design-add-form [type=submit]")
 	p.Await("the design view", `!document.querySelector('[data-view="design"]').hidden`)

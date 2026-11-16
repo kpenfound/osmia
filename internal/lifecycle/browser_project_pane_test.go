@@ -204,7 +204,9 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		if !found {
 			t.Fatalf("workgroup feed lost the adopted design reply: %+v", shared.Entries)
 		}
-		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstreams [data-kind="transition"]') !== null && !document.querySelector('#workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"], #workstreams [data-kind="session"][data-role="chief_of_staff"]')`)
+		p.OpenActivity()
+		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstream-activity [data-kind="transition"]') !== null && !document.querySelector('#workstream-activity [data-kind="message"], #workstream-activity [data-kind="response"], #workstream-activity [data-kind="status"], #workstream-activity [data-kind="action"], #workstream-activity [data-kind="session"][data-role="chief_of_staff"], #workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"]')`)
+		p.OpenConversation()
 	}
 	assertSharedDesignConversation()
 	upstream, err := f.s.repository(f.project)
@@ -290,7 +292,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	for _, project := range []config.ProjectID{f.project, f.project2} {
 		card := `#project-pane [data-project="` + string(project) + `"]`
 		p.Await("one shared decision under the member's project card", `document.querySelectorAll(`+quote(card+` [data-group-inbox]`)+`).length === 1 && document.querySelector(`+quote(card+` [data-group-inbox]`)+`).dataset.groupInbox === `+quote(string(selected.Group)))
-		p.AwaitText(card+` [data-group-inbox]`, "1 waiting for you · Open inbox")
+		p.AwaitText(card+` [data-group-inbox]`, "1 waiting for you, open inbox")
 	}
 	p.Click(`#project-pane [data-project="` + string(f.project2) + `"] [data-group-inbox]`)
 	p.Await("the project inbox opens the workgroup", `!document.querySelector('[data-view=workgroup]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))

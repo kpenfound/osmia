@@ -107,7 +107,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	preview := card + "[data-field=preview] [data-field=description]"
 	approve := card + "button[type=submit]"
 	pins := func(revision int, presented DeliveryPresentation) string {
-		return fmt.Sprintf("final review 1 · report revision %d · commit %s · draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
+		return fmt.Sprintf("final review 1, report revision %d, commit %s, draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
 	}
 	drafted := func(presented DeliveryPresentation) {
 		t.Helper()
@@ -167,7 +167,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
 	p.AwaitText(card+"[data-field=question]", "Mark ready for review: Resumable uploads? Final review 1 of commit "+report.Commit)
-	p.AwaitText(card+"[data-field=options]", "Options: approve")
+	p.AwaitText(card+"[data-field=options]", "Mark ready for review")
 	p.AwaitText(card+"[data-field=pins]", pins(1, first))
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()

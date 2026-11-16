@@ -244,6 +244,36 @@ func (p *Page) AwaitText(selector, want string) {
 	p.Await(fmt.Sprintf("%q in %s", want, selector), TextOf(selector)+".includes("+Quote(want)+")")
 }
 
+// OpenTab shows one tab of the displayed workstream (conversation, activity,
+// documents or trace) and waits until its panel is shown.
+func (p *Page) OpenTab(tab string) {
+	p.T.Helper()
+	p.Click(`[data-tab="` + tab + `"]`)
+	p.Await("the "+tab+" tab", `!document.querySelector('[data-panel="`+tab+`"]').hidden`)
+}
+
+// OpenConversation shows the displayed workstream's Conversation tab.
+func (p *Page) OpenConversation() {
+	p.T.Helper()
+	p.OpenTab("conversation")
+}
+
+// OpenActivity shows the displayed workstream's Activity tab, opens every
+// folded run of events in place and waits until the log is drawn.
+func (p *Page) OpenActivity() {
+	p.T.Helper()
+	p.OpenTab("activity")
+	p.Await("every folded run open", `(() => {
+  const openAll = () => document.querySelectorAll('#workstream-activity .fold:not([open])').forEach((fold) => { fold.open = true; });
+  if (!window.openedFolds) {
+    window.openedFolds = new MutationObserver(openAll);
+    window.openedFolds.observe(document.querySelector('#workstream-activity'), { childList: true, subtree: true });
+  }
+  openAll();
+  return document.querySelectorAll('#workstream-activity .fold:not([open])').length === 0 && !!document.querySelector('#workstream-activity .activity-log > ol, #workstream-activity .activity-log > [data-field=empty]');
+})()`)
+}
+
 // OutcomeEntries selects the feed entries that show the outcome of the
 // owner's own accepted commands.
 const OutcomeEntries = "[data-field=feed] [data-kind=outcome]"
@@ -387,13 +417,30 @@ func (p *Page) ClosePopovers() {
 	p.Eval(`document.querySelectorAll(':popover-open').forEach((e) => e.hidePopover())`, nil)
 }
 
-// openView opens one of the views the settings menu lists.
+// OpenView opens the create-project view from the New menu, or a section of
+// the Settings view: projects, priority, profiles, config or engine.
 func (p *Page) OpenView(name string) {
 	p.T.Helper()
 	p.ClosePopovers()
-	p.Click("#settings-button")
-	p.Click(`#settings-menu [data-open="` + name + `"]`)
-	p.Await("the "+name+" view", `!document.querySelector('.view[data-view="`+name+`"]').hidden`)
+	if name == "project-add" {
+		p.OpenNewItem(`#create-menu [data-open="project-add"]`)
+		p.Await("the "+name+" view", `!document.querySelector('.view[data-view="project-add"]').hidden`)
+		return
+	}
+	var open bool
+	p.Eval(`document.getElementById('settings-menu').hidden === false`, &open)
+	if !open {
+		p.Click("#settings-button")
+	}
+	p.Click(`#settings-nav [data-open="` + name + `"]`)
+	p.Await("the "+name+" settings section", `!document.querySelector('[data-section="`+name+`"]').hidden`)
+}
+
+// OpenNewItem opens the New menu and clicks one of its items.
+func (p *Page) OpenNewItem(item string) {
+	p.T.Helper()
+	p.Click("#new-workstream")
+	p.Click(item)
 }
 
 // openPauses opens the header's pause popover unless it is open.

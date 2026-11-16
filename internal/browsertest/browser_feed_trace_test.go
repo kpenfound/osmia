@@ -23,7 +23,7 @@ func assertCheckTrace(p *page, entry string, linked bool) {
 	}
 }
 
-func TestBrowserUnitAndFinalCheckFeedTraceLinks(t *testing.T) {
+func TestBrowserUnitAndFinalCheckActivityTraceLinks(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	repo := service.InspectForTest(f.s).SoleRepository()
@@ -40,6 +40,7 @@ func TestBrowserUnitAndFinalCheckFeedTraceLinks(t *testing.T) {
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.SelectWorkstream(stream)
+	p.OpenActivity()
 	for n := 1; n <= 2; n++ {
 		assertCheckTrace(p, fmt.Sprintf(`[data-kind=unit_checks][data-unit=upload][data-run="%d"]`, n), n == 1)
 		assertCheckTrace(p, fmt.Sprintf(`[data-kind=final_checks][data-review="%d"]`, n), n == 1)

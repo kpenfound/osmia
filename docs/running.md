@@ -133,7 +133,7 @@ another instance was open. Create forms start with an empty outcome when
 opened or switched to another project.
 
 When the service accepts one of your commands on a workstream or workgroup, the
-page adds its outcome to that feed as an entry marked "Your command", with the
+page adds its outcome to that Conversation as an entry marked "Your command", with the
 time it was accepted: a ratification, a shed or contested-unit ruling, an
 amendment decision, an answer, a delivery approval, a base continuation, a
 project selection, a charter rule decision, a drift rebase or a recorded merge.
@@ -146,7 +146,7 @@ decisions shows "Sending…"; a refused command shows its reason there next to
 the restored card and adds no entry. Archiving a workstream keeps its
 acknowledgement in that line and adds no feed entry.
 
-The project pane is the main entry point. Each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared chief and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement. Choose **New project** in the design form to design a project that does not exist yet: the session lives in the project whose card you opened the form from, or in the first active project, and the form refuses when no project is active. The agent drafts the project's name, repo name, visibility, description and first charter with the brief, and the design page shows them, including the visibility, before you press Start. The visibility is private unless you confirm public in the session. The repo is created with only a README, so the new project's first unit sets up `dagger check`. Once the agent has titled a design session, its title replaces the workstream ID in the sidebar row, the project pane's design-session list and the design page's heading, and follows a later title without a reload; an untitled session keeps its ID. After you press Start, the chief of staff titles the started work from the handed brief, and the page shows that title as the work's goal.
+The project pane is the main entry point. It leads with **Needs you**, a list of every open inbox entry and charter rule across the workstreams, each linking to the workstream or workgroup that answers it. Below it, each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared chief and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement. Choose **New project** in the design form to design a project that does not exist yet: the session lives in the project whose card you opened the form from, or in the first active project, and the form refuses when no project is active. The agent drafts the project's name, repo name, visibility, description and first charter with the brief, and the design page shows them, including the visibility, before you press Start. The visibility is private unless you confirm public in the session. The repo is created with only a README, so the new project's first unit sets up `dagger check`. Once the agent has titled a design session, its title replaces the workstream ID in the sidebar row, the project pane's design-session list and the design page's heading, and follows a later title without a reload; an untitled session keeps its ID. After you press Start, the chief of staff titles the started work from the handed brief, and the page shows that title as the work's goal.
 
 Above **Start workgroup from brief**, the read-only **Brief** panel shows the latest revision, project names with home marked and text collapsed by default. It updates live and Start sends the displayed revision. A stale brief shows a conflict and refreshes the panel without allocating work. One member per selected project is created without an architect selection turn. The list stays fixed until ratification; changing it requires abandoning and handing in again. One ratification covers the workgroup spec, graph and slices; the original conversation continues as the shared chief, at the session's project even when it is not a member.
 
@@ -159,9 +159,11 @@ or merge), PR open, delivered (merged) and cancelled. Expected merge waits
 create no inbox entry or notification. The workstream graph appears only for
 several members or recorded edges. Exploratory sessions appear under their
 project outside workgroups and retain their direct writable-worktree chat.
-The **Osmia** heading returns to the project pane. **Create project**, **Hand in a feature**, **Open a design session** and **Open an exploratory session** use shared forms from the header's **+**, sidebar and project cards. Card actions preselect that project; global actions ask for it. A cross-project workgroup appears under each member's project card and sidebar group row. Member labels are project names only.
+The **Osmia** heading returns to the project pane. **Create project**, **Hand in a feature**, **Open a design session** and **Open an exploratory session** use shared forms. The header's **New** menu offers all four, and it is the only place that offers **Create project**; the sidebar has no create buttons. Project cards also offer the three feature actions. Card actions preselect that project; global actions ask for it. A cross-project workgroup appears under each member's project card and sidebar group row. Member labels are project names only.
 
-**Project management**, from the cog menu or a project card, shows the chosen
+The cog opens the **Settings** view, which has five sections: Projects, Priority, Profiles and usage, Configuration, and Dagger engine (restart and prune). The cog closes it again. The header shows the connection as a dot and spells it out only once it is lost. Capacity, pauses and activity are three pills of one shape. A sidebar row shows a state glyph (live, waiting, done, failed, idle or archived), the title and a count of what waits on you.
+
+**Project management**, from the Settings view's Projects section or a project card, shows the chosen
 project's own charter and how many citable rules it has. **Read charter**
 loads the current revision; **Save charter** saves against that revision. An
 untouched editor follows another client's save live. Unsaved edits keep their
@@ -231,13 +233,28 @@ The member view is laid out like a chat client:
   widths the list is behind the button at the top left and covers the page
   until you pick a workstream or close it.
 - The main area shows the selected workstream: its goal, state, project and
-  units counted by state, and its feed. The feed lists, in the order they
-  happened, your messages and the chief of staff's answers and actions, each
-  status the chief of staff wrote, each agent session with its role, profile
-  and outcome, and each change of the workstream's or a unit's state. The
-  latest status's attention note is highlighted; a finished session opens to
-  its report or failure. Its inbox entries sit below the feed, above the
-  message field: what each asks, what waits on it, its options and the chief
+  units counted by state, and two tabs for what happened.
+  **Conversation** is the default. It lists, in the order they happened, your
+  messages and the chief of staff's answers and actions, images, delivery
+  briefs, the outcomes of your commands, and only the latest status the chief
+  of staff wrote, with its attention note highlighted. Machine events appear
+  only as one quiet line each: the workstream becoming ratified, building,
+  assembled or delivered, and the result of each final review. Selecting a
+  line opens Activity at that entry. Sessions, unit changes and check runs,
+  failed ones included, never appear in Conversation. **Activity** lists every
+  event, in the order it happened: each agent session with its role, profile
+  and outcome (a finished session opens to its report or failure), each change
+  of the workstream's or a unit's state with its reason, each check run, each
+  final review and every status the chief of staff wrote. The latest status is
+  marked current and older ones recede. Consecutive runs of routine events fold
+  into one "N events" line that opens in place. A unit filter limits Activity
+  to one unit's events; there are no event-type filters. The tab, the unit
+  filter and the entries you opened are kept in the page address
+  (`#workstream=<id>&tab=activity&unit=<unit>&open=<entries>`), so loading the
+  address shows the same view and Back and Forward step through it. The dot on
+  a sidebar row follows Conversation, the status and what waits on you; events
+  only Activity shows never mark a workstream. Its inbox entries sit below
+  Conversation's entries, above the message field: what each asks, what waits on it, its options and the chief
   of staff's recommendation. A ratification also shows the objections the
   chief of staff escalated and your own, with the ones it dismissed and why
   folded below them; a
@@ -248,7 +265,7 @@ The member view is laid out like a chat client:
   criterion. Without a brief it says "No brief was recorded for this review".
   The delivery entry waits for the brief while the chief of staff's turn for
   that final review runs and appears when the brief is recorded or that turn
-  ends without one. The brief is also its own entry in the feed, so you can
+  ends without one. The brief is also its own entry in Conversation, so you can
   reply to the chief of staff right under it; a workgroup's conversation
   shows each member's brief labelled with the member.
   Jev, the factory's decision maker, decides some of these entries before
@@ -256,7 +273,7 @@ The member view is laid out like a chat client:
   changes the approved intent, an escalated question, an escalated contested
   unit or an escalated objection reaches `jev.decision_threshold` (0.9 by
   default), its pick is recorded as your decision, the flow continues as if you
-  had chosen it, and the entry never appears. The feed and the trace label
+  had chosen it, and the entry never appears. Activity and the trace label
   such a decision "decided by Jev". Otherwise the entry reaches you with Jev's
   pick and confidence as its recommendation. Delivery approval, charter
   proposals, "no change needed" escalations, cancellation and anything that
@@ -348,7 +365,7 @@ From the page you can:
 - Answer a **Checks missing** entry: keep waiting, or continue the final review
   without check results (see the section below).
 - Opening a workgroup, workstream, design or exploratory conversation shows
-  its newest entry, including direct links and returning to Feed. New entries
+  its newest entry, including direct links and returning to Conversation. New entries
   scroll the shown conversation to its end even while reading older history.
   Refreshes without new entries keep your scroll position; your composer draft
   and keyboard focus stay in place.
@@ -368,10 +385,14 @@ From the page you can:
 
 Ratification, contested-unit, amendment and parked-base cards offer a button
 for each available decision below the note field, where the card takes a note.
-Click **Ratify** to approve the displayed revisions, or **Ask for a Redraft**
-with a note saying what should change. Standing objections have **Sustain**
-and **Overrule** buttons. While a decision is sending, the card blocks further
-decisions.
+The recommended option is the primary button and the others are secondary.
+Click **Ratify** to approve the displayed revisions, or **Ask for a redraft**
+with a note saying what should change. Each standing objection has its own
+**Sustain** and **Overrule** buttons, which send the note with that objection.
+While a decision is sending, the card blocks further decisions. Revisions,
+commit and what each role asked sit in closed footnotes on the card. A delivery
+card reads as a release note: the brief, the findings, the criteria and the
+preview of what will be published, then the button that publishes it.
 
 Submitting a feed action, such as a ruling on a contested unit or ratifying a
 proposal, removes its card from the feed right away, before the service has

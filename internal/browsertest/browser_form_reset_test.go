@@ -87,8 +87,8 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 
 	// Abandoning and archiving quiet, with a reason, succeeds; the shared
 	// form clears back to its defaults once it does.
-	p.Click("#workstream-menu-button")
-	p.Click(`[data-workstream-action="abandon-archive"]`)
+	p.SetValue("#workstream-action [name=action]", "abandon")
+	p.Click("#workstream-action [name=archive]")
 	p.Await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
 	p.TypeInto("#workstream-action [name=note]", "Superseded by the upload design.")
 	p.Click("#workstream-action [type=submit]")

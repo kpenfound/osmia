@@ -129,6 +129,30 @@ func (p *page) awaitText(selector, want string) {
 	p.await(want+" in "+selector, expr)
 }
 
+// openTab shows one tab of the displayed workstream: conversation, activity,
+// documents or trace.
+func (p *page) openTab(tab string) {
+	p.t.Helper()
+	p.click(`[data-tab="` + tab + `"]`)
+	p.await("the "+tab+" tab", `!document.querySelector('[data-panel="`+tab+`"]').hidden`)
+}
+
+// openActivity shows the displayed workstream's Activity tab with every
+// folded run opened, and waits until the log is drawn.
+func (p *page) openActivity() {
+	p.t.Helper()
+	p.openTab("activity")
+	p.await("every folded run open", `(() => {
+  const openAll = () => document.querySelectorAll('#workstream-activity .fold:not([open])').forEach((fold) => { fold.open = true; });
+  if (!window.openedFolds) {
+    window.openedFolds = new MutationObserver(openAll);
+    window.openedFolds.observe(document.querySelector('#workstream-activity'), { childList: true, subtree: true });
+  }
+  openAll();
+  return document.querySelectorAll('#workstream-activity .fold:not([open])').length === 0 && !!document.querySelector('#workstream-activity .activity-log > ol, #workstream-activity .activity-log > [data-field=empty]');
+})()`)
+}
+
 // awaitOutcome waits until a feed shows an entry for the outcome of the
 // owner's own accepted command, containing want.
 func (p *page) awaitOutcome(want string) {
@@ -190,10 +214,12 @@ type fakeAPI struct {
 	activityEntries []string
 	// feeds holds each workstream's feed entries, as JSON, empty until a
 	// test sets some. state is the workflow state every workstream shows,
-	// building when unset. charter is the JSON the charter read answers,
-	// no proposals when unset.
+	// building when unset. units is the JSON array every workstream's units
+	// are read as, none when unset. charter is the JSON the charter read
+	// answers, no proposals when unset.
 	feeds   map[string][]string
 	state   string
+	units   string
 	charter string
 	events  chan string
 
@@ -248,6 +274,10 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if state == "" {
 		state = "building"
 	}
+	units := f.units
+	if units == "" {
+		units = "[]"
+	}
 	var workstreams strings.Builder
 	for i := 0; i < f.workstreams; i++ {
 		if i > 0 {
@@ -255,8 +285,8 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(&workstreams, `{"workstream":"w_%03d","project":"p_fake","workspaces":"git","state":%s,`+
 			`"display_state":%s,"workgroup":{"id":"g_%03d","members":["w_%03d"],"edges":[]},`+
-			`"units":[],"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
-			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, quote(state), quote(state), i, i, i)
+			`"units":%s,"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
+			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, quote(state), quote(state), i, i, units, i)
 	}
 	writeJSON(w, `{"workstreams":[`+workstreams.String()+`],"profiles":{},"daily_budget":null,"capacity":null,`+
 		`"provider_usage":null,"diagnostics":[],"workspaces":{"setting":"git","backend":"git"}}`)

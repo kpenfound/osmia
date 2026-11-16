@@ -15,6 +15,7 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(stream)
+	p.OpenActivity()
 	repo := f.s.sole().repository
 	at := f.s.now()
 	selection := &CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://go/check"}, Candidates: 113}

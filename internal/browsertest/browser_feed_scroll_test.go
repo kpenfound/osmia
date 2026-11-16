@@ -170,7 +170,7 @@ func TestBrowserWorkstreamFeedScroll(t *testing.T) {
 	seedScrollMessages(t, f.c, stream)
 	path := "/v1/feed/" + string(stream)
 	p := openFeedScrollPage(t, f.s, "#workstream="+string(stream), path)
-	p.AwaitText("#workstreams .feed", "Reading the feed")
+	p.AwaitText("#workstreams .feed", "Reading the conversation")
 	releaseFeedRead(p, path)
 	p.AwaitText("#workstreams .feed", "History 13.")
 	feedAtBottom(p, "#workstreams .feed")
@@ -187,18 +187,18 @@ func TestBrowserWorkstreamFeedScroll(t *testing.T) {
 	for _, tab := range []string{"documents", "trace"} {
 		scrollFeedUp(p)
 		p.Click(`[data-tab="` + tab + `"]`)
-		p.Await("the non-feed tab", `!document.querySelector('[data-panel="`+tab+`"]')?.hidden`)
+		p.Await("the non-conversation tab", `!document.querySelector('[data-panel="`+tab+`"]')?.hidden`)
 		if tab == "trace" {
 			p.Click("#trace-form [type=submit]")
 			p.AwaitText("#trace-form .result", "Trace loaded")
 		}
-		p.Await("the non-feed reads completed", `feedPending === 0`)
+		p.Await("the non-conversation reads completed", `feedPending === 0`)
 		scrollFeedUp(p)
 		_, err = f.c.Send(context.Background(), stream, "Hidden feed entry on "+tab)
 		must(t, err)
 		rereadFeed(p)
 		feedScrollUnchanged(p)
-		p.Click(`[data-tab=feed]`)
+		p.OpenConversation()
 		feedAtBottom(p, "#workstreams .feed")
 	}
 	f.status(t, trace.StatusContent{Goal: "Project history " + strings.Repeat("Keep uploads working. ", 300), Note: "The project remains active.", Agents: []string{}})
