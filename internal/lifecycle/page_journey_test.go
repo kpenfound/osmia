@@ -37,7 +37,8 @@ func (v journeyViewport) emulate(height int64) chromedp.Action {
 }
 
 // journey is a project with two assembled workstreams, each waiting for the
-// owner to approve its delivery, running behind the real service with a fake
+// owner to mark its draft pull request ready for review, on a fake pull
+// request host that follows each workstream's branch, running behind the real service with a fake
 // chief of staff. The first has check runs recorded for its units, so
 // Activity has something to fold and filter.
 type journey struct {
@@ -51,6 +52,7 @@ func newJourney(t *testing.T) *journey {
 	j := newBriefFixture(t, listenWeb)
 	first, repository := j.buildFixture().SeedGit(t, "journey")
 	j.stream, j.repository = first, repository
+	j.host(t)
 	j.s.setSole(&activeProject{repository: repository})
 	other := j.secondMember(t, "journey-other")
 	j.assemble(t, first, "internal/trace", "resume", "dedupe")
@@ -140,7 +142,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	if wantStreams[0] > wantStreams[1] {
 		wantStreams[0], wantStreams[1] = wantStreams[1], wantStreams[0]
 	}
-	if strings.Join(home.Workstreams, ",") != strings.Join(wantStreams, ",") || strings.Join(home.Kinds, ",") != "Delivery,Delivery" || home.Count != "2" || !home.Above || home.Cards != 1 {
+	if strings.Join(home.Workstreams, ",") != strings.Join(wantStreams, ",") || strings.Join(home.Kinds, ",") != "Mark ready for review,Mark ready for review" || home.Count != "2" || !home.Above || home.Cards != 1 {
 		t.Fatalf("home: %+v, want deliveries of %v above one project card", home, wantStreams)
 	}
 	if home.Rows[string(stream)] != "1" || home.Rows[string(other)] != "1" {
@@ -203,7 +205,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 		}
 	}
 	if conversation.Allowed != "yes" || conversation.Machines != 0 || !conversation.CardAboveComposer || !conversation.ReleaseNoteOrder ||
-		strings.Join(conversation.Primary, "|") != "Open pull request" {
+		strings.Join(conversation.Primary, "|") != "Mark ready for review" {
 		t.Fatalf("Conversation: %+v", conversation)
 	}
 	shot("conversation", `document.querySelector('[data-panel=conversation] [data-kind=milestone]').scrollIntoView({block: 'center'})`)
@@ -279,11 +281,12 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 
 	// The delivery card is answered with its primary button.
 	p.Await("the delivery card ready to approve", `!document.querySelector(`+quote(cardSelector+" button.primary")+`).disabled`)
+	drafted := j.present(t, stream)
 	p.Click(card + "button.primary")
-	p.AwaitOutcome("Approved the delivery of final review 1")
+	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
 	approved := j.present(t, stream)
-	if approved.Approval == nil || approved.Approval.Description != approved.Draft || !strings.Contains(approved.Approval.Description, briefBlock) {
+	if approved.Approval == nil || approved.Approval.Description != drafted.Draft || !strings.Contains(approved.Approval.Description, briefBlock) {
 		t.Fatalf("the recorded approval: %+v", approved.Approval)
 	}
 	if left := j.entries(t, other); len(left) != 1 || left[0].Number != second.Number {
