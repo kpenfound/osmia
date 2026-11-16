@@ -764,7 +764,7 @@ const (
 // draftJudge returns the verdict the service would give what the attempt
 // delivered if its turn ended now, with every problem of an invalid draft.
 // It is the same judgment the service records once the attempt completes.
-type DraftJudge func(stream config.WorkstreamID, attempt string) (string, []string, error)
+type DraftJudge func(ctx context.Context, stream config.WorkstreamID, attempt string) (string, []string, error)
 
 // draftStatus is draft_write's result: the file it delivered and the
 // attempt's draft as it now stands.
@@ -784,7 +784,7 @@ var DraftNext = map[string]string{
 
 // judge is the draftJudge of a workstream's own draft: both files must be
 // delivered within the attempt and pass validation.
-func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+func (d *Drafter) Judge(_ context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
 	files, problems, err := d.Delivered(stream, attempt)
 	if err != nil || len(problems) > 0 {
 		return DraftInvalid, problems, err
@@ -808,7 +808,7 @@ func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []s
 func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge DraftJudge) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json","decline.txt"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
-		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }
 			dec := json.NewDecoder(bytes.NewReader(raw))
 			dec.DisallowUnknownFields()
@@ -831,7 +831,7 @@ func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge Draft
 			if err := os.WriteFile(filepath.Join(directory, input.Path), []byte(input.Content), 0600); err != nil {
 				return nil, err
 			}
-			verdict, problems, err := judge(config.WorkstreamID(scope.Workstream), attempt)
+			verdict, problems, err := judge(ctx, config.WorkstreamID(scope.Workstream), attempt)
 			if err != nil {
 				return nil, err
 			}

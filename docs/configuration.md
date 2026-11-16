@@ -1046,7 +1046,7 @@ one entity per directory of the repository, named from CODEOWNERS and the
 directory structure, and no agent writes it. Registration records the first
 revision from the clone's tracked files. After that the service re-seeds the map
 from the project's upstream default branch when an architect draft starts and
-again just before a sealing resolves its plan's footprints: it fetches the
+again just before a sealing resolves its plan's footprints, and before the owner's plan edit, a ratification or an amendment draft is validated: it fetches the
 upstream ref first, so a directory that landed upstream after drafting is
 visible, and reads the directory listing and the CODEOWNERS blob from the fetched
 commit without checking anything out. A commit is seeded once for the whole

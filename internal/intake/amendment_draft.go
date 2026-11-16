@@ -469,7 +469,7 @@ type AmendmentRevision struct {
 }
 
 // revision reads and validates what the amendment attempt turn delivered.
-func (a *AmendmentDrafter) Revision(stream config.WorkstreamID, turn string) (AmendmentRevision, error) {
+func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.WorkstreamID, turn string) (AmendmentRevision, error) {
 	latest, err := a.Latest(stream)
 	if err != nil {
 		return AmendmentRevision{}, err
@@ -520,6 +520,11 @@ func (a *AmendmentDrafter) Revision(stream config.WorkstreamID, turn string) (Am
 	if !hasSpec && !hasPlan {
 		return AmendmentRevision{Problems: []string{"no revised document was delivered"}}, nil
 	}
+	// A directory that landed upstream since the sealing is in the entity map
+	// the draft is validated against.
+	if a.S.Reseed != nil {
+		a.S.Reseed(ctx, a.Repository)
+	}
 	problems, err := a.Validate(trace.Document{Header: trace.Header{Workstream: stream}, Content: spec}, trace.Document{Content: graph})
 	if err != nil {
 		return AmendmentRevision{}, err
@@ -551,8 +556,8 @@ func (a *AmendmentDrafter) Revision(stream config.WorkstreamID, turn string) (Am
 }
 
 // judge is the draftJudge of an amendment draft.
-func (a *AmendmentDrafter) Judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
-	r, err := a.Revision(stream, attempt)
+func (a *AmendmentDrafter) Judge(ctx context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
+	r, err := a.Revision(ctx, stream, attempt)
 	switch {
 	case err != nil:
 		return "", nil, err
@@ -565,7 +570,7 @@ func (a *AmendmentDrafter) Judge(stream config.WorkstreamID, attempt string) (st
 }
 
 func (a *AmendmentDrafter) Record(ctx context.Context, operation string, stream config.WorkstreamID, request trace.Amendment, turn string) (coreadapter.OperationResult, error) {
-	r, err := a.Revision(stream, turn)
+	r, err := a.Revision(ctx, stream, turn)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

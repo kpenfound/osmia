@@ -551,7 +551,7 @@ func (d *Debate) Redraft(stream config.WorkstreamID, attempt string) (map[string
 }
 
 // judge is the draftJudge of a redraft delivered with a reply.
-func (d *Debate) Judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+func (d *Debate) Judge(_ context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
 	files, problems, err := d.Redraft(stream, attempt)
 	switch {
 	case err != nil:

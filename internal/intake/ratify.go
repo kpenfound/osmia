@@ -245,7 +245,7 @@ func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.
 	if err != nil {
 		return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.Stream)}
 	}
-	refusals, err := s.Refusals(o, asked, entries)
+	refusals, err := s.Refusals(ctx, o, asked, entries)
 	if err != nil {
 		return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the spec and plan of workstream %s; check the trace repository", o.Stream)}
 	}
@@ -335,7 +335,7 @@ func (s *Controller) RatifyWorkgroup(ctx context.Context, o *ShedOwner, id confi
 		if err != nil {
 			return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", mo.Stream)}
 		}
-		memberRefusals, err := s.Refusals(mo, pin, entries)
+		memberRefusals, err := s.Refusals(ctx, mo, pin, entries)
 		if err != nil {
 			return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the spec and plan of workstream %s; check the trace repository", mo.Stream)}
 		}
@@ -444,7 +444,7 @@ func (s *Controller) Sealing(ctx context.Context, o *ShedOwner, r Ratification, 
 // does not validate, revisions that are not the current ones, and a workstream
 // that is not at its decision point. Every reason that applies is listed, so
 // one call tells the owner everything they have to settle.
-func (s *Controller) Refusals(o *ShedOwner, asked shed.Pin, entries []shed.Entry) ([]string, error) {
+func (s *Controller) Refusals(ctx context.Context, o *ShedOwner, asked shed.Pin, entries []shed.Entry) ([]string, error) {
 	var out []string
 	if o.Feature == SketchedState && !o.Skipped {
 		out = append(out, fmt.Sprintf("the workstream is %s and debate is not skipped: it is ratified in the shed", SketchedState))
@@ -463,7 +463,7 @@ func (s *Controller) Refusals(o *ShedOwner, asked shed.Pin, entries []shed.Entry
 		}
 		out = append(out, fmt.Sprintf("objection %s (%s, by %s in round %d%s) blocks and %s", e.ID, e.Kind, e.Member, e.Round, about, reason))
 	}
-	problems, err := s.PlanProblems(o)
+	problems, err := s.PlanProblems(ctx, o)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +476,7 @@ func (s *Controller) Refusals(o *ShedOwner, asked shed.Pin, entries []shed.Entry
 // planProblems validates the workstream's latest recorded spec and plan, the
 // revisions a ratification approves, exactly as the architect's draft is
 // validated.
-func (s *Controller) PlanProblems(o *ShedOwner) ([]string, error) {
+func (s *Controller) PlanProblems(ctx context.Context, o *ShedOwner) ([]string, error) {
 	dr := &Drafter{S: s.DrafterDependencies(), Repository: o.Repository}
 	latest, err := dr.Latest(o.Stream)
 	if err != nil {
@@ -487,5 +487,9 @@ func (s *Controller) PlanProblems(o *ShedOwner) ([]string, error) {
 	if !drafted || !planned {
 		return nil, errors.New("the workstream has no recorded spec and plan")
 	}
+	// The upstream head is fetched and the entity map re-seeded from it
+	// before the plan is validated, so a directory that landed upstream
+	// after drafting does not refuse the ratification.
+	s.ReseedEntities(ctx, o.Repository)
 	return dr.Validate(spec, graph)
 }

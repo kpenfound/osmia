@@ -97,6 +97,53 @@ func recordRatification(t *testing.T, f *shedFixture, repo *trace.Repository, st
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.RatificationDocumentID(1), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner-shed"}, Path: shed.RatificationPath(1), Content: string(content)}}))
 }
 
+// fileChiefAmendment files amendment 1 as the chief of staff does: a request against
+// the current seal, which the service's amendment passes take from there.
+func fileChiefAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, stream config.WorkstreamID, id string, sealed seal.Seal) {
+	t.Helper()
+	ctx := context.Background()
+	_, doc, found, err := seal.Latest(repo, stream)
+	must(t, err)
+	if !found {
+		t.Fatal("the workstream has no seal")
+	}
+	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	header := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: chief, Cause: "fixture"}
+	must(t, repo.Append(ctx, trace.Amendment{Header: header, Requester: chief, Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1",
+		Citations: []string{"spec#1"}, Change: "Move a footprint to the new directory", Reason: "The directory landed upstream", Seal: sealed.Seal, SealRevision: doc.Revision, SpecHash: sealed.SpecHash}))
+	header.Schema, header.ID = "osmia.trace.transition", "amendment_"+id+"_filed"
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: header, Subject: amendmentSubject(id), To: "filed", Reason: "filed"}})
+	must(t, err)
+}
+
+// awaitSealRevision waits for the workstream's seal.json to reach the given
+// revision and returns the seal it holds.
+func awaitSealRevision(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, revision int) seal.Seal {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		current, doc, found, err := seal.Latest(repo, stream)
+		must(t, err)
+		if found && doc.Revision >= revision {
+			return current
+		}
+		state, err := repo.Workflow(stream, amendmentSubject("1"))
+		must(t, err)
+		if state.Value == amendmentUnapplied || time.Now().After(deadline) {
+			transitions, err := trace.Read[trace.Transition](repo, stream)
+			must(t, err)
+			var moves []string
+			for _, tr := range transitions {
+				if tr.Subject == amendmentSubject("1") {
+					moves = append(moves, tr.To+": "+tr.Reason)
+				}
+			}
+			t.Fatalf("the workstream stayed at seal revision %d, want %d, with amendment 1 %s: %q", doc.Revision, revision, state.Value, moves)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // plantRatification is recordRatification and the request of the sealing of
 // the ratification. It returns the sealing operation.
 func plantRatification(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, revision int, footprint string) trace.OperationRecord {
@@ -293,6 +340,45 @@ func TestReseedFailureIsLoggedOnceAndNeverBlocks(t *testing.T) {
 	}
 }
 
+// A plan edit and a ratification whose upstream fetch fails are validated
+// against the latest recorded map: a footprint it resolves is accepted, one it
+// does not is still refused, and no revision is recorded.
+func TestEditAndRatificationValidateAgainstTheRecordedMapWhenTheFetchFails(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { opts.WriteTimeout = time.Minute })
+	ctx := context.Background()
+	repo := f.repository()
+	// The clone has no remote naming the project's upstream, so every fetch fails.
+	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitPacket(t, stream, "ratify: no objection stands")
+	before := entityRevisions(t, repo)
+
+	unknown := strings.ReplaceAll(validPlan, `"footprint": ["internal.trace"]`, `"footprint": ["internal.nowhere"]`)
+	for range 2 {
+		if _, err := f.c.EditDraft(ctx, stream, DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec, Plan: unknown}); !failed(err, Validation) || !strings.Contains(err.Error(), "internal.nowhere") {
+			t.Fatalf("editing in a footprint no map resolves: %v", err)
+		}
+	}
+	edited, err := f.c.EditDraft(ctx, stream, DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec + "\nAn owner note.\n", Plan: validPlan})
+	must(t, err)
+	if edited["spec"].Revision != 2 {
+		t.Fatalf("the edit left %+v", edited)
+	}
+	ratified, err := f.c.Ratify(ctx, stream, 2, 1)
+	must(t, err)
+	if ratified.Sealing != "requested" {
+		t.Fatalf("ratification %+v", ratified)
+	}
+	if after := entityRevisions(t, repo); len(after) != len(before) {
+		t.Fatalf("validations with a failing fetch recorded %d revisions", len(after)-len(before))
+	}
+}
+
 // oldKnowledgeSentinel marks the prose and source ledger an older trace holds.
 const oldKnowledgeSentinel = "OLD-KNOWLEDGE-SENTINEL"
 
@@ -301,13 +387,18 @@ const oldKnowledgeSentinel = "OLD-KNOWLEDGE-SENTINEL"
 // drafts with the entity map and no prose in its context, even though the
 // trace holds old prose and a source ledger. A directory then lands upstream
 // while the clone's ref of upstream is stale, and the workstream, ratified
-// with a plan naming that directory, is sealed by the service: the sealing
-// fetches upstream, re-seeds once for that commit, and resolves the footprint.
+// with a plan naming that directory, is sealed by the service: the owner's
+// edit fetches upstream and re-seeds once for that commit, so the edit and
+// the ratification are accepted while the clone's ref of upstream was stale,
+// and the sealing finds the map seeded already. A second directory then lands
+// after the seal: an amendment draft naming it is accepted and re-seals with
+// its footprint resolved. The plan edit, the ratification, the amendment
+// draft, its debate and the owner's decision all go through the production
+// actions; only the amendment request is filed into the trace.
 func TestRunningServiceSealsAFootprintNamingADirectoryThatLandedAfterDrafting(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
 		opts.WriteTimeout = time.Minute
-		opts.Committee = nil
 	})
 	ctx := context.Background()
 	repo := f.repository()
@@ -439,10 +530,38 @@ func TestRunningServiceSealsAFootprintNamingADirectoryThatLandedAfterDrafting(t 
 		t.Fatalf("the clone already has %s", late)
 	}
 
-	// The owner ratifies a plan naming it, and the service seals the workstream.
-	recordRatification(t, f, repo, stream, 2, "internal.late")
-	f.awaitFeature(t, stream, BuildingState)
+	// The owner edits the plan to name it. A plan naming what no map resolves
+	// is refused, and the refusal does not stop the edit that follows.
+	named := strings.ReplaceAll(validPlan, `"footprint": ["internal.trace"]`, `"footprint": ["internal.late"]`)
+	unknown := strings.ReplaceAll(validPlan, `"footprint": ["internal.trace"]`, `"footprint": ["internal.nowhere"]`)
+	if _, err := f.c.EditDraft(ctx, stream, DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec, Plan: unknown}); !failed(err, Validation) || !strings.Contains(err.Error(), "internal.nowhere") {
+		t.Fatalf("editing in a footprint no map resolves: %v", err)
+	}
+	if got := entityRevisions(t, repo); len(got) != len(before)+1 || !slices.Equal(reseeds(got[len(before):]), []string{late}) {
+		t.Fatalf("the refused edit left %d revisions with re-seeds %v, want one from %s", len(got)-len(before), reseeds(got[len(before):]), late)
+	}
+	edited, err := f.c.EditDraft(ctx, stream, DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec, Plan: named})
+	must(t, err)
+	if edited["plan"].Revision != 2 || edited["plan"].Content != named || edited["spec"].Revision != 1 {
+		t.Fatalf("the edit left %+v", edited)
+	}
+	if ref := f.upstreamRef(t); ref != late {
+		t.Fatalf("the edit left the clone's upstream ref at %s, want the fetched %s", ref, late)
+	}
+	revisions := entityRevisions(t, repo)
+	added := revisions[len(before):]
+	if got := reseeds(added); len(added) != 1 || !slices.Equal(got, []string{late}) || !hasEntity(t, added[0], "internal.late") || added[0].Revision != before[len(before)-1].Revision+1 {
+		t.Fatalf("the edit recorded %d revisions with re-seeds %v, want one from %s: %+v", len(added), got, late, added)
+	}
 
+	// The owner ratifies it, and the service seals the workstream. Neither
+	// computes another seed.
+	ratified, err := f.c.Ratify(ctx, stream, 1, 2)
+	must(t, err)
+	if ratified.Sealing != "requested" {
+		t.Fatalf("ratification %+v", ratified)
+	}
+	f.awaitFeature(t, stream, BuildingState)
 	record, _, found, err := seal.Latest(repo, stream)
 	must(t, err)
 	if !found || record.Seal != 1 || record.Base.Commit != late {
@@ -456,22 +575,49 @@ func TestRunningServiceSealsAFootprintNamingADirectoryThatLandedAfterDrafting(t 
 			t.Fatalf("footprint of %s: %+v", footprint.Unit, footprint)
 		}
 	}
-	if ref := f.upstreamRef(t); ref != late {
-		t.Fatalf("the sealing left the clone's upstream ref at %s, want the fetched %s", ref, late)
-	}
-	revisions := entityRevisions(t, repo)
-	added := revisions[len(before):]
-	if got := reseeds(added); len(added) != 1 || !slices.Equal(got, []string{late}) || !hasEntity(t, added[0], "internal.late") || added[0].Revision != before[len(before)-1].Revision+1 {
-		t.Fatalf("the sealing recorded %d revisions with re-seeds %v, want one from %s: %+v", len(added), got, late, added)
+	if got := entityRevisions(t, repo); len(got) != len(revisions) {
+		t.Fatalf("the ratification and the sealing recorded %d more revisions", len(got)-len(revisions))
 	}
 	sealings := f.sealOperations(t, stream)
 	if len(sealings) != 1 || sealings[0].Result == nil || sealings[0].Result.Outcome != "succeeded" {
 		t.Fatalf("sealings %+v", sealings)
 	}
 
+	// A second directory lands upstream after the seal. An amendment draft
+	// naming it is validated against the re-seeded map, debated, approved by
+	// the owner and re-sealed with the footprint resolved.
+	later := f.landUpstream(t, "internal/later")
+	if refs := demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "for-each-ref", "--format=%(objectname)", "refs/remotes/upstream"); strings.Contains(refs, later) {
+		t.Fatalf("the clone already has %s", later)
+	}
+	amended := strings.Replace(named, `"footprint": ["internal.late"]`, `"footprint": ["internal.later"]`, 1)
+	f.script("amend-1-1", map[string]string{plan.PlanPath: amended}, nil)
+	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
+	f.script("amend-1-reply-1", nil, nil)
+	fileChiefAmendment(t, f.architectFixture, repo, stream, "1", record)
+	f.awaitAmendment(t, stream, amendmentPresented)
+	view, err := f.c.Amendment(ctx, stream, "1")
+	must(t, err)
+	_, err = f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: view.Revision, Note: "The footprint names the new directory."})
+	must(t, err)
+	resealed := awaitSealRevision(t, repo, stream, 2)
+	i := slices.IndexFunc(resealed.Footprints, func(fp seal.Footprint) bool { return fp.Unit == "resume" })
+	if i < 0 || !slices.Equal(resealed.Footprints[i].Entities, []string{"internal.later"}) || !slices.Equal(resealed.Footprints[i].Paths, []string{"internal/later"}) {
+		t.Fatalf("footprints of the reseal %+v", resealed.Footprints)
+	}
+	if ref := f.upstreamRef(t); ref != later {
+		t.Fatalf("the amendment left the clone's upstream ref at %s, want the fetched %s", ref, later)
+	}
+	amendments := entityRevisions(t, repo)[len(revisions):]
+	if got := reseeds(amendments); len(amendments) != 1 || !slices.Equal(got, []string{later}) || !hasEntity(t, amendments[0], "internal.later") {
+		t.Fatalf("the amendment recorded %d revisions with re-seeds %v, want one from %s", len(amendments), got, later)
+	}
+
 	// No librarian workstream, thread, operation or turn came of any of it.
 	noLibrarian("after sealing")
-	if ran := slices.DeleteFunc(f.runs(), func(name string) bool { return name == "events" }); !slices.Equal(ran, []string{"draft-1-1"}) {
-		t.Fatalf("the factory ran %v", ran)
+	ran := slices.DeleteFunc(f.runs(), func(name string) bool { return name == "events" })
+	slices.Sort(ran)
+	if want := []string{"amend-1-1", "amend-1-reply-1", "amend-1-round-1-" + committeeAgent(1) + "-1", "draft-1-1"}; !slices.Equal(slices.Compact(ran), want) {
+		t.Fatalf("the factory ran %v, want %v", ran, want)
 	}
 }
