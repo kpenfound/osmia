@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -21,35 +20,34 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// confirmDestroy answers the native confirmation after one dispatched click.
+// confirmDestroy presses a destroy button, reads the in-page dialog it opens
+// and answers it. Cancelling hands focus back to the button; the native
+// confirmation is never called.
 func confirmDestroy(p *page, selector string, accept bool) {
 	p.T.Helper()
-	ctx, cancel := context.WithCancel(p.Ctx)
-	defer cancel()
-	type answer struct {
-		message string
-		err     error
-	}
-	answered := make(chan answer, 1)
-	chromedp.ListenTarget(ctx, func(event any) {
-		if dialog, ok := event.(*cdppage.EventJavascriptDialogOpening); ok {
-			go func() {
-				err := chromedp.Run(ctx, cdppage.HandleJavaScriptDialog(accept))
-				answered <- answer{dialog.Message, err}
-			}()
-		}
-	})
+	p.Eval(`window.nativeConfirms = 0; window.confirm = () => { window.nativeConfirms++; return true; }`, nil)
 	p.Click(selector)
-	select {
-	case out := <-answered:
-		must(p.T, out.err)
-		for _, want := range []string{"local branch", "unpushed commits", "history", "permanently", "cannot be undone", "Pushed branches stay on the remote"} {
-			if !strings.Contains(out.message, want) {
-				p.T.Fatalf("destroy confirmation %q lacks %q", out.message, want)
-			}
+	p.Await("the destroy dialog", `document.getElementById('confirm-dialog').open`)
+	var text string
+	p.Eval(`document.getElementById('confirm-dialog').textContent`, &text)
+	for _, want := range []string{"local branch", "unpushed commits", "history", "permanently", "cannot be undone", "Pushed branches stay on the remote"} {
+		if !strings.Contains(text, want) {
+			p.T.Fatalf("destroy dialog %q lacks %q", text, want)
 		}
-	case <-time.After(browserTimeout):
-		p.T.Fatal("destroy did not ask for confirmation")
+	}
+	answer := "#confirm-cancel"
+	if accept {
+		answer = "#confirm-accept"
+	}
+	p.Click(answer)
+	p.Await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
+	if !accept {
+		p.Await("focus back on the button that opened the dialog", `document.activeElement === document.querySelector(`+Quote(selector)+`)`)
+	}
+	var native int
+	p.Eval(`window.nativeConfirms`, &native)
+	if native != 0 {
+		p.T.Fatalf("destroy called window.confirm %d times", native)
 	}
 }
 
@@ -99,8 +97,8 @@ func assertBrowserDestroyed(p *page, s *Service, c *Client, project config.Proje
       !document.querySelector('[data-pane-workstream=%q]') &&
       JSON.parse(localStorage.getItem('osmia.selected')) === null`, id, id))
 	p.Await("conversation placeholders replace deleted history", `
-      document.getElementById('design-feed').textContent === 'No design session selected.' &&
-      document.getElementById('session-feed').textContent === 'No session selected.'`)
+      document.getElementById('design-feed').textContent.startsWith('No design session selected.') &&
+      document.getElementById('session-feed').textContent.startsWith('No session selected.')`)
 	ctx := context.Background()
 	designs, err := c.Designs(ctx, project)
 	must(p.T, err)
@@ -175,6 +173,7 @@ func TestBrowserDestroyDesignConfirmsRefusesBusyAndRemovesHistory(t *testing.T) 
 	must(t, err)
 	// Sending after cancellation proves that the retained session is usable.
 	p.TypeInto("#design-form textarea", "Keep thinking")
+	p.Await("the message typed", `document.querySelector('#design-form textarea').value === 'Keep thinking'`)
 	p.Click("#design-form [type=submit]")
 	select {
 	case <-entered:

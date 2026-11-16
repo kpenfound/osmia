@@ -210,7 +210,7 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
-	p.Await("the feeds read", `document.querySelector('[data-field=feed] .meta')?.textContent !== 'Reading the conversation…'`)
+	p.Await("the feeds read", `document.querySelector('.feed [data-state=loading]') === null`)
 	// markSeen runs synchronously inside app.js's render(), so there is no
 	// transient window to wait out: this await is itself the readiness check.
 	p.Await("nothing marked", `document.querySelector('[data-field=unread]') === null`)

@@ -558,7 +558,7 @@
             delete failures[name];
           } catch (err) {
             if (!isManagementView(name) || name.endsWith('/' + byId('project-edit').elements.project.value)) {
-              failures[name] = 'Cannot read /' + name + ': ' + err.message;
+              failures[name] = err.message;
             }
           }
         }));
@@ -587,6 +587,9 @@
               if (w.kind === 'design') {
                 dirty.add('design/' + w.workstream);
                 dirty.add('design/' + w.workstream + '/conversation');
+              }
+              if (w.kind === 'session') {
+                dirty.add('sessions/' + w.workstream + '/changes');
               }
             }
           }
@@ -892,7 +895,7 @@
   async function readEngine(opening) {
     const reading = ++engineStatusRead;
     const box = byId('engine-status');
-    box.textContent = 'Reading engine status…';
+    box.replaceChildren(stateBlock('loading', 'Reading engine status…'));
     try {
       const status = await request('GET', '/engine/status');
       if (opening !== engineOpening || reading !== engineStatusRead) return;
@@ -912,7 +915,11 @@
         ].filter(Boolean).join('; ') || 'None'),
         field('cache-size', 'Cache size', status.cache_size_bytes == null ? 'Unknown' : status.cache_size_bytes.toLocaleString() + ' bytes')].filter(Boolean));
     } catch (err) {
-      if (opening === engineOpening && reading === engineStatusRead) box.textContent = err.message;
+      if (opening === engineOpening && reading === engineStatusRead) {
+        const again = el('button', { type: 'button', class: 'secondary', 'data-action': 'retry' }, 'Try again');
+        again.addEventListener('click', () => readEngine(engineOpening));
+        box.replaceChildren(stateBlock('error', 'The engine status could not be read.', err.message, again));
+      }
     }
   }
 
@@ -1027,19 +1034,105 @@
     return w.status ? w.status.goal : w.workstream;
   }
 
+  // viewLabel names a view the way the owner thinks of it, for the banner
+  // that says a read failed.
+  function viewLabel(name) {
+    const fixed = {
+      status: 'the workstream list',
+      runtime: 'pauses and priorities',
+      config: 'the configuration',
+      inbox: 'the inbox',
+      charter: 'charter proposals',
+      activity: 'backend activity',
+    };
+    if (fixed[name]) return fixed[name];
+    const tail = name.split('/');
+    if (tail[0] === 'feed') return 'the conversation of ' + workstreamName(tail[1]);
+    if (tail[0] === 'workgroups') return 'the shared conversation';
+    if (tail[0] === 'packet') return 'the ratification packet of ' + workstreamName(tail[1]);
+    if (tail[0] === 'delivery') return 'the final report of ' + workstreamName(tail[1]);
+    if (tail[0] === 'design') return 'the design session ' + tail[1];
+    if (tail[0] === 'sessions') return 'the changes of session ' + tail[1];
+    if (tail[0] === 'projects' && tail[1] === 'charter') return 'the project charter';
+    if (tail[0] === 'projects' && tail[1] === 'config') return 'the project settings';
+    return name;
+  }
+
+  // retryReads reads the named views again, forgetting the failure each
+  // one showed so the page says it is reading until the answer arrives.
+  function retryReads(names) {
+    for (const name of names) {
+      delete failures[name];
+    }
+    render();
+    mark(names);
+  }
+
+  // retryButton is the next step an error state offers.
+  function retryButton(names, label = 'Try again') {
+    const button = el('button', { type: 'button', class: 'secondary', 'data-action': 'retry' }, label);
+    button.addEventListener('click', () => retryReads(names));
+    return button;
+  }
+
+  // openButton is the next step an empty state offers: it opens a view.
+  function openButton(label, view, primary = false) {
+    const button = el('button', { type: 'button', class: primary ? 'primary' : 'secondary', 'data-open': view }, label);
+    button.addEventListener('click', () => openView(view));
+    return button;
+  }
+
+  // stateBlock builds a designed empty, loading or error state: a mark, what
+  // is going on in a sentence, a line saying what to do next, and the
+  // actions that do it. A loading state holds the room its content takes so
+  // the page does not jump when the content arrives.
+  function stateBlock(kind, title, detail, ...actions) {
+    return el('div', { class: 'state', 'data-state': kind, role: kind === 'error' ? 'alert' : 'status' },
+      kind === 'loading'
+        ? el('span', { class: 'state-bars', 'aria-hidden': 'true' }, el('span'), el('span'), el('span'))
+        : el('span', { class: 'state-mark', 'aria-hidden': 'true' }),
+      el('p', { class: 'state-title' }, title),
+      detail ? el('p', { class: 'state-detail' }, detail) : null,
+      actions.length > 0 ? el('div', { class: 'actions' }, ...actions) : null);
+  }
+
+  // keptState returns the same state node for a key, so a list that places
+  // its nodes on every render does not rebuild a state and restart its
+  // motion.
+  const stateNodes = new Map();
+  function keptState(key, build) {
+    if (!stateNodes.has(key)) stateNodes.set(key, build());
+    return stateNodes.get(key);
+  }
+
+  // readState is the state of a view that has not arrived: reading while the
+  // read is in flight, and an error with a retry once it failed.
+  function readState(name, reading, failed, detail) {
+    return failures[name]
+      ? stateBlock('error', failed, detail || 'Check the connection, then read it again.', retryButton([name]))
+      : stateBlock('loading', reading);
+  }
+
   function renderProblems() {
-    const items = Object.values(failures);
+    const failed = Object.entries(failures);
+    const diagnostics = [];
     for (const name of ['status', 'runtime']) {
       const view = views[name];
       if (view && Array.isArray(view.diagnostics)) {
         for (const d of view.diagnostics) {
-          items.push(d.field + ': ' + d.message);
+          diagnostics.push(d.field + ': ' + d.message);
         }
       }
     }
-    const list = byId('problem-list');
-    list.replaceChildren(...items.map((text) => el('li', {}, text)));
-    byId('problems').hidden = items.length === 0;
+    byId('problems-title').textContent = failed.length > 0
+      ? (failed.length === 1 ? 'One view could not be read.' : failed.length + ' views could not be read.')
+      : 'The service reports a problem with its settings.';
+    byId('problems-retry').hidden = failed.length === 0;
+    byId('problems-retry').dataset.names = JSON.stringify(failed.map(([name]) => name));
+    byId('problem-list').replaceChildren(
+      ...failed.map(([name, message]) => el('li', { 'data-view-name': name }, el('span', {}, 'Could not read ' + viewLabel(name) + '.'), ' ', el('span', { class: 'meta' }, message))),
+      ...diagnostics.map((text) => el('li', {}, text)));
+    byId('problems').hidden = failed.length + diagnostics.length === 0;
   }
 
   // resume clears a pause the way osmia resume does.
@@ -1266,7 +1359,7 @@
     const live = !!group && groupLive(id);
     // An all-archived workgroup is gone once its shared feed cannot be read.
     if (!group || (!live && failures[groupFeed(id)])) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'This workgroup is unavailable.'));
+      box.replaceChildren(stateBlock('empty', 'This workgroup is unavailable.', 'It may have been archived. Open another workstream from the list.', openButton('Go to projects', 'project-pane')));
       return;
     }
     const c = card(id, true);
@@ -1301,7 +1394,7 @@
         const node = e.kind === 'status' ? renderStatus(e, i === latest) : e.kind === 'brief' ? renderBriefEntry(e) : renderConversationEntry(e);
         if (e.repo) node.prepend(el('span', { class: 'tag', 'data-field': 'repo' }, repoLabel(e.repo)));
         return node;
-      }))] : [el('p', { class: 'meta' }, failures[groupFeed(id)] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
+      }))] : [readState(groupFeed(id), 'Reading the conversation…', 'The conversation is unavailable.'),
         ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : [])]));
       const members = el('div', { class: 'workgroup-members', 'data-field': 'members' }, ...(feed?.members || []).map(m => {
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
@@ -1516,7 +1609,10 @@
   function renderSidebar() {
     const list = byId('workstream-list');
     if (!views.status) {
-      place(list, [el('li', { class: 'meta none', 'data-field': 'loading' }, 'Loading workstreams…')]);
+      place(list, [failures.status
+        ? keptState('sidebar:error', () => el('li', { class: 'none', 'data-field': 'error' },
+          stateBlock('error', 'The workstream list could not be read.', 'Check the connection, then read it again.', retryButton(['status']))))
+        : keptState('sidebar:loading', () => el('li', { class: 'none', 'data-field': 'loading' }, stateBlock('loading', 'Loading workstreams…')))]);
       return;
     }
     const ids = new Set(streams().map((w) => w.workstream));
@@ -1607,7 +1703,10 @@
     place(byId('archived-list'), groupedEntries(archived, archivedSidebarGroups));
     const work = streams().filter((w) => !w.archived);
     if (work.length === 0) {
-      list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
+      place(list, [keptState(archived.length === 0 ? 'sidebar:empty' : 'sidebar:archived', () => el('li', { class: 'none', 'data-field': 'empty' },
+        archived.length === 0
+          ? stateBlock('empty', 'No workstreams yet.', 'Hand in a feature to start one.', openButton('Hand in a feature', 'handin'))
+          : stateBlock('empty', 'Every workstream is archived.', 'Hand in a feature to start new work.', openButton('Hand in a feature', 'handin'))))]);
       return;
     }
     place(list, groupedEntries(work, sidebarGroups));
@@ -1811,7 +1910,13 @@
     // the CLI or the API began it.
     const creations = (views.inbox ? views.inbox.entries : []).filter((e) => e.kind === 'project-creation' && !dismissed.has(decisionKey(e))).map(renderDecision);
     place(byId('project-pane'), [renderNeedsYou(), ...(creations.length ? [el('h3', { 'data-field': 'creations' }, 'Project creation waiting for you'), ...creations, inboxResult] : []), ...projectNodes].filter(node => node !== null));
-    if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'No projects yet. Use New to create one.' : 'Loading projects…'));
+    if (!projects().length) {
+      byId('project-pane').append(views.config
+        ? stateBlock('empty', 'No projects yet.', 'Create a project to register its repository, then hand in a feature.', openButton('Create project', 'project-add', true))
+        : failures.config
+          ? stateBlock('error', 'The projects could not be read.', 'Check the connection, then read them again.', retryButton(['config']))
+          : stateBlock('loading', 'Loading projects…'));
+    }
     for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
     for (const id of paneGroups.keys()) if (!streams().some(w => w.project + ":" + w.workgroup?.id === id)) paneGroups.delete(id);
     for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
@@ -2626,12 +2731,14 @@
     }
     c.shown = key;
     if (!view) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
+      c.entries.replaceChildren(readState(name, 'Reading the conversation…', 'The conversation is unavailable.'),
         ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : []));
       return;
     }
     if (shown.length === 0 && outcomes.length === 0) {
-      c.entries.replaceChildren(el('p', { class: 'meta', 'data-field': 'empty' }, 'Nothing here yet. Sessions and check runs are in Activity.'));
+      const open = el('button', { type: 'button', class: 'secondary' }, 'Open activity');
+      open.addEventListener('click', () => showActivity());
+      c.entries.replaceChildren(el('div', { 'data-field': 'empty' }, stateBlock('empty', 'Nothing here yet.', 'Write to the chief of staff below. Sessions and check runs are in Activity.', open)));
       return;
     }
     c.entries.replaceChildren(el('ol', {}, ...withOutcomes(shown, outcomes, (e) => {
@@ -2732,17 +2839,17 @@
     c.unitFilter.value = ui.unit;
     c.unitFilter.closest('.activity-bar').hidden = units.length === 0 && ui.unit === '';
     if (!view) {
-      c.activity.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The activity is unavailable.' : 'Reading the activity…'));
+      c.activity.replaceChildren(readState(name, 'Reading the activity…', 'The activity is unavailable.'));
       return;
     }
     const latest = entries.findLastIndex((e) => e.kind === 'status');
     const listed = entries.map((e, i) => ({ e, latest: i === latest })).filter(({ e }) => !ui.unit || entryUnit(e) === ui.unit);
     if (listed.length === 0) {
-      const clear = el('button', { type: 'button', class: 'quiet', 'data-field': 'clear-filter' }, 'Show all units');
+      const clear = el('button', { type: 'button', class: 'secondary', 'data-field': 'clear-filter' }, 'Show all units');
       clear.addEventListener('click', () => { ui.unit = ''; syncRoute(true); render(); });
-      c.activity.replaceChildren(ui.unit
-        ? el('p', { class: 'meta', 'data-field': 'empty' }, 'No events for unit ' + ui.unit + ' yet. ', clear)
-        : el('p', { class: 'meta', 'data-field': 'empty' }, 'No activity yet. Sessions, state changes and check runs appear here as the work runs.'));
+      c.activity.replaceChildren(el('div', { 'data-field': 'empty' }, ui.unit
+        ? stateBlock('empty', 'No events for unit ' + ui.unit + ' yet.', 'Its sessions, state changes and check runs appear here once it runs.', clear)
+        : stateBlock('empty', 'No activity yet.', 'Sessions, state changes and check runs appear here as the work runs.')));
       return;
     }
     const nodes = [];
@@ -3176,7 +3283,7 @@
     sessionFeedShown = key;
     const box = byId('session-feed');
     if (entries.length === 0) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+      box.replaceChildren(stateBlock('empty', 'Nothing has happened yet.', 'Message the agent below; it works in the session\'s own worktree and its answers appear here.'));
     } else {
       box.replaceChildren(el('ol', {}, ...entries.map((e) => e.kind === 'session_checks' ? renderChecks(e) : renderConversationEntry(e, 'Agent'))));
     }
@@ -3248,8 +3355,19 @@
     });
   }
 
+  // destroyConversation asks the owner to confirm, then destroys the session.
   function destroyConversation(id, design) {
-    if (!window.confirm('Permanently destroy this ' + (design ? 'design session' : 'session') + '? The session, its local branch (including unpushed commits) and all its history will be removed permanently. This cannot be undone. Pushed branches stay on the remote.')) return;
+    const button = byId(design ? 'design-destroy' : 'session-destroy');
+    confirmDanger({
+      title: 'Destroy this ' + (design ? 'design session' : 'session') + '?',
+      consequence: ['The session, its local branch (including unpushed commits) and all its history will be removed permanently. This cannot be undone.', 'Pushed branches stay on the remote.'],
+      accept: design ? 'Destroy design session' : 'Destroy session',
+      opener: button,
+      run: () => runDestroy(id, design),
+    });
+  }
+
+  function runDestroy(id, design) {
     const button = byId(design ? 'design-destroy' : 'session-destroy');
     const result = byId(design ? 'design-destroy-result' : 'session-control-result');
     act(result, button, () => request('POST', '/' + (design ? 'design' : 'sessions') + '/' + id + '/destroy'), () => {
@@ -3309,10 +3427,15 @@
 
   function renderSessionChanges(id) {
     const view = views['sessions/' + id + '/changes'];
-    byId('session-diff').textContent = view ? (view.changes || 'No uncommitted changes.') : 'Reading changes…';
+    const name = 'sessions/' + id + '/changes';
+    const diff = byId('session-diff');
+    diff.textContent = view ? (view.changes || 'No uncommitted changes.') : failures[name] ? 'The changes could not be read.' : 'Reading changes…';
+    diff.dataset.state = view ? 'ready' : failures[name] ? 'error' : 'loading';
     const list = byId('session-commits');
-    if (!view || view.commits.length === 0) {
-      list.replaceChildren(el('li', { class: 'meta' }, 'No commits yet.'));
+    if (!view && failures[name]) {
+      list.replaceChildren(el('li', {}, retryButton([name])));
+    } else if (!view || view.commits.length === 0) {
+      list.replaceChildren(el('li', { class: 'meta' }, view ? 'No commits yet. Commit the changes above to record them.' : 'No commits yet.'));
     } else {
       list.replaceChildren(...view.commits.map((c) => el('li', { 'data-commit': c.commit },
         el('code', {}, c.commit.slice(0, 10)), ' ', c.message.split('\n')[0])));
@@ -3328,7 +3451,7 @@
     if (!w) {
       byId('session-title').textContent = 'Session';
       byId('session-meta').replaceChildren();
-      byId('session-feed').replaceChildren(el('p', { class: 'meta' }, 'No session selected.'));
+      byId('session-feed').replaceChildren(stateBlock('empty', 'No session selected.', 'Open an exploratory session to chat with an agent in its own worktree.', openButton('Open an exploratory session', 'session-add', true)));
       sessionFeedShown = null;
       block(byId('session-destroy'), true);
       byId('session-diff').textContent = '';
@@ -3441,7 +3564,7 @@
     box.dataset.conversation = id;
     designFeedShown = key;
     if (entries.length === 0) {
-      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+      box.replaceChildren(stateBlock('empty', 'Nothing has happened yet.', 'Describe the feature below; the design agent answers and drafts a brief.'));
     } else {
       box.replaceChildren(el('ol', {}, ...entries.map((e, index) => {
         const entry = renderConversationEntry(e, 'Design agent');
@@ -3514,7 +3637,11 @@
     if (!design || failures[path]) {
       delete panel.dataset.revision;
       delete panel.dataset.shown;
-      box.replaceChildren(el('p', { class: 'meta' }, failures[path] || (w ? 'Reading the brief…' : 'No design session selected.')));
+      box.replaceChildren(!w
+        ? stateBlock('empty', 'No design session selected.', 'Open a design session to draft a brief with the design agent.', openButton('Open a design session', 'design-add', true))
+        : failures[path]
+          ? stateBlock('error', 'The brief could not be read.', 'Start stays off until the brief is read again.', retryButton([path]))
+          : stateBlock('loading', 'Reading the brief…'));
       return;
     }
     const key = JSON.stringify([design, design.projects.map(projectName), projectName(design.project)]);
@@ -3529,7 +3656,7 @@
       ...(design.new_project ? [renderDraftedNewProject(design.new_project)] : []),
       design.brief_revision > 0
         ? el('details', {}, el('summary', {}, 'Brief text'), renderMarkdown(design.brief))
-        : el('p', { class: 'meta' }, 'The agent has not drafted a brief yet.'));
+        : stateBlock('empty', 'The agent has not drafted a brief yet.', 'Describe the feature to the design agent; the brief appears here as it takes shape.'));
   }
 
   // renderDraftedNewProject shows the project the brief asks Start to
@@ -3549,7 +3676,7 @@
     if (!w) {
       byId('design-title').textContent = 'Design session';
       byId('design-meta').replaceChildren();
-      byId('design-feed').replaceChildren(el('p', { class: 'meta' }, 'No design session selected.'));
+      byId('design-feed').replaceChildren(stateBlock('empty', 'No design session selected.', 'Open a design session to talk a feature through before handing it in.', openButton('Open a design session', 'design-add', true)));
       designFeedShown = null;
       block(byId('design-destroy'), true);
       return;
@@ -3652,6 +3779,84 @@
     }
   }
 
+  // abandonWorkstream abandons a workstream with the owner's reason and,
+  // when asked, archives it straight after.
+  async function abandonWorkstream(workstream, reason, archive) {
+    const out = await request('POST', '/abandon/' + workstream, { reason });
+    if (archive) {
+      await request('POST', '/archive/' + workstream);
+    }
+    return out;
+  }
+
+  // The confirmation dialog is one native dialog, filled for the action it
+  // guards. It names the consequence, offers a quiet cancel beside the
+  // danger button, closes on Escape and returns focus to the control that
+  // opened it. The action runs only after the owner accepts.
+  let confirming = null;
+
+  // confirmDanger opens the dialog. options: title, consequence (paragraphs),
+  // accept (the danger button's label), opener (the control that gets focus
+  // back), run(reason) and optionally reason {label, hint, required}.
+  function confirmDanger(options) {
+    const dialog = byId('confirm-dialog');
+    const form = byId('confirm-form');
+    confirming = { ...options, accepted: false };
+    byId('confirm-title').textContent = options.title;
+    byId('confirm-consequence').replaceChildren(...options.consequence.map((text) => el('p', {}, text)));
+    byId('confirm-accept').textContent = options.accept;
+    const field = byId('confirm-reason-field');
+    field.hidden = !options.reason;
+    form.elements.reason.value = '';
+    form.elements.reason.setAttribute('aria-required', String(!!options.reason));
+    if (options.reason) {
+      field.querySelector('label').textContent = options.reason.label;
+      byId('confirm-reason-hint').textContent = options.reason.hint;
+    }
+    const result = byId('confirm-result');
+    result.textContent = '';
+    delete result.dataset.outcome;
+    dialog.showModal();
+    // Cancel is the safe default. A reason, when one is asked for, comes first.
+    (options.reason ? form.elements.reason : byId('confirm-cancel')).focus();
+  }
+
+  function setupConfirmDialog() {
+    const dialog = byId('confirm-dialog');
+    const form = byId('confirm-form');
+    byId('confirm-cancel').addEventListener('click', () => dialog.close('cancelled'));
+    // A press on the backdrop is a press on the dialog element itself.
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close('cancelled');
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!confirming) return;
+      const reason = form.elements.reason.value.trim();
+      if (confirming.reason && reason === '') {
+        const result = byId('confirm-result');
+        result.dataset.outcome = 'error';
+        result.textContent = confirming.reason.required;
+        form.elements.reason.focus();
+        return;
+      }
+      confirming.accepted = true;
+      confirming.reasonText = reason;
+      dialog.close('accepted');
+    });
+    dialog.addEventListener('close', () => {
+      const done = confirming;
+      confirming = null;
+      if (!done) return;
+      // The browser hands focus back to the control that was focused when the
+      // dialog opened. A menu item that has since closed cannot take it, so
+      // focus goes to the opener, unless the owner has already moved on.
+      const active = document.activeElement;
+      if (done.opener && done.opener.isConnected && (!active || active === document.body || active === dialog)) done.opener.focus();
+      if (done.accepted) done.run(done.reasonText);
+    });
+  }
+
   // workstreamAction runs an entry of the workstream's menu.
   function workstreamAction(action) {
     const w = shown();
@@ -3666,14 +3871,46 @@
       return;
     }
     if (action === 'archive') {
-      if (!window.confirm('Permanently archive ' + goal(w) + '? All workstream history, decisions, agent turns and check output will be deleted. Only its title will remain in the archived list. This cannot be undone.')) { return; }
-      const button = document.querySelector('[data-workstream-action="' + action + '"]');
-      act(inboxResult, button, () => request('POST', '/archive/' + w.workstream), (out) => {
-        if (out.archived) {
-          leaveArchived(w.workstream);
-        }
-        mark(['status', 'runtime']);
-        return 'Archived ' + goal(w) + '; it is listed under Archived. Its history will be permanently deleted.';
+      confirmDanger({
+        title: 'Archive ' + goal(w) + ' permanently?',
+        consequence: ['All workstream history, decisions, agent turns and check output will be deleted. Only its title will remain in the archived list. This cannot be undone.'],
+        accept: 'Archive permanently',
+        opener: byId('workstream-menu-button'),
+        run: () => {
+          const button = document.querySelector('[data-workstream-action="archive"]');
+          act(inboxResult, button, () => request('POST', '/archive/' + w.workstream), (out) => {
+            if (out.archived) {
+              leaveArchived(w.workstream);
+            }
+            mark(['status', 'runtime']);
+            return 'Archived ' + goal(w) + '; it is listed under Archived. Its history will be permanently deleted.';
+          });
+        },
+      });
+      return;
+    }
+    if (action === 'abandon' || action === 'abandon-archive') {
+      const archive = action === 'abandon-archive';
+      confirmDanger({
+        title: (archive ? 'Abandon and archive ' : 'Abandon ') + goal(w) + '?',
+        consequence: [
+          'Abandoning stops new turns, cancels active turns while keeping their recorded work, and releases capacity. The trace is kept. Your branch and any open pull request are not touched.',
+          ...(archive ? ['It is then archived permanently: all history, decisions, agent turns and check output are deleted and only the title remains. This cannot be undone.'] : []),
+        ],
+        reason: { label: 'Reason', hint: 'Why this work is stopping. It is recorded with the abandonment.', required: 'Give a reason for abandoning this workstream.' },
+        accept: archive ? 'Abandon and archive' : 'Abandon workstream',
+        opener: byId('workstream-menu-button'),
+        run: (reason) => {
+          const button = document.querySelector('[data-workstream-action="' + action + '"]');
+          act(inboxResult, button, () => abandonWorkstream(w.workstream, reason, archive), () => {
+            mark(['status', 'config', 'inbox', 'charter']);
+            if (!archive) {
+              return 'Abandoned ' + goal(w) + '.';
+            }
+            leaveArchived(w.workstream);
+            return 'Abandoned and archived ' + goal(w) + '.';
+          });
+        },
       });
       return;
     }
@@ -3695,18 +3932,15 @@
     }
     setTab('documents');
     const target = byId(action === 'dependency' ? 'base-form' : 'workstream-action');
-    if (action === 'abandon' || action === 'abandon-archive') {
-      target.elements.action.value = 'abandon';
-      target.elements.archive.checked = action === 'abandon-archive';
-      renderOwnerForms();
-      target.elements.note.focus();
-    } else if (action === 'debate') {
+    if (action === 'debate') {
       target.elements.action.focus();
     }
     target.scrollIntoView({ block: 'start' });
   }
 
   function setupLayout() {
+    setupConfirmDialog();
+    byId('problems-retry').addEventListener('click', () => retryReads(JSON.parse(byId('problems-retry').dataset.names || '[]')));
     byId('picker-toggle').addEventListener('click', () => {
       setPicker(document.body.dataset.picker !== 'open');
       render();
@@ -4092,7 +4326,7 @@
   function renderDissent(d, name) {
     const view = views[name];
     if (!view) {
-      d.detail.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The packet is unavailable.' : 'Reading the packet…'));
+      d.detail.replaceChildren(readState(name, 'Reading the packet…', 'The packet is unavailable.'));
       return [];
     }
     // The chief of staff decides the committee's objections first; the
@@ -4146,7 +4380,7 @@
     block(d.submit, !view || !!d.pending);
     d.preview.hidden = !view;
     if (!view) {
-      d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
+      d.detail.replaceChildren(el('div', { 'data-field': 'reading' }, readState(name, 'Reading the final report…', 'The final report is unavailable.')));
       return;
     }
     // The title is the one an already-approved delivery records, even if the
@@ -5165,14 +5399,13 @@
       const kind = action.elements.action.value;
       const workstream = action.elements.workstream.value;
       const note = action.elements.note.value.trim();
-      const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}, abandon: {reason: note}};
+      const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}};
       const archive = kind === 'abandon' && action.elements.archive.checked;
       formAction(action, event.submitter, async () => {
-        const out = await request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]);
-        if (archive) {
-          await request('POST', '/archive/' + workstream);
+        if (kind === 'abandon') {
+          return abandonWorkstream(workstream, note, archive);
         }
-        return out;
+        return request('POST', '/shed/' + kind + '/' + workstream, bodies[kind]);
       }, () => {
         if (!archive) {
           return 'Workstream action recorded.';

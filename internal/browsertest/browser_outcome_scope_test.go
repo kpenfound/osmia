@@ -349,11 +349,12 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
 	p.Click("[data-tab=conversation]")
-	p.Eval(`window.confirm = () => true`, nil)
 	url := "/v1/archive/" + string(quiet)
 	holdOutcome(p, url)
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="archive"]`)
+	p.Await("the archive dialog", `document.getElementById('confirm-dialog').open`)
+	p.Click("#confirm-accept")
 	p.Await("the real archive response held", `typeof releaseOutcome[`+quote(url)+`] === 'function' && outcomeResponses[`+quote(url)+`].archived`)
 	// Only the status event has moved the displayed workstream: the archive
 	// callback has not yet selected its successor or produced its final text.

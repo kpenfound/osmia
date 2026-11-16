@@ -246,3 +246,45 @@ func TestPageElementsNeverRepeatAnAttribute(t *testing.T) {
 		}
 	}
 }
+
+// The four create forms share one layout: the form class, fields with a
+// label tied to their control, and the actions after the last field.
+func TestCreateFormsShareOneLayoutInTheMarkup(t *testing.T) {
+	w, _ := serve(http.MethodGet, "/")
+	page := w.Body.String()
+	for _, id := range []string{"handin-form", "design-add-form", "session-add-form", "project-add"} {
+		start := strings.Index(page, `<form id="`+id+`" class="form"`)
+		if start < 0 {
+			t.Fatalf("form %s does not use the shared form layout", id)
+		}
+		form := page[start : start+strings.Index(page[start:], "</form>")]
+		if !strings.Contains(form, `<div class="form-actions">`) || !strings.Contains(form, `<p class="result" role="status"></p>`) {
+			t.Fatalf("form %s lacks its actions or result", id)
+		}
+		if strings.Index(form, `class="form-actions"`) < strings.LastIndex(form, `class="field"`) {
+			t.Fatalf("form %s puts its actions before a field", id)
+		}
+		for _, label := range regexp.MustCompile(`<label for="([^"]+)"`).FindAllStringSubmatch(form, -1) {
+			if !strings.Contains(form, `id="`+label[1]+`"`) {
+				t.Fatalf("form %s has a label for %s with no control", id, label[1])
+			}
+		}
+		if strings.Contains(form, "<label>") {
+			t.Fatalf("form %s has a label that wraps its control", id)
+		}
+	}
+	if strings.Contains(page, "window.confirm") {
+		t.Fatal("the page markup asks the browser to confirm")
+	}
+}
+
+// The script never asks the browser to confirm anything: the actions that
+// need confirming open the page's own dialog.
+func TestScriptNeverUsesTheNativeConfirmation(t *testing.T) {
+	w, _ := serve(http.MethodGet, "/app.js")
+	for _, banned := range []string{"window.confirm", "confirm(", "alert(", "prompt("} {
+		if strings.Contains(w.Body.String(), banned) {
+			t.Fatalf("the script calls %s", banned)
+		}
+	}
+}

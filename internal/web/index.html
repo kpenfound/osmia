@@ -83,6 +83,23 @@
   <button type="button" class="danger" data-workstream-action="archive">Archive permanently…</button>
 </div>
 
+<dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-consequence">
+  <form id="confirm-form" class="form" method="dialog">
+    <h2 id="confirm-title"></h2>
+    <div id="confirm-consequence" class="dialog-consequence"></div>
+    <div class="field" id="confirm-reason-field" hidden>
+      <label for="confirm-reason">Reason</label>
+      <textarea id="confirm-reason" name="reason" rows="3" aria-describedby="confirm-reason-hint"></textarea>
+      <p class="hint" id="confirm-reason-hint"></p>
+    </div>
+    <p id="confirm-result" class="result" role="status"></p>
+    <div class="form-actions">
+      <button type="button" id="confirm-cancel" class="quiet">Cancel</button>
+      <button type="submit" id="confirm-accept" class="danger"></button>
+    </div>
+  </form>
+</dialog>
+
 <div class="shell">
   <nav id="sidebar" aria-label="Workstreams">
     <div class="sidebar-head">
@@ -99,7 +116,11 @@
   </nav>
 
   <main id="main">
-    <section id="problems" class="problems" aria-label="Problems" hidden>
+    <section id="problems" class="problems" aria-labelledby="problems-title" role="alert" hidden>
+      <div class="problems-head">
+        <p id="problems-title" class="state-title"></p>
+        <button type="button" id="problems-retry" class="secondary">Try again</button>
+      </div>
       <ul id="problem-list"></ul>
     </section>
 
@@ -114,9 +135,11 @@
     </section>
 
     <section class="view" data-view="workstream" aria-label="Workstream" hidden>
-      <div id="nothing" class="nothing" hidden>
-        <p>No workstreams yet.</p>
-        <button type="button" data-open="handin">Hand in a feature</button>
+      <div id="nothing" class="state" data-state="empty" hidden>
+        <span class="state-mark" aria-hidden="true"></span>
+        <p class="state-title">No workstreams yet.</p>
+        <p class="state-detail">Hand in a feature to start the first one. The architect drafts a spec and plan for you to ratify.</p>
+        <div class="actions"><button type="button" class="primary" data-open="handin">Hand in a feature</button></div>
       </div>
       <div id="workstream-top" class="workstream-top">
         <div id="workstream-head" class="workstream-head"></div>
@@ -140,52 +163,75 @@
       </div>
 
       <div data-panel="documents" role="tabpanel" hidden>
-        <form id="documents-form" class="control">
+        <form id="documents-form" class="form panel">
           <h3>Specification and plan</h3>
           <input type="hidden" name="workstream">
           <p id="document-revisions" class="meta"></p>
-          <label>Specification <textarea name="spec" rows="10"></textarea></label>
-          <label>Plan <textarea name="plan" rows="10"></textarea></label>
-          <div class="actions">
+          <div class="field">
+            <label for="documents-spec">Specification</label>
+            <textarea id="documents-spec" class="document" name="spec" rows="10"></textarea>
+          </div>
+          <div class="field">
+            <label for="documents-plan">Plan</label>
+            <textarea id="documents-plan" class="document" name="plan" rows="10"></textarea>
+          </div>
+          <div class="form-actions">
             <button type="submit" class="primary" disabled>Save draft documents</button>
             <button type="button" class="quiet" data-action="read">Read again</button>
           </div>
           <p class="result" role="status"></p>
         </form>
-        <form id="base-form" class="control">
+        <form id="base-form" class="form panel">
           <h3>Dependency</h3>
           <input type="hidden" name="workstream">
-          <label>Base <select name="base"><option value="">Project upstream</option></select></label>
-          <div class="actions">
+          <div class="field">
+            <label for="base-form-base">Base</label>
+            <select id="base-form-base" name="base" aria-describedby="base-form-hint"><option value="">Project upstream</option></select>
+            <p class="hint" id="base-form-hint">Dependencies can be changed before ratification.</p>
+          </div>
+          <div class="form-actions">
             <button type="submit" class="primary" disabled>Save dependency</button>
             <button type="button" class="quiet" data-action="read">Read again</button>
           </div>
-          <p class="meta">Dependencies can be changed before ratification.</p>
           <p class="result" role="status"></p>
         </form>
-        <form id="workstream-action" class="control">
+        <form id="workstream-action" class="form panel">
           <h3>Debate and abandonment</h3>
           <input type="hidden" name="workstream">
-          <label>Action <select name="action">
-            <option value="object">Raise a shed objection</option>
-            <option value="more">Request another debate round</option>
-            <option value="redraft">Request a redraft</option>
-            <option value="skip">Skip debate; ratification still required</option>
-            <option value="abandon">Abandon workstream</option>
-          </select></label>
-          <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
-          <label class="check" data-field="archive-once"><input name="archive" type="checkbox"> Permanently archive once abandoned: delete all history, decisions, turns and check output; retain only the title. Cannot be undone.</label>
-          <div class="actions"><button type="submit" class="primary">Apply action</button></div>
+          <div class="field">
+            <label for="workstream-action-kind">Action</label>
+            <select id="workstream-action-kind" name="action">
+              <option value="object">Raise a shed objection</option>
+              <option value="more">Request another debate round</option>
+              <option value="redraft">Request a redraft</option>
+              <option value="skip">Skip debate; ratification still required</option>
+              <option value="abandon">Abandon workstream</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="workstream-action-note">Reason or requested change</label>
+            <textarea id="workstream-action-note" name="note" rows="3" required></textarea>
+          </div>
+          <div class="field" data-field="archive-once">
+            <label class="check" for="workstream-action-archive"><input id="workstream-action-archive" name="archive" type="checkbox"> Permanently archive once abandoned: delete all history, decisions, turns and check output; retain only the title. Cannot be undone.</label>
+          </div>
+          <div class="form-actions"><button type="submit" class="primary">Apply action</button></div>
           <p class="result" role="status"></p>
         </form>
       </div>
 
       <div data-panel="trace" role="tabpanel" hidden>
-        <form id="trace-form" class="control">
+        <form id="trace-form" class="form panel">
           <input type="hidden" name="workstream">
-          <label>Trace <select name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select></label>
-          <label>Unit, criterion, or commit <input name="selector" type="text" autocomplete="off"></label>
-          <div class="actions"><button type="submit" class="primary">Read trace</button></div>
+          <div class="field">
+            <label for="trace-kind">Trace</label>
+            <select id="trace-kind" name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select>
+          </div>
+          <div class="field">
+            <label for="trace-selector">Unit, criterion, or commit</label>
+            <input id="trace-selector" name="selector" type="text" autocomplete="off">
+          </div>
+          <div class="form-actions"><button type="submit" class="primary">Read trace</button></div>
           <p class="result" role="status"></p>
           <div id="trace-content" class="trace"></div>
         </form>
@@ -195,11 +241,20 @@
 
     <section class="view" data-view="session-add" aria-labelledby="session-add-title" hidden>
       <div class="view-head"><h2 id="session-add-title">Open an exploratory session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="session-add-form" class="control">
-        <label>Repo <select name="project" data-repo-select required></select></label>
-        <label>Profile <select name="profile" required></select></label>
-        <label>Title (optional) <input name="title" type="text"></label>
-        <div class="actions"><button type="submit" class="primary">Open an exploratory session</button></div>
+      <form id="session-add-form" class="form">
+        <div class="field">
+          <label for="session-add-repo">Repo</label>
+          <select id="session-add-repo" name="project" data-repo-select required></select>
+        </div>
+        <div class="field">
+          <label for="session-add-profile">Profile</label>
+          <select id="session-add-profile" name="profile" required></select>
+        </div>
+        <div class="field">
+          <label for="session-add-title-field">Title <span class="optional">(optional)</span></label>
+          <input id="session-add-title-field" name="title" type="text" autocomplete="off">
+        </div>
+        <div class="form-actions"><button type="submit" class="primary">Open an exploratory session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -207,53 +262,67 @@
     <section class="view" data-view="session" aria-labelledby="session-title" hidden>
       <div class="view-head"><h2 id="session-title">Session</h2></div>
       <div id="session-meta" class="id"></div>
-      <div class="thread">
-        <div id="session-feed" class="feed" data-field="feed"></div>
-        <form id="session-form" class="send composer">
-          <div class="box">
-            <textarea name="text" rows="2" aria-label="Message the session's agent" placeholder="Message the agent"></textarea>
-            <div class="actions"><button type="button" class="icon dictate-icon" aria-label="Dictate" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button type="submit" class="primary icon send-icon" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button></div>
+      <div class="split">
+        <div class="split-main">
+          <div class="thread">
+            <div id="session-feed" class="feed" data-field="feed"></div>
+            <form id="session-form" class="send composer">
+              <div class="box">
+                <textarea name="text" rows="2" aria-label="Message the session's agent" placeholder="Message the agent"></textarea>
+                <div class="actions"><button type="button" class="icon dictate-icon" aria-label="Dictate" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button type="submit" class="primary icon send-icon" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button></div>
+              </div>
+              <p id="session-result" class="result" role="status"></p>
+            </form>
           </div>
-          <p id="session-result" class="result" role="status"></p>
-        </form>
-      </div>
-      <div class="control">
-        <div class="actions"><button type="button" id="session-stop">Stop</button></div>
-      </div>
-      <div class="control">
-        <h3>Changes</h3>
-        <pre id="session-diff" class="diff" data-field="diff"></pre>
-        <ul id="session-commits" class="notes" data-field="commits"></ul>
-      </div>
-      <form id="session-commit-form" class="control">
-        <h3>Commit</h3>
-        <label>Message <textarea name="message" rows="3" required></textarea></label>
-        <div class="actions"><button type="submit" class="primary">Commit</button></div>
-        <p class="result" role="status"></p>
-      </form>
-      <div class="control">
-        <h3>Check</h3>
-        <div class="actions"><button type="button" id="session-check">Run check</button></div>
-        <p id="session-check-result" class="meta" data-field="check-result"></p>
-      </div>
-      <div class="control">
-        <div class="actions">
-          <button type="button" id="session-push" class="primary">Push</button>
-          <button type="button" id="session-end" class="quiet">End session</button>
-          <button type="button" id="session-destroy" class="danger">Destroy</button>
         </div>
-        <p id="session-control-result" class="result" role="status"></p>
+        <aside class="split-side" aria-label="Session controls">
+          <div class="side-section">
+            <div class="actions"><button type="button" id="session-stop">Stop</button></div>
+          </div>
+          <div class="side-section">
+            <h3>Changes</h3>
+            <pre id="session-diff" class="diff" data-field="diff"></pre>
+            <ul id="session-commits" class="notes" data-field="commits"></ul>
+          </div>
+          <form id="session-commit-form" class="side-section form">
+            <h3>Commit</h3>
+            <div class="field">
+              <label for="session-commit-message">Message</label>
+              <textarea id="session-commit-message" name="message" rows="3" required></textarea>
+            </div>
+            <div class="form-actions"><button type="submit" class="primary">Commit</button></div>
+            <p class="result" role="status"></p>
+          </form>
+          <div class="side-section">
+            <h3>Check</h3>
+            <div class="actions"><button type="button" id="session-check">Run check</button></div>
+            <p id="session-check-result" class="meta" data-field="check-result"></p>
+          </div>
+          <div class="side-section">
+            <div class="actions">
+              <button type="button" id="session-push" class="primary">Push</button>
+              <button type="button" id="session-end" class="quiet">End session</button>
+              <button type="button" id="session-destroy" class="danger">Destroy</button>
+            </div>
+            <p id="session-control-result" class="result" role="status"></p>
+          </div>
+        </aside>
       </div>
     </section>
 
     <section class="view" data-view="design-add" aria-labelledby="design-add-title" hidden>
       <div class="view-head"><h2 id="design-add-title">Open a design session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="design-add-form" class="control">
-        <label>Project <select name="project" data-project-select required></select></label>
-        <label><input type="checkbox" name="new_project"> New project</label>
-        <p class="meta">New project designs a project that does not exist yet; Start creates its repository. The session lives in the project chosen above, or in the first active project when none is chosen.</p>
-        <p class="meta">The agent reads the project's charter and every repo's entity map, read-only. It cannot write, use version control, or start any work itself.</p>
-        <div class="actions"><button type="submit" class="primary">Open a design session</button></div>
+      <form id="design-add-form" class="form">
+        <div class="field">
+          <label for="design-add-project">Project</label>
+          <select id="design-add-project" name="project" data-project-select required aria-describedby="design-add-new-hint"></select>
+        </div>
+        <div class="field">
+          <label class="check" for="design-add-new"><input id="design-add-new" type="checkbox" name="new_project" aria-describedby="design-add-new-hint"> New project</label>
+          <p class="hint" id="design-add-new-hint">New project designs a project that does not exist yet; Start creates its repository. The session lives in the project chosen above, or in the first active project when none is chosen.</p>
+        </div>
+        <p class="hint">The agent reads the project's charter and every repo's entity map, read-only. It cannot write, use version control, or start any work itself.</p>
+        <div class="form-actions"><button type="submit" class="primary">Open a design session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -261,55 +330,91 @@
     <section class="view" data-view="design" aria-labelledby="design-title" hidden>
       <div class="view-head"><h2 id="design-title">Design session</h2></div>
       <div id="design-meta" class="id"></div>
-      <div class="thread">
-        <div id="design-feed" class="feed" data-field="feed"></div>
-        <form id="design-form" class="send composer">
-          <div class="box">
-            <textarea name="text" rows="2" aria-label="Message the design agent" placeholder="Message the design agent"></textarea>
-            <div class="actions"><button type="button" class="icon dictate-icon" aria-label="Dictate" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button type="submit" class="primary icon send-icon" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button></div>
+      <div class="split">
+        <div class="split-main">
+          <div class="thread">
+            <div id="design-feed" class="feed" data-field="feed"></div>
+            <form id="design-form" class="send composer">
+              <div class="box">
+                <textarea name="text" rows="2" aria-label="Message the design agent" placeholder="Message the design agent"></textarea>
+                <div class="actions"><button type="button" class="icon dictate-icon" aria-label="Dictate" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button type="submit" class="primary icon send-icon" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button></div>
+              </div>
+              <p id="design-result" class="result" role="status"></p>
+            </form>
           </div>
-          <p id="design-result" class="result" role="status"></p>
-        </form>
-      </div>
-      <section id="design-brief" class="control" aria-labelledby="design-brief-title">
-        <h3 id="design-brief-title">Brief</h3>
-        <div id="design-brief-content"></div>
-      </section>
-      <div class="control">
-        <h3>Start</h3>
-        <p class="meta">Once the agent has drafted a brief, starting the workgroup hands it to the architect and committee. This thread then continues as the workgroup's chief-of-staff thread.</p>
-        <div class="actions"><button type="button" id="design-start" class="primary">Start workgroup from brief</button></div>
-        <p id="design-start-result" class="result" role="status"></p>
-      </div>
-      <div class="control">
-        <div class="actions"><button type="button" id="design-destroy" class="danger">Destroy</button></div>
-        <p id="design-destroy-result" class="result" role="status"></p>
+        </div>
+        <aside class="split-side" aria-label="Brief and start">
+          <section id="design-brief" class="side-section" aria-labelledby="design-brief-title">
+            <h3 id="design-brief-title">Brief</h3>
+            <div id="design-brief-content"></div>
+          </section>
+          <div class="side-section">
+            <h3>Start</h3>
+            <p class="meta">Once the agent has drafted a brief, starting the workgroup hands it to the architect and committee. This thread then continues as the workgroup's chief-of-staff thread.</p>
+            <div class="actions"><button type="button" id="design-start" class="primary">Start workgroup from brief</button></div>
+            <p id="design-start-result" class="result" role="status"></p>
+          </div>
+          <div class="side-section">
+            <div class="actions"><button type="button" id="design-destroy" class="danger">Destroy</button></div>
+            <p id="design-destroy-result" class="result" role="status"></p>
+          </div>
+        </aside>
       </div>
     </section>
 
     <section class="view" data-view="handin" aria-labelledby="handin-title" hidden>
       <div class="view-head"><h2 id="handin-title">Hand in a feature</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="handin-form" class="control">
-        <label>Projects <select name="project" data-project-select multiple required></select></label>
-        <p class="meta" id="handin-project-order">Choose projects in order; the first hosts the shared chief and conversation.</p>
-        <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
-        <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
-        <label>Feature description or issue URL <textarea name="content" rows="8" required></textarea></label>
-        <label class="check"><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
-        <div class="actions"><button type="submit" class="primary">Hand in a feature</button></div>
+      <form id="handin-form" class="form">
+        <div class="field">
+          <label for="handin-projects">Projects</label>
+          <select id="handin-projects" name="project" data-project-select multiple required aria-describedby="handin-project-order"></select>
+          <p class="hint" id="handin-project-order">Choose projects in order; the first hosts the shared chief and conversation.</p>
+        </div>
+        <div class="field">
+          <label for="handin-base">Base workstream</label>
+          <select id="handin-base" name="base"><option value="">Project upstream</option></select>
+        </div>
+        <div class="field">
+          <label for="handin-source">Input</label>
+          <select id="handin-source" name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select>
+        </div>
+        <div class="field">
+          <label for="handin-content">Feature description or issue URL</label>
+          <textarea id="handin-content" name="content" rows="8" required></textarea>
+        </div>
+        <div class="field">
+          <label class="check" for="handin-skip"><input id="handin-skip" name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
+        </div>
+        <div class="form-actions"><button type="submit" class="primary">Hand in a feature</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
 
     <section class="view" data-view="project-add" aria-labelledby="project-add-title" hidden>
       <div class="view-head"><h2 id="project-add-title">Create project</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <form id="project-add" class="control">
-        <label>Name <input name="name" type="text" required></label>
-        <label>Upstream repository <input name="upstream" type="text" placeholder="owner/repository" required></label>
-        <label>Your fork (optional) <input name="fork" type="text" placeholder="Omit to push feature branches to upstream"></label>
-        <label>Clone path on the service machine <input name="clone" type="text" required></label>
-        <label>Base branch <input name="base_branch" type="text" value="main" required></label>
-        <div class="actions"><button type="submit" class="primary">Create project</button></div>
+      <form id="project-add" class="form">
+        <div class="field">
+          <label for="project-add-name">Name</label>
+          <input id="project-add-name" name="name" type="text" autocomplete="off" required>
+        </div>
+        <div class="field">
+          <label for="project-add-upstream">Upstream repository</label>
+          <input id="project-add-upstream" name="upstream" type="text" autocomplete="off" placeholder="owner/repository" required>
+        </div>
+        <div class="field">
+          <label for="project-add-fork">Your fork <span class="optional">(optional)</span></label>
+          <input id="project-add-fork" name="fork" type="text" autocomplete="off" placeholder="Omit to push feature branches to upstream" aria-describedby="project-add-fork-hint">
+          <p class="hint" id="project-add-fork-hint">Without a fork, feature branches are pushed to the upstream repository.</p>
+        </div>
+        <div class="field">
+          <label for="project-add-clone">Clone path on the service machine</label>
+          <input id="project-add-clone" name="clone" type="text" autocomplete="off" required>
+        </div>
+        <div class="field">
+          <label for="project-add-base">Base branch</label>
+          <input id="project-add-base" name="base_branch" type="text" autocomplete="off" value="main" required>
+        </div>
+        <div class="form-actions"><button type="submit" class="primary">Create project</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>

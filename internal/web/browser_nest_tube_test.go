@@ -168,7 +168,7 @@ func TestBrowserHeaderShowsStatePillAndCopyableID(t *testing.T) {
 	}))
 	var head struct {
 		Pill, Glyph, ID, IDFont, Headline, Workspaces string
-		WorkspacesInTitle                              bool
+		WorkspacesInTitle                             bool
 	}
 	p.eval(`(() => {
   const h = document.getElementById('workstream-head');
