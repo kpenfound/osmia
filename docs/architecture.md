@@ -79,7 +79,7 @@ See
 | Local API types | Request, response, event and activity JSON contracts | [api](../internal/api) |
 | Intake and owner gates | Hand-in, design, debate, ratification, questions, charter decisions and amendments | [intake](../internal/intake) |
 | Unit execution | Dispatch, checks, exact-candidate review, landing and rebase | [execution](../internal/execution) |
-| Final review and delivery | Final checks, follow-ups, delivery approval, publication and own-PR outcomes | [delivery](../internal/delivery) |
+| Final review and delivery | Draft publication and pushes, Cloud check watching, follow-ups, mark-ready approval and own-PR outcomes | [delivery](../internal/delivery) |
 | Workgroup lifecycle | Shared approvals, edges, archive cleanup, pull-request polling, base refresh and drift | [lifecycle](../internal/lifecycle) |
 | Runtime observations | Activity health, event subscriptions, bounded reads and tailnet connections | [activity](../internal/activity), [eventstream](../internal/eventstream), [readview](../internal/readview), [tailnet](../internal/tailnet) |
 | Review evidence | Review bundles, diffs, check reports and check selection records | [review](../internal/review), [checks](../internal/checks) |
@@ -108,10 +108,11 @@ method publishes dispatch intent without running a model. Reconciliation hands
 that intent to the thread runner, which executes a scoped turn and records its
 response. Landing checks the reviewed candidate, base and governing document
 revisions before merging it. A changed candidate returns to review. Delivery
-requires final-review acceptance and each workstream's owner approval of the
-PR description and commit message, followed by owner signing. Amend and cancel
-use one impact-summary decision in the shared conversation; later publication
-approvals remain separate.
+pushes the signed branch and opens the pull request as a draft at assembly,
+watches its Dagger Cloud statuses and pushes every later commit to it; marking
+it ready requires final-review acceptance and each workstream's own owner
+approval of the PR description. Amend and cancel use one impact-summary
+decision in the shared conversation; later approvals remain separate.
 
 ## Staying responsive under backend work
 

@@ -775,7 +775,7 @@ cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
 | --- | --- | --- |
 | `engine` | `"auto"` | `auto`, `managed`, `cloud` or an explicit `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` address |
 | `version` | Host Dagger CLI release, resolved at runtime | Expected engine release, such as `v0.20.5` or `0.20.5`; a mismatch is reported rather than enforced |
-| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` and for `check_fallback = "cloud"` |
+| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` and for `check_fallback = "cloud"`, and used for the `dagger cloud checks rerun` of a pull request's failed Cloud checks, which cannot be requested without it |
 | `check_fallback` | `""` (off) | `""` or `"cloud"`. With `"cloud"`, a check run that cannot finish on the service's engine is retried on the Dagger Cloud engine; see [Cloud fallback for checks](#cloud-fallback-for-checks). Any other value fails to load, naming `dagger.check_fallback` |
 
 `auto` lets the host CLI choose an engine. `managed` selects Osmia's
@@ -1133,7 +1133,10 @@ duration shorter than `1m` is rejected.
 `pull_request_poll` is a Go duration string of at least `5m`, defaulting to
 `"10m"`. It governs base refreshes (delivered workstreams' own pull requests
 and dependency integration), delivered unresolved archives' pinned pull requests,
-and incoming hard-block and merge-order edges. Failed lookups also wait for the
+incoming hard-block and merge-order edges, the final review's reads of a pushed
+commit's Dagger Cloud statuses (after the 2 minutes that follow a push), and the
+lookup of an assembled workstream's draft pull request that you may have marked
+ready on GitHub. Failed lookups also wait for the
 interval; they supply no merge or close evidence. Zero, negative and shorter
 durations, invalid duration strings and TOML numbers are rejected; polling
 cannot be disabled.
@@ -1457,7 +1460,7 @@ tools. Feedback on a delivered workstream can produce a notice or question; it
 cannot reopen implementation.
 
 When `fork` is omitted, Osmia pushes its feature branch to `upstream` and
-opens the pull request there against `base_branch`. A fork equal to upstream
+opens the draft pull request there against `base_branch`. A fork equal to upstream
 (case-insensitive) is normalized to omission. The clone can have just an
 `origin` remote matching upstream. Existing configurations with a separate
 fork continue to push there. Osmia never pushes to the configured base branch

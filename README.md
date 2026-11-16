@@ -38,8 +38,9 @@ behavior and feature dependencies; the guides describe implemented behavior.
    candidate against its unit's acceptance, and the service lands approved
    units in dependency order.
 4. A high-level final review reads the assembled branch against the spec's
-   intent and reports blocking and advisory findings. You approve delivery;
-   the service pushes the branch and opens the pull request.
+   intent and reports blocking and advisory findings. The service pushes the
+   branch and opens the pull request as a draft when the work is assembled,
+   Dagger Cloud's checks run on it, and you mark it ready for review.
 
 The chief of staff answers what it can, resolves contested units it is
 confident about and moves units the state machine leaves stuck; the

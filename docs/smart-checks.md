@@ -374,15 +374,6 @@ asking again. Recording the same run again keeps one selection record. A new run
 candidate, asks afresh. A judgment interrupted twice falls back as
 `interrupted`.
 
-Final-review judgments are keyed by the review number and rebased commit,
-not the attempt number. An incomplete run's retry or an attempt resumed after
-a service restart lists the checks again and reuses the recorded judgment
-for each stage's same task, version, exact request and configured acceptance
-values. The depth request follows deterministically from breadth, and ranking
-from both, so the same change reuses all three judgments across restarts and
-retries. A new review, commit or changed judgment input asks afresh. Each
-attempt keeps its own start and result evidence.
-
 ## What Jev sees
 
 All three requests carry the same state bundle: `checks` (the link guide),

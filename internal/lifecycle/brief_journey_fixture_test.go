@@ -60,6 +60,9 @@ type briefPlan struct {
 	// Early are record_delivery_brief inputs made before the gate, as a
 	// delayed or replayed call of an earlier review would be.
 	Early []map[string]any
+	// Calls are tool calls made before the gate, as the chief of staff's
+	// triage of the review's findings.
+	Calls []briefCall
 }
 
 // briefChief is a fake chief of staff that handles the delivery brief
@@ -73,10 +76,12 @@ type briefChief struct {
 	results map[string][]string
 	early   map[int][]string
 	refused []string
+	called  map[int][]string
+	heard   []string
 }
 
 func newBriefChief() *briefChief {
-	return &briefChief{plans: map[int]briefPlan{}, results: map[string][]string{}, early: map[int][]string{}}
+	return &briefChief{plans: map[int]briefPlan{}, results: map[string][]string{}, early: map[int][]string{}, called: map[int][]string{}}
 }
 
 // plan sets what the chief does on the notice of final review review.
@@ -118,6 +123,33 @@ func (c *briefChief) result(id string) []string {
 	return c.results[id]
 }
 
+// calls returns the results of the plan's Calls for a final review.
+func (c *briefChief) calls(review int) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.called[review]...)
+}
+
+// prompts returns the prompts the chief handled, oldest first.
+func (c *briefChief) prompts() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.heard...)
+}
+
+// heardOf returns how many prompts the chief handled that contain text.
+func (c *briefChief) heardOf(text string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, prompt := range c.heard {
+		if strings.Contains(prompt, text) {
+			n++
+		}
+	}
+	return n
+}
+
 func (c *briefChief) earlyResults(review int) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -136,6 +168,9 @@ func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall
 
 func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 	prompt := ownPrompt(req.Prompt)
+	c.mu.Lock()
+	c.heard = append(c.heard, prompt)
+	c.mu.Unlock()
 	finish := func(text string) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: text, SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
@@ -172,6 +207,12 @@ func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 			out := briefToolCall(ctx, tools, briefCall{Tool: "record_delivery_brief", Input: input})
 			c.mu.Lock()
 			c.early[review] = append(c.early[review], out)
+			c.mu.Unlock()
+		}
+		for _, call := range plan.Calls {
+			out := briefToolCall(ctx, tools, call)
+			c.mu.Lock()
+			c.called[review] = append(c.called[review], out)
 			c.mu.Unlock()
 		}
 		if gate != nil {
@@ -237,8 +278,18 @@ func newBriefJourney(t *testing.T, extra string) *briefJourney {
 // tools and the fake chief of this journey.
 func newBriefFixture(t *testing.T, extra string) *briefJourney {
 	t.Helper()
+	return newBriefFixtureAt(t, extra, nil)
+}
+
+// newBriefFixtureAt is newBriefFixture with the service, and the turns it
+// runs, reading now as their clock when it is not nil.
+func newBriefFixtureAt(t *testing.T, extra string, now func() time.Time) *briefJourney {
+	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, chiefRole+extra, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
+		if now != nil {
+			opts.Reconciliation.Now = now
+		}
 		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	})
