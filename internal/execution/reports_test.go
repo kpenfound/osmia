@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -316,8 +317,7 @@ func TestDoneStillRefusesAReportItsRulesReject(t *testing.T) {
 		t.Fatal("fixture unit resume did not start")
 	}
 	for name, args := range map[string]map[string]any{
-		"empty outcome":  with(" ", nil),
-		"empty learning": with("Built", map[string]any{"learnings": []string{"Uses chunks.", " "}}),
+		"empty outcome": with(" ", nil),
 	} {
 		if out := call(args); !strings.Contains(out, `"recorded":false`) {
 			t.Fatalf("%s: %s", name, out)
@@ -334,5 +334,48 @@ func TestDoneStillRefusesAReportItsRulesReject(t *testing.T) {
 	}
 	if got := reports.accepted[turnKey(scope)]; got.Report.Outcome != "Built" || got.OwnerAction != ownerActionWording {
 		t.Fatalf("accepted %+v", got)
+	}
+}
+
+func TestDoneToolOffersNoLearningsField(t *testing.T) {
+	t.Parallel()
+	f := newBuildFixture(t, "no-learnings")
+	scope := coreadapter.Scope{Project: string(f.repository.Project()), Workstream: string(stream), Unit: "resume", Thread: masonAgent("resume"), Turn: "t", Role: masonRole}
+	done := (&masonReports{}).tool(f.repository, scope)
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	must(t, json.Unmarshal(done.InputSchema, &schema))
+	if _, ok := schema.Properties["learnings"]; ok || strings.Contains(done.Description, "learnings") {
+		t.Fatalf("the done tool offers learnings: %s %s", done.InputSchema, done.Description)
+	}
+	if _, err := done.Handle(context.Background(), json.RawMessage(`{"outcome":"Built","learnings":["Uses chunks."]}`)); err == nil {
+		t.Fatal("a report with learnings was accepted")
+	}
+}
+
+// A report recorded before the done tool dropped learnings still reads, and
+// rewriting it keeps them.
+func TestReportsThatCarryLearningsStillRead(t *testing.T) {
+	t.Parallel()
+	turn := trace.QueuedTurn{}
+	turn.Request.TurnID = "turn_1"
+	turn.Response = &trace.TurnResponse{}
+	turn.Response.Result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: `{"outcome":"Built","learnings":["Uses chunks."," "],"owner_action":"Look."}`}
+	done, err := parseDoneReport(turn)
+	if err != nil || done.Outcome != "Built" || !slices.Equal(done.Learnings, []string{"Uses chunks.", " "}) || done.OwnerAction != "Look." {
+		t.Fatalf("old done report: %+v %v", done, err)
+	}
+	if reason := checkReport(done.MasonReport); reason != "" {
+		t.Fatalf("an old report with an empty learning is refused: %s", reason)
+	}
+	var recorded UnitReport
+	must(t, json.Unmarshal([]byte(`{"unit":"resume","turn":"turn_1","seal":1,"outcome":"Built","learnings":["Uses chunks."],"branch":"b","base":"x","candidate":"y"}`), &recorded))
+	if !slices.Equal(recorded.Learnings, []string{"Uses chunks."}) {
+		t.Fatalf("old unit report: %+v", recorded)
+	}
+	rewritten, err := json.Marshal(recorded)
+	if err != nil || !strings.Contains(string(rewritten), `"learnings":["Uses chunks."]`) {
+		t.Fatalf("a rewritten report lost its learnings: %s %v", rewritten, err)
 	}
 }

@@ -104,10 +104,10 @@ func TestMasonBundleHoldsExactlyTheUnit(t *testing.T) {
 	if len(m.Context.Charter.Rules) != 2 || !reflect.DeepEqual(m.Context.Scope.Entities, []string{"internal.kb.seed"}) || m.Context.Scope.Workstream != first {
 		t.Fatalf("context = %+v", m.Context)
 	}
-	if got := sources(m.Context); !reflect.DeepEqual(got, []string{"kb/internal.md", "kb/internal.kb.seed.md"}) {
-		t.Fatalf("knowledge = %v", got)
-	}
 	r := m.Render()
+	if strings.Contains(r, "# Seeding") || strings.Contains(r, "How the internal packages fit") {
+		t.Fatalf("the unit's context holds prose:\n%s", r)
+	}
 	for _, s := range []string{"# Unit resume", "## Task\nResume interrupted uploads and log each seed.", "## Acceptance\n- TestResume covers an interrupted upload\n- Each seed logs one line", "## Criteria served\n- spec#1: Uploads resume.\n- spec#3: Seeds are logged.", "## Depends on\nNo units.", "## Footprint\n- internal.kb.seed", "1. Uploads resume.", "charter#1", "# Project context"} {
 		if !strings.Contains(r, s) {
 			t.Errorf("render lacks %q:\n%s", s, r)

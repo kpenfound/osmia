@@ -150,7 +150,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if mason.Spec.Revision != s.Revision.Spec || mason.Plan.Revision != s.Revision.Plan || mason.Context.Charter.Revision == 0 || len(mason.Context.Entities.Unresolved) != 0 {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s lacks sealed revisions, charter or resolved local context", unit)
 	}
-	if reason := checkReport(MasonReport{Outcome: report.Outcome, Learnings: report.Learnings}); reason != "" {
+	if reason := checkReport(MasonReport{Outcome: report.Outcome}); reason != "" {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
 	}
 	g, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)

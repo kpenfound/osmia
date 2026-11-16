@@ -1,5 +1,5 @@
 // Package bundle assembles the project context a turn receives: the charter,
-// knowledge-base prose, footprint entities and trace decisions.
+// footprint entities and trace decisions.
 package bundle
 
 import (
@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -50,8 +48,6 @@ type Bundle struct {
 	Scope          Scope                 `json:"scope"`
 	MemberCharters []trace.MemberCharter `json:"member_charters,omitempty"`
 	Charter        Charter               `json:"charter"`
-	Knowledge      []Prose               `json:"knowledge"`
-	Missing        []MissingProse        `json:"missing"`
 	Entities       Entities              `json:"entities"`
 	Decisions      []Decision            `json:"decisions"`
 	Notices        []Notice              `json:"notices"`
@@ -111,20 +107,6 @@ type Charter struct {
 	Guidance    string               `json:"guidance"`
 	Rules       []charter.Rule       `json:"rules"`
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`
-}
-
-// Prose is one kb/<subsystem>.md file as read at assembly.
-type Prose struct {
-	Subsystem string `json:"subsystem"`
-	Source    string `json:"source"`
-	Content   string `json:"content"`
-}
-
-// MissingProse names a scope entity for which none of the files that could
-// hold its prose, its own or an ancestor's, exists.
-type MissingProse struct {
-	Entity string   `json:"entity"`
-	Looked []string `json:"looked"`
 }
 
 // Entities are the relevant entities of the recorded entity map.
@@ -192,7 +174,7 @@ type CharterNotice struct {
 }
 
 // Files is the provider that reads only the project's trace. It keeps
-// nothing between calls, so edits to the charter or the knowledge base apply
+// nothing between calls, so edits to the charter apply
 // to the next assembly.
 type Files struct {
 	Provider Provider
@@ -206,8 +188,8 @@ var _ Provider = Files{}
 
 func (Files) Mode(config.ProjectID) Mode { return ModeFile }
 
-// Assemble reads the latest charter, then the knowledge base, the entity map
-// and the rulings, in that order. The notices are the project's rulings with scope
+// Assemble reads the latest charter, then the entity map and the rulings, in
+// that order. The notices are the project's rulings with scope
 // notify, ordered as the decisions are, and the charter rules ratified from
 // rulings, ordered by when the charter recorded them.
 func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Scope) (Bundle, error) {
@@ -218,7 +200,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	if err != nil {
 		return Bundle{}, err
 	}
-	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}, CharterNotices: []CharterNotice{}}
+	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Decisions: []Decision{}, Notices: []Notice{}, CharterNotices: []CharterNotice{}}
 	doc, err := repo.Charter(ctx)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("charter: %w", err)
@@ -242,12 +224,9 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	}
 	b.Entities = Entities{Source: trace.EntitiesPath, Record: trace.EntitiesDocument, Revision: revision, Entities: []Entity{}, Unresolved: []string{}}
 	if len(scope.Entities) == 0 {
-		err = f.whole(repo, m, &b)
+		f.whole(m, &b)
 	} else {
-		err = f.scoped(repo, m, scope.Entities, &b)
-	}
-	if err != nil {
-		return Bundle{}, err
+		f.scoped(m, scope.Entities, &b)
 	}
 	if b.Decisions, err = decisions(repo, scope.Workstream); err != nil {
 		return Bundle{}, fmt.Errorf("decisions: %w", err)
@@ -321,28 +300,14 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	return b, nil
 }
 
-func (f Files) whole(repo *trace.Repository, m kb.Map, b *Bundle) error {
+func (f Files) whole(m kb.Map, b *Bundle) {
 	for _, e := range m.Entities {
 		b.Entities.Entities = append(b.Entities.Entities, entity(e))
 	}
 	slices.SortFunc(b.Entities.Entities, func(x, y Entity) int { return strings.Compare(x.ID, y.ID) })
-	names, err := repo.Subsystems()
-	if err != nil {
-		return fmt.Errorf("knowledge base: %w", err)
-	}
-	for _, name := range names {
-		p, ok, err := prose(repo, name)
-		if err != nil {
-			return err
-		}
-		if ok {
-			b.Knowledge = append(b.Knowledge, p)
-		}
-	}
-	return nil
 }
 
-func (f Files) scoped(repo *trace.Repository, m kb.Map, names []string, b *Bundle) error {
+func (f Files) scoped(m kb.Map, names []string, b *Bundle) {
 	fp := m.ResolveEntities(names)
 	b.Entities.Unresolved = fp.Unresolved
 	byID := map[string]kb.Entity{}
@@ -352,76 +317,6 @@ func (f Files) scoped(repo *trace.Repository, m kb.Map, names []string, b *Bundl
 	for _, id := range fp.Entities {
 		b.Entities.Entities = append(b.Entities.Entities, entity(byID[id]))
 	}
-	// lineage returns an entity's ID and those of its part_of ancestors,
-	// nearest first.
-	lineage := func(id string) []string {
-		var out []string
-		seen := map[string]bool{}
-		queue := []string{id}
-		for len(queue) > 0 {
-			next := queue[0]
-			queue = queue[1:]
-			if seen[next] {
-				continue
-			}
-			seen[next] = true
-			out = append(out, next)
-			queue = append(queue, byID[next].PartOf...)
-		}
-		return out
-	}
-	read := map[string]bool{} // subsystem -> file exists
-	candidates := map[string]bool{}
-	for _, id := range fp.Entities {
-		for _, name := range lineage(id) {
-			candidates[name] = true
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(candidates)) {
-		p, ok, err := prose(repo, name)
-		if err != nil {
-			return err
-		}
-		read[name] = ok
-		if ok {
-			b.Knowledge = append(b.Knowledge, p)
-		}
-	}
-	unresolved := map[string]bool{}
-	for _, name := range fp.Unresolved {
-		unresolved[name] = true
-	}
-	noted := map[string]bool{}
-	for _, name := range names {
-		e, ok := m.Lookup(name)
-		if !ok || unresolved[name] || noted[e.ID] {
-			continue
-		}
-		noted[e.ID] = true
-		missing := MissingProse{Entity: e.ID, Looked: []string{}}
-		for _, id := range lineage(e.ID) {
-			if read[id] {
-				missing.Looked = nil
-				break
-			}
-			missing.Looked = append(missing.Looked, trace.ProsePath(id))
-		}
-		if missing.Looked != nil {
-			b.Missing = append(b.Missing, missing)
-		}
-	}
-	return nil
-}
-
-func prose(repo *trace.Repository, subsystem string) (Prose, bool, error) {
-	content, err := repo.Prose(subsystem)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Prose{}, false, nil
-	}
-	if err != nil {
-		return Prose{}, false, fmt.Errorf("knowledge base %s: %w", trace.ProsePath(subsystem), err)
-	}
-	return Prose{Subsystem: subsystem, Source: trace.ProsePath(subsystem), Content: content}, true, nil
 }
 
 func entity(e kb.Entity) Entity {

@@ -40,8 +40,8 @@ type Mason struct {
 	// Amendments are the approved amendments that rework the unit or
 	// change its plan entry, in the order they were applied.
 	Amendments []AmendmentNotice `json:"amendments,omitempty"`
-	// Context holds the charter and the knowledge-base context of the
-	// unit's footprint.
+	// Context holds the charter and the entity map context of the unit's
+	// footprint.
 	Context Bundle `json:"context"`
 }
 

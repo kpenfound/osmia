@@ -1065,7 +1065,7 @@ func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("runtime environment exposes %s", key)
 		}
 	}
-	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/<subsystem>.md", "kb/entities.json#<entity>", "veto", "advice", "split", "acceptance", shed.ObjectTool, "Call " + questions.AskTool + " when something you must know"} {
+	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/entities.json#<entity>", "veto", "advice", "split", "acceptance", shed.ObjectTool, "Call " + questions.AskTool + " when something you must know"} {
 		if !strings.Contains(req.Prompt, want) {
 			fail("prompt lacks %q", want)
 		}

@@ -3,7 +3,6 @@ package trace
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"reflect"
 	"slices"
 	"strings"
@@ -77,9 +76,6 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 	}
 	if got := kbFiles(t, r); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace 2\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
 		t.Fatalf("knowledge base after removal: %v", got)
-	}
-	if _, err := r.Prose("service"); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("removed prose read: %v", err)
 	}
 	got := projectDocuments(t, r, "subsystem-service")
 	if len(got) != 2 || got[0].Content != "# service\n" || got[1].Content != "" {

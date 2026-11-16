@@ -10,7 +10,7 @@ import (
 	testing "testing"
 )
 
-func TestProjectContextPagesKnowledgeWithoutExposingPrivateRecords(t *testing.T) {
+func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testing.T) {
 	t.Parallel()
 	f, stream, repo, _ := newFinalFixture(t, "project-context")
 	ctx := context.Background()
@@ -22,58 +22,78 @@ func TestProjectContextPagesKnowledgeWithoutExposingPrivateRecords(t *testing.T)
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "context-claim", "/owned/context", f.s.now())
 	must(t, err)
 	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "context", Role: trace.ChiefOfStaff}
+	notice := func(text string) string {
+		data, err := json.Marshal(trace.ProjectNotice{Text: text})
+		must(t, err)
+		return string(data)
+	}
 	var docs []trace.Document
 	for i := range 25 {
-		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("knowledge-%d", i), Revision: 1, Project: repo.Project(), At: f.s.now(), Actor: ownerActor, Cause: "fixture"}
-		docs = append(docs, trace.Document{Header: dh, Path: fmt.Sprintf("kb/topic-%02d.md", i), Content: strings.Repeat("évidence ", 4000)})
+		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("topic-%02d", i), Revision: 1, Project: repo.Project(), At: f.s.now(), Actor: ownerActor, Cause: "fixture"}
+		docs = append(docs, trace.Document{Header: dh, Path: fmt.Sprintf("notices/topic-%02d.json", i), Content: notice(strings.Repeat("évidence ", 4000))})
 	}
 	dh := docs[0].Header
 	dh.ID = "private-note"
 	docs = append(docs, trace.Document{Header: dh, Path: "notes/private.md", Content: "private-secret"})
+	// An older trace holds prose and a source ledger, which are never served.
+	dh.ID = "subsystem-topic"
+	docs = append(docs, trace.Document{Header: dh, Path: "kb/topic-00.md", Content: "old-prose-secret"})
+	dh.ID = "kb-sources"
+	docs = append(docs, trace.Document{Header: dh, Path: "kb/sources.json", Content: "[\"old-prose-secret\"]\n"})
 	must(t, repo.RecordDocuments(ctx, docs))
 	tool := projectContext(repo, scope)
 	call := func(in string) map[string]any {
 		t.Helper()
 		raw, err := tool.Handle(ctx, json.RawMessage(in))
 		must(t, err)
-		if len(raw) > 20000 || strings.Contains(string(raw), "private-secret") {
+		if len(raw) > 20000 || strings.Contains(string(raw), "private-secret") || strings.Contains(string(raw), "old-prose-secret") {
 			t.Fatalf("unbounded or private output: %d bytes", len(raw))
 		}
 		var got map[string]any
 		must(t, json.Unmarshal(raw, &got))
 		return got
 	}
-	first := call(`{"prefix":"kb/topic-"}`)
+	first := call(`{"prefix":"notices/topic-"}`)
 	if len(first["records"].([]any)) != 20 || first["next_offset"] != float64(20) {
 		t.Fatalf("first page: %+v", first)
 	}
-	last := call(`{"prefix":"kb/topic-","offset":20}`)
+	last := call(`{"prefix":"notices/topic-","offset":20}`)
 	if len(last["records"].([]any)) != 5 || last["next_offset"] != float64(-1) {
 		t.Fatalf("last page: %+v", last)
 	}
-	part := call(`{"path":"kb/topic-00.md","revision":1}`)
+	part := call(`{"path":"notices/topic-00.json","revision":1}`)
 	next := int(part["next_offset"].(float64))
 	if next <= 0 || len(part["content"].(string)) != next {
 		t.Fatalf("invalid content continuation: %+v", part)
 	}
-	call(fmt.Sprintf(`{"path":"kb/topic-00.md","revision":1,"offset":%d}`, next))
+	call(fmt.Sprintf(`{"path":"notices/topic-00.json","revision":1,"offset":%d}`, next))
 	updated := docs[0]
 	updated.Revision = 2
-	updated.Content = "Current consolidated knowledge."
+	updated.Content = notice("Current consolidated notice.")
 	must(t, repo.RecordDocuments(ctx, []trace.Document{updated}))
-	if current := call(`{"path":"kb/topic-00.md"}`); current["content"] != updated.Content || current["revision"] != float64(2) {
-		t.Fatalf("stale current knowledge: %+v", current)
+	if current := call(`{"path":"notices/topic-00.json"}`); current["content"] != updated.Content || current["revision"] != float64(2) {
+		t.Fatalf("stale current notice: %+v", current)
 	}
-	if old := call(`{"path":"kb/topic-00.md","revision":1}`); old["content"] != part["content"] {
+	if old := call(`{"path":"notices/topic-00.json","revision":1}`); old["content"] != part["content"] {
 		t.Fatal("compaction lost historical evidence")
 	}
 	if found := call(`{"query":"consolidated"}`); found["total"] != float64(1) {
-		t.Fatalf("search did not use current knowledge: %+v", found)
+		t.Fatalf("search did not use the current notice: %+v", found)
 	}
-	for _, path := range []string{"../config.toml", "notes/private.md", "tools/private.json"} {
+	if listed := call(`{"prefix":"kb/"}`); listed["total"] != float64(1) || listed["records"].([]any)[0].(map[string]any)["path"] != "kb/entities.json" {
+		t.Fatalf("kb/ lists more than the entity map: %+v", listed)
+	}
+	if found := call(`{"query":"old-prose-secret"}`); found["total"] != float64(0) {
+		t.Fatalf("search found old prose: %+v", found)
+	}
+	for _, path := range []string{"../config.toml", "notes/private.md", "tools/private.json", "kb/topic-00.md", "kb/sources.json"} {
 		in, _ := json.Marshal(map[string]string{"path": path})
 		if _, err := tool.Handle(ctx, in); err == nil {
 			t.Errorf("read forbidden path %s", path)
+		}
+		in, _ = json.Marshal(map[string]any{"path": path, "revision": 1})
+		if _, err := tool.Handle(ctx, in); err == nil {
+			t.Errorf("read revision 1 of forbidden path %s", path)
 		}
 	}
 	bad := scope

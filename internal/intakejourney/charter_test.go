@@ -153,7 +153,10 @@ func TestContextProviderReadsActiveProject(t *testing.T) {
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.now(), Actor: ownerActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
 	b, err := provider.Assemble(ctx, id, bundle.Scope{})
 	must(t, err)
-	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 1 || len(b.Knowledge) != 1 || b.Knowledge[0].Content != "Service notes\n" || b.Entities.Revision != 1 {
+	if strings.Contains(b.Render(), "Service notes") {
+		t.Fatalf("bundle carries prose: %s", b.Render())
+	}
+	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 1 || b.Entities.Revision != 1 {
 		t.Fatalf("bundle: %+v", b)
 	}
 	if n := charterRevisionCount(t, s); n != 2 {

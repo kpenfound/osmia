@@ -213,8 +213,8 @@ owners change nothing posted, and a re-seed that records no revision posts nothi
 - Turn requests and responses, tool calls and conversations.
 - Costs, check and test output, and images.
 - Spec drafts, committee debate rounds and amendment requests before a decision.
-- Plans and footprints, unit landings, mason reports and learnings, and
-  per-unit review findings.
+- Plans and footprints, unit landings, mason reports and per-unit review
+  findings.
 - Knowledge-base prose and `kb/sources.json` in older traces.
 - Engineering answers that came from reading code.
 - The chief's fixes to a stuck workstream (`move_workstream` and similar).

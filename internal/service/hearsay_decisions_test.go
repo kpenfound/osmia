@@ -494,7 +494,7 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 
 	// Notes, aliases, paths and the source ledger change nothing posted.
 	f.storeMap(testEntities(kb.Entity{ID: "api", Name: "API", Aliases: []string{"rest"}, Paths: []string{"internal/api/**", "cmd/api/**"}, Owners: []string{"@owner"}, PartOf: []string{}}), hr(2), "fixture")
-	f.document("", "subsystem-api", 1, trace.ProsePath("api"), "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
+	f.document("", "subsystem-api", 1, "kb/api.md", "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
 	f.document("", "kb-sources", 1, "kb/sources.json", "[]\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("a non-structural edit posted %v", kinds(posts))

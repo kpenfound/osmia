@@ -60,10 +60,6 @@ func setup(t *testing.T) fixture {
 	if _, err := repo.EditCharter(ctx, 1, "# Charter\n\n1. Every change has a test.\n2. Keep state in files.\n3. First of two.\n3. Second of two.\n", start); err != nil {
 		t.Fatal(err)
 	}
-	store := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-store", Revision: 1, Project: project, At: start, Actor: owner, Cause: "test"}, Path: "kb/store.md", Content: "# Store\nState lives in files under the root.\n"}
-	if err := repo.RecordDocuments(ctx, []trace.Document{store}); err != nil {
-		t.Fatal(err)
-	}
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "draft"}, Path: path, Content: content}
 	}
@@ -321,7 +317,7 @@ func TestResolveCitations(t *testing.T) {
 	if _, err := f.repo.AnswerQuestion(ctx, "chief", chief, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"charter#1", "charter#2", "kb/store.md", "ruling#1", "spec#1", "spec#2", "plan#resume"} {
+	for _, c := range []string{"charter#1", "charter#2", "ruling#1", "spec#1", "spec#2", "plan#resume"} {
 		if err := questions.Resolve(ctx, f.repo, stream, c); err != nil {
 			t.Errorf("%s: %v", c, err)
 		}
@@ -330,7 +326,7 @@ func TestResolveCitations(t *testing.T) {
 		"charter#3":        "the charter has no rule numbered 3 exactly once",
 		"charter#9":        "the charter has no rule numbered 9 exactly once",
 		"charter#0":        "it is not one of " + questions.CitationForms,
-		"kb/missing.md":    "the knowledge base has no file kb/missing.md",
+		"kb/store.md":      "it is not one of " + questions.CitationForms,
 		"kb/../charter.md": "it is not one of " + questions.CitationForms,
 		"ruling#2":         "this workstream records no ruling 2",
 		"spec#3":           "the spec has no acceptance criterion numbered 3 exactly once",
@@ -410,7 +406,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	before := f.head(t)
 	for _, c := range [][3]string{
 		{"answer", `{"question":"1","text":"In files.","citations":[]}`, `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`},
-		{"answer", `{"question":"1","text":"In files.","citations":["kb/missing.md"]}`, `{"recorded":false,"reason":"citation \"kb/missing.md\" does not resolve: the knowledge base has no file kb/missing.md"}`},
+		{"answer", `{"question":"1","text":"In files.","citations":["kb/store.md"]}`, `{"recorded":false,"reason":"citation \"kb/store.md\" does not resolve: it is not one of ` + questions.CitationForms + `"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["the code"]}`, `{"recorded":false,"reason":"citation \"the code\" does not resolve: it is not one of ` + questions.CitationForms + `"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["spec#9"]}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
 		{"route_amendment", `{"question":"1","citations":["spec#1"],"change":"Amend criterion 1.","reason":"Needed"}`, `{"recorded":false,"reason":"this workstream has no seal"}`},
@@ -456,7 +452,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		t.Fatalf("an open question was delivered: %+v", th.Turns)
 	}
 
-	if got := call(t, chief["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","kb/store.md"]}`); got != `{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}` {
+	if got := call(t, chief["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","spec#1"]}`); got != `{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}` {
 		t.Fatalf("answer: %s", got)
 	}
 	if got := call(t, chief["answer"], `{"question":"1","text":"In a database.","citations":["charter#1"]}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
@@ -509,7 +505,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		t.Fatalf("answer turns: %+v %v", th.Turns, err)
 	}
 	req := th.Turns[1].Request
-	wantPrompt := "Answer to your question 1.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=22 >>>\n| Where does state live?\n<<< /osmia:question >>>\n<<< osmia:answer | chief of staff | bytes=24 >>>\n| In files under the root.\n<<< /osmia:answer >>>\n<<< osmia:citations | chief of staff | bytes=21 >>>\n| charter#2\n| kb/store.md\n<<< /osmia:citations >>>\n"
+	wantPrompt := "Answer to your question 1.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=22 >>>\n| Where does state live?\n<<< /osmia:question >>>\n<<< osmia:answer | chief of staff | bytes=24 >>>\n| In files under the root.\n<<< /osmia:answer >>>\n<<< osmia:citations | chief of staff | bytes=16 >>>\n| charter#2\n| spec#1\n<<< /osmia:citations >>>\n"
 	if req.TurnID != "answer_1" || req.TurnID != questions.TurnID("1") || req.ID != "request_answer_1" || req.AgentID != "mason1" || req.ThreadID != "mason1_thread" || req.Unit != "resume" ||
 		req.Prompt != wantPrompt || req.SystemPrompt != "You are the mason." || req.Actor != questions.Actor || req.Cause != "question_1_answered" ||
 		req.Profile != (coreadapter.Profile{Name: "strong", Backend: "fake", Model: "for-mason"}) || !req.At.Equal(start.Add(2*time.Hour)) {

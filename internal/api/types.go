@@ -201,7 +201,7 @@ type ProjectView struct {
 }
 
 // RepoView names one repo of a project: its own upstream, optional fork,
-// local clone, landing style, trace and knowledge base.
+// local clone, landing style, trace and entity map.
 type RepoView struct {
 	ID         config.ProjectID `json:"id"`
 	Name       string           `json:"name"`

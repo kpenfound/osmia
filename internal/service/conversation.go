@@ -151,7 +151,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		if wholeGroup {
 			return ConversationEntry{}, workgroupAuthorityError(err)
 		}
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the knowledge base and the trace repository", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the entity map and the trace repository", stream)}
 	}
 	note := ""
 	if host != stream {

@@ -19,6 +19,7 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	intake "github.com/kpenfound/osmia/internal/intake"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	kb "github.com/kpenfound/osmia/internal/kb"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	status "github.com/kpenfound/osmia/internal/status"
@@ -387,8 +388,10 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	for _, repoID := range []config.ProjectID{project, second} {
 		repository, err := s.repository(repoID)
 		must(t, err)
-		header := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-design", Revision: 1, Project: repoID, At: s.now(), Actor: ownerActor, Cause: "knowledge-base"}
-		must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: header, Path: "kb/design.md", Content: "Conventions for repo " + string(repoID)}}))
+		m, err := kb.Load(repository)
+		must(t, err)
+		m.Entities = append(m.Entities, kb.Entity{ID: "conventions", Name: "Conventions for repo " + string(repoID), Aliases: []string{}, Paths: []string{"conventions/**"}, Owners: []string{}, PartOf: []string{}})
+		must(t, kb.Store(context.Background(), repository, m, s.now(), ownerActor, "fixture"))
 	}
 	opened, err := c.OpenDesign(context.Background(), project)
 	must(t, err)
@@ -410,9 +413,9 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			fail("non-brief charter was inlined")
 		}
 		if strings.Contains(req.SystemPrompt, "Conventions for repo "+string(second)) {
-			fail("non-brief KB was inlined")
+			fail("non-brief entity map was inlined")
 		}
-		for _, name := range []string{"charter.md", "kb.md"} {
+		for _, name := range []string{"charter.md", "entities.md"} {
 			out, err := readTool(ctx, tools, "projects/"+string(second)+"/"+name)
 			if err != nil || out == "" {
 				fail("non-brief reference %s unreadable: %s %v", name, out, err)
@@ -420,13 +423,13 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			if name == "charter.md" && !strings.Contains(out, "Keep the client API stable") {
 				fail("reference charter missing content: %s", out)
 			}
-			if name == "kb.md" && !strings.Contains(out, "Conventions for repo "+string(second)) {
-				fail("reference KB missing content: %s", out)
+			if name == "entities.md" && !strings.Contains(out, "Conventions for repo "+string(second)) {
+				fail("reference entity map missing content: %s", out)
 			}
 		}
 		for _, repo := range []config.ProjectID{project, second} {
 			if repo == project && !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
-				fail("missing repo knowledge base in context: %s", repo)
+				fail("missing repo entity map in context: %s", repo)
 			}
 			out, err := callTool(ctx, tools, designReadRepoToolName, map[string]any{"repo": repo, "path": "README.md"})
 			if err != nil {

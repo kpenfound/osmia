@@ -1068,7 +1068,7 @@ func ArchitectGrant(tools ...string) coreadapter.Capabilities {
 }
 
 func ArchitectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its entity map, in the vocabulary the entity map gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
@@ -1086,7 +1086,7 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, an
 Your view holds:
 - %s: what the owner handed in, unchanged. It says what to build.
 - charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
-- context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
+- context.md: the project context bundle: the charter's rules, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
 Deliver two files with %s; only what you deliver is kept.
 

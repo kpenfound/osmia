@@ -74,7 +74,6 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		reason string
 	}{
 		{map[string]any{"outcome": " "}, "outcome is required: say what the unit's work now does and how you checked its acceptance"},
-		{map[string]any{"outcome": "Built", "learnings": []string{" "}}, "learning 1 is empty"},
 	}
 	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		for _, r := range refused {
@@ -88,6 +87,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 			{"outcome": "approved", "state": UnitApproved},
 			{"outcome": "Built", "criteria": []any{map[string]any{"criterion": "spec#1"}}},
 			{"outcome": 1},
+			{"outcome": "Built", "learnings": []string{"Uses chunks."}},
 		} {
 			if text, err := callTool(ctx, tools, doneTool, args); err == nil {
 				return fmt.Errorf("done %v is no tool error: %s", args, text)

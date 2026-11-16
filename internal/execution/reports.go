@@ -32,11 +32,9 @@ const (
 )
 
 // MasonReport is what a mason reports with done: its outcome, which says
-// what the unit's work now does and how the mason checked its acceptance,
-// and any reusable project learnings.
+// what the unit's work now does and how the mason checked its acceptance.
 type MasonReport struct {
-	Outcome   string   `json:"outcome"`
-	Learnings []string `json:"learnings,omitempty"`
+	Outcome string `json:"outcome"`
 }
 
 // doneReport is the report of an outcome masonDone: the mason's report and,
@@ -46,7 +44,10 @@ type MasonReport struct {
 // card the service dropped.
 type doneReport struct {
 	MasonReport
-	OwnerAction string `json:"owner_action,omitempty"`
+	// Learnings are the learnings an earlier mason report carries. They are
+	// read and carried into the unit's report, never written by a new report.
+	Learnings   []string `json:"learnings,omitempty"`
+	OwnerAction string   `json:"owner_action,omitempty"`
 }
 
 const (
@@ -61,7 +62,9 @@ const (
 // UnitReport is the document units/<unit>/report.json: the mason's report
 // on a unit, the turn and owner-facing card it came from, the seal the unit was built against,
 // and the candidate the service made of the unit's workspace, a commit on
-// Branch that descends from the feature branch at Base.
+// Branch that descends from the feature branch at Base. Learnings are the
+// learnings a report recorded earlier carries; they are read and kept when a
+// report is rewritten, and a new report never writes them.
 type UnitReport struct {
 	Unit      string            `json:"unit"`
 	Turn      string            `json:"turn"`
@@ -125,8 +128,8 @@ func turnKey(scope coreadapter.Scope) string {
 // adjustment.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Put any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths, URLs or model names. The service shortens a card field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or what happened it records no card. A needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
+		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths, URLs or model names. The service shortens a card field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or what happened it records no card. A needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			MasonReport
@@ -252,16 +255,11 @@ func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
 	return done
 }
 
-// checkReport returns why a report is incomplete: an empty outcome or an
-// empty learning. It returns "" for a complete report.
+// checkReport returns why a report is incomplete: an empty outcome. It
+// returns "" for a complete report.
 func checkReport(report MasonReport) string {
 	if strings.TrimSpace(report.Outcome) == "" {
 		return "outcome is required: say what the unit's work now does and how you checked its acceptance"
-	}
-	for i, learning := range report.Learnings {
-		if strings.TrimSpace(learning) == "" {
-			return fmt.Sprintf("learning %d is empty", i+1)
-		}
 	}
 	return ""
 }
@@ -463,7 +461,7 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	if err != nil {
 		return false, false, nil, err
 	}
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Learnings: report.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Learnings: done.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
 		return false, false, nil, err
 	}

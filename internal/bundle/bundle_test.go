@@ -75,9 +75,9 @@ func setup(t *testing.T) fixture {
 		},
 	}
 	f.charter(t, "# Charter\n\n## Testing\n\n1. Every change has a test.\n2. Run dagger check.\n")
-	f.prose(t, "internal", "# Internal\nHow the internal packages fit.\n")
-	f.prose(t, "internal.kb.seed", "# Seeding\n")
-	f.prose(t, "zeta", "# Zeta\nNo entity names this subsystem.\n")
+	f.oldProse(t, "internal", "# Internal\nHow the internal packages fit.\n")
+	f.oldProse(t, "internal.kb.seed", "# Seeding\n")
+	f.oldProse(t, "zeta", "# Zeta\nNo entity names this subsystem.\n")
 	return f
 }
 
@@ -94,9 +94,9 @@ func (f fixture) charter(t *testing.T, content string) {
 	}
 }
 
-// prose records content as the next revision of subsystem's knowledge-base
-// prose. Empty content removes the subsystem.
-func (f fixture) prose(t *testing.T, subsystem, content string) {
+// oldProse records content as the next revision of the prose file an older
+// trace holds for subsystem, which no bundle serves.
+func (f fixture) oldProse(t *testing.T, subsystem, content string) {
 	t.Helper()
 	revision := 1
 	documents, err := f.repo.ProjectDocuments()
@@ -104,14 +104,14 @@ func (f fixture) prose(t *testing.T, subsystem, content string) {
 		t.Fatal(err)
 	}
 	for _, d := range documents {
-		if d.Path == trace.ProsePath(subsystem) {
+		if d.Path == "kb/"+subsystem+".md" {
 			revision = d.Revision + 1
 		}
 	}
 	// An entity's prose is named by its entity ID, whose dots a record ID
 	// cannot hold.
 	id := "subsystem-" + strings.ReplaceAll(subsystem, ".", "-")
-	d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: project, At: timestamp, Actor: owner, Cause: "test"}, Path: trace.ProsePath(subsystem), Content: content}
+	d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: project, At: timestamp, Actor: owner, Cause: "test"}, Path: "kb/" + subsystem + ".md", Content: content}
 	if err := f.repo.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
@@ -124,14 +124,6 @@ func (f fixture) assemble(t *testing.T, scope bundle.Scope) bundle.Bundle {
 		t.Fatal(err)
 	}
 	return b
-}
-
-func sources(b bundle.Bundle) []string {
-	out := []string{}
-	for _, p := range b.Knowledge {
-		out = append(out, p.Source)
-	}
-	return out
 }
 
 func ids(b bundle.Bundle) []string {
@@ -148,17 +140,11 @@ func TestUnscopedBundleHoldsWholeProject(t *testing.T) {
 	if b.Mode != bundle.ModeFile || f.provider.Mode(project) != bundle.ModeFile {
 		t.Fatalf("mode %q", b.Mode)
 	}
-	if got := sources(b); !reflect.DeepEqual(got, []string{"kb/internal.md", "kb/internal.kb.seed.md", "kb/zeta.md"}) {
-		t.Fatalf("knowledge %v", got)
-	}
-	if b.Knowledge[0].Subsystem != "internal" || b.Knowledge[0].Content != "# Internal\nHow the internal packages fit.\n" {
-		t.Fatalf("prose %#v", b.Knowledge[0])
-	}
 	if got := ids(b); !reflect.DeepEqual(got, []string{"cmd", "docs", "internal", "internal.kb", "internal.kb.seed"}) {
 		t.Fatalf("entities %v", got)
 	}
-	if b.Entities.Source != "kb/entities.json" || b.Entities.Record != trace.EntitiesDocument || b.Entities.Revision != 1 || len(b.Entities.Unresolved) != 0 || len(b.Missing) != 0 {
-		t.Fatalf("entity section %#v missing %#v", b.Entities, b.Missing)
+	if b.Entities.Source != "kb/entities.json" || b.Entities.Record != trace.EntitiesDocument || b.Entities.Revision != 1 || len(b.Entities.Unresolved) != 0 {
+		t.Fatalf("entity section %#v", b.Entities)
 	}
 	want := []charter.Rule{{Number: 1, Text: "Every change has a test.", Heading: "Testing"}, {Number: 2, Text: "Run dagger check.", Heading: "Testing"}}
 	if !reflect.DeepEqual(b.Charter.Rules, want) || b.Charter.Source != "charter.md" || b.Charter.Record != "charter" {
@@ -169,7 +155,6 @@ func TestUnscopedBundleHoldsWholeProject(t *testing.T) {
 		"scope: whole project",
 		"source: charter.md (record charter revision 2)",
 		"- charter#1 [Testing]: Every change has a test.",
-		"### kb/zeta.md (subsystem zeta)\n# Zeta\nNo entity names this subsystem.\n### end of kb/zeta.md",
 		"source: kb/entities.json (record kb-entities revision 1)",
 		"- internal.kb (Knowledge base): internal/kb/**",
 		"- docs (Documentation): no paths",
@@ -181,28 +166,50 @@ func TestUnscopedBundleHoldsWholeProject(t *testing.T) {
 	}
 }
 
-func TestScopedBundleExpandsPartOfAndNotesMissingProse(t *testing.T) {
+// Prose files an older trace holds are neither read into a bundle nor
+// reported missing: the bundle has no knowledge or missing field and no
+// knowledge section, scoped or not.
+func TestBundleCarriesNoProse(t *testing.T) {
 	f := setup(t)
-	// "knowledge" is an alias of internal.kb, which has no prose of its own;
-	// its ancestor internal has, and its part internal.kb.seed has. cmd has no
-	// prose anywhere in its lineage, and docs has no paths.
-	b := f.assemble(t, bundle.Scope{Entities: []string{"cmd", "knowledge", "docs", "nowhere", "internal.kb"}})
-	if got := sources(b); !reflect.DeepEqual(got, []string{"kb/internal.md", "kb/internal.kb.seed.md"}) {
-		t.Fatalf("knowledge %v", got)
+	for _, scope := range []bundle.Scope{{}, {Entities: []string{"cmd", "knowledge", "internal"}}} {
+		b := f.assemble(t, scope)
+		data, err := json.Marshal(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"knowledge", "missing"} {
+			if _, ok := fields[field]; ok {
+				t.Errorf("scope %+v: bundle has a %q field", scope, field)
+			}
+		}
+		for _, text := range []string{b.Render(), b.Brief()} {
+			for _, s := range []string{"## Knowledge base", "knowledge-base", "How the internal packages fit", "No entity names this subsystem", "- missing:", "kb/internal.md", "KB files"} {
+				if strings.Contains(text, s) {
+					t.Errorf("scope %+v: context holds %q:\n%s", scope, s, text)
+				}
+			}
+		}
 	}
+}
+
+func TestScopedBundleExpandsPartOf(t *testing.T) {
+	f := setup(t)
+	// "knowledge" is an alias of internal.kb, which has its part
+	// internal.kb.seed. docs has no paths.
+	b := f.assemble(t, bundle.Scope{Entities: []string{"cmd", "knowledge", "docs", "nowhere", "internal.kb"}})
 	if got := ids(b); !reflect.DeepEqual(got, []string{"cmd", "internal.kb", "internal.kb.seed"}) {
 		t.Fatalf("entities %v", got)
 	}
 	if !reflect.DeepEqual(b.Entities.Unresolved, []string{"docs", "nowhere"}) {
 		t.Fatalf("unresolved %v", b.Entities.Unresolved)
 	}
-	if want := []bundle.MissingProse{{Entity: "cmd", Looked: []string{"kb/cmd.md"}}}; !reflect.DeepEqual(b.Missing, want) {
-		t.Fatalf("missing %#v", b.Missing)
-	}
 	text := b.Render()
 	for _, s := range []string{
 		"scope: entities cmd, knowledge, docs, nowhere, internal.kb",
-		"- missing: no prose for entity cmd; looked for kb/cmd.md",
 		"- unresolved: docs, nowhere",
 	} {
 		if !strings.Contains(text, s) {
@@ -210,17 +217,7 @@ func TestScopedBundleExpandsPartOfAndNotesMissingProse(t *testing.T) {
 		}
 	}
 	if strings.Contains(text, "zeta") {
-		t.Fatalf("scoped bundle holds unrelated prose:\n%s", text)
-	}
-
-	// A missing ancestor's prose is looked for along the whole lineage.
-	f.prose(t, "internal", "")
-	b = f.assemble(t, bundle.Scope{Entities: []string{"knowledge"}})
-	if want := []bundle.MissingProse{{Entity: "internal.kb", Looked: []string{"kb/internal.kb.md", "kb/internal.md"}}}; !reflect.DeepEqual(b.Missing, want) {
-		t.Fatalf("missing %#v", b.Missing)
-	}
-	if got := sources(b); !reflect.DeepEqual(got, []string{"kb/internal.kb.seed.md"}) {
-		t.Fatalf("knowledge %v", got)
+		t.Fatalf("scoped bundle holds unrelated context:\n%s", text)
 	}
 }
 
@@ -228,16 +225,8 @@ func TestBundleReadsTheLatestRevisionsAtEachCall(t *testing.T) {
 	f := setup(t)
 	scope := bundle.Scope{Entities: []string{"internal"}}
 	f.assemble(t, scope)
-	f.prose(t, "internal", "edited\n")
-	f.prose(t, "internal.kb", "new prose\n")
 	f.charter(t, "1. Only this rule.\n")
 	b := f.assemble(t, scope)
-	if got := sources(b); !reflect.DeepEqual(got, []string{"kb/internal.md", "kb/internal.kb.md", "kb/internal.kb.seed.md"}) {
-		t.Fatalf("knowledge %v", got)
-	}
-	if b.Knowledge[0].Content != "edited\n" {
-		t.Fatalf("stale prose %q", b.Knowledge[0].Content)
-	}
 	if b.Charter.Revision != 3 || len(b.Charter.Rules) != 1 || b.Charter.Rules[0].Text != "Only this rule." {
 		t.Fatalf("stale charter %#v", b.Charter)
 	}
@@ -541,7 +530,7 @@ func TestRenderedBundleTravelsInTurnRequest(t *testing.T) {
 	if _, err := runner.RunNext(ctx, first, "agent", coreadapter.PreparedTurn{SessionDirectory: filepath.Join(t.TempDir(), "session"), AllowedOutcomes: []string{"complete"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got != prompt || !strings.Contains(got, "(record r-1 revision 1") || !strings.Contains(got, "kb/internal.md") {
+	if got != prompt || !strings.Contains(got, "(record r-1 revision 1") || !strings.Contains(got, "- internal.kb (Knowledge base): internal/kb/**") {
 		t.Fatalf("turn received:\n%s", got)
 	}
 	requests, err := trace.Read[trace.TurnRequest](f.repo, first)
