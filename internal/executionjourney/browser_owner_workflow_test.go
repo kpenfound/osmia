@@ -221,7 +221,9 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// The ruling reaches resume's mason, which reports; resume is reviewed
 	// and lands, and the page shows it merged.
 	f.awaitMerged(t, stream, "resume")
+	p.OpenActivity()
 	p.AwaitText(ws+`[data-kind=transition][data-unit=resume][data-to=merged]`, "Unit resume: approved → merged")
+	p.OpenConversation()
 
 	// 4. dedupe's mason gives up and the unit is contested; the owner rules
 	// revise with a note on the page.

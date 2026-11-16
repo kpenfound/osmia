@@ -67,7 +67,7 @@ func TestBrowserRatifyButtonRecordsRatificationAndLeavesGate(t *testing.T) {
 	p.Await("a feed entry the service added after the ratification rendered after the outcome entry", `(() => {
 		const items = [...document.querySelectorAll(`+quote(feed+"ol > li")+`)];
 		const at = items.findIndex(n => n.dataset.kind === 'outcome');
-		return at >= 0 && items.slice(at + 1).some(n => n.dataset.kind === 'transition');
+		return at >= 0 && items.slice(at + 1).some(n => n.dataset.kind === 'milestone');
 	})()`)
 	if texts := p.OutcomeTexts("#workstreams"); len(texts) != 1 {
 		t.Fatalf("outcome entries after the feed was read again: %q", texts)

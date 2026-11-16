@@ -99,22 +99,90 @@
     }
   }
 
+  // workstreamTabs are the tabs of a workstream, the first being the default.
+  const workstreamTabs = ['conversation', 'activity', 'documents', 'trace'];
+
+  // parseRoute reads the page's location hash. A hash names what the main
+  // area shows: #workstream=<id> or #workgroup=<id>, followed for a
+  // workstream by the tab, the Activity unit filter and the opened
+  // Activity entries as &tab=, &unit=, &open= and &entry=.
+  function parseRoute(hash) {
+    const [head, ...rest] = hash.replace(/^#/, '').split('&');
+    const route = { kind: '', id: '', tab: 'conversation', unit: '', open: [], entry: '' };
+    const at = head.indexOf('=');
+    const kind = head.slice(0, at);
+    if (at < 0 || (kind !== 'workstream' && kind !== 'workgroup')) return route;
+    const decode = (text) => { try { return decodeURIComponent(text); } catch { return text; } };
+    route.kind = kind;
+    route.id = decode(head.slice(at + 1));
+    for (const part of rest) {
+      const eq = part.indexOf('=');
+      const name = part.slice(0, eq);
+      const value = part.slice(eq + 1);
+      if (name === 'tab' && workstreamTabs.includes(value)) route.tab = value;
+      if (name === 'unit') route.unit = decode(value);
+      if (name === 'open') route.open = value.split(',').filter(Boolean).map(decode);
+      if (name === 'entry') route.entry = decode(value);
+    }
+    return route;
+  }
+
+  const startRoute = parseRoute(location.hash);
+
   // ui is what the owner is looking at: the selected workstream, the view
-  // the main area shows and the workstream's tab. seen holds the activity the
-  // owner last saw on each workstream. initial holds the workstreams the
-  // first status read listed, whose current activity counts as seen the
-  // first time the page shows them.
+  // the main area shows and the workstream's tab. unit, open and focus are
+  // the Activity tab's unit filter, its opened entries and the entry a
+  // milestone or link pointed at. seen holds the activity the owner last saw
+  // on each workstream. initial holds the workstreams the first status read
+  // listed, whose current activity counts as seen the first time the page
+  // shows them. navigated says the owner has opened a view since the page
+  // loaded, so the first status read no longer picks the view from the link.
   const ui = {
-    selected: location.hash.startsWith('#workstream=') ? decodeURIComponent(location.hash.slice(12)) : stored('selected', null),
+    selected: startRoute.kind === 'workstream' ? startRoute.id : stored('selected', null),
     section: 'projects',
-    view: location.hash.startsWith('#workgroup=') ? 'workgroup' : location.hash.startsWith('#workstream=') ? 'workstream' : 'project-pane',
+    view: startRoute.kind === 'workgroup' ? 'workgroup' : startRoute.kind === 'workstream' ? 'workstream' : 'project-pane',
     aboutMember: null,
-    workgroup: location.hash.startsWith('#workgroup=') ? decodeURIComponent(location.hash.slice(11)) : null,
-    tab: 'feed',
+    workgroup: startRoute.kind === 'workgroup' ? startRoute.id : null,
+    tab: startRoute.kind === 'workstream' ? startRoute.tab : 'conversation',
+    unit: startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.unit : '',
+    open: new Set(startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.open : []),
+    focus: startRoute.kind === 'workstream' && startRoute.tab === 'activity' ? startRoute.entry : '',
+    scrollFocus: startRoute.kind === 'workstream' && startRoute.tab === 'activity' && startRoute.entry !== '',
     seen: stored('seen', {}),
     initial: null,
+    navigated: false,
     toEnd: true,
   };
+
+  // routeHash is the location hash for what the owner is looking at.
+  function routeHash() {
+    const enc = encodeURIComponent;
+    if (ui.view === 'workgroup' && ui.workgroup) return '#workgroup=' + enc(ui.workgroup);
+    if (!ui.selected || !['workstream', 'session', 'design'].includes(ui.view)) return '';
+    const parts = ['workstream=' + enc(ui.view === 'workstream' ? shown()?.workstream || ui.selected : ui.selected)];
+    if (ui.view === 'workstream') {
+      if (ui.tab !== 'conversation') parts.push('tab=' + ui.tab);
+      if (ui.tab === 'activity') {
+        if (ui.unit) parts.push('unit=' + enc(ui.unit));
+        if (ui.open.size > 0) parts.push('open=' + [...ui.open].map(enc).join(','));
+        if (ui.focus) parts.push('entry=' + enc(ui.focus));
+      }
+    }
+    return '#' + parts.join('&');
+  }
+
+  // syncRoute writes the view into the location. A change the Back button
+  // should undo, such as a new tab or filter, pushes a history entry; the
+  // rest replaces the current one.
+  function syncRoute(push = false) {
+    const hash = routeHash();
+    if (hash === '' || hash === location.hash) return;
+    if (push) {
+      history.pushState(null, '', hash);
+    } else {
+      history.replaceState(null, '', hash);
+    }
+  }
 
   // el builds an element; strings among the children become text nodes.
   function el(tag, attrs, ...children) {
@@ -504,12 +572,15 @@
               if (ui.view === 'design' || ui.view === 'workstream') {
                 ui.view = isMultiMember(member) ? 'workgroup' : 'workstream';
                 ui.workgroup = member.workgroup?.id || null;
-                ui.tab = 'feed';
-                history.replaceState(null, '', isMultiMember(member) ? '#workgroup=' + encodeURIComponent(ui.workgroup) : '#workstream=' + encodeURIComponent(ui.selected));
+                ui.tab = 'conversation';
+                ui.unit = '';
+                ui.open.clear();
+                ui.focus = '';
+                syncRoute();
               }
             }
           }
-          if (ui.initial === null && location.hash.startsWith('#workstream=')) {
+          if (ui.initial === null && !ui.navigated && startRoute.kind === 'workstream') {
             const w = streams().find(w => w.workstream === ui.selected);
             if (w) {
               ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
@@ -525,7 +596,7 @@
               startedDesignIds.add(w.workstream);
               if (ui.selected === w.workstream && ui.view === 'design') {
                 ui.view = 'workstream';
-                ui.tab = 'feed';
+                ui.tab = 'conversation';
               }
             }
           }
@@ -1181,8 +1252,8 @@
     ui.workgroup = id;
     ui.aboutMember = aboutMember;
     ui.toEnd = true;
-    history.replaceState(null, '', '#workgroup=' + encodeURIComponent(id));
     openView('workgroup');
+    syncRoute();
     mark([groupFeed(id)]);
   }
 
@@ -1317,20 +1388,21 @@
   }
 
   // activity is what the owner has seen of a workstream once they look at
-  // it: its state, status and units, what waits on them and its
-  // conversation in single-member groups. Sessions alone are not activity.
-  // It is null until the feed and inbox are read.
+  // it: its status and what waits on them, and what Conversation shows, its
+  // conversation and milestones. Sessions, unit changes and check runs, which
+  // only Activity shows, are not activity here. It is null until the feed and
+  // inbox are read.
   function activity(w) {
     const feed = views['feed/' + w.workstream];
     if (!feed || !views.inbox) {
       return null;
     }
-    const conversation = isMultiMember(w) ? [] : feed.entries.filter((e) => conversationKinds.has(e.kind));
+    const entries = feedView(w.workstream).entries;
+    const conversation = entries.filter((e) => !activityKinds.has(e.kind));
     const last = conversation[conversation.length - 1];
     return JSON.stringify([
-      w.state,
       !isMultiMember(w) && w.status ? [w.status.goal, w.status.attention, w.status.note] : null,
-      (w.units || []).map((u) => u.unit + ':' + u.state).sort(),
+      entries.filter(isMilestone).map(entryKey),
       inboxOf(w.workstream).map((e) => decisionKey(e) + ':' + e.revision),
       proposalsOf(w.workstream).map((p) => p.question),
       conversation.length,
@@ -1758,12 +1830,18 @@
     const changed = ui.selected !== id;
     ui.selected = id;
     store('selected', id);
-    history.replaceState(null, '', '#workstream=' + encodeURIComponent(id));
     setPicker(false);
     const session = isSessionId(id);
     const design = !session && isDesignId(id);
     ui.toEnd = true;
+    if (changed) {
+      ui.unit = '';
+      ui.open.clear();
+      ui.focus = '';
+      ui.scrollFocus = false;
+    }
     openView(session ? 'session' : design ? 'design' : 'workstream');
+    syncRoute();
     if (changed) {
       clearWorkstreamForms();
     }
@@ -1788,6 +1866,7 @@
   // openView shows a view in the main area: the selected workstream or
   // session, or one of the views the header opens.
   function openView(view, project = '') {
+    ui.navigated = true;
     for (const popover of document.querySelectorAll('[popover]')) {
       if (popover.matches(':popover-open')) {
         popover.hidePopover();
@@ -1815,14 +1894,57 @@
     if ((changed || section) && !shownFeed()) byId('main').scrollTop = 0;
   }
 
+  // setTab shows a tab of the workstream. Leaving Activity drops the entry
+  // a link pointed at, and a tab other than Activity carries no filter or
+  // opened entries in the location.
   function setTab(tab) {
     const changed = ui.tab !== tab;
     ui.tab = tab;
-    if (changed && tab === 'feed') ui.toEnd = true;
+    if (changed) {
+      ui.focus = '';
+      ui.scrollFocus = false;
+      if (tab === 'conversation' || tab === 'activity') ui.toEnd = true;
+      syncRoute(true);
+    }
     render();
     if (changed && tab === 'documents') {
       readWorkstreamDocuments();
     }
+  }
+
+  // showActivity opens Activity, optionally on one unit's events or at one
+  // entry. The entry is opened, highlighted and scrolled to.
+  function showActivity({ unit = '', entry = '' } = {}) {
+    ui.unit = unit;
+    ui.focus = entry;
+    ui.scrollFocus = entry !== '';
+    ui.tab = 'activity';
+    ui.toEnd = entry === '';
+    syncRoute(true);
+    render();
+  }
+
+  // restoreRoute shows what the location hash names, after Back, Forward or
+  // an edit of the hash.
+  function restoreRoute() {
+    const route = parseRoute(location.hash);
+    if (route.kind === 'workgroup') {
+      if (ui.view !== 'workgroup' || ui.workgroup !== route.id) selectWorkgroup(route.id);
+      return;
+    }
+    if (route.kind !== 'workstream') return;
+    if (ui.selected !== route.id || ui.view === 'project-pane' || ui.view === 'settings') select(route.id);
+    if (ui.view !== 'workstream') return;
+    const activity = route.tab === 'activity';
+    ui.tab = route.tab;
+    ui.unit = activity ? route.unit : '';
+    ui.open = new Set(activity ? route.open : []);
+    ui.focus = activity ? route.entry : '';
+    ui.scrollFocus = ui.focus !== '';
+    ui.toEnd = ui.focus === '' && (route.tab === 'conversation' || activity);
+    syncRoute();
+    render();
+    if (route.tab === 'documents') readWorkstreamDocuments();
   }
 
   // inboxResult shows the outcome of the last answer to an inbox entry. It
@@ -2113,10 +2235,18 @@
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
       about: el('div', { class: 'composer-about' }),
-      // opened holds the sessions whose report the owner expanded, so a
-      // new entry does not fold them again.
-      opened: new Set(),
+      activity: el('div', { class: 'activity-log', 'data-field': 'activity-log' }),
+      activityShown: null,
+      unitFilter: el('select', { name: 'unit', 'aria-label': 'Filter by unit', 'data-field': 'unit-filter' }),
     };
+    c.unitFilter.addEventListener('change', () => {
+      ui.unit = c.unitFilter.value;
+      ui.focus = '';
+      syncRoute(true);
+      render();
+    });
+    c.activityNode = el('section', { class: 'activity', 'data-workstream': id, 'aria-label': 'Activity' },
+      el('div', { class: 'activity-bar' }, el('label', {}, el('span', {}, 'Unit'), c.unitFilter)), c.activity);
     const form = el('form', { class: 'send composer', 'data-field': 'send' },
       c.about, el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, dictationButton(), c.button)), c.result);
     form.addEventListener('submit', (event) => {
@@ -2136,7 +2266,7 @@
       el('div', { class: 'thread' }, c.entries, c.decisions, form));
     scopeOutcome(c.result, () => ui.view === (group ? 'workgroup' : 'workstream') ? (group ? ui.workgroup : shown()?.workstream) : null, [c.button]);
     setupDictation(form, c.result, () => {
-      const selected = ui.view === (group ? 'workgroup' : 'workstream') && (group || ui.tab === 'feed')
+      const selected = ui.view === (group ? 'workgroup' : 'workstream') && (group || ui.tab === 'conversation')
         ? (group ? ui.workgroup : shown()?.workstream) : null;
       return selected === id ? key : null;
     });
@@ -2244,21 +2374,23 @@
   }
 
   // renderStatus shows a status the chief of staff wrote. Only the latest
-  // status's attention asks for something now.
-  function renderStatus(e, latest) {
+  // status's attention asks for something now; marked names the latest as
+  // current, where older statuses sit beside it.
+  function renderStatus(e, latest, marked = false) {
     const s = e.status;
     return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
       el('div', { class: 'meta meta-row' },
         el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
         el('span', { 'data-ann': 'action' }, 'status'), ' ',
-        el('span', { 'data-ann': 'when' }, when(e.at))),
+        el('span', { 'data-ann': 'when' }, when(e.at)),
+        latest && marked ? ' ' : null, latest && marked ? el('span', { class: 'current', 'data-field': 'current' }, 'Current') : null),
       el('div', { class: 'card' },
         s.attention ? el('div', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, renderMarkdown(s.attention)) : null,
         el('div', { class: 'text', 'data-field': 'note' }, renderMarkdown(s.note)),
         s.agents.length > 0 ? el('ul', { class: 'notes', 'data-field': 'status-agents' }, ...s.agents.map((a) => el('li', {}, renderMarkdown(a)))) : null));
   }
 
-  function renderSession(e, c) {
+  function renderSession(e) {
     const s = e.session;
     const report = s.failure || s.summary;
     const line = el('span', { class: 'meta-row', 'data-field': 'session' },
@@ -2273,13 +2405,17 @@
     }
     const details = el('details', {}, el('summary', { class: 'event-line' }, ...head),
       el('div', { class: 'text', 'data-field': s.failure ? 'failure' : 'summary' }, renderMarkdown(report)));
-    details.open = c.opened.has(s.agent + '/' + s.turn);
+    const key = entryKey(e);
+    details.open = ui.open.has(key) || ui.focus === key;
     details.addEventListener('toggle', () => {
+      if (details.open === ui.open.has(key)) return;
       if (details.open) {
-        c.opened.add(s.agent + '/' + s.turn);
+        ui.open.add(key);
       } else {
-        c.opened.delete(s.agent + '/' + s.turn);
+        ui.open.delete(key);
+        if (ui.focus === key) ui.focus = '';
       }
+      syncRoute();
     });
     node.append(details);
     return node;
@@ -2368,54 +2504,277 @@
         el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, r.state),
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
       r.reader ? el('p', { 'data-field': 'reader' }, 'Reader ' + r.reader,
-        r.turn ? ' ' : null, r.turn ? el('a', { href: '#feed-turn-' + r.turn, 'data-field': 'turn' }, 'turn ' + r.turn) : null) : null,
+        r.turn ? ' ' : null, r.turn ? sessionLink(r.turn) : null) : null,
       r.state === 'reviewed' ? el('p', { class: 'meta-row', 'data-field': 'findings' },
         el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' ',
         el('span', { 'data-field': 'gaps' }, r.gaps + ' uncovered criteria')) : null,
       r.failure ? el('p', { 'data-field': 'failure' }, r.failure) : null);
   }
 
-  // renderFeed shows member activity in order. Single-member groups also
-  // include the chief conversation, statuses and turns.
-  function renderFeed(c, id) {
+  // activityKinds are the feed entries Activity shows: the machine events
+  // and every status of the chief of staff. The rest of the feed is the
+  // conversation.
+  const activityKinds = new Set(['status', 'session', 'transition', 'unit_checks', 'final_checks', 'session_checks', 'final_review']);
+
+  // milestoneStates are the workstream states Conversation notes in a line.
+  const milestoneStates = new Set(['ratified', 'building', 'assembled', 'delivered']);
+
+  function isWorkstreamTransition(e) {
+    const t = e.transition;
+    return e.kind === 'transition' && (t.subject === 'feature' || (!t.subject && !t.unit));
+  }
+
+  // isMilestone reports whether Conversation shows a feed entry as a quiet
+  // line: a workstream state change to ratified, building, assembled or
+  // delivered, or the result of a final review. Sessions, unit transitions
+  // and check runs, failed or not, are never milestones.
+  function isMilestone(e) {
+    return e.kind === 'final_review' || (isWorkstreamTransition(e) && milestoneStates.has(e.transition.to));
+  }
+
+  // foldable reports whether Activity may fold an entry into a run: the
+  // routine events between statuses, milestones and final reviews.
+  function foldable(e) {
+    return activityKinds.has(e.kind) && e.kind !== 'status' && e.kind !== 'final_review' && !isMilestone(e);
+  }
+
+  // The shortest run of consecutive events that folds into one line.
+  const foldMin = 3;
+
+  // entryKey names an Activity entry in the location and the document. A
+  // session is named by its turn; the rest by a short hash of the fields that
+  // stay the same while an entry progresses.
+  function entryKey(e) {
+    if (e.kind === 'session') return 'turn-' + e.session.turn;
+    const text = feedIdentity(e);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    }
+    return 'e' + (hash >>> 0).toString(36);
+  }
+
+  // entryUnit is the plan unit an entry is about, or the empty string.
+  function entryUnit(e) {
+    return e.session?.unit || e.transition?.unit || e.unit_checks?.unit || '';
+  }
+
+  function activityHref(id, entry) {
+    return '#workstream=' + encodeURIComponent(id) + '&tab=activity' + (entry ? '&entry=' + encodeURIComponent(entry) : '');
+  }
+
+  // activityLink is a link that opens Activity at an entry of the workstream
+  // shown, in place and without a reload.
+  function activityLink(attrs, entry, ...children) {
+    const id = shown()?.workstream || ui.selected;
+    const link = el('a', { href: activityHref(id, entry), ...attrs }, ...children);
+    link.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showActivity({ entry });
+    });
+    return link;
+  }
+
+  function sessionLink(turn) {
+    return activityLink({ 'data-field': 'turn' }, 'turn-' + turn, 'turn ' + turn);
+  }
+
+  // renderMilestone shows a milestone as one quiet line that opens Activity
+  // at the entry it comes from.
+  function renderMilestone(e) {
+    const key = entryKey(e);
+    const base = { class: 'entry milestone', 'data-kind': 'milestone', 'data-milestone': e.kind === 'final_review' ? 'final_review' : e.transition.to, 'data-entry': key };
+    if (e.kind === 'final_review') {
+      const r = e.final_review;
+      return el('li', { ...base, 'data-review': r.review, 'data-state': r.state },
+        activityLink({ class: 'milestone-line', 'data-field': 'milestone' }, key,
+          el('span', { class: 'dot', 'aria-hidden': 'true' }),
+          el('strong', { 'data-ann': 'role' }, 'Final review ' + r.review),
+          el('span', { 'data-ann': 'action', 'data-field': 'outcome' }, r.state),
+          r.state === 'reviewed' ? el('span', { class: 'meta', 'data-field': 'findings' }, r.blocking + ' blocking findings, ' + r.gaps + ' uncovered criteria') : null,
+          r.failure ? el('span', { class: 'meta', 'data-field': 'failure' }, r.failure) : null,
+          el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+    }
+    return el('li', { ...base, 'data-to': e.transition.to },
+      activityLink({ class: 'milestone-line', 'data-field': 'milestone' }, key,
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-ann': 'role' }, 'Workstream'),
+        el('span', { 'data-ann': 'action', 'data-field': 'to' }, e.transition.to),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+  }
+
+  // conversationEntries are the feed entries Conversation shows, oldest
+  // first: the conversation itself, only the latest status and the
+  // milestones.
+  function conversationEntries(entries) {
+    const latest = entries.findLastIndex((e) => e.kind === 'status');
+    return entries.filter((e, i) => e.kind === 'status' ? i === latest : !activityKinds.has(e.kind) || isMilestone(e));
+  }
+
+  // renderConversation shows the workstream's conversation: what the owner
+  // and the chief of staff said, the chief's latest status, and the
+  // milestones, with the owner's command outcomes where they were taken.
+  function renderConversation(c, id) {
     const name = 'feed/' + id;
     const view = feedView(id);
     const outcomes = ownerOutcomes.get(id) || [];
-    const key = view ? JSON.stringify([view.entries, outcomes]) : (failures[name] ? 'failed' : 'reading');
+    const shown = view ? conversationEntries(view.entries) : [];
+    const key = view ? JSON.stringify([shown, outcomes]) : (failures[name] ? 'failed' : 'reading');
     if (c.shown === key) {
       return;
     }
     c.shown = key;
     if (!view) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The feed is unavailable.' : 'Reading the feed…'),
+      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The conversation is unavailable.' : 'Reading the conversation…'),
         ...(outcomes.length ? [el('ol', {}, ...outcomes.map(renderOwnerOutcome))] : []));
       return;
     }
-    if (view.entries.length === 0 && outcomes.length === 0) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+    if (shown.length === 0 && outcomes.length === 0) {
+      c.entries.replaceChildren(el('p', { class: 'meta', 'data-field': 'empty' }, 'Nothing here yet. Sessions and check runs are in Activity.'));
       return;
     }
-    const latest = view.entries.findLastIndex((e) => e.kind === 'status');
-    c.entries.replaceChildren(el('ol', {}, ...withOutcomes(view.entries, outcomes, (e, i) => {
-      switch (e.kind) {
-        case 'status':
-          return renderStatus(e, i === latest);
-        case 'session':
-          return renderSession(e, c);
-        case 'transition':
-          return renderTransition(e);
-        case 'unit_checks':
-        case 'final_checks':
-        case 'session_checks':
-          return renderChecks(e);
-        case 'final_review':
-          return renderFinalReview(e);
-        case 'brief':
-          return renderBriefEntry(e);
-        default:
-          return renderConversationEntry(e);
-      }
+    c.entries.replaceChildren(el('ol', {}, ...withOutcomes(shown, outcomes, (e) => {
+      if (e.kind === 'status') return renderStatus(e, true);
+      if (isMilestone(e)) return renderMilestone(e);
+      return e.kind === 'brief' ? renderBriefEntry(e) : renderConversationEntry(e);
     })));
+  }
+
+  function renderActivityEntry(e, latest) {
+    let node;
+    switch (e.kind) {
+      case 'status':
+        node = renderStatus(e, latest, true);
+        break;
+      case 'session':
+        node = renderSession(e);
+        break;
+      case 'transition':
+        node = renderTransition(e);
+        break;
+      case 'final_review':
+        node = renderFinalReview(e);
+        break;
+      default:
+        node = renderChecks(e);
+    }
+    const key = entryKey(e);
+    node.dataset.entry = key;
+    if (ui.focus === key) node.dataset.focus = 'true';
+    return node;
+  }
+
+  // foldSummary counts what a folded run holds by kind.
+  function foldSummary(run) {
+    const count = (match) => run.filter(match).length;
+    const sessions = count((e) => e.kind === 'session');
+    const changes = count((e) => e.kind === 'transition');
+    const checks = run.length - sessions - changes;
+    return [
+      sessions > 0 ? sessions + (sessions === 1 ? ' session' : ' sessions') : '',
+      changes > 0 ? changes + (changes === 1 ? ' state change' : ' state changes') : '',
+      checks > 0 ? checks + (checks === 1 ? ' check run' : ' check runs') : '',
+    ].filter(Boolean).join(', ');
+  }
+
+  // renderFold shows a run of routine events as one "N events" line that
+  // opens in place. It is open when the owner opened it or an entry the
+  // location names is in it.
+  function renderFold(run, nodes) {
+    const key = 'f' + entryKey(run[0]);
+    const inside = run.map(entryKey);
+    const forced = inside.some((k) => k === ui.focus || ui.open.has(k));
+    const details = el('details', { class: 'fold', 'data-fold': key },
+      el('summary', { class: 'event-line' },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('strong', { 'data-field': 'count' }, run.length + ' events'),
+        el('span', { 'data-field': 'fold-kinds' }, foldSummary(run)),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(run[0].at))),
+      el('ol', {}, ...nodes));
+    details.open = forced || ui.open.has(key);
+    details.addEventListener('toggle', () => {
+      if (details.open === ui.open.has(key)) return;
+      if (details.open) {
+        ui.open.add(key);
+      } else {
+        ui.open.delete(key);
+        for (const k of inside) {
+          ui.open.delete(k);
+          if (ui.focus === k) ui.focus = '';
+        }
+      }
+      syncRoute();
+    });
+    return el('li', { class: 'fold-item', 'data-kind': 'fold', 'data-count': String(run.length) }, details);
+  }
+
+  // activityUnits lists the units the unit filter offers.
+  function activityUnits(w, entries) {
+    return [...new Set([...(w.units || []).map((u) => u.unit), ...entries.map(entryUnit).filter(Boolean), ...(ui.unit ? [ui.unit] : [])])].sort();
+  }
+
+  // renderActivityTab shows every event of the workstream, oldest first,
+  // with a filter by unit. Routine runs fold into one line; older chief
+  // statuses recede behind the latest.
+  function renderActivityTab(c, w) {
+    const id = w.workstream;
+    const name = 'feed/' + id;
+    const view = feedView(id);
+    const entries = view ? view.entries.filter((e) => activityKinds.has(e.kind)) : [];
+    const units = activityUnits(w, entries);
+    const key = JSON.stringify([view ? entries : (failures[name] ? 'failed' : 'reading'), units, ui.unit, ui.focus]);
+    if (c.activityShown === key) {
+      return;
+    }
+    c.activityShown = key;
+    c.unitFilter.replaceChildren(el('option', { value: '' }, 'All units'), ...units.map((u) => el('option', { value: u }, u)));
+    c.unitFilter.value = ui.unit;
+    c.unitFilter.closest('.activity-bar').hidden = units.length === 0 && ui.unit === '';
+    if (!view) {
+      c.activity.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The activity is unavailable.' : 'Reading the activity…'));
+      return;
+    }
+    const latest = entries.findLastIndex((e) => e.kind === 'status');
+    const listed = entries.map((e, i) => ({ e, latest: i === latest })).filter(({ e }) => !ui.unit || entryUnit(e) === ui.unit);
+    if (listed.length === 0) {
+      const clear = el('button', { type: 'button', class: 'quiet', 'data-field': 'clear-filter' }, 'Show all units');
+      clear.addEventListener('click', () => { ui.unit = ''; syncRoute(true); render(); });
+      c.activity.replaceChildren(ui.unit
+        ? el('p', { class: 'meta', 'data-field': 'empty' }, 'No events for unit ' + ui.unit + ' yet. ', clear)
+        : el('p', { class: 'meta', 'data-field': 'empty' }, 'No activity yet. Sessions, state changes and check runs appear here as the work runs.'));
+      return;
+    }
+    const nodes = [];
+    let run = [];
+    const flush = () => {
+      if (run.length >= foldMin) {
+        nodes.push(renderFold(run.map((x) => x.e), run.map((x) => renderActivityEntry(x.e, x.latest))));
+      } else {
+        nodes.push(...run.map((x) => renderActivityEntry(x.e, x.latest)));
+      }
+      run = [];
+    };
+    for (const item of listed) {
+      if (foldable(item.e)) {
+        run.push(item);
+      } else {
+        flush();
+        nodes.push(renderActivityEntry(item.e, item.latest));
+      }
+    }
+    flush();
+    c.activity.replaceChildren(el('ol', {}, ...nodes));
+  }
+
+  // focusEntry scrolls to the Activity entry the location names, once.
+  function focusEntry() {
+    if (!ui.scrollFocus || ui.view !== 'workstream' || ui.tab !== 'activity' || !ui.focus) return;
+    const node = byId('workstream-activity').querySelector('[data-entry="' + CSS.escape(ui.focus) + '"]');
+    if (!node) return;
+    ui.scrollFocus = false;
+    ui.toEnd = false;
+    requestAnimationFrame(() => node.scrollIntoView({ block: 'center' }));
   }
 
   // feedView is the feed the workstream's card shows: its read feed, less the
@@ -2586,7 +2945,7 @@
     } else if (!c.form.isConnected) {
       c.node.querySelector('.thread').append(c.form);
     }
-    renderFeed(c, w.workstream);
+    renderConversation(c, w.workstream);
     if (ui.view !== 'workgroup') renderDecisions(c, w.workstream);
     return c.node;
   }
@@ -2621,6 +2980,9 @@
     }
     renderHead(w);
     place(box, [renderWorkstream(w)]);
+    const c = card(w.workstream);
+    if (ui.tab === 'activity') renderActivityTab(c, w);
+    place(byId('workstream-activity'), [c.activityNode]);
   }
 
   // sessionEchoes holds, per session, the owner's own sent messages by turn
@@ -3022,7 +3384,7 @@
     act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start', { brief_revision: revision }), (out) => {
       designIds.delete(id);
       startedDesignIds.add(id);
-      ui.tab = 'feed';
+      ui.tab = 'conversation';
       select(out.workstream);
       mark(['status', 'feed/' + out.workstream]);
       return 'Started a workgroup from this brief; workstream ' + out.workstream + ' is now ' + out.state + '.';
@@ -4805,9 +5167,13 @@
   // before treating a placeholder as a rendered feed.
   function shownFeed() {
     let key, box;
-    if (ui.view === 'workstream' && ui.tab === 'feed' && shown()) {
+    if (ui.view === 'workstream' && ui.tab === 'conversation' && shown()) {
       key = 'feed/' + shown().workstream;
       box = byId('workstreams').querySelector('.feed');
+    } else if (ui.view === 'workstream' && ui.tab === 'activity' && shown()) {
+      key = 'activity/' + shown().workstream;
+      box = byId('workstream-activity').querySelector('.activity-log');
+      return box ? { key, box, ready: !!views['feed/' + shown().workstream], end: box } : null;
     } else if (ui.view === 'workgroup') {
       key = groupFeed(ui.workgroup);
       box = byId('workgroup-content').querySelector('.feed');
@@ -4832,7 +5198,8 @@
     if (!feed) return;
     const count = feed.box.querySelectorAll(':scope > ol > li').length;
     if (!feed.ready && count === 0) return;
-    const snap = ui.toEnd || renderedFeed?.key !== feed.key || count > renderedFeed.count;
+    const pinned = ui.tab === 'activity' && ui.view === 'workstream' && ui.focus !== '';
+    const snap = !pinned && (ui.toEnd || renderedFeed?.key !== feed.key || count > renderedFeed.count);
     renderedFeed = { key: feed.key, count };
     if (!snap) return;
     ui.toEnd = false;
@@ -4843,7 +5210,7 @@
       const main = byId('main');
       // Session controls follow the chat; land at the conversation's end
       // with its composer visible, leaving those controls below it.
-      const end = feed.box.closest('.thread');
+      const end = feed.end || feed.box.closest('.thread');
       main.scrollTop += end.getBoundingClientRect().bottom - main.getBoundingClientRect().bottom;
     });
   }
@@ -4874,6 +5241,7 @@
     renderProviders();
     renderConfig();
     renderDictation();
+    focusEntry();
     snapFeed();
   }
 
@@ -4907,6 +5275,7 @@
     renderHeader();
     renderActivity();
   }, dismissCheckInterval);
+  window.addEventListener('popstate', restoreRoute);
   window.addEventListener('online', reconnectNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {

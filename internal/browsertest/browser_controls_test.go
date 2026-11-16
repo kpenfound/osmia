@@ -31,7 +31,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(quiet)
-	p.AwaitText(card+"[data-field=feed]", "Nothing has happened yet.")
+	p.AwaitText(card+"[data-field=feed]", "Nothing here yet.")
 	p.Eval(`window.notReloaded = true`, nil)
 
 	// An empty message is refused on the page and never sent.

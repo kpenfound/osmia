@@ -244,6 +244,36 @@ func (p *Page) AwaitText(selector, want string) {
 	p.Await(fmt.Sprintf("%q in %s", want, selector), TextOf(selector)+".includes("+Quote(want)+")")
 }
 
+// OpenTab shows one tab of the displayed workstream (conversation, activity,
+// documents or trace) and waits until its panel is shown.
+func (p *Page) OpenTab(tab string) {
+	p.T.Helper()
+	p.Click(`[data-tab="` + tab + `"]`)
+	p.Await("the "+tab+" tab", `!document.querySelector('[data-panel="`+tab+`"]').hidden`)
+}
+
+// OpenConversation shows the displayed workstream's Conversation tab.
+func (p *Page) OpenConversation() {
+	p.T.Helper()
+	p.OpenTab("conversation")
+}
+
+// OpenActivity shows the displayed workstream's Activity tab, opens every
+// folded run of events in place and waits until the log is drawn.
+func (p *Page) OpenActivity() {
+	p.T.Helper()
+	p.OpenTab("activity")
+	p.Await("every folded run open", `(() => {
+  const openAll = () => document.querySelectorAll('#workstream-activity .fold:not([open])').forEach((fold) => { fold.open = true; });
+  if (!window.openedFolds) {
+    window.openedFolds = new MutationObserver(openAll);
+    window.openedFolds.observe(document.querySelector('#workstream-activity'), { childList: true, subtree: true });
+  }
+  openAll();
+  return document.querySelectorAll('#workstream-activity .fold:not([open])').length === 0 && !!document.querySelector('#workstream-activity .activity-log > ol, #workstream-activity .activity-log > [data-field=empty]');
+})()`)
+}
+
 // OutcomeEntries selects the feed entries that show the outcome of the
 // owner's own accepted commands.
 const OutcomeEntries = "[data-field=feed] [data-kind=outcome]"

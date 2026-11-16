@@ -114,7 +114,7 @@ func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
 	p := f.p
 	card := decisionSelector("contested", "w_000", "index")
 	p.awaitVisible("the contested unit", card)
-	p.awaitFeedKinds("transition")
+	p.awaitFeedKinds("milestone")
 	p.awaitNoUnread()
 
 	p.typeInto(card+`input[name=note]`, "Review it again.")
@@ -124,7 +124,7 @@ func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
 	// The entry says whose command it is and when it was accepted, follows
 	// the entry shown when the command was accepted, and leaves the shared
 	// result line empty.
-	p.awaitFeedKinds("transition,outcome")
+	p.awaitFeedKinds("milestone,outcome")
 	p.assertOutcomes("#workstreams", "Ruled review on unit index.")
 	var marked bool
 	p.eval(`(() => {
@@ -142,7 +142,7 @@ func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
 	api := f.api
 	api.setFeed("w_000", transitionEntry("2025-12-31T00:00:09Z", "assembled"), transitionEntry("2026-01-01T00:00:01Z", "building"))
 	api.pushEvent("resync")
-	p.awaitFeedKinds("transition,outcome,transition")
+	p.awaitFeedKinds("milestone,outcome,milestone")
 	var order string
 	p.eval(`[...document.querySelectorAll('#workstreams [data-field=feed] ol > li')].map(n => n.dataset.kind === 'outcome' ? 'outcome' : n.textContent.includes('assembled') ? 'assembled' : 'building').join(',')`, &order)
 	if order != "building,outcome,assembled" {
@@ -155,12 +155,12 @@ func TestBrowserAcceptedOutcomeIsFeedEntryBeforeLaterEntries(t *testing.T) {
 	api.pushEvent("inbox")
 	soon(t, "the page never read the inbox again", func() bool { return api.inboxRequests() > hits })
 	api.pushEvent("resync")
-	p.awaitFeedKinds("transition,outcome,transition")
+	p.awaitFeedKinds("milestone,outcome,milestone")
 	p.assertOutcomes("#workstreams", "Ruled review on unit index.")
 	p.awaitNoUnread()
 	p.click(`[data-select="w_001"]`)
 	p.click(`[data-select="w_000"]`)
-	p.awaitFeedKinds("transition,outcome,transition")
+	p.awaitFeedKinds("milestone,outcome,milestone")
 	p.awaitNoUnread()
 }
 
@@ -275,7 +275,7 @@ func TestBrowserLateOutcomeBelongsToTheOriginatingFeed(t *testing.T) {
 	p.settle()
 
 	// The other workstream shows no outcome entry and no result.
-	p.awaitFeedKinds("transition")
+	p.awaitFeedKinds("milestone")
 	p.assertOutcomes("#workstreams")
 	if outcome := p.outcomeOf("#inbox-result"); outcome != "" {
 		t.Fatalf("the other workstream's result line shows data-outcome=%q", outcome)
@@ -285,10 +285,10 @@ func TestBrowserLateOutcomeBelongsToTheOriginatingFeed(t *testing.T) {
 	// Returning shows the outcome, once, in the originating feed.
 	p.click(`[data-select="w_000"]`)
 	p.awaitOutcome("Ruled review on unit index.")
-	p.awaitFeedKinds("transition,outcome")
+	p.awaitFeedKinds("milestone,outcome")
 	p.assertOutcomes("#workstreams", "Ruled review on unit index.")
 	p.click(`[data-select="w_001"]`)
-	p.awaitFeedKinds("transition")
+	p.awaitFeedKinds("milestone")
 	p.assertOutcomes("#workstreams")
 	if strings.Contains(p.feedKinds(), "outcome") {
 		t.Fatal("the other workstream's feed shows the outcome")

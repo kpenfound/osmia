@@ -318,7 +318,7 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 		p.Eval(`({text: document.querySelector(`+quote(selector)+`).textContent, state: document.querySelector(`+quote(selector)+`).dataset.outcome})`, &out)
 		recorded[selector] = out
 	}
-	p.Click("[data-tab=feed]")
+	p.Click("[data-tab=conversation]")
 	p.SelectWorkstream(quiet)
 	for selector := range recorded {
 		assertOutcome(p, selector, "", "")
@@ -348,7 +348,7 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Click("[data-tab=trace]")
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
-	p.Click("[data-tab=feed]")
+	p.Click("[data-tab=conversation]")
 	p.Eval(`window.confirm = () => true`, nil)
 	url := "/v1/archive/" + string(quiet)
 	holdOutcome(p, url)
@@ -385,7 +385,7 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Click("[data-tab=trace]")
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
-	p.Click("[data-tab=feed]")
+	p.Click("[data-tab=conversation]")
 	assertFallbackOutcomes := func() {
 		t.Helper()
 		assertOutcome(p, "#inbox-result", menuState, menuText)

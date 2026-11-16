@@ -204,7 +204,9 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		if !found {
 			t.Fatalf("workgroup feed lost the adopted design reply: %+v", shared.Entries)
 		}
-		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstreams [data-kind="transition"]') !== null && !document.querySelector('#workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"], #workstreams [data-kind="session"][data-role="chief_of_staff"]')`)
+		p.OpenActivity()
+		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstream-activity [data-kind="transition"]') !== null && !document.querySelector('#workstream-activity [data-kind="message"], #workstream-activity [data-kind="response"], #workstream-activity [data-kind="status"], #workstream-activity [data-kind="action"], #workstream-activity [data-kind="session"][data-role="chief_of_staff"], #workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"]')`)
+		p.OpenConversation()
 	}
 	assertSharedDesignConversation()
 	upstream, err := f.s.repository(f.project)

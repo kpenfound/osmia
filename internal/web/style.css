@@ -894,7 +894,7 @@ button.icon.dictate-icon[aria-pressed="true"] {
 
 .entry[data-kind="message"] .text,
 .entry[data-kind="owner"] .text {
-  max-width: min(36rem, 90%);
+  max-width: min(70ch, 90%);
   padding: 0.5rem 0.8rem;
   font-size: var(--fs-prose);
   background: var(--surface-raised);
@@ -991,29 +991,71 @@ button.icon.dictate-icon[aria-pressed="true"] {
   border-radius: 0.25rem;
   padding: 0.1rem 0.3rem;
 }
-.markdown pre, .markdown-table {
+/* Prose stops at a reading width. Tables and code may run wider and scroll
+   inside their own box. */
+.markdown > :is(p, ul, ol, dl, blockquote, h1, h2, h3, h4, h5, h6) {
+  max-width: 70ch;
+}
+
+.markdown pre,
+.markdown-table {
   max-width: 100%;
   overflow-x: auto;
   margin: 0.6rem 0;
   background: var(--surface-sunken);
   border-radius: var(--radius-sm);
 }
+
 .markdown pre {
-  padding: 0.6rem 0.75rem;
+  padding: 0.65rem 0.85rem;
   font-size: var(--fs-small);
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre;
   overflow-wrap: normal;
+  tab-size: 4;
 }
-.markdown pre code { padding: 0; font-size: inherit; background: transparent; }
-.markdown table { border-collapse: collapse; width: max-content; min-width: 100%; }
-.markdown th, .markdown td {
-  padding: 0.35rem 0.75rem;
-  border-bottom: 1px solid var(--line);
+
+.markdown pre code {
+  padding: 0;
+  font-size: inherit;
+  background: transparent;
+}
+
+.markdown-table {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "zero" 1, "calt" 0;
+}
+
+.markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.4rem 0.85rem;
+  vertical-align: top;
   white-space: nowrap;
 }
-.markdown th { font-weight: 600; color: var(--text-muted); }
-.markdown tr:last-child td { border-bottom: 0; }
+
+.markdown th {
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+}
+
+.markdown td {
+  border-top: 1px solid var(--line);
+}
+
+.markdown tr:first-child td {
+  border-top: 0;
+}
+
 .markdown .align-left { text-align: left; }
 .markdown .align-center { text-align: center; }
 .markdown .align-right { text-align: right; }
@@ -1085,15 +1127,6 @@ button.icon.dictate-icon[aria-pressed="true"] {
   padding: 0.4rem 0.7rem;
   color: var(--text);
   border-left: 2px solid var(--line);
-}
-
-.event .dot {
-  flex: none;
-  width: 0.45rem;
-  height: 0.45rem;
-  background: var(--line-strong);
-  border-radius: 50%;
-  transform: translateY(-0.05rem);
 }
 
 .event[data-state="running"] .dot {
@@ -1619,7 +1652,7 @@ button.danger:disabled:hover {
 
   .entry[data-kind="message"] .text,
   .entry[data-kind="owner"] .text {
-    max-width: 90%;
+    max-width: min(70ch, 90%);
   }
 }
 
@@ -1732,6 +1765,16 @@ button.danger:disabled:hover {
   .chip,
   .new-button {
     position: relative;
+  }
+  .milestone-line,
+  .fold > summary,
+  .activity-bar select {
+    min-height: 2.75rem;
+  }
+
+  .milestone-line,
+  .fold > summary {
+    align-content: center;
   }
 }
 
@@ -1919,6 +1962,172 @@ button.danger:disabled:hover {
 
 #engine-controls .result:empty {
   display: none;
+}
+
+/* Conversation and Activity. Conversation notes the work's milestones in a
+   quiet line each; Activity holds every event, folded into runs, with older
+   chief statuses receding behind the current one. */
+
+.feed .entry.milestone {
+  margin: 0;
+}
+
+.milestone-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.5rem;
+  margin-left: -0.5rem;
+  padding: 0.3rem 0.5rem;
+  font-size: var(--fs-ui);
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion), color var(--motion);
+}
+
+.milestone-line:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.milestone-line strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.milestone-line > .meta {
+  margin: 0;
+  font-size: var(--fs-small);
+}
+
+.milestone-line > .meta:last-child {
+  margin-left: auto;
+}
+
+.milestone .dot,
+.event .dot {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--line-strong);
+  border-radius: 50%;
+  transform: translateY(-0.05rem);
+}
+
+.milestone[data-state="failed"] .dot {
+  background: var(--failed);
+}
+
+.activity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.activity-bar label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.activity-log {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity-log ol {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-log .entry {
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.activity-log .entry[data-focus="true"] {
+  background: var(--accent-soft);
+}
+
+.activity-log .entry[data-kind="status"] {
+  margin: 0.4rem 0;
+  padding-inline: 0;
+}
+
+.activity-log .entry[data-kind="status"][data-focus="true"] {
+  padding-inline: 0.5rem;
+}
+
+.fold-item {
+  padding: 0;
+}
+
+.fold > summary {
+  padding: 0.3rem 0.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  list-style: none;
+}
+
+.fold > summary:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold > summary strong::after {
+  font-family: var(--font-mono);
+  content: " \25B8";
+}
+
+.fold[open] > summary strong::after {
+  content: " \25BE";
+}
+
+.fold > ol {
+  margin: 0.15rem 0 0.3rem 0.4rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--line);
+}
+
+[data-fold] > summary [data-field="fold-kinds"] {
+  min-width: 0;
+}
+
+.current {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.activity-log .entry[data-kind="status"][data-latest="true"] .card {
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.activity-log .entry[data-kind="status"][data-latest="false"] {
+  opacity: 0.72;
+}
+
+.activity-log .entry[data-kind="status"][data-latest="false"] .card {
+  padding-block: 0.2rem;
+  font-size: var(--fs-small);
+}
+
+.activity-log .entry[data-kind="status"][data-latest="false"] .markdown,
+.activity-log .entry[data-kind="status"][data-latest="false"] .text {
+  font-size: var(--fs-small);
 }
 
 /* Motion is reduced to nothing for people who ask for it. */

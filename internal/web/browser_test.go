@@ -129,6 +129,30 @@ func (p *page) awaitText(selector, want string) {
 	p.await(want+" in "+selector, expr)
 }
 
+// openTab shows one tab of the displayed workstream: conversation, activity,
+// documents or trace.
+func (p *page) openTab(tab string) {
+	p.t.Helper()
+	p.click(`[data-tab="` + tab + `"]`)
+	p.await("the "+tab+" tab", `!document.querySelector('[data-panel="`+tab+`"]').hidden`)
+}
+
+// openActivity shows the displayed workstream's Activity tab with every
+// folded run opened, and waits until the log is drawn.
+func (p *page) openActivity() {
+	p.t.Helper()
+	p.openTab("activity")
+	p.await("every folded run open", `(() => {
+  const openAll = () => document.querySelectorAll('#workstream-activity .fold:not([open])').forEach((fold) => { fold.open = true; });
+  if (!window.openedFolds) {
+    window.openedFolds = new MutationObserver(openAll);
+    window.openedFolds.observe(document.querySelector('#workstream-activity'), { childList: true, subtree: true });
+  }
+  openAll();
+  return document.querySelectorAll('#workstream-activity .fold:not([open])').length === 0 && !!document.querySelector('#workstream-activity .activity-log > ol, #workstream-activity .activity-log > [data-field=empty]');
+})()`)
+}
+
 // awaitOutcome waits until a feed shows an entry for the outcome of the
 // owner's own accepted command, containing want.
 func (p *page) awaitOutcome(want string) {

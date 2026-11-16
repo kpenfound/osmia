@@ -9,6 +9,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
+// OpenCheckFeed opens the page at a phone width on the stream's Activity tab,
+// once its workstream transition is drawn, with the page's timers stopped.
 func OpenCheckFeed(t *testing.T, address string, stream config.WorkstreamID) *Page {
 	t.Helper()
 	p := OpenBrowser(t)
@@ -29,6 +31,7 @@ func OpenCheckFeed(t *testing.T, address string, stream config.WorkstreamID) *Pa
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+address+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(stream)
+	p.OpenActivity()
 	p.AwaitText(`[data-workstream="`+string(stream)+`"] [data-kind=transition][data-subject=feature]`, "Workstream")
 	p.Eval(`window.feedEvents.length = 0`, nil)
 	return p

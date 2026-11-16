@@ -185,17 +185,20 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	card := `[data-workstream="` + string(stream) + `"] `
 	assertMarkdown(p, card+`[data-latest=true] [data-field=note] > .markdown`)
 	assertMarkdown(p, card+`[data-latest=true] [data-field=attention] > .markdown`)
+	p.OpenActivity()
 	p.Click(card + `[data-kind=session][data-role=chief_of_staff] summary`)
 	report := card + `[data-kind=session][data-role=chief_of_staff] [data-field=summary] > .markdown`
 	assertMarkdown(p, report)
 	assertMarkdownPhone(p, report)
 	p.Eval(`window.feedEvents.length = 0`, nil)
-	// A new reply forces replacement of the feed entries while the report
+	// A new reply forces replacement of the entries while the report
 	// remains open. The existing anchor still addresses this agent turn.
+	p.OpenConversation()
 	f.sendAndAnswer(t, p, stream, "Refresh while I read the report.", "A new reply.")
 	awaitFeedEvent(p, stream)
-	p.Await("report stays open after a feed update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=chief_of_staff] details`)+`).open &&
-	   [...document.querySelectorAll(`+quote(card+`[data-kind=response]`)+`)].some(n => n.textContent.includes('A new reply.'))`)
+	p.Await("the new reply in Conversation", `[...document.querySelectorAll(`+quote(card+`[data-kind=response]`)+`)].some(n => n.textContent.includes('A new reply.'))`)
+	p.OpenActivity()
+	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=chief_of_staff] details`)+`).open`)
 	assertMarkdown(p, report)
 	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.chief.Turn)+`)?.querySelector('details').open`)
 }

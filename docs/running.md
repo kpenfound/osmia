@@ -133,7 +133,7 @@ another instance was open. Create forms start with an empty outcome when
 opened or switched to another project.
 
 When the service accepts one of your commands on a workstream or workgroup, the
-page adds its outcome to that feed as an entry marked "Your command", with the
+page adds its outcome to that Conversation as an entry marked "Your command", with the
 time it was accepted: a ratification, a shed or contested-unit ruling, an
 amendment decision, an answer, a delivery approval, a base continuation, a
 project selection, a charter rule decision, a drift rebase or a recorded merge.
@@ -233,13 +233,28 @@ The member view is laid out like a chat client:
   widths the list is behind the button at the top left and covers the page
   until you pick a workstream or close it.
 - The main area shows the selected workstream: its goal, state, project and
-  units counted by state, and its feed. The feed lists, in the order they
-  happened, your messages and the chief of staff's answers and actions, each
-  status the chief of staff wrote, each agent session with its role, profile
-  and outcome, and each change of the workstream's or a unit's state. The
-  latest status's attention note is highlighted; a finished session opens to
-  its report or failure. Its inbox entries sit below the feed, above the
-  message field: what each asks, what waits on it, its options and the chief
+  units counted by state, and two tabs for what happened.
+  **Conversation** is the default. It lists, in the order they happened, your
+  messages and the chief of staff's answers and actions, images, delivery
+  briefs, the outcomes of your commands, and only the latest status the chief
+  of staff wrote, with its attention note highlighted. Machine events appear
+  only as one quiet line each: the workstream becoming ratified, building,
+  assembled or delivered, and the result of each final review. Selecting a
+  line opens Activity at that entry. Sessions, unit changes and check runs,
+  failed ones included, never appear in Conversation. **Activity** lists every
+  event, in the order it happened: each agent session with its role, profile
+  and outcome (a finished session opens to its report or failure), each change
+  of the workstream's or a unit's state with its reason, each check run, each
+  final review and every status the chief of staff wrote. The latest status is
+  marked current and older ones recede. Consecutive runs of routine events fold
+  into one "N events" line that opens in place. A unit filter limits Activity
+  to one unit's events; there are no event-type filters. The tab, the unit
+  filter and the entries you opened are kept in the page address
+  (`#workstream=<id>&tab=activity&unit=<unit>&open=<entries>`), so loading the
+  address shows the same view and Back and Forward step through it. The dot on
+  a sidebar row follows Conversation, the status and what waits on you; events
+  only Activity shows never mark a workstream. Its inbox entries sit below
+  Conversation's entries, above the message field: what each asks, what waits on it, its options and the chief
   of staff's recommendation. A ratification also shows the objections the
   chief of staff escalated and your own, with the ones it dismissed and why
   folded below them; a
@@ -250,7 +265,7 @@ The member view is laid out like a chat client:
   criterion. Without a brief it says "No brief was recorded for this review".
   The delivery entry waits for the brief while the chief of staff's turn for
   that final review runs and appears when the brief is recorded or that turn
-  ends without one. The brief is also its own entry in the feed, so you can
+  ends without one. The brief is also its own entry in Conversation, so you can
   reply to the chief of staff right under it; a workgroup's conversation
   shows each member's brief labelled with the member.
   Jev, the factory's decision maker, decides some of these entries before
@@ -258,7 +273,7 @@ The member view is laid out like a chat client:
   changes the approved intent, an escalated question, an escalated contested
   unit or an escalated objection reaches `jev.decision_threshold` (0.9 by
   default), its pick is recorded as your decision, the flow continues as if you
-  had chosen it, and the entry never appears. The feed and the trace label
+  had chosen it, and the entry never appears. Activity and the trace label
   such a decision "decided by Jev". Otherwise the entry reaches you with Jev's
   pick and confidence as its recommendation. Delivery approval, charter
   proposals, "no change needed" escalations, cancellation and anything that
@@ -350,7 +365,7 @@ From the page you can:
 - Answer a **Checks missing** entry: keep waiting, or continue the final review
   without check results (see the section below).
 - Opening a workgroup, workstream, design or exploratory conversation shows
-  its newest entry, including direct links and returning to Feed. New entries
+  its newest entry, including direct links and returning to Conversation. New entries
   scroll the shown conversation to its end even while reading older history.
   Refreshes without new entries keep your scroll position; your composer draft
   and keyboard focus stay in place.

@@ -124,15 +124,15 @@ func TestBrowserDeliveryCardWithoutBriefFieldShowsNoBlock(t *testing.T) {
 	}
 }
 
-// The brief is its own entry of the workstream's feed, with its text, items and
+// The brief is its own entry of the workstream's Conversation, with its text, items and
 // screenshots, and the conversation composer stays under it.
-func TestBrowserFeedShowsTheBriefAsItsOwnEntry(t *testing.T) {
+func TestBrowserConversationShowsTheBriefAsItsOwnEntry(t *testing.T) {
 	t.Parallel()
 	brief := `{"kind":"brief","at":"2026-01-01T00:00:05Z","brief":{"review":2,"review_revision":3,"commit":"abc123",` +
 		`"text":"Owners see the new page.","before_you_ship":["Set OSMIA_TOKEN"],` +
 		`"screenshots":[{"id":"img1","url":"/v1/images/w_000/img1","content_type":"image/png"},{"id":"img2","placeholder":"image img2 is no longer stored"}]}}`
 	p := newDeliveryBriefPage(t, deliveryPresentation(""), transitionEntry("2026-01-01T00:00:01Z", "assembled"), brief)
-	p.awaitFeedKinds("transition,brief")
+	p.awaitFeedKinds("milestone,brief")
 	const entry = `#workstreams [data-field=feed] li[data-kind=brief]`
 	p.awaitText(entry+" [data-field=brief-text]", "Owners see the new page.")
 	var got struct {
