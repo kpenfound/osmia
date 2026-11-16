@@ -169,7 +169,7 @@ text and revision, with a notice that the charter changed elsewhere; a stale
 save is refused and keeps the draft and error until **Read charter** explicitly
 loads the latest text.
 
-Project management shows the project's settings, its knowledge extraction state, and the actions that affect that project. **Extract knowledge**, **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves, configuration saves and extraction state arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
+Project management shows the project's settings and the actions that affect that project. **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and configuration saves arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
 **Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
 
@@ -203,12 +203,12 @@ The member view is laid out like a chat client:
   why. Check slots appear alongside mason, reviewer and committee slots: the
   factory shares `capacity.checks` (default 2) across every project's unit,
   final-review and session checks. Waiting entries name the workstream and unit,
-  final review number or session. The architect and librarian pools have no
-  factory-wide limit: they show as unbounded (`<n> active (unbounded; 1 per
+  final review number or session. The architect pool has no
+  factory-wide limit: it shows as unbounded (`<n> active (unbounded; 1 per
   workstream)`) with a note that no configuration setting controls them, never
   as zero slots, and the header's slot total (`used/limit`) counts only the
-  pools with a numeric limit while its tooltip still counts the architect and
-  librarian sessions in use. Counts and waits update as runs start and
+  pools with a numeric limit while its tooltip still counts the architect
+  sessions in use. Counts and waits update as runs start and
   finish. Check slots are separate from agent and per-workstream limits;
   waiting does not consume the check timeout. Reload applies a changed limit to
   new admissions while checks already running finish. The pauses open to every
@@ -313,7 +313,7 @@ Images must match their declared type and be at most 5 MiB. They are stored in
 the shown workstream's or session's trace; shared conversations keep references.
 Archiving a member deletes its images with its trace, and destroying a session
 deletes its images. Pinned archives retain no image bytes. Images are never sent
-to Hearsay, notification webhooks or the knowledge base.
+to Hearsay or notification webhooks.
 
 Which workstream is selected and what you have seen are kept in the browser,
 so another browser has its own. The list's order comes from the service and
@@ -507,7 +507,7 @@ Destroy is refused without changing anything while a turn is running or being
 started, while a session commit, check, push or end is still in progress
 (including the external check and push), or while a design's workgroup start
 is in progress. A design that has already started a workgroup cannot be
-destroyed. Ordinary workstreams, workgroups and the librarian workstream are
+destroyed. Ordinary workstreams and workgroups are
 also refused; their existing abandon/archive controls still apply. Wait for
 busy work to finish before retrying. An unknown or already destroyed ID reports
 not found. The CLI prints the service's refusal message and exits non-zero.
@@ -519,7 +519,7 @@ virtual machine, and the mason, reviewer and committee pools can hold several at
 once. Before `osmia serve`, `osmia doctor` estimates the memory they could hold
 at once, from each pool's capacity and each role's `memory` (or `sbx`'s default,
 half the host's memory between 512 MiB and 32 GiB, when it is unset), with the
-architect and librarian counted once each. It warns, without failing, when the
+architect counted once. It warns, without failing, when the
 estimate exceeds the host's memory. Set `cpus` and `memory` in
 `[roles.<role>]` to bring it down; the keys, a starting point for a 16 GB host
 and what to do when a mason runs out of memory are in

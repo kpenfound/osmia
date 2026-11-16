@@ -32,7 +32,6 @@ var TestLandIDs = landIDs
 type TestLandInput = landInput
 
 var TestLeastWorkstream = leastWorkstream
-var TestLibrarianActor = librarianActor
 
 const TestMasonDone = masonDone
 
@@ -69,9 +68,6 @@ const TestDriftDocument = driftDocument
 const TestDriftMasonAgent = driftMasonAgent
 const TestDriftReviewerAgent = driftReviewerAgent
 const TestDriftsDirectory = driftsDirectory
-const TestLibrarianAgent = librarianAgent
-
-type TestRefreshInput = refreshInput
 
 var TestContestOptions = contestOptions
 

@@ -55,7 +55,7 @@ func TestZeroProjectStart(t *testing.T) {
 	}
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if !hasDiagnostic(rt.Diagnostics, NoProject) || len(rt.Effective.Profiles) != 7 || rt.Projects == nil || len(rt.Projects) != 0 {
+	if !hasDiagnostic(rt.Diagnostics, NoProject) || len(rt.Effective.Profiles) != 6 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	if s.sole() != nil {
@@ -144,14 +144,10 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if len(bound) != 1 || bound[0] != id || s.sole() == nil || s.sole().repository.Project() != id {
 		t.Fatalf("activation: bound=%v active=%v", bound, s.sole())
 	}
-	// Registration starts the librarian's extraction; without a runner it
-	// fails, is reported, and leaves the project usable.
-	if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "failed" || !strings.Contains(x.Reason, "no agent runner") {
-		t.Fatalf("extraction without a runner: %+v", x)
+	// Registration requests no work: the trace has no librarian workstream.
+	if streams, err := s.sole().repository.Workstreams(); err != nil || len(streams) != 0 {
+		t.Fatalf("workstreams after registration: %v %v", streams, err)
 	}
-	// The result and acknowledgement commits land after the terminal state,
-	// so wait for both before snapshotting the trace below.
-	awaitExtractionAcknowledged(t, s)
 	// The runtime store resolves against the new project without a restart.
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
@@ -368,24 +364,13 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if string(charter) != trace.CharterTemplate {
 					t.Fatalf("charter: %q", charter)
 				}
-				// Recovery repeats no commit: the creation, the librarian's
-				// workstream, its chief-of-staff thread, the librarian thread,
-				// the extraction request and its five reconciliation actions
-				// (claim, observe, effect, result and acknowledgement) are each
-				// recorded once.
-				if x := awaitExtraction(t, c); x.State != "failed" {
-					t.Fatalf("extraction: %+v", x)
-				}
-				awaitExtractionAcknowledged(t, s)
+				// Recovery repeats no commit: the creation is recorded once, and
+				// registration requests no work, so no workstream trace exists.
 				if n := traceCommits(t, filepath.Join(root, "projects", string(id))); n != 1 {
 					t.Fatalf("project trace history: %d commits", n)
 				}
-				loaded, err := config.Load(opts.Config)
-				must(t, err)
-				librarianTrace, err := loaded.Root.WorkstreamTrace(id, librarianWorkstream(id))
-				must(t, err)
-				if n := traceCommits(t, librarianTrace); n != 9 {
-					t.Fatalf("librarian workstream trace history: %d commits", n)
+				if streams, err := s.sole().repository.Workstreams(); err != nil || len(streams) != 0 {
+					t.Fatalf("workstreams after recovery: %v %v", streams, err)
 				}
 				// The seed is committed with the trace, so recovery never leaves a
 				// trace without its first entity map revision.

@@ -484,7 +484,7 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 
 func (f *publisherFixture) storeMap(m kb.Map, when time.Time, cause string) {
 	f.t.Helper()
-	must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: librarianAgent}, cause))
+	must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: "agent_librarian"}, cause))
 }
 
 func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
@@ -494,8 +494,8 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 
 	// Notes, aliases, paths and the source ledger change nothing posted.
 	f.storeMap(testEntities(kb.Entity{ID: "api", Name: "API", Aliases: []string{"rest"}, Paths: []string{"internal/api/**", "cmd/api/**"}, Owners: []string{"@owner"}, PartOf: []string{}}), hr(2), "fixture")
-	f.document("", kb.ProseDocument("api"), 1, trace.ProsePath("api"), "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: librarianAgent})
-	f.document("", "kb-sources", 1, "kb/sources.json", "[]\n", hr(2), trace.Actor{Kind: "agent", ID: librarianAgent})
+	f.document("", "subsystem-api", 1, trace.ProsePath("api"), "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
+	f.document("", "kb-sources", 1, "kb/sources.json", "[]\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("a non-structural edit posted %v", kinds(posts))
 	}
@@ -534,16 +534,16 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 
 func hearsayTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
-func TestPublishSubsystemMapUpdatesNameTheCausingWorkstream(t *testing.T) {
+func TestPublishSubsystemMapUpdatesFromLibrarianRevisionsKeepTheirText(t *testing.T) {
 	f := newPublisherFixture(t)
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**")), hr(1), "fixture")
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**")), hr(2), "operation-refresh")
 
 	in, err := collectPublishInputs(context.Background(), f.repo, f.s.current())
 	must(t, err)
-	input, err := json.Marshal(refreshInput{Workstream: fixturekit.Stream, Commit: strings.Repeat("a", 40)})
+	input, err := json.Marshal(map[string]any{"workstream": fixturekit.Stream, "commit": strings.Repeat("a", 40)})
 	must(t, err)
-	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: RefreshAction, Input: input}}
+	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: retiredRefreshAction, Input: input}}
 	storeUpdate := func() string {
 		for _, r := range mapUpdateRecords(in) {
 			if text := r.Versions[0].Text; strings.Contains(text, `"Store"`) {
@@ -556,9 +556,9 @@ func TestPublishSubsystemMapUpdatesNameTheCausingWorkstream(t *testing.T) {
 	if text := storeUpdate(); !strings.Contains(text, "Caused by workstream "+string(fixturekit.Stream)) {
 		t.Fatalf("the update does not name the workstream: %s", text)
 	}
-	extract, err := json.Marshal(extractionInput{Extraction: 3})
+	extract, err := json.Marshal(map[string]any{"extraction": 3})
 	must(t, err)
-	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: ExtractAction, Input: extract}}
+	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: retiredExtractAction, Input: extract}}
 	if text := storeUpdate(); !strings.Contains(text, "knowledge-base extraction 3") {
 		t.Fatalf("extraction: %s", text)
 	}

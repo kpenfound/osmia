@@ -84,13 +84,10 @@ const TestNotificationGaveUp = notificationGaveUp
 const TestNotifyAttempts = notifyAttempts
 
 var TestFactoryInstructions = factoryInstructions
-var TestEnsureLibrarianThread = ensureLibrarianThread
 var TestFeedEntries = feedEntries
 var TestFeedSelection = feedSelection
 var TestStatusView = statusView
 var TestRecoveryActor = recoveryActor
-
-const TestLibrarianRole = librarianRole
 
 func (a TestAccess) Hub() *eventstream.Hub { return a.s.hub }
 

@@ -87,17 +87,13 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: &demoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{"notes_read", status.ToolName}}},
+			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				tools, err := r.NotesTools(chiefAgent, scope)
-				if err != nil {
-					return nil, err
-				}
 				set, err := status.Tool(r, chiefAgent, scope, clock.Now)
-				return append(tools, set), err
+				return []coreadapter.Tool{set}, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
@@ -130,7 +126,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		for _, tool := range listed.Tools {
 			names = append(names, tool.Name)
 		}
-		if want := []string{"notes_read", "set_status"}; !slices.Equal(names, want) {
+		if want := []string{"set_status"}; !slices.Equal(names, want) {
 			t.Errorf("chief of staff tools %v, want %v", names, want)
 		}
 		mu.Lock()

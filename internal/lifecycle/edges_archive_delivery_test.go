@@ -377,7 +377,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	}
 	streams, err := down.Workstreams()
 	must(t, err)
-	if !slices.Equal(streams, []config.WorkstreamID{librarianWorkstream(f.project2), f.stream2}) && !slices.Equal(streams, []config.WorkstreamID{f.stream2, librarianWorkstream(f.project2)}) {
+	if !slices.Equal(streams, []config.WorkstreamID{f.stream2}) {
 		t.Fatalf("repair created another workstream: %v", streams)
 	}
 	assertPrompts()

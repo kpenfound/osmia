@@ -14,11 +14,6 @@ func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files
 	return intakefixture.MoveFeature(t, workspaces(f.s.current(), branchesDirectory, backendOf(t, f, stream)), stream, files)
 }
 
-func rebaseOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []trace.OperationRecord {
-	t.Helper()
-	return intakefixture.UnitOperations(t, repository, stream, unit, func(op coreadapter.Operation) (string, error) { in, err := decodeRebase(op); return in.Unit, err })
-}
-
 func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) trace.QueuedTurn {
 	t.Helper()
 	return f.sharedTurns().CompleteMasonTurn(t, repository, stream, unit, outcome)

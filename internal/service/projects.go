@@ -327,8 +327,7 @@ func discardUnpublished(directory string) error {
 // activates the project unless startup will. The journal goes last, once the
 // project is listed and running. Each step inspects the disk before acting, so
 // running it again after an interruption neither repeats an effect nor skips
-// one. The trace's first extraction is requested before the project activates,
-// so the reconciliation loop finds it on its first pass.
+// one.
 func (s *Service) complete(ctx context.Context, pending pendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	root := s.current().Root
@@ -410,9 +409,6 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if err := s.step("active-project-listed"); err != nil {
-		return p, err
-	}
-	if err := s.ensureExtraction(ctx, root, p); err != nil {
 		return p, err
 	}
 	if activate {

@@ -12,7 +12,7 @@ import (
 )
 
 // The capacity view a running service serializes, in the chief's capacity
-// tool result and in /v1/status, shows the architect and librarian pools as
+// tool result and in /v1/status, shows the architect pool as
 // unbounded in words and with no numeric limit, and the other pools with
 // their configured limits, in the same order.
 func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
@@ -49,7 +49,7 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	fromStatus := fixturekit.CapacityWire(t, status)
 
 	cfg := s.current().Capacity
-	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 5: cfg.Checks} {
+	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 4: cfg.Checks} {
 		for name, roles := range map[string][]map[string]any{"tool": fromTool, "status": fromStatus} {
 			if got := roles[i]["limit"]; got != float64(want) {
 				t.Fatalf("%s %v limit %v, want %d", name, roles[i]["role"], got, want)

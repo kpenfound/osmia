@@ -52,10 +52,9 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []api.Event{ws, inbox}},
 		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []api.Event{ws, inbox}},
 		{"cost", trace.Commit{Paths: []string{prefix + "ledger.jsonl"}}, []api.Event{spend, ws}},
-		{"librarian", trace.Commit{Paths: []string{librarian + "ledger.jsonl", librarian + "workflow.json", librarian + "questions/1/question.jsonl"}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}, Deliveries: true}}, []api.Event{spend, {Kind: api.EventConfig, Project: project}}},
+		{"librarian", trace.Commit{Paths: []string{librarian + "ledger.jsonl", librarian + "workflow.json", librarian + "questions/1/question.jsonl"}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}, Deliveries: true}}, []api.Event{spend}},
 		{"project files", trace.Commit{Paths: []string{"charter.md", "documents.jsonl", "kb/entities.json"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
 		{"charter", trace.Commit{Paths: []string{"charter.md"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
-		{"extraction result", trace.Commit{Paths: []string{"documents.jsonl"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
 		{"knowledge files", trace.Commit{Paths: []string{"kb/entities.json"}}, nil},
 	} {
 		observe(c.commit)

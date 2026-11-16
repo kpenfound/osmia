@@ -300,7 +300,7 @@ type ProjectCapacity struct {
 // DefaultGitOperations bounds one project's repository and GitHub operations.
 const DefaultGitOperations = 4
 
-var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", "librarian", "mason", "reviewer"}
+var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", "mason", "reviewer"}
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
@@ -764,6 +764,10 @@ const JevEnabledIgnored = "jev.enabled = false is ignored: Jev is always on, and
 // [roles.mason.dagger] section. The mason runs Dagger on the service's engine.
 const MasonDaggerIgnored = "roles.mason.dagger is ignored: the mason runs Dagger on the engine [dagger] selects, with its version"
 
+// LibrarianIgnored warns that a top-level file has the removed [roles.librarian]
+// table. The librarian role no longer exists.
+const LibrarianIgnored = "roles.librarian is ignored: the librarian role is removed"
+
 // legacyWarnings reads the top-level file at path again for settings that are
 // accepted and ignored but deserve a warning. A file that cannot be read has
 // none: the load already read it.
@@ -776,6 +780,7 @@ func legacyWarnings(path string) []string {
 			Mason struct {
 				Dagger *struct{} `toml:"dagger"`
 			} `toml:"mason"`
+			Librarian *struct{} `toml:"librarian"`
 		} `toml:"roles"`
 	}
 	data, err := os.ReadFile(path)
@@ -791,6 +796,9 @@ func legacyWarnings(path string) []string {
 	}
 	if raw.Roles.Mason.Dagger != nil {
 		warnings = append(warnings, MasonDaggerIgnored)
+	}
+	if raw.Roles.Librarian != nil {
+		warnings = append(warnings, LibrarianIgnored)
 	}
 	return warnings
 }
@@ -944,9 +952,10 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 	if c.Roles == nil {
 		c.Roles = map[string]Role{}
 	}
-	// A leftover roles.classifier from the removed classifier role is
+	// A leftover roles.classifier or roles.librarian from a removed role is
 	// accepted and ignored.
 	delete(c.Roles, "classifier")
+	delete(c.Roles, "librarian")
 	names = names[:0]
 	for name := range c.Roles {
 		names = append(names, name)

@@ -23,10 +23,9 @@ type Dependencies struct {
 	PollCursor                func(context.Context, string) config.WorkstreamID
 	ObserveSharedConversation func(trace.Commit)
 
-	Execution             func() *execution.Controller
-	MemoryTurns           func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
-	UnresolvedWork        func(*trace.Repository, config.WorkstreamID) (bool, error)
-	LearningsIncorporated func(*trace.Repository, config.WorkstreamID) (bool, error)
+	Execution      func() *execution.Controller
+	MemoryTurns    func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
+	UnresolvedWork func(*trace.Repository, config.WorkstreamID) (bool, error)
 	// KeepForPublication carries what the workstream's trace holds of
 	// pending publication into the project's own trace, before archive
 	// cleanup removes it. Nil keeps nothing. It must not wait for any remote

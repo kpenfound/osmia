@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -147,28 +148,34 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 	}
 }
 
-func TestLandingWaitsOnlyForItsWorkstreamsRebasesAndRefresh(t *testing.T) {
+func TestLandingWaitsOnlyForItsWorkstreamsRebases(t *testing.T) {
 	t.Parallel()
-	for _, wait := range []string{"rebase", "refresh"} {
+	for _, wait := range []string{"rebase", "pending librarian refresh"} {
 		t.Run(wait, func(t *testing.T) {
 			t.Parallel()
 			f, a, repo := newApprovedFixture(t, "waiting-a")
 			b := approvedStream(t, f, repo, "waiting-b", config.WorkspacesGit)
 			lands := &foreman{masons: newMasonController(f.s, repo)}
-			if wait == "rebase" {
+			held := wait == "rebase"
+			if held {
 				moveFeature(t, f, a, map[string]string{"OTHER.md": "new feature tip\n"})
 			} else {
-				queueGitFixtureOperation(t, repo, librarianWorkstream(repo.Project()), RefreshAction, coreadapter.RunnerBoundary,
-					refreshInput{Workstream: a, Commit: strings.Repeat("a", 40), Unit: "resume", Landing: 1, Report: 1})
+				// A pending librarian refresh holds no workstream.
+				intakefixture.PlantLibrarian(t, repo, f.clock.Now(), ownerActor)
+				intakefixture.PlantLibrarianOperation(t, repo, f.clock.Now(), ownerActor, "refresh-fixture", "kb-refresh", map[string]any{"workstream": a, "commit": strings.Repeat("a", 40)})
 			}
 			must(t, lands.Pass(context.Background()))
-			if ops := landOperations(t, repo, a); len(ops) != 0 {
-				t.Fatalf("held workstream received landing: %+v", ops)
+			wantA := 1
+			if held {
+				wantA = 0
+			}
+			if ops := landOperations(t, repo, a); len(ops) != wantA {
+				t.Fatalf("workstream %s has %d landings, want %d: %+v", a, len(ops), wantA, ops)
 			}
 			if ops := landOperations(t, repo, b); len(ops) != 1 {
 				t.Fatalf("independent workstream has %d landings", len(ops))
 			}
-			if wait == "rebase" && len(rebaseOperations(t, repo, a, "resume")) != 1 {
+			if held && len(rebaseOperations(t, repo, a, "resume")) != 1 {
 				t.Fatal("the workstream behind its feature branch was not rebased")
 			}
 		})

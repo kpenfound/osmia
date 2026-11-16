@@ -224,13 +224,6 @@ func (m *masons) Pass(ctx context.Context) error {
 		}
 		read = append(read, b)
 	}
-	pending, err := m.s.RefreshPending(m.repository)
-	if err != nil {
-		return err
-	}
-	if pending {
-		return nil
-	}
 	// A turn can complete while this pass follows existing units. Refresh
 	// its recorded spend before reusing the slot that completion freed.
 	if err := m.s.RefreshBudget(ctx, m.repository); err != nil {

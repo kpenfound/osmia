@@ -100,7 +100,6 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		// Pools without a factory-wide limit never show as zero slots.
 		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
 			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
-			"  librarian: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
 			"  checks: 0 of 2 slot(s) in use\n",
 		// The service's jj decides what auto gives new workstreams.
 		"Workspaces: setting=auto new_workstreams=",
@@ -150,7 +149,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
 	none := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
-	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), fixturekit.Unbounded("librarian", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}}}
+	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
@@ -495,7 +494,6 @@ func TestStatusPrintsCapacity(t *testing.T) {
 			{Workstream: quiet, Unit: "validator", Reason: "priority"}}},
 		{Role: "reviewer", Used: 0, Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}},
 		fixturekit.Unbounded("architect", 1, []wire.SlotWait{}),
-		fixturekit.Unbounded("librarian", 0, []wire.SlotWait{}),
 		{Role: "checks", Used: 2, Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{
 			{Workstream: stream, Unit: "parser", Reason: "capacity"},
 			{Workstream: stream, Review: 3, Reason: "capacity"},
@@ -508,7 +506,6 @@ func TestStatusPrintsCapacity(t *testing.T) {
 		"    Waiting: " + quiet + " unit validator (priority)\n" +
 		"  reviewer: 0 of 2 slot(s) in use\n" +
 		"  architect: 1 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
-		"  librarian: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
 		"  checks: 2 of 2 slot(s) in use\n" +
 		"    Waiting: " + stream + " unit parser (capacity)\n" +
 		"    Waiting: " + stream + " final review 3 (capacity)\n" +

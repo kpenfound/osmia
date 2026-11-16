@@ -19,7 +19,7 @@ flowchart LR
     Trace --> API
 ```
 
-A project is exactly one repo with its own charter, settings, KB, entities and dedicated knowledge trace. Each workstream has its own complete trace, branch and PR. A cross-project workgroup's separate trace under `workgroups/<group-id>/` owns its workgroup spec, fixed membership, shared chief and decisions. Direct single-project groups keep their chief in the workstream trace. A design session can start members in other projects while its conversation stays at the session's project; the workgroup adopts that thread even for one selected member.
+A project is exactly one repo with its own charter, settings, entity map and dedicated project trace. The service re-seeds the entity map by itself from the upstream default branch when an architect draft starts and again before a sealing resolves footprints, and records a revision only when the map changes; no agent writes it. Each workstream has its own complete trace, branch and PR. A cross-project workgroup's separate trace under `workgroups/<group-id>/` owns its workgroup spec, fixed membership, shared chief and decisions. Direct single-project groups keep their chief in the workstream trace. A design session can start members in other projects while its conversation stays at the session's project; the workgroup adopts that thread even for one selected member.
 
 Nothing is authoritative in two places, and every trace stays
 outside target clones. Each trace is one SQLite database, `trace.db`, in its
@@ -66,7 +66,7 @@ A trace still kept as a Git repository is migrated to its database
 automatically and resumably before its project is opened. Permanently
 archiving a workstream closes its database, moves its trace directory aside
 and deletes it, together with its temporary workspaces, once any busy or
-pending work has cleared and the knowledge base has absorbed its learnings.
+pending work has cleared.
 See
 [design §4.5](design.md#45-where-they-live) and
 [§5.1](design.md#51-feature-states).
@@ -152,8 +152,8 @@ no search or fetch of its own and keeps no record of web reads. Only the
 planning roles hold it: the design session, the exploratory session, the
 architect on every turn path (including a workgroup's project-spec draft and
 delta amendment turns), the ordinary chief of staff and the committee in plan
-and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers, the
-librarian and the foreman never do, whatever a service grant
+and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers and the
+foreman never do, whatever a service grant
 says, and no configuration key changes that. A role that holds it keeps its
 read-only view and its service tools, gains no write, shell or `Network`
 grant, and is told in its system prompt that web content is evidence rather
@@ -214,7 +214,7 @@ Osmia.
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
 root holds its own `config.toml`. Runtime overrides, project configuration,
-repo knowledge traces, workgroup traces and workstream trace databases and workspaces live
+project traces, workgroup traces and workstream trace databases and workspaces live
 in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access

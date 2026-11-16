@@ -27,11 +27,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 }
 
 type DriftRebase = service.DriftRebase
-type Librarian = service.Librarian
-type refreshInput = service.TestRefreshInput
-type KnowledgeSource = service.KnowledgeSource
 
-const RefreshAction = service.RefreshAction
 const DriftAction = service.DriftAction
 
 var stageChiefDocuments = service.TestStageChiefDocuments
@@ -49,7 +45,6 @@ const driftDocument = service.TestDriftDocument
 const driftMasonAgent = service.TestDriftMasonAgent
 const driftReviewerAgent = service.TestDriftReviewerAgent
 const driftsDirectory = service.TestDriftsDirectory
-const librarianAgent = service.TestLibrarianAgent
 
 var factoryTarget = runtime.Target{Scope: "factory"}
 

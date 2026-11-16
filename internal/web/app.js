@@ -1067,7 +1067,7 @@
   }
 
   // A pool is bounded when the service reports a numeric factory-wide limit.
-  // The architect and librarian pools report none (unbounded: at most one
+  // The architect pool reports none (unbounded: at most one
   // turn per workstream), which is not a limit of 0.
   function boundedPool(r) {
     return typeof r.limit === 'number';
@@ -2996,7 +2996,7 @@
           title: r.role + ': ' + poolUse(r) + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
       }));
       byId('meter-total').textContent = used + '/' + limit;
-      byId('capacity-button').title = used + ' of ' + limit + ' slots in use' + (local > 0 ? '; ' + local + ' architect/librarian sessions' : '');
+      byId('capacity-button').title = used + ' of ' + limit + ' slots in use' + (local > 0 ? '; ' + local + ' architect sessions' : '');
     }
     const pauses = views.runtime ? views.runtime.effective.pauses || [] : [];
     const button = byId('pause-button');
@@ -4231,9 +4231,8 @@
     for (const repo of repos) {
       let row = managementRepos.get(repo.id);
       if (!row) {
-        row = { title: el('h4'), extraction: el('p', {class: 'meta', 'data-field': 'extraction'}),
-          result: el('p', {class: 'result', role: 'status'}), buttons: [] };
-        for (const [action, label] of [['extract', 'Extract knowledge'], ['rebase', 'Rebase workstreams'], ['remove', 'Remove repo from active work']]) {
+        row = { title: el('h4'), result: el('p', {class: 'result', role: 'status'}), buttons: [] };
+        for (const [action, label] of [['rebase', 'Rebase workstreams'], ['remove', 'Remove repo from active work']]) {
           const button = el('button', {type: 'button', 'data-action': action}, label);
           button.addEventListener('click', () => {
             if (action === 'remove') row.retain = true;
@@ -4244,21 +4243,17 @@
               }
               mark(['status', 'config']);
               return action === 'remove' ? 'Repo removed from active work; its trace and clone are retained.' :
-                (action === 'extract' ? 'Knowledge extraction requested.' : 'Workstream rebase: ' + out.covered.length + ' requested, ' + out.skipped.length + ' skipped.' +
-                  out.skipped.map(skip => ' ' + skip.workstream + ': ' + skip.reason + '.').join(''));
+                'Workstream rebase: ' + out.covered.length + ' requested, ' + out.skipped.length + ' skipped.' +
+                  out.skipped.map(skip => ' ' + skip.workstream + ': ' + skip.reason + '.').join('');
             }, () => { row.retain = false; });
           });
           row.buttons.push(button);
         }
         row.node = el('article', {class: 'managed-repo', 'data-managed-repo': repo.id}, row.title,
-          row.extraction, el('div', {class: 'actions'}, ...row.buttons), row.result);
+          el('div', {class: 'actions'}, ...row.buttons), row.result);
         managementRepos.set(repo.id, row);
       }
       row.title.textContent = repoLabel(repo.id);
-      const extraction = repo.extraction;
-      row.extraction.hidden = !extraction;
-      row.extraction.textContent = extraction ? 'Knowledge extraction ' + extraction.extraction + ': ' + extraction.state +
-        (extraction.reason ? ' · ' + extraction.reason : '') : '';
     }
     place(byId('project-repos'), [...managementRepos.values()].map(row => row.node));
   }

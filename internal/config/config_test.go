@@ -88,7 +88,7 @@ func TestDefaults(t *testing.T) {
 	if c.Project.Capacity.GitOperations != 4 {
 		t.Fatalf("git operation default: %+v", c.Project.Capacity)
 	}
-	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
+	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 6 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
 	p, settings, err := c.Execution("mason", "default")
@@ -229,6 +229,32 @@ func TestClassifierSettingsAreIgnored(t *testing.T) {
 		if _, ok := c.Roles["classifier"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: classifier setting took effect: %+v", name, c)
 		}
+	}
+}
+
+// A leftover [roles.librarian] table from the removed librarian role loads and
+// has no effect, apart from a warning that names it.
+func TestLibrarianRoleTableIsIgnoredWithAWarning(t *testing.T) {
+	plain, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain.Warnings) != 0 {
+		t.Fatalf("warnings without the table: %v", plain.Warnings)
+	}
+	c, err := Load(fixture(t, topConfig+"[roles.librarian]\nprofile = 'missing'\nsandbox = 'bogus'\nimage = 'x'\nmemory = '2g'\n", projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Roles["librarian"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(c.Roles, plain.Roles) {
+		t.Fatalf("the librarian table took effect: %+v", c.Roles)
+	}
+	if !slices.Equal(c.Warnings, []string{LibrarianIgnored}) || !strings.Contains(LibrarianIgnored, "roles.librarian") {
+		t.Fatalf("warnings %q", c.Warnings)
+	}
+	top, err := LoadTopLevel(fixture(t, topConfig+"[roles.librarian]\nsandbox = 'sbx'\n", projectConfig))
+	if err != nil || !slices.Equal(top.Warnings, []string{LibrarianIgnored}) {
+		t.Fatalf("top-level load: %v %q", err, top.Warnings)
 	}
 }
 
@@ -678,7 +704,7 @@ func TestNamedBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 7 || c.Roles["reviewer"].Profile != "custom" {
+	if len(c.Roles) != 6 || c.Roles["reviewer"].Profile != "custom" {
 		t.Fatalf("bindings: %+v", c.Roles)
 	}
 }

@@ -184,7 +184,7 @@ func TestFinalReviewsShareACloneWithoutHoldingItDuringChecksOrModels(t *testing.
 
 func TestModelOperationsUseWorkflowOrderingBesideThePass(t *testing.T) {
 	t.Parallel()
-	for _, action := range []string{DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction, ExtractAction, RefreshAction, FinalReviewAction, deliveryReviewAction} {
+	for _, action := range []string{DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction, FinalReviewAction, deliveryReviewAction} {
 		t.Run(action, func(t *testing.T) {
 			op := coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: action}
 			if !concurrentOperation(op) || operationClass(op) != trace.WorkflowOperation {
@@ -262,12 +262,12 @@ func TestModelOperationsHoldForProviderUsageLimits(t *testing.T) {
 	}
 	stream := f.handIn(t, "provider-held-model-work", handedDesign)
 	hold := InspectForTest(f.s).Holding(f.repository())
-	for _, action := range []string{DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction, ExtractAction, RefreshAction, FinalReviewAction, deliveryReviewAction} {
+	for _, action := range []string{DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction, FinalReviewAction, deliveryReviewAction} {
 		if op := (coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: action}); !hold(stream, op) {
 			t.Errorf("provider usage limit did not hold %s before admission", action)
 		}
 	}
-	if got := InspectForTest(f.s).Pool().Slots(nil).Used; got[architectRole] != 0 || got[committeeRole] != 0 || got[librarianRole] != 0 {
+	if got := InspectForTest(f.s).Pool().Slots(nil).Used; got[architectRole] != 0 || got[committeeRole] != 0 {
 		t.Fatalf("held model operations took capacity: %v", got)
 	}
 }

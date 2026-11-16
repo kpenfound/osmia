@@ -41,7 +41,7 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"file_read", "file_write", "notes_read", "notes_write"}; !slices.Equal(names, want) {
+	if want := []string{"file_read", "file_write"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	if want := coreadapter.AllowedTools([]string{"osmia_0"}, names); !slices.Equal(req.Profile.AllowedTools, want) {
@@ -159,13 +159,10 @@ func demonstrate(t *testing.T, mode string) {
 		live = r
 		bound.Unlock()
 		turns := &isolation.Turns{Workspaces: workspaces, Views: isolation.Views{Directory: views}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{demoRole: {Tools: []string{"file_read", "file_write", "notes_read", "notes_write", "shell", "git_push"}, WriteFiles: true}},
+			Grants: map[string]coreadapter.Capabilities{demoRole: {Tools: []string{"file_read", "file_write", "shell", "git_push"}, WriteFiles: true}},
 			Tools:  []coreadapter.Tool{{Name: "shell", Effect: coreadapter.ToolExecute}, {Name: "git_push", Effect: coreadapter.ToolVCS}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Paths: []string{"src"}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
-			},
-			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				return r.NotesTools(demoAgent, scope)
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
 		}
@@ -191,12 +188,8 @@ func demonstrate(t *testing.T, mode string) {
 		if req.ResumeID != "" || !strings.HasSuffix(req.Prompt, first.Prompt) {
 			err = errors.Join(err, fmt.Errorf("first turn context: %q %q", req.ResumeID, req.Prompt))
 		}
-		if notes, e := callTool(ctx, tools, "notes_read", map[string]any{}); e != nil || notes != `{"text":"","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}` {
-			err = errors.Join(err, fmt.Errorf("fresh notes %q %v", notes, e))
-		}
-		_, e1 := callTool(ctx, tools, "notes_write", map[string]any{"text": "first turn: owner prefers small commits", "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 		_, e2 := callTool(ctx, tools, "file_write", map[string]any{"path": "src/app.txt", "content": "edited in turn one\n"})
-		if err = errors.Join(err, e1, e2); err != nil {
+		if err = errors.Join(err, e2); err != nil {
 			t.Error(err)
 		}
 		close(entered)
@@ -245,9 +238,6 @@ func demonstrate(t *testing.T, mode string) {
 			t.Fatalf("second operation was applied before the restart: %+v", op)
 		}
 	}
-	if notes, _ := traceFile(t, traceDir, "notes/"+demoRole+".md"); string(notes) != "first turn: owner prefers small commits" {
-		t.Fatalf("notes before restart: %q", notes)
-	}
 	must(t, repo.Close())
 
 	// Second service lifetime: the controller finds both intents by scanning.
@@ -280,23 +270,12 @@ func demonstrate(t *testing.T, mode string) {
 				err = errors.Join(err, fmt.Errorf("replayed exchange: %s", history))
 			}
 		}
-		notes, e1 := callTool(ctx, tools, "notes_read", map[string]any{})
-		if e1 == nil && notes != `{"text":"first turn: owner prefers small commits","sha256":"6ed8b1311fa65fdd3ee9191dddacf7aa51404cca29d209a7f65f3d46754de087"}` {
-			e1 = fmt.Errorf("notes after restart: %s", notes)
-		}
-		var notesState struct {
-			SHA256 string `json:"sha256"`
-		}
-		if e := json.Unmarshal([]byte(notes), &notesState); e != nil {
-			e1 = errors.Join(e1, e)
-		}
-		_, e2 := callTool(ctx, tools, "notes_write", map[string]any{"text": "second turn: confirmed", "expected_sha256": notesState.SHA256})
 		// Views are fresh copies; the first turn's edit was never copied back.
 		content, e3 := callTool(ctx, tools, "file_read", map[string]any{"path": "src/app.txt"})
 		if e3 == nil && content != `"original\n"` {
 			e3 = fmt.Errorf("fresh view content %s", content)
 		}
-		if err = errors.Join(err, e1, e2, e3); err != nil {
+		if err = errors.Join(err, e3); err != nil {
 			t.Error(err)
 		}
 		id := "session-second"
@@ -424,9 +403,6 @@ func demonstrate(t *testing.T, mode string) {
 	}
 	if log := workstreamRecords(t, cfg.Root, project, stream, "agents/"+demoAgent+"/log.jsonl"); len(log) != 4 {
 		t.Fatalf("owned log has %d records", len(log))
-	}
-	if notes, _ := traceFile(t, traceDir, "notes/"+demoRole+".md"); string(notes) != "second turn: confirmed" {
-		t.Fatalf("final notes: %q", notes)
 	}
 	if after := snapshot(t, clone); !reflect.DeepEqual(after, cloneBefore) {
 		t.Fatal("runtime changed the target repository or its VCS metadata")

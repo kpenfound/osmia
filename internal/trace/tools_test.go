@@ -35,14 +35,6 @@ func TestToolCallsRecordIntentCompletionAndInterruptedEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool.Name = "notes_read"
-	complete, err = r.BeginTool(ctx, scope, tool, json.RawMessage(`{}`), func() time.Time { return at })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := complete(ctx, json.RawMessage(`{"text":"private craft"}`), nil); err != nil {
-		t.Fatal(err)
-	}
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +68,8 @@ func TestToolCallsRecordIntentCompletionAndInterruptedEffect(t *testing.T) {
 		} else {
 			completed++
 		}
-		if call.Name == "notes_read" && (call.Input.Content != "" || call.Output.Content != "" || call.Output.SHA256 == "") {
-			t.Fatal("private notes leaked into tool payload")
-		}
 	}
-	if len(latest) != 3 || started != 1 || completed != 2 {
+	if len(latest) != 2 || started != 1 || completed != 1 {
 		t.Fatalf("calls %+v", latest)
 	}
 	if _, err := r.BeginTool(ctx, scope, tool, json.RawMessage(`{}`), func() time.Time { return at }); err == nil {

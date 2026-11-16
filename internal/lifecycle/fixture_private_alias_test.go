@@ -22,7 +22,6 @@ var landIDs = service.TestLandIDs
 
 type landInput = service.TestLandInput
 
-var librarianActor = service.TestLibrarianActor
 var masonTurnID = service.TestMasonTurnID
 
 type reportingTurns = service.TestReportingTurns

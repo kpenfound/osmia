@@ -2161,43 +2161,6 @@
         }
       }
     },
-    "/v1/projects/extract": {
-      "post": {
-        "summary": "Start a knowledge-base extraction",
-        "operationId": "postProjectsExtract",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectExtractRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "description": "The request failed; the error names its code and reason.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExtractionResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/projects/memory/{project}": {
       "get": {
         "summary": "Export a project's Hearsay setup",
@@ -4124,7 +4087,7 @@
             "type": "integer"
           },
           "roles": {
-            "description": "Factory-wide mason, reviewer, committee, architect, librarian and checks slot pools, in that order.",
+            "description": "Factory-wide mason, reviewer, committee, architect and checks slot pools, in that order.",
             "items": {
               "$ref": "#/components/schemas/RoleCapacity"
             },
@@ -5728,35 +5691,6 @@
         },
         "type": "object"
       },
-      "ExtractionResponse": {
-        "properties": {
-          "extraction": {
-            "$ref": "#/components/schemas/ExtractionState"
-          },
-          "project": {
-            "$ref": "#/components/schemas/ProjectView"
-          }
-        },
-        "type": "object"
-      },
-      "ExtractionState": {
-        "properties": {
-          "at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "extraction": {
-            "type": "integer"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "FailureStreak": {
         "properties": {
           "consecutive": {
@@ -7059,14 +6993,6 @@
         },
         "type": "object"
       },
-      "ProjectExtractRequest": {
-        "properties": {
-          "project": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ProjectRebaseRequest": {
         "properties": {
           "project": {
@@ -7155,9 +7081,6 @@
           },
           "clone": {
             "type": "string"
-          },
-          "extraction": {
-            "$ref": "#/components/schemas/ExtractionState"
           },
           "fork": {
             "type": "string"
@@ -7350,9 +7273,6 @@
           "entity_map": {
             "type": "string"
           },
-          "extraction": {
-            "$ref": "#/components/schemas/ExtractionState"
-          },
           "fork": {
             "type": "string"
           },
@@ -7405,7 +7325,7 @@
             "type": "string"
           },
           "role": {
-            "description": "Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams.",
+            "description": "Slot pool: mason, reviewer, committee, architect or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams.",
             "type": "string"
           },
           "scope": {
@@ -7413,7 +7333,7 @@
             "type": "string"
           },
           "unbounded": {
-            "description": "True when the pool has no factory-wide limit (architect, librarian). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise.",
+            "description": "True when the pool has no factory-wide limit (architect). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise.",
             "type": "boolean"
           },
           "used": {

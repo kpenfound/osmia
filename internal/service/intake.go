@@ -244,14 +244,6 @@ const driftResolved = intake.DriftResolved
 
 var revisionWorkersIdle = intake.RevisionWorkersIdle
 
-const librarianRole = intake.LibrarianRole
-
-const librarianAgent = intake.LibrarianAgent
-
-const librarianThread = intake.LibrarianThread
-
-const maxExtractionAttempts = intake.MaxExtractionAttempts
-
 var librarianWorkstream = intake.LibrarianWorkstream
 
 var progress = intake.Progress
@@ -357,8 +349,6 @@ func (s *Service) ratifyMember(ctx context.Context, o *shedOwner, asked shed.Pin
 const projectSpecCatchingUp = intake.ProjectSpecCatchingUp
 
 var recoveryActor = intake.RecoveryActor
-
-var copyCommit = intake.CopyCommit
 
 var readCommitPath = intake.ReadCommitPath
 

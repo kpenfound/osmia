@@ -97,7 +97,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
 	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, librarianActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, ownerActor)
 	defer f.stop(t)
 	j := &telemetryJourney{f: f}
 
@@ -500,11 +500,11 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		role := attrOf(sp, attrRole)
 		slotRoles[role]++
 		unbounded := attrOf(sp, attrUnbounded) == "true"
-		if attrOf(sp, attrPool) != role || !hasAttr(sp, attrOutcome) || unbounded == hasAttr(sp, attrLimit) || attrOf(sp, attrLimit) == "0" || (role == "architect" || role == "librarian") != unbounded {
+		if attrOf(sp, attrPool) != role || !hasAttr(sp, attrOutcome) || unbounded == hasAttr(sp, attrLimit) || attrOf(sp, attrLimit) == "0" || role == "architect" != unbounded {
 			fail("slot span %s: %v", sp.Name, sp.Attributes)
 		}
 	}
-	for _, role := range []string{"mason", "reviewer", "checks", "architect", "committee", "librarian"} {
+	for _, role := range []string{"mason", "reviewer", "checks", "architect", "committee"} {
 		if slotRoles[role] == 0 {
 			fail("no slot span for %s: %v", role, slotRoles)
 		}
@@ -536,13 +536,13 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	limits := spans.Named("osmia.pool.limit")
 	runOne := limits.Where(func(sp tracetest.SpanStub) bool { return sp.Parent.SpanID() == uptimes[0].SpanContext.SpanID() })
 	runTwo := limits.Where(func(sp tracetest.SpanStub) bool { return sp.Parent.SpanID() == uptimes[1].SpanContext.SpanID() })
-	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "librarian", "checks"} {
+	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "checks"} {
 		for run, list := range map[string]servicetest.Spans{"first": runOne.With(attrPool, pool), "second": runTwo.With(attrPool, pool)} {
 			if len(list) == 0 {
 				fail("no pool limit span for %s in the %s run", pool, run)
 			}
 			for _, sp := range list {
-				if (pool == "architect" || pool == "librarian") != (attrOf(sp, attrUnbounded) == "true") || hasAttr(sp, attrLimit) == (attrOf(sp, attrUnbounded) == "true") || attrOf(sp, attrLimit) == "0" {
+				if (pool == "architect") != (attrOf(sp, attrUnbounded) == "true") || hasAttr(sp, attrLimit) == (attrOf(sp, attrUnbounded) == "true") || attrOf(sp, attrLimit) == "0" {
 					fail("pool limit span %v", sp.Attributes)
 				}
 			}
@@ -572,9 +572,9 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	// nothing is idle throughout, and the unbounded pools are busy or idle and
 	// never at capacity.
 	times := spans.PoolTimes(uptimes[0].StartTime, uptimes[1].EndTime)
-	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "librarian", "checks"} {
+	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "checks"} {
 		pt := times[pool]
-		unbounded := pool == "architect" || pool == "librarian"
+		unbounded := pool == "architect"
 		if pt.Running <= 0 || pt.Busy+pt.Idle != pt.Running || unbounded && pt.AtCapacity != 0 || pt.AtCapacity > pt.Busy {
 			fail("pool %s time %+v", pool, pt)
 		}
@@ -681,21 +681,21 @@ func TestTelemetryServiceWithoutWorkSendsAPoolLimitSpanForEveryConfiguredPool(t 
 	spans := servicetest.SpansOf(exporter)
 	uptime := spans.Named("osmia.service.uptime")
 	limits := spans.Named("osmia.pool.limit")
-	if len(uptime) != 1 || len(limits) != 6 {
+	if len(uptime) != 1 || len(limits) != 5 {
 		t.Fatalf("%d uptime spans, %d pool limit spans:\n%s", len(uptime), len(limits), spans.Summary())
 	}
-	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "librarian", "checks"} {
+	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "checks"} {
 		list := limits.With(attrPool, pool)
 		if len(list) != 1 || !list[0].StartTime.Equal(uptime[0].StartTime) || !list[0].EndTime.Equal(uptime[0].EndTime) || list[0].Parent.SpanID() != uptime[0].SpanContext.SpanID() {
 			t.Fatalf("pool %s limit spans %v, uptime %v", pool, list, uptime)
 		}
-		unbounded := pool == "architect" || pool == "librarian"
+		unbounded := pool == "architect"
 		if unbounded != (attrOf(list[0], attrUnbounded) == "true") || unbounded == hasAttr(list[0], attrLimit) || attrOf(list[0], attrLimit) == "0" {
 			t.Fatalf("pool %s limit span %v", pool, list[0].Attributes)
 		}
 	}
 	for _, sp := range spans {
-		if strings.HasPrefix(sp.Name, "osmia.slot.") && attrOf(sp, attrRole) != "librarian" && attrOf(sp, attrRole) != "architect" {
+		if strings.HasPrefix(sp.Name, "osmia.slot.") && attrOf(sp, attrRole) != "architect" {
 			t.Fatalf("a service with no work sent %s:\n%s", sp.Name, spans.Summary())
 		}
 	}

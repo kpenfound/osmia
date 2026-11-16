@@ -124,8 +124,8 @@ func (s *Subscriber) Take() []api.Event {
 }
 
 // TraceEvents returns the observer of a project's trace, which announces the
-// views each commit changes. The librarian's workstream has no status,
-// conversation or inbox entry; its changes refresh extraction in configuration.
+// views each commit changes. The librarian workstream an older trace can hold has no status,
+// conversation or inbox entry; its changes announce nothing.
 func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamID) func(trace.Commit) {
 	return func(c trace.Commit) {
 		var out []api.Event
@@ -150,7 +150,6 @@ func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamI
 				add(api.EventSpend, "")
 			}
 			if stream == librarian {
-				add(api.EventConfig, "")
 				continue
 			}
 			add(api.EventWorkstream, stream)

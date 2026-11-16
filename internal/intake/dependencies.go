@@ -74,25 +74,25 @@ type Dependencies struct {
 	PublicationEntry         func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	RefreshRuntime           func() error
 	// Reseeder returns the project's entity map re-seeder, or nil when it has none.
-	Reseeder                 func(repo *trace.Repository) *kb.Reseeder
-	RemoteFileTool           func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
-	Repository               func(id config.ProjectID) (*trace.Repository, error)
-	ProjectCreation          ProjectCreation
-	ResolveBase              func(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error)
-	ResumeGroupApproval      func(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError)
-	RoleExecution            func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
-	RuntimeOf                func(id config.ProjectID) (*config.Config, *Project)
-	Runtimes                 func() (*config.Config, []*Project)
-	Step                     func(name string) error
-	Stoppable                func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
-	StoreGeneration          func() uint64
-	ThreadRunner             func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
-	WorkgroupFullyRetired    func(ctx context.Context, g trace.Workgroup) (bool, error)
-	Store                    func() *runtime.Store
-	HandInMu                 *sync.Mutex
-	Jev                      *jev.Judge
-	TrackTurn                func(config.WorkstreamID, context.CancelFunc) func()
-	Options                  Execution
+	Reseeder              func(repo *trace.Repository) *kb.Reseeder
+	RemoteFileTool        func(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool
+	Repository            func(id config.ProjectID) (*trace.Repository, error)
+	ProjectCreation       ProjectCreation
+	ResolveBase           func(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error)
+	ResumeGroupApproval   func(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError)
+	RoleExecution         func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
+	RuntimeOf             func(id config.ProjectID) (*config.Config, *Project)
+	Runtimes              func() (*config.Config, []*Project)
+	Step                  func(name string) error
+	Stoppable             func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
+	StoreGeneration       func() uint64
+	ThreadRunner          func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
+	WorkgroupFullyRetired func(ctx context.Context, g trace.Workgroup) (bool, error)
+	Store                 func() *runtime.Store
+	HandInMu              *sync.Mutex
+	Jev                   *jev.Judge
+	TrackTurn             func(config.WorkstreamID, context.CancelFunc) func()
+	Options               Execution
 }
 
 // ProjectCreation is the service's project creation as a design start uses

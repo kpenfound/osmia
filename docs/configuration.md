@@ -11,7 +11,7 @@ Startup performs the recoverable migrations described below.
 
 ## Projects, repos and workgroups
 
-A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps, KB and entity map. Its `p_…` ID identifies it in `active_projects` and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters, KBs and entities are independent for every project.
+A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps and entity map. Its `p_…` ID identifies it in `active_projects` and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters, KBs and entities are independent for every project.
 
 A workgroup represents one feature across any number of selected active projects. It has one member workstream per project, one shared chief, one workgroup spec, contracts and graph, and one ratification. The workgroup appears under each member's project card and sidebar group row, with members labelled by project name. Briefs, workgroup specs, slices and all factory state stay outside target repositories. File-based context supports the whole flow without Hearsay.
 
@@ -89,7 +89,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
 <root>/service-intervals.json                 the pool limit intervals and uptime of the running service, while [telemetry] is on
 <root>/projects/<repo-id>/config.toml
-<root>/projects/<repo-id>/trace.db             project charter, KB, entity map and role notes
+<root>/projects/<repo-id>/trace.db             project charter, entity map and lasting decisions
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
 <root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own trace.db and osmia.lock, separate from projects/<repo-id>/
 <root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, workgroup spec, shared chief and group decisions
@@ -387,7 +387,7 @@ further rounds the owner may ask for after a
 conclusion; from the first such request the rounds the owner asked for replace
 the cap as the debate's round limit.
 
-The architect and librarian pools have no factory-wide limit and no
+The architect pool has no factory-wide limit and no
 `capacity.*` key: each runs at most one turn per workstream. The capacity view
 (the status API's `capacity` and the chief of staff's `capacity` tool) shows
 them as unbounded, with no numeric `limit`, and a note saying so; only the
@@ -415,7 +415,7 @@ profiles = ["claude", "codex-fast"]
 ```
 
 A perspective is `correctness` (charter compliance, contradictions and
-verifiable acceptance), `integration` (fit with the knowledge base's decisions,
+verifiable acceptance), `integration` (fit with the project's recorded decisions,
 the existing code and the order of units) or `scope` (expansion beyond the
 handed design and unit size). It adds that focus to the member's shed system
 prompt, in debate and amendment rounds. Every member still applies the charter,
@@ -460,9 +460,11 @@ provider at execution time, not through network access during loading.
 | `timeout` | `45m` | Positive Go duration; explicit empty values are invalid |
 | `max_turns` | `0` | Nonnegative; zero means no turn limit; only Claude supports a nonzero value through the pinned adapter |
 
-Roles are `architect`, `committee`, `chief_of_staff`, `foreman`, `librarian`,
-`mason` and `reviewer`. Every omitted role binding defaults to profile `default`.
-If there is no profile named `default`, bind all seven roles explicitly. Role keys:
+Roles are `architect`, `committee`, `chief_of_staff`, `foreman`, `mason` and
+`reviewer`. Every omitted role binding defaults to profile `default`.
+If there is no profile named `default`, bind all six roles explicitly. A leftover
+`[roles.librarian]` table is accepted and ignored, and the service warns that
+it has no effect. Role keys:
 
 | Role key | Default | Validation/meaning |
 | --- | --- | --- |
@@ -492,14 +494,11 @@ sandbox = "sbx"
 # Optional; omit to use sbx's template for the resolved agent.
 # image = "example/osmia-claude:1"
 
-[roles.librarian]
-sandbox = "sbx"
-
 [roles.committee]
 sandbox = "sbx"
 ```
 
-All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
+All six roles support this mode with `claude`, `codex` or `opencode` profiles.
 An omitted `image` lets each fallback profile select its agent's default template.
 A custom template must support every agent in that role's fallback chain. A
 `[roles.classifier]` table is accepted and ignored, so a configuration file that
@@ -545,7 +544,7 @@ sandbox = "sbx"
 cpus = 2
 memory = "4g"
 
-# The read-only roles: architect, reviewer, committee, librarian,
+# The read-only roles: architect, reviewer, committee,
 # chief_of_staff and foreman.
 [roles.reviewer]
 sandbox = "sbx"
@@ -555,7 +554,7 @@ memory = "2g"
 
 That is `2g` for read-only roles, `4g` for masons and `cpus = 2`. With the
 default capacity, the four masons, two reviewers, three committee members and
-one architect and librarian hold 16 + 4 + 6 + 4 = 30 GiB at most, more than
+one architect hold 16 + 4 + 6 + 2 = 28 GiB at most, more than
 such a host has, so lower `capacity.masons`, `capacity.reviewers` and
 `capacity.committee` or the values to fit; doctor shows the total. These are
 not defaults, only a place to start: Osmia applies none of them.
@@ -1003,12 +1002,9 @@ writing anything, then:
    revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
-5. creates the librarian's workstream, its own trace database and
-   its thread, and requests
-   the first knowledge-base extraction as a
-   durable operation;
-6. activates the project (opens the trace and starts reconciliation, which
-   runs the extraction) and removes the journal.
+5. activates the project (opens the trace and starts reconciliation) and
+   removes the journal. Registration creates no workstream and requests no
+   other work.
 
 Validation refuses, each with its own message: a blank name, an upstream or a supplied fork
 that is not `owner/repository`, an invalid base
@@ -1025,8 +1021,7 @@ run again finishes it. A retry never creates a second trace and an
 interrupted registration never blocks a retry: the same request returns the
 finished project; a different request waits until the pending registration finishes. A trace whose database never committed its
 manifest is discarded and redone, keeping only `config.toml`; one with a
-manifest is kept. The extraction is requested
-once; a retry finds it in the trace and does not request another.
+manifest is kept.
 
 Registration can add distinct projects while other projects run. Each active
 registration needs its own clone. Repeating an active project's exact
@@ -1035,29 +1030,31 @@ are retained.
 
 `osmia project add` creates exactly one one-repo project with its own charter. `--fork` and `--base-branch` are optional. The project pane offers the same creation operation. To coordinate repositories, select their independent projects when handing in a feature or confirming a design brief's project list.
 
-### Knowledge maintenance and retrieval
+### The entity map and retrieval
 
-Factory turns receive governing rules and decisions with references to project
-knowledge. They retrieve KB prose, the entity map and informational project
+Factory turns receive governing rules and decisions with references to the
+project's entity map. They retrieve the entity map and informational project
 notices with `project_context`, rather than carrying that material in every
 prompt. The tool searches current records, lists at most 20 matches per page,
 and reads at most 16 KiB per call. Reads identify the revision; subsequent pages
-can pin it, and older revisions remain available. Private role notes and other
-workstreams' records are not exposed by this tool. Workstream documents remain
-available through `factory_context` and each role's scoped file view.
+can pin it, and older revisions remain available. Other workstreams' records are
+not exposed by this tool. Workstream documents remain available through
+`factory_context` and each role's scoped file view.
 
-The librarian maintains concise current explanations on every extraction and
-refresh. It removes superseded claims, duplicate explanations, routine status
-and refresh histories, retaining applicable constraints and non-obvious pitfalls.
-It references detailed evidence rather than copying it into the KB. The service
-keeps provenance and historical revisions in the trace and source ledger.
-
-Each KB prose file has an 8 KiB ceiling, and all prose together has a 64 KiB
-ceiling; the entity map is excluded. The librarian is instructed to aim well
-below these limits and can call `kb_check` on its isolated output to find and
-repair problems before finishing. The service also validates at publication;
-invalid output leaves the recorded KB unchanged. Existing KB documents are not
-silently truncated: a successful librarian pass must consolidate them.
+The entity map, `kb/entities.json`, is computed by the service alone. It holds
+one entity per directory of the repository, named from CODEOWNERS and the
+directory structure, and no agent writes it. Registration records the first
+revision from the clone's tracked files. After that the service re-seeds the map
+from the project's upstream default branch when an architect draft starts and
+again just before a sealing resolves its plan's footprints: it fetches the
+upstream ref first, so a directory that landed upstream after drafting is
+visible, and reads the directory listing and the CODEOWNERS blob from the fetched
+commit without checking anything out. A commit is seeded once for the whole
+project, however many workstreams trigger it, and never a commit older than the
+last one seeded. Each seed is computed from the tree alone, so an entity whose
+directory is gone leaves the map. A new revision is recorded only when the map
+changes. A failed fetch or seed is logged once per distinct reason and does not
+block drafting or sealing, which go on with the latest recorded map.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active repo ID from `active_projects` as a text edit, stops admitting new work,
@@ -1109,7 +1106,7 @@ land, rebase, drift and publish share this per-project limit with remote polls.
 An operation waiting for capacity stays pending while the pass admits other
 eligible work. Each workstream's workflow operations run in order; different
 workstreams can land concurrently onto their own feature branches. A landing
-waits only for its own workstream's rebases and pending knowledge refresh.
+waits only for its own workstream's rebases.
 Reload applies a new limit to admission; operations already running finish.
 
 Publication requires the service host's Git `user.name`, `user.email` and
@@ -1858,9 +1855,7 @@ The cleanup pass first fills in the title, outcome and delivery link in
 while the trace is still present. It then waits for unfinished turns, pending
 or unacknowledged operations and temporary workspace cleanup. A base's trace
 also waits while another retained workstream depends on it as a base
-(archived bases may leave together with their archived dependents), and until
-the librarian refresh covering its landed units has incorporated the
-workstream's learnings into project knowledge. Once every wait clears, the
+(archived bases may leave together with their archived dependents). Once every wait clears, the
 service records durable cleanup intent, closes the workstream's database and
 moves its trace directory aside by one atomic rename. Directory listings no
 longer show it as live, and its removal then runs without holding any trace

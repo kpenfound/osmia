@@ -44,7 +44,7 @@ func TestWorkflowReservationsShareCommitteeCapacityWithTurns(t *testing.T) {
 }
 
 func TestWorkflowReservationCoversClaimedAndCapturedRunner(t *testing.T) {
-	for _, role := range []string{"architect", "librarian", "committee"} {
+	for _, role := range []string{"architect", "committee"} {
 		t.Run(role, func(t *testing.T) {
 			f, repo := setup(t)
 			defer repo.Close()
@@ -89,8 +89,8 @@ func TestWorkflowReservationCoversClaimedAndCapturedRunner(t *testing.T) {
 	}
 }
 
-func TestWorkflowReservationsKeepArchitectAndLibrarianLocalLimits(t *testing.T) {
-	for _, role := range []string{"architect", "librarian"} {
+func TestWorkflowReservationsKeepArchitectLocalLimits(t *testing.T) {
+	for _, role := range []string{"architect"} {
 		t.Run(role, func(t *testing.T) {
 			f, repo := setup(t)
 			defer repo.Close()

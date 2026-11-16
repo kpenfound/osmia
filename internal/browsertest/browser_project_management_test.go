@@ -127,10 +127,7 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	p.Await("charter save used the revision read", `managementWrites.some(r => r.method === 'PUT' && r.path === `+quote(Prefix+"/projects/charter/"+string(project))+` && r.body.revision === `+strconv.Itoa(read.Revision)+`)`)
 	p.AwaitText("#charter-state", "2 rules")
 
-	p.Await("initial extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
-	p.Click(row + ` [data-action=extract]`)
-	managementOutcome(p, row+" .result", "ok")
-	p.AwaitText(row+` [data-field=extraction]`, "Knowledge extraction 2:")
+	p.Await("no knowledge extraction is offered", `document.querySelector(`+quote(row+` [data-field=extraction]`)+`) === null && document.querySelector(`+quote(row+` [data-action=extract]`)+`) === null`)
 	p.Click(row + ` [data-action=rebase]`)
 	managementOutcome(p, row+" .result", "ok")
 	p.Click("#project-home")
@@ -262,22 +259,6 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	p.Choose("#project-edit [name=project]", string(repoID))
 	row := `#project-repos [data-managed-repo="` + string(repoID) + `"]`
 	p.Await("the chosen repo's settings", `document.querySelector('#project-config [name=upstream]')?.value === 'owner/second'`)
-	p.Await("initial API-added repo extraction finished", `/Knowledge extraction 1: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
-	p.Eval(`managementConfigEvents.length = 0`, nil)
-	extraction, err := c.ExtractProject(ctx, repoID)
-	must(t, err)
-	if extraction.Extraction.Extraction != 2 {
-		t.Fatalf("API extraction number: %+v", extraction)
-	}
-	p.Await("external extraction announced for its repo", `managementConfigEvents.some(e => e.project === `+quote(string(repoID))+`)`)
-	p.Await("external extraction completion shown live", `/Knowledge extraction 2: (succeeded|failed)/.test(document.querySelector(`+quote(row+` [data-field=extraction]`)+`).textContent)`)
-	cfg, err := c.Configuration(ctx)
-	must(t, err)
-	for _, repo := range cfg.Projects[0].Repos {
-		if repo.ID == project && (repo.Extraction == nil || repo.Extraction.Extraction != 1) {
-			t.Fatalf("external extraction affected the sibling: %+v", repo)
-		}
-	}
 	third := filepath.Join(t.TempDir(), "third")
 	demoGit(t, filepath.Dir(third), "init", "-q", third)
 	another, err := c.AddProject(ctx, ProjectAddRequest{Name: "Third", Upstream: "owner/third", Clone: third})

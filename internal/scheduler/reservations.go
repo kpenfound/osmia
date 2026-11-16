@@ -11,7 +11,7 @@ import (
 
 // TryReserve offers a workflow operation its role's capacity without waiting
 // for a slot. The release must run after inspection, execution and recording
-// have ended. Architect and librarian roles retain their per-workstream role
+// have ended. The architect role retains its per-workstream role
 // limit; committee shares its configured role limit with scheduled turns.
 // The operation's own runner turns are covered by this reservation. Workflow
 // reservations do not consume the per-workstream allowance for worker turns.

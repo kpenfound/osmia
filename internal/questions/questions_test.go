@@ -372,7 +372,7 @@ func TestToolsFollowTheRole(t *testing.T) {
 	if got := names(f.turn(t, "chief", trace.ChiefOfStaff, "chief1"), "chief"); !reflect.DeepEqual(got, questions.ChiefTools) || strings.Contains(strings.Join(got, " "), "ask") {
 		t.Fatalf("chief of staff tools: %v", got)
 	}
-	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman", "librarian"} {
+	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman"} {
 		want := []string{"ask"}
 		if got := names(f.turn(t, role+"1", role, "turn_"+role), role+"1"); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s tools: %v", role, got)

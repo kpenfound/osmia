@@ -110,7 +110,7 @@ func (f fixture) prose(t *testing.T, subsystem, content string) {
 	}
 	// An entity's prose is named by its entity ID, whose dots a record ID
 	// cannot hold.
-	id := kb.ProseDocument(strings.ReplaceAll(subsystem, ".", "-"))
+	id := "subsystem-" + strings.ReplaceAll(subsystem, ".", "-")
 	d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: project, At: timestamp, Actor: owner, Cause: "test"}, Path: trace.ProsePath(subsystem), Content: content}
 	if err := f.repo.Append(context.Background(), d); err != nil {
 		t.Fatal(err)

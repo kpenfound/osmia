@@ -35,9 +35,10 @@ type mapChange struct {
 	parentNames, oldWere []string
 }
 
-// librarianOperations reads the librarian's recorded operations by ID. Each
-// revision of the entity map names the operation that recorded it. A
-// librarian trace that cannot be read leaves the map without attributions.
+// librarianOperations reads the operations of a librarian workstream in the
+// trace, by ID. A revision of the entity map a librarian operation recorded
+// names that operation. A trace without a librarian workstream, or one that cannot be
+// read, leaves the map without such attributions.
 func librarianOperations(repo *trace.Repository) map[string]coreadapter.Operation {
 	stream := librarianWorkstream(repo.Project())
 	streams, err := repo.Workstreams()
@@ -57,10 +58,9 @@ func librarianOperations(repo *trace.Repository) map[string]coreadapter.Operatio
 
 // mapUpdateRecords posts the structural changes between consecutive committed
 // revisions of kb/entities.json as dated updates on the project, on the work
-// source and without an author. Each names the workstream whose landed work
-// caused the revision, or the extraction when no workstream did. Only the
-// map's structure is posted: subsystem notes, the source ledger and entity
-// owners are not.
+// source and without an author. Each names the re-seed and its commit, or for
+// a revision a librarian operation recorded the workstream or extraction that
+// caused it. Only the map's structure is posted: entity owners are not.
 func mapUpdateRecords(in *publishInputs) []hearsay.Record {
 	var revisions []trace.Document
 	for _, d := range in.documents {
@@ -112,13 +112,17 @@ func (in *publishInputs) mapCause(d trace.Document) string {
 		return "Caused by a knowledge-base extraction."
 	}
 	switch op.Action {
-	case RefreshAction:
-		var input refreshInput
+	case retiredRefreshAction:
+		var input struct {
+			Workstream config.WorkstreamID `json:"workstream"`
+		}
 		if json.Unmarshal(op.Input, &input) == nil && input.Workstream != "" {
 			return "Caused by workstream " + in.workstreamLabel(input.Workstream) + "."
 		}
-	case ExtractAction:
-		var input extractionInput
+	case retiredExtractAction:
+		var input struct {
+			Extraction int `json:"extraction"`
+		}
 		if json.Unmarshal(op.Input, &input) == nil && input.Extraction > 0 {
 			return fmt.Sprintf("Caused by knowledge-base extraction %d.", input.Extraction)
 		}

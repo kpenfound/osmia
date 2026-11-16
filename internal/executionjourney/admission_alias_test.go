@@ -69,7 +69,6 @@ const sibling config.WorkstreamID = "w_0123456789abcdef0123456789abcdee"
 const ReplyAction = intake.ReplyAction
 const AmendmentDraftAction = intake.AmendmentDraftAction
 const AmendmentReplyAction = intake.AmendmentReplyAction
-const ExtractAction = service.ExtractAction
 
 var stagePriority = service.TestStagePriority
 

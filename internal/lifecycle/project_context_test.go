@@ -24,7 +24,7 @@ func TestProjectContextPagesKnowledgeWithoutExposingPrivateRecords(t *testing.T)
 	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "context", Role: trace.ChiefOfStaff}
 	var docs []trace.Document
 	for i := range 25 {
-		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("knowledge-%d", i), Revision: 1, Project: repo.Project(), At: f.s.now(), Actor: librarianActor, Cause: "fixture"}
+		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("knowledge-%d", i), Revision: 1, Project: repo.Project(), At: f.s.now(), Actor: ownerActor, Cause: "fixture"}
 		docs = append(docs, trace.Document{Header: dh, Path: fmt.Sprintf("kb/topic-%02d.md", i), Content: strings.Repeat("évidence ", 4000)})
 	}
 	dh := docs[0].Header

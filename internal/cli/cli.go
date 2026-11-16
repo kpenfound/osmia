@@ -38,7 +38,6 @@ const usage = `Usage: osmia <command> [--root PATH]
   project create <name> --repo NAME --charter-file PATH|- [--description TEXT] [--public] [--id PROJECT-ID] [--json]
   project create --id PROJECT-ID [--json]
   project remove <project-id> [--json]
-  project extract <project-id> [--json]
   project memory <project-id>
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
@@ -313,7 +312,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory") ||
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "rebase" || a[0] == "memory") ||
 			len(a) == 1 && a[0] == "create" && o.id != "" && o.repo == "" && o.charterFile == "" && o.description == "" && !o.public
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
@@ -424,21 +423,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 4
 		}
 		return fail(err)
-	}
-	if cmd == "project" && a[0] == "extract" {
-		id, err := config.ParseProjectID(a[1])
-		if err != nil {
-			return invalid()
-		}
-		result, err := c.ExtractProject(ctx, id)
-		if err != nil {
-			return fail(err)
-		}
-		if o.json {
-			return output(stdout, stderr, result)
-		}
-		fmt.Fprintf(stdout, "Extraction %d of project %s (%s) started\nFollow it with osmia status\n", result.Extraction.Extraction, result.Project.ID, result.Project.Name)
-		return 0
 	}
 	if cmd == "config" {
 		cfg, err := c.Configuration(ctx)
@@ -1644,13 +1628,6 @@ func showProject(w io.Writer, p *wire.ProjectView) {
 		for _, d := range c.Diagnostics {
 			fmt.Fprintf(w, "  charter.md:%d: %s\n", d.Line, d.Message)
 		}
-	}
-	if x := p.Extraction; x != nil {
-		line := fmt.Sprintf("Knowledge base: extraction %d %s at %s", x.Extraction, x.State, x.At.UTC().Format(time.RFC3339))
-		if x.Reason != "" {
-			line += ": " + x.Reason
-		}
-		fmt.Fprintln(w, line)
 	}
 }
 func diagnostics(w io.Writer, ds []wire.Diagnostic) {

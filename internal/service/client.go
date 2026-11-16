@@ -260,13 +260,6 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (api.Pr
 	return v, err
 }
 
-// ExtractProject starts a new knowledge-base extraction of the active project.
-func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (api.ExtractionResponse, error) {
-	var v api.ExtractionResponse
-	err := c.Do(ctx, "POST", api.Prefix+"/projects/extract", api.ProjectExtractRequest{Project: id}, &v)
-	return v, err
-}
-
 // RebaseProject asks for a drift rebase of every eligible workstream of a
 // project and reports the workstreams the request covers.
 func (c *Client) RebaseProject(ctx context.Context, id config.ProjectID) (api.ProjectRebaseResponse, error) {

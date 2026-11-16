@@ -16,7 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -52,22 +52,6 @@ func awaitArchiveCleaned(t *testing.T, ctx context.Context, repo *trace.Reposito
 	}
 }
 
-// requestRefresh durably records a pending (unresulted) librarian refresh
-// covering stream's landings, the way refresher.Pass does, without
-// requiring a real landing or mason report.
-func requestRefresh(t *testing.T, repository *trace.Repository, librarian, stream config.WorkstreamID, at time.Time) {
-	t.Helper()
-	in := refreshInput{Workstream: stream, Commit: "0123456789abcdef0123456789abcdef01234567"}
-	data, err := json.Marshal(in)
-	must(t, err)
-	id := service.RefreshKeyForTest(in)
-	eventID := trace.EventID(id, "run")
-	event := trace.Event{ID: eventID, Kind: RefreshAction, Body: "Refresh local knowledge base"}
-	event.Operation = &coreadapter.Operation{ID: trace.OperationID(repository.Project(), librarian, eventID), Boundary: coreadapter.RunnerBoundary, Action: RefreshAction, Input: data}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: librarian, At: at, Actor: serviceActor, Cause: "fixture"}
-	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: id, To: "requested", Reason: "refresh knowledge from workstream " + string(stream)}, Events: []trace.Event{event}})
-	must(t, err)
-}
 func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"no archives", "already cleaned", "another project"} {
@@ -388,67 +372,39 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 	}
 }
 
-// TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds shows that
-// cleanup waits, with a logged reason, for the librarian refresh covering
-// the archived workstream's landings, and proceeds once it completes.
-func TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds(t *testing.T) {
+// TestArchiveCleanupDoesNotWaitOnPendingLibrarianWork shows that cleanup of an
+// archived workstream proceeds while the trace still holds a librarian refresh
+// covering the workstream's landings that an earlier release left pending.
+func TestArchiveCleanupDoesNotWaitOnPendingLibrarianWork(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	logged, logger := captureLog(t)
-	opts, cfg := conversationFixture(t, "archive-learnings-")
+	opts, cfg := conversationFixture(t, "archive-librarian-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	librarian := librarianWorkstream(project)
-	must(t, repo.CreateWorkstream(ctx, librarian, demoStart, serviceActor))
+	librarian := intakefixture.PlantLibrarian(t, repo, demoStart, serviceActor)
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, librarian}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
+	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "done")
 	must(t, err)
-	requestRefresh(t, repo, librarian, stream, demoStart)
+	refresh := intakefixture.PlantLibrarianOperation(t, repo, demoStart, serviceActor, "refresh-archived", "kb-refresh", map[string]any{"workstream": stream, "commit": "0123456789abcdef0123456789abcdef01234567"})
+	gap := intakefixture.PlantLibrarianOperation(t, repo, demoStart, serviceActor, "refresh-gap-archived", "kb-refresh", map[string]any{"workstream": stream, "question": "q", "inspection": "i", "commit": "0123456789abcdef0123456789abcdef01234567"})
 	must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: stream, ArchivedAt: demoStart}))
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
-	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
-	raw, _ := store.Snapshot()
-	var a runtime.Archive
-	for _, candidate := range raw.Archived {
-		if candidate.Workstream == stream {
-			a = candidate
-		}
-	}
-	if a.Title == "" || !a.CleanedAt.IsZero() {
-		t.Fatalf("cleaned before the librarian refresh covering it completed: %+v", a)
-	}
-	if !strings.Contains(logged.String(), "incorporated") {
-		t.Fatalf("deferral for unincorporated learnings was not logged: %s", logged.String())
-	}
-	decodeStructuredLines(t, logged.String())
-	in := refreshInput{Workstream: stream, Commit: "0123456789abcdef0123456789abcdef01234567"}
-	err = repo.WithOperation(ctx, librarian, trace.EventID(service.RefreshKeyForTest(in), "run"), trace.Actor{Kind: "service", ID: "test"}, s.now, func(at *trace.OperationAttempt, current trace.OperationRecord) error {
-		observe := at.Action("observe", s.now())
-		observe.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "not started"}
-		if err := at.Record(ctx, observe); err != nil {
-			return err
-		}
-		if err := at.Record(ctx, at.Action("effect", s.now())); err != nil {
-			return err
-		}
-		result := at.Action("result", s.now())
-		result.Result = &coreadapter.OperationResult{Outcome: "succeeded", Evidence: "refreshed"}
-		if err := at.Record(ctx, result); err != nil {
-			return err
-		}
-		return at.Record(ctx, at.Action("acknowledge", s.now()))
-	})
-	must(t, err)
-	logged.Reset()
 	clean := awaitArchiveCleaned(t, ctx, repo, cleanup, store, stream)
 	if clean.CleanedAt.IsZero() {
-		t.Fatal("not cleaned once the librarian refresh completed")
+		t.Fatal("cleanup waited on the pending librarian work")
+	}
+	ops, err := repo.Operations(librarian)
+	must(t, err)
+	for _, op := range ops {
+		if (op.Operation.ID == refresh.ID || op.Operation.ID == gap.ID) && op.Result != nil {
+			t.Fatalf("cleanup resolved a librarian operation: %+v", op)
+		}
 	}
 }
 

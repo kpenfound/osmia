@@ -22,7 +22,7 @@ import (
 // turn. A chief-of-staff turn may name any member of its workgroup, whose
 // feature branch, unit candidates and clone it then reads.
 func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	description := "Read committed project code or list a directory. Set unit to inspect that mason's latest recorded candidate, or captured true to inspect unfinished changes since its last report; captured inspection waits for the unit's writer to finish its turn. If it has no completed report, the service snapshots its captured workspace after the writer finishes; the returned commit identifies that evidence. Use the returned inspection citation when answering from code; this queues a librarian knowledge-gap refresh. The service owns snapshot creation. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000)."
+	description := "Read committed project code or list a directory. Set unit to inspect that mason's latest recorded candidate, or captured true to inspect unfinished changes since its last report; captured inspection waits for the unit's writer to finish its turn. If it has no completed report, the service snapshots its captured workspace after the writer finishes; the returned commit identifies that evidence. Use the returned inspection citation when answering from code. The service owns snapshot creation. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000)."
 	if scope.Role == trace.ChiefOfStaff {
 		description += " workstream: a member workstream ID of your workgroup whose code and units to read; omit for this conversation's own workstream."
 	}

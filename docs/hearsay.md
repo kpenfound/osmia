@@ -20,8 +20,8 @@ and [configuration](https://github.com/kpenfound/hearsay/blob/main/docs/config.m
 
 ## Push, and who decided
 
-Only deterministic service code writes: lifecycle steps, the librarian's
-committed extraction and the owner's own gates. No model turn writes to Hearsay,
+Only deterministic service code writes: lifecycle steps, entity map
+re-seeds and the owner's own gates. No model turn writes to Hearsay,
 and Osmia adds no agent tool for writing. Agents keep `assert` as it is.
 
 Publishing is off unless `[hearsay.publish]` is configured
@@ -30,13 +30,13 @@ Hearsay `work` sources and the publisher agent that posts to them:
 
 | Source | Holds | Authority |
 |---|---|---|
-| **work source** | `project`, `workstream` and `update` records, plus what the chief of staff, a committee, the librarian or Jev decided | Documents and decisions are **inferred** |
+| **work source** | `project`, `workstream` and `update` records, plus what the chief of staff, a committee or Jev decided | Documents and decisions are **inferred** |
 | **owner source** | `document` and `decision` records the owner stands behind, for the projects and workstreams the work source holds | Documents and decisions are **ratified** |
 
 **Authority comes from the source, never from the author.** Everything the owner
 decides goes to the owner source, with the owner named as `author` through the
 publisher agent, which Hearsay lists as an `attributor`. Everything the chief,
-a committee or the librarian decides goes to the work source and stays
+or a committee decides goes to the work source and stays
 inferred, even when it names the owner or says `decider: owner`. A decision Jev
 made is never the owner's: it goes to the work source with no author. A chief's
 relay of a ruling is never posted as a ruling: the ruling is posted once, from
@@ -53,10 +53,10 @@ attributing poster or the decider to decide a tier.
 | A registered project, with the owner as `author`; its removal, as a repost of the project ([how a removal appears](#project-removal)) | `project` | work |
 | A workgroup's project spec (its cross-repo contract), on each member project | `document` | owner |
 | A project amendment to it, with the owner's ruling; posted once on each member project | `decision` | owner |
-| A subsystem added, removed, renamed or moved under a different `part_of` parent in `kb/entities.json`, naming the workstream that caused it | `update` | work |
+| A subsystem added, removed, renamed or moved under a different `part_of` parent in `kb/entities.json`, naming the re-seed and its commit | `update` | work |
 
-Nothing else from the knowledge base is posted: no subsystem notes, no
-`kb/sources.json` and no KB entity as a live Hearsay code entity.
+Nothing else from the entity map is posted: no entity owners and no entity as a
+live Hearsay code entity.
 
 **Charter**
 
@@ -203,10 +203,10 @@ anyone, Jev included; only the spec a ratification sealed is.
 on the work source and without an author, for every subsystem added, removed,
 renamed or moved under a different `part_of` parent. A subsystem is renamed when
 its name changed, or when its id is gone and its primary path now belongs to a
-new id. The update is dated with the revision, and names the workstream whose
-landed work the librarian folded in, or, for an extraction the owner requested or
-that registered the project, the extraction. Edits to notes, aliases, paths or
-owners, and `kb/sources.json`, change nothing posted.
+new id. The update is dated with the revision, and names the re-seed and the commit it
+seeded from. An update for a revision an older trace recorded through a knowledge-base
+extraction or refresh names that workstream or extraction. Edits to aliases, paths or
+owners change nothing posted, and a re-seed that records no revision posts nothing.
 
 ### Never sent
 
@@ -215,7 +215,7 @@ owners, and `kb/sources.json`, change nothing posted.
 - Spec drafts, committee debate rounds and amendment requests before a decision.
 - Plans and footprints, unit landings, mason reports and learnings, and
   per-unit review findings.
-- Subsystem notes and `kb/sources.json`.
+- Knowledge-base prose and `kb/sources.json` in older traces.
 - Engineering answers that came from reading code.
 - The chief's fixes to a stuck workstream (`move_workstream` and similar).
 - Private role notes (`notes/`), CODEOWNERS handles, entity owners, runtime
@@ -224,7 +224,7 @@ owners, and `kb/sources.json`, change nothing posted.
 - Anything that came out of a Hearsay bundle. Nothing flows from Hearsay back
   into what Osmia posts, and Hearsay posts nothing to Osmia.
 
-The librarian's own workstream and exploratory sessions produce no posts.
+A librarian workstream in an older trace and exploratory sessions produce no posts.
 
 ## Delivery
 
@@ -334,7 +334,7 @@ posted. The loop for removed projects keeps the same cadence. A pass posts the p
 not attempt a record whose parent was refused.
 
 **Eligible workstreams** are the project's feature workstreams. Exploratory
-sessions, design sessions and the librarian's own workstream post nothing.
+sessions, design sessions and a librarian workstream in an older trace post nothing.
 
 **Core states.** A workstream's `status` is Osmia's own state; its `state` is
 one of Hearsay's core states:
@@ -401,7 +401,7 @@ Roles receive the read tools `get_bundle`, `search`, `traverse`, `resolve`,
 graph from an entity, so a role can reach the decision log and spec documents
 around a project or workstream. Exploratory sessions receive the read tools at
 the observer class and no write tool.
-External context is labelled separately from the local knowledge base, which
+External context is labelled separately from the local context, which
 every turn still receives word for word.
 
 The chief of staff's watch reads the project's default entity with the

@@ -196,9 +196,8 @@ type ProjectView struct {
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
 	Repos      []RepoView       `json:"repos"`
-	// CharterState and Extraction are reported by status only.
-	CharterState *CharterState    `json:"charter_state,omitempty"`
-	Extraction   *ExtractionState `json:"extraction,omitempty"`
+	// CharterState is reported by status only.
+	CharterState *CharterState `json:"charter_state,omitempty"`
 }
 
 // RepoView names one repo of a project: its own upstream, optional fork,
@@ -214,22 +213,6 @@ type RepoView struct {
 	Trace      string           `json:"trace"`
 	KB         string           `json:"kb"`
 	EntityMap  string           `json:"entity_map"`
-	Extraction *ExtractionState `json:"extraction,omitempty"`
-}
-
-// ExtractionState is the latest knowledge-base extraction of a project: its
-// number, whether it is pending, running, succeeded or failed, the time of its
-// last recorded activity and, when it failed or is waiting to retry, why.
-type ExtractionState struct {
-	Extraction int       `json:"extraction"`
-	State      string    `json:"state"`
-	At         time.Time `json:"at"`
-	Reason     string    `json:"reason,omitempty"`
-}
-
-// ProjectExtractRequest starts a new extraction pass of the active project.
-type ProjectExtractRequest struct {
-	Project config.ProjectID `json:"project"`
 }
 
 // ProjectRebaseRequest asks for a drift rebase of every building or
@@ -265,11 +248,6 @@ type DriftCoverage struct {
 type DriftSkip struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Reason     string              `json:"reason"`
-}
-
-type ExtractionResponse struct {
-	Project    ProjectView     `json:"project"`
-	Extraction ExtractionState `json:"extraction"`
 }
 
 // CharterState summarizes the charter as last recorded: its citable rules,
@@ -768,19 +746,19 @@ type DailyBudgetStatus struct {
 // per-workstream worker-turn limit in force.
 type CapacityStatus struct {
 	PerWorkstream int            `json:"per_workstream" description:"Maximum concurrent worker turns per workstream; check slots are independent."`
-	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, librarian and checks slot pools, in that order."`
+	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect and checks slot pools, in that order."`
 }
 
 // RoleCapacity is one pool's slots: Used includes turns, workflow reservations
 // or check runs. A pool with a configured factory-wide limit reports it in
-// Limit. A pool without one (architect, librarian) sets Unbounded, omits
+// Limit. A pool without one (architect) sets Unbounded, omits
 // Limit, and says in Scope and Note how it is bounded instead.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, librarian or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams."`
+	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams."`
 	Used      int        `json:"used" description:"Number of slots currently in use."`
 	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
-	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect, librarian). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`
+	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`
 	Scope     string     `json:"scope,omitempty" description:"How an unbounded pool is bounded instead: per_workstream means at most one turn runs per workstream. Absent for bounded pools."`
 	Note      string     `json:"note,omitempty" description:"Plain-words explanation of an unbounded pool: no factory-wide limit, at most one turn per workstream, no configuration setting. Absent for bounded pools."`
 	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session."`

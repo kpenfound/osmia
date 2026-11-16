@@ -46,9 +46,9 @@ const (
 	DraftSubject = "draft"
 	// maxDrafts bounds the drafts the service asks the architect for on one
 	// workstream, and maxDraftAttempts the turns one draft may start after
-	// service stops interrupt earlier ones: the librarian's bounds.
-	MaxDrafts        = MaxExtractionAttempts
-	MaxDraftAttempts = MaxExtractionAttempts
+	// service stops interrupt earlier ones.
+	MaxDrafts        = MaxTurnAttempts
+	MaxDraftAttempts = MaxTurnAttempts
 )
 
 var (

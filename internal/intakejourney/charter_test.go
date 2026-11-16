@@ -150,7 +150,7 @@ func TestContextProviderReadsActiveProject(t *testing.T) {
 	writeCharter(t, c, id, "1. Keep changes small.\n")
 	repo, err := s.repository(id)
 	must(t, err)
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
+	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.now(), Actor: ownerActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
 	b, err := provider.Assemble(ctx, id, bundle.Scope{})
 	must(t, err)
 	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 1 || len(b.Knowledge) != 1 || b.Knowledge[0].Content != "Service notes\n" || b.Entities.Revision != 1 {

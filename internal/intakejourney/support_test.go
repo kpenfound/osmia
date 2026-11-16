@@ -61,12 +61,6 @@ func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, st
 
 var awaitAcknowledged = intakefixture.AwaitAcknowledged
 
-// awaitExtraction polls status until the latest extraction is terminal.
-func awaitExtraction(t *testing.T, c *Client) ExtractionState {
-	t.Helper()
-	return intakefixture.AwaitExtraction(t, c.Configuration)
-}
-
 // awaitMasonRan waits until the unit's first mason turn completed.
 func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
 	t.Helper()
@@ -290,7 +284,7 @@ func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, librarianActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, masonTurnID, ownerActor)
 	return f, fake
 }
 
@@ -505,8 +499,6 @@ func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Re
 	return deliveryFixtureWith(t, "")
 }
 
-var entitiesWith = intakefixture.EntitiesWith
-
 var equalJSONTest = intakefixture.EqualJSONTest
 
 var errorCode = intakefixture.ErrorCode
@@ -525,7 +517,6 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		intakefixture.ConfigureProductionDesign(t, opts.Config.Root)
 		opts.Reconciliation.Now = clock.Now
 		opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
-		opts.Librarian = nil
 		if configuration.options != nil {
 			configuration.options(&opts)
 		}

@@ -18,7 +18,6 @@ import (
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
-	kb "github.com/kpenfound/osmia/internal/kb"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -30,11 +29,6 @@ const landingPlan = `{"version": 1, "units": [
 ]}
 `
 
-const (
-	landingLearning = "Trace snapshots require a clean worktree."
-	landedKnowledge = "# Internal\n\nPrevious project knowledge.\n\n" + landingLearning + "\n"
-)
-
 var landingUnits = map[string]struct{ criterion, file string }{
 	"resume": {"spec#1", ""},
 	"audit":  {"spec#2", "internal/trace/audit.go"},
@@ -42,9 +36,8 @@ var landingUnits = map[string]struct{ criterion, file string }{
 }
 
 type landingDemo struct {
-	mu        sync.Mutex
-	reviews   map[string][]UnitReviewIdentity
-	refreshed []string
+	mu      sync.Mutex
+	reviews map[string][]UnitReviewIdentity
 }
 
 func (d *landingDemo) reviewed(unit string) []UnitReviewIdentity {
@@ -61,43 +54,6 @@ func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request
 	})
 }
 
-func (d *landingDemo) refresh(ctx context.Context, entities string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
-	var landings []UnitLanding
-	var reports []UnitReport
-	for path, into := range map[string]any{"source/landings.json": &landings, "source/reports.json": &reports} {
-		body, err := readTool(ctx, tools, path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
-		}
-		if err := json.Unmarshal([]byte(body), into); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-	}
-	if len(landings) == 0 || len(landings) != len(reports) || !strings.Contains(req.Prompt, landings[len(landings)-1].Commit) {
-		return nil, fmt.Errorf("refresh sources %+v, reports %+v", landings, reports)
-	}
-	var units []string
-	for i, landing := range landings {
-		report := reports[i]
-		if landing.Unit != report.Unit || landing.Candidate != report.Candidate {
-			return nil, fmt.Errorf("refresh source landing %+v, report of %s on %s", landing, report.Unit, report.Candidate)
-		}
-		if landing.Unit == "resume" && !slices.Equal(report.Learnings, []string{landingLearning}) {
-			return nil, fmt.Errorf("resume's learnings %v", report.Learnings)
-		}
-		units = append(units, landing.Unit)
-	}
-	d.mu.Lock()
-	d.refreshed = append(d.refreshed, strings.Join(units, ","))
-	d.mu.Unlock()
-	for path, content := range map[string]string{"output/kb/internal.md": landedKnowledge, "output/kb/entities.json": entities} {
-		if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); err != nil {
-			return nil, err
-		}
-	}
-	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Refreshed", SessionDir: req.SessionDir, NumTurns: 1}, nil
-}
-
 func landingByUnit(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) map[string]trace.Document {
 	t.Helper()
 	return intakefixture.LandingByUnit(t, repository, stream, landingDocument)
@@ -108,18 +64,6 @@ func TestLandingDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, landingPlan)
 	defer f.stop(t)
-	f.stop(t)
-	configFile, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString(librarianContainer)
-	must(t, errors.Join(err, configFile.Close()))
-	f.opts.Librarian = &Librarian{Engine: f.engine, Hosts: f.opts.Architect.Hosts}
-	f.start(t)
-	must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
-	mapping, err := kb.Load(f.repository())
-	must(t, err)
-	entities, err := kb.Encode(mapping)
-	must(t, err)
 
 	for unit, u := range landingUnits {
 		masons.Play[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
@@ -128,11 +72,7 @@ func TestLandingDemonstration(t *testing.T) {
 					return err
 				}
 			}
-			args := map[string]any{"outcome": "Built " + unit}
-			if unit == "resume" {
-				args["learnings"] = []string{landingLearning}
-			}
-			recorded, reason, err := done(ctx, tools, args)
+			recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built " + unit})
 			if err != nil || !recorded {
 				return fmt.Errorf("done refused: %q %v", reason, err)
 			}
@@ -148,9 +88,6 @@ func TestLandingDemonstration(t *testing.T) {
 			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
 			}
-		}
-		if strings.HasPrefix(req.Name, "refresh-") {
-			return demo.refresh(ctx, string(entities), req, tools)
 		}
 		return chief(ctx, req, verified, tools)
 	}
@@ -295,68 +232,6 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 	if audit := decoded["audit"]; audit.Candidate == approvedAudit[0].Candidate.Revision || audit.Base == base {
 		t.Fatalf("audit landed its approval from before the rebase: %+v", audit)
-	}
-
-	awaitRefresh(t, f)
-	var refresh trace.OperationRecord
-	var refreshes int
-	lib, err := f.repository().Operations(librarianWorkstream(f.project))
-	must(t, err)
-	for _, op := range lib {
-		var in refreshInput
-		if op.Operation.Action != RefreshAction || json.Unmarshal(op.Operation.Input, &in) != nil || in.Inspection != "" {
-			continue
-		}
-		refreshes++
-		refresh = op
-		var units []string
-		for _, l := range in.Landings {
-			units = append(units, l.Unit)
-			if l.Unit == "resume" && (l.Commit != resume.Commit || l.Landing != landings["resume"].Revision) {
-				t.Fatalf("resume's refresh source %+v", l)
-			}
-		}
-		if in.Workstream != stream || len(in.Landings) != 3 || in.Commit != in.Landings[2].Commit || !slices.Contains(units, "resume") || !slices.Contains(units, "audit") || !slices.Contains(units, "dedupe") {
-			t.Fatalf("refresh source %+v", in)
-		}
-	}
-	demo.mu.Lock()
-	refreshed := slices.Clone(demo.refreshed)
-	demo.mu.Unlock()
-	if refreshes != 1 || refresh.Result == nil || refresh.Result.Outcome != "succeeded" || len(refreshed) != 1 || !strings.Contains(refreshed[0], "resume") {
-		t.Fatalf("%d refreshes, the last %+v; refreshed %v", refreshes, refresh, refreshed)
-	}
-	docs, err := trace.Read[trace.Document](f.repository(), "")
-	must(t, err)
-	var ledger, prose trace.Document
-	for _, d := range docs {
-		switch d.ID {
-		case "kb-sources":
-			ledger = d
-		case "subsystem-internal":
-			if d.Cause == refresh.Operation.ID {
-				prose = d
-			}
-		}
-	}
-	var sources []KnowledgeSource
-	must(t, json.Unmarshal([]byte(ledger.Content), &sources))
-	i := slices.IndexFunc(sources, func(s KnowledgeSource) bool { return s.Operation == refresh.Operation.ID })
-	if prose.Content != landedKnowledge || i < 0 || sources[i].Subsystem != "internal" || sources[i].Revision != prose.Revision || sources[i].Unit != "resume" || sources[i].Commit != resume.Commit || sources[i].Landing != landings["resume"].Revision {
-		t.Fatalf("knowledge provenance %+v; prose %+v", sources, prose.Header)
-	}
-	var resumePrompt, dedupePrompt string
-	for _, req := range masons.Requests(stream) {
-		switch req.Name {
-		case masonTurnID("resume"):
-			resumePrompt = req.Prompt
-		case masonTurnID("dedupe"):
-			dedupePrompt = req.Prompt
-		}
-	}
-
-	if resumePrompt == "" || dedupePrompt == "" || strings.Contains(resumePrompt, landingLearning) || strings.Contains(dedupePrompt, landingLearning) {
-		t.Fatalf("the refreshed knowledge in the mason bundles: resume %t, dedupe %t", strings.Contains(resumePrompt, landingLearning), strings.Contains(dedupePrompt, landingLearning))
 	}
 
 	st, err := f.c.Status(ctx, stream)

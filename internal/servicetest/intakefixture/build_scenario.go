@@ -95,24 +95,6 @@ func AttemptOperation(t *testing.T, now time.Time, actor trace.Actor, repository
 	return result, applied
 }
 
-func AwaitExtraction(t *testing.T, configuration func(context.Context) (api.ConfigResponse, error)) api.ExtractionState {
-	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
-		cfg, err := configuration(context.Background())
-		Must(t, err)
-		if cfg.Project != nil && cfg.Project.Extraction != nil {
-			if x := cfg.Project.Extraction; x.State == "succeeded" || x.State == "failed" {
-				return *x
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("extraction did not finish: %+v", cfg.Project)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
 func (f *TurnScenario) AwaitMasonRan(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
 	t.Helper()
 	wait, close := f.Changes(t)

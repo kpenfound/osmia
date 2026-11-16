@@ -251,7 +251,8 @@ func sessionDirectories(cfg *config.Config, project config.ProjectID, stream con
 			filepath.Join(root, "shed", string(project), string(stream), turn, "session"),
 			filepath.Join(root, "final", string(project), string(stream), turn, "session"),
 		}
-	case librarianRole:
+	case "librarian":
+		// Sandboxes of an interrupted librarian turn.
 		return []string{filepath.Join(root, "librarian", string(project), turn, "session")}
 	case sessionRole:
 		return []string{filepath.Join(runtime.ModelSessionDirectory(root, project, stream), turn)}

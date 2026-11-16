@@ -34,7 +34,6 @@ var landIDs = service.TestLandIDs
 type landInput = service.TestLandInput
 
 var leastWorkstream = service.TestLeastWorkstream
-var librarianActor = service.TestLibrarianActor
 
 var masonTurnID = service.TestMasonTurnID
 

@@ -134,12 +134,6 @@ func (e *launchEngine) reset() {
 	e.views = map[string]map[string]string{}
 }
 
-func (e *launchEngine) ran(name string) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return slices.Contains(e.turns, name)
-}
-
 // serve runs osmia serve on root until the test ends.
 func serve(t *testing.T, root string) {
 	t.Helper()
@@ -178,76 +172,67 @@ func serve(t *testing.T, root string) {
 }
 
 // TestServeRunsRoleTurns shows a service started by osmia serve running role
-// turns through the enforcers it builds: the librarian extracts an added
-// project, the architect drafts a handed workstream and a message to the
-// chief of staff is dispatched. A role whose sandbox the platform cannot
-// enforce fails its turns with core's reason and the service keeps running.
+// turns through the enforcers it builds: the architect drafts a handed
+// workstream and a message to the chief of staff is dispatched. Adding a
+// project runs no turn.
 func TestServeRunsRoleTurns(t *testing.T) {
-	for _, sandbox := range []string{agent.SandboxNone, agent.SandboxClaude} {
-		t.Run(sandbox, func(t *testing.T) {
-			launches.reset()
-			opts, clone := emptyFixture(t)
-			root := opts.Config.Root
-			f, err := os.OpenFile(filepath.Join(root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-			must(t, err)
-			_, err = fmt.Fprintf(f, "[roles.librarian]\nsandbox=%q\n", sandbox)
-			must(t, errors.Join(err, f.Close()))
-			serve(t, root)
+	launches.reset()
+	opts, clone := emptyFixture(t)
+	root := opts.Config.Root
+	serve(t, root)
 
-			var added wire.ProjectResponse
-			must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
-			extraction := awaitExtraction(t, root)
-			if sandbox == agent.SandboxNone {
-				launches.await(t, "extract-1-1")
-			} else if extraction.State != "failed" || !strings.Contains(extraction.Reason, refusal) || launches.ran("extract-1-1") {
-				t.Fatalf("refused librarian: %+v", extraction)
+	var added wire.ProjectResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
+	launches.mu.Lock()
+	ran := slices.Clone(launches.turns)
+	launches.mu.Unlock()
+	if len(ran) != 0 {
+		t.Fatalf("adding a project ran turns %v", ran)
+	}
+
+	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
+	design := filepath.Join(filepath.Dir(clone), "design.md")
+	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
+	var handed wire.HandInResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(added.Project.ID), design, "--json")), &handed))
+	launches.await(t, "draft-1-1")
+
+	var sent wire.ConversationEntry
+	must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
+	c := service.NewClient(filepath.Join(root, "osmia.sock"))
+	defer c.Close()
+	diagnostics := func() { chiefDispatchDiagnostics(t, c, root, added.Project.ID, handed.Workstream) }
+	chief(t, launches.await(t, sent.Turn, diagnostics), root, string(added.Project.ID), string(handed.Workstream))
+	// The live controller must finish this exact ordinary owner turn,
+	// not just enter the fake engine before a later boundary fails.
+	deadline := time.Now().Add(time.Minute)
+	for {
+		conversation, err := c.Conversation(context.Background(), handed.Workstream)
+		must(t, err)
+		var messages, responses []wire.ConversationEntry
+		for _, entry := range conversation.Entries {
+			if entry.Turn != sent.Turn {
+				continue
 			}
-
-			setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
-			design := filepath.Join(filepath.Dir(clone), "design.md")
-			must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
-			var handed wire.HandInResponse
-			must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(added.Project.ID), design, "--json")), &handed))
-			launches.await(t, "draft-1-1")
-
-			var sent wire.ConversationEntry
-			must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
-			c := service.NewClient(filepath.Join(root, "osmia.sock"))
-			defer c.Close()
-			diagnostics := func() { chiefDispatchDiagnostics(t, c, root, added.Project.ID, handed.Workstream) }
-			chief(t, launches.await(t, sent.Turn, diagnostics), root, string(added.Project.ID), string(handed.Workstream))
-			// The live controller must finish this exact ordinary owner turn,
-			// not just enter the fake engine before a later boundary fails.
-			deadline := time.Now().Add(time.Minute)
-			for {
-				conversation, err := c.Conversation(context.Background(), handed.Workstream)
-				must(t, err)
-				var messages, responses []wire.ConversationEntry
-				for _, entry := range conversation.Entries {
-					if entry.Turn != sent.Turn {
-						continue
-					}
-					switch entry.Kind {
-					case "message":
-						messages = append(messages, entry)
-					case "response":
-						responses = append(responses, entry)
-					}
-				}
-				if len(responses) > 0 {
-					if len(messages) != 1 || len(responses) != 1 || messages[0].State != wire.TurnDone || responses[0].State != wire.TurnDone || responses[0].Text != "Noted" {
-						diagnostics()
-						t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
-					}
-					break
-				}
-				if time.Now().After(deadline) {
-					diagnostics()
-					t.Fatalf("ordinary owner turn %s did not complete: %+v", sent.Turn, conversation)
-				}
-				time.Sleep(20 * time.Millisecond)
+			switch entry.Kind {
+			case "message":
+				messages = append(messages, entry)
+			case "response":
+				responses = append(responses, entry)
 			}
-		})
+		}
+		if len(responses) > 0 {
+			if len(messages) != 1 || len(responses) != 1 || messages[0].State != wire.TurnDone || responses[0].State != wire.TurnDone || responses[0].Text != "Noted" {
+				diagnostics()
+				t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			diagnostics()
+			t.Fatalf("ordinary owner turn %s did not complete: %+v", sent.Turn, conversation)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -349,11 +334,11 @@ func TestServeBuildsCoreEnforcement(t *testing.T) {
 		t.Fatalf("hosts %#v", e.Hosts)
 	}
 	opts := service.Enforce(service.Options{}, e)
-	if opts.Threads == nil || opts.Librarian == nil || opts.Architect == nil || opts.Committee == nil {
+	if opts.Threads == nil || opts.Architect == nil || opts.Committee == nil {
 		t.Fatalf("options %+v", opts)
 	}
-	for _, role := range []any{*opts.Librarian, *opts.Architect, *opts.Committee} {
-		if !reflect.DeepEqual(role, service.Librarian{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Architect{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Committee{Engine: e.Engine, Hosts: e.Hosts}) {
+	for _, role := range []any{*opts.Architect, *opts.Committee} {
+		if !reflect.DeepEqual(role, service.Architect{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Committee{Engine: e.Engine, Hosts: e.Hosts}) {
 			t.Fatalf("role enforcement %#v", role)
 		}
 	}

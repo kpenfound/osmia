@@ -58,8 +58,8 @@ const (
 	SkippedValue   = "skipped"
 	SkipTransition = "shed-owner-skip"
 	// maxRoundAttempts bounds the turns one member may start in one round
-	// after service stops interrupt earlier ones: the librarian's bound.
-	MaxRoundAttempts = MaxExtractionAttempts
+	// after service stops interrupt earlier ones.
+	MaxRoundAttempts = MaxTurnAttempts
 )
 
 var ShedActor = trace.Actor{Kind: "service", ID: "shed"}

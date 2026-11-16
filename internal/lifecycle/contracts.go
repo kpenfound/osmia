@@ -68,7 +68,6 @@ const ownPullRequestOutcomeMerged = delivery.OwnPullRequestOutcomeMerged
 
 type streamWorkspaces = intake.StreamWorkspaces
 
-const RefreshAction = "kb-refresh"
 const handedDocument = intake.HandedDocument
 const driftsDirectory = intake.DriftsDirectory
 

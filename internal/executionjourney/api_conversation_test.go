@@ -170,8 +170,7 @@ func TestConversationRejections(t *testing.T) {
 
 	// The librarian's workstream is in the trace but not in status, and its
 	// chief of staff never gets a turn: it is unknown to the conversation too.
-	librarian, err := ensureLibrarianThread(ctx, s.sole().repository, demoStart, ownerActor)
-	must(t, err)
+	librarian := intakefixture.PlantLibrarian(t, s.sole().repository, demoStart, ownerActor)
 	_, err = c.Send(ctx, librarian, "hello")
 	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
 	_, err = c.Conversation(ctx, librarian)
