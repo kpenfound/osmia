@@ -53,7 +53,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 			ran := awaitCheck(t, checks.entered)
 			awaitFeedEvent(p, stream)
 			p.Await("the running check entry", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-			p.AwaitText(entry+` [data-field=checks]`, "Unit resume · check run 1")
+			p.AwaitText(entry+` [data-field=checks]`, "Unit resume, check run 1")
 			selection := "checking " + strconv.Itoa(selected) + " of " + strconv.Itoa(judged)
 			if mode == "full" {
 				selection = "checking every check: Jev is unconfigured"
@@ -64,7 +64,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 				t.Fatalf("runner received %v, want %d selected checks", ran, selected)
 			}
 			if mode == "picks" {
-				selection = "no check reached the threshold; checking the highest-scored checks · checking 3 of 113"
+				selection = "no check reached the threshold; checking the highest-scored checks, checking 3 of 113"
 			}
 			p.AwaitText(entry+` [data-field=selection]`, selection)
 			if mode == "narrowed" {
@@ -91,7 +91,7 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 				p.AwaitText(entry+` [data-field=failed]`, failed)
 			}
 			if mode == "picks" {
-				selection = "no check reached the threshold; the highest-scored checks ran · checking 3 of 113"
+				selection = "no check reached the threshold; the highest-scored checks ran, checking 3 of 113"
 			}
 			p.AwaitText(entry+` [data-field=selection]`, selection)
 			p.Await("one entry for the run", `document.querySelectorAll(`+quote(entry)+`).length === 1`)

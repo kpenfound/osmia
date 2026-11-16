@@ -403,7 +403,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 	p.AwaitText(`[data-select-workgroup="`+string(g.ID)+`"]`, "Coordinate two repositories")
 	p.Click(`[data-select-workgroup="` + string(g.ID) + `"]`)
 	p.AwaitText("#workgroup-content "+decisionCard(e), e.Question)
-	p.Await("shared decision carries repo labels", `document.querySelector('#workgroup-content [data-group-decision-repo]').textContent.startsWith('Workgroup · ')`)
+	p.Await("shared decision carries repo labels", `document.querySelector('#workgroup-content [data-group-decision-repo]').textContent.startsWith('Workgroup, ')`)
 	p.Eval(`(() => { const prior = window.fetch; window.fetch = (url,init) => { if (init?.method === 'POST') window.workgroupAnswer = {url,method:init.method,body:JSON.parse(init.body)}; return prior(url,init); }; })()`, nil)
 	holdOutcome(p, e.Answer.Path)
 	p.TypeInto(decisionCard(e)+"textarea", "Keep both repositories compatible.")

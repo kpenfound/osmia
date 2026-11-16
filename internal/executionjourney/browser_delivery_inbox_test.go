@@ -107,7 +107,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	preview := card + "[data-field=preview] [data-field=description]"
 	approve := card + "button[type=submit]"
 	pins := func(revision int, presented DeliveryPresentation) string {
-		return fmt.Sprintf("final review 1 · report revision %d · commit %s · draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
+		return fmt.Sprintf("final review 1, report revision %d, commit %s, draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
 	}
 	drafted := func(presented DeliveryPresentation) {
 		t.Helper()

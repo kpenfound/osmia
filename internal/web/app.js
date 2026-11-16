@@ -134,6 +134,19 @@
     return document.getElementById(id);
   }
 
+  // metaRow lays separate facts out in a row with a gap between them. A
+  // string part becomes its own span; a node part is kept as it is, so it
+  // can carry its own data attributes. The text between parts is a space,
+  // never a separator character.
+  function metaRow(...parts) {
+    const out = [];
+    for (const part of parts.filter((p) => p !== null && p !== undefined && p !== false && p !== '')) {
+      if (out.length > 0) out.push(' ');
+      out.push(typeof part === 'string' ? el('span', {}, part) : part);
+    }
+    return el('span', { class: 'meta-row' }, ...out);
+  }
+
   // Markdown is built only from text nodes and known elements. Agent HTML
   // never passes through an HTML parser, and links require an explicit scheme.
   function markdownClosingMark(text, mark, start) {
@@ -928,7 +941,7 @@
 
   // archiveLabel says who archived a workstream and how far its cleanup is.
   function archiveLabel(w) {
-    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ' · ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
+    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ', ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
   }
   function repoLabel(id) {
     return configuredRepos().find(r => r.id === id)?.label || id;
@@ -1059,10 +1072,10 @@
       return el('li', { class: 'activity-entry', 'data-activity': e.id, 'data-blocked': String(blocked) },
         el('div', { class: 'line' },
           el('strong', { 'data-field': 'kind' }, e.kind),
-          where.length > 0 ? el('span', { class: 'tag', 'data-field': 'where' }, where.join(' · ')) : null),
+          where.length > 0 ? el('span', { class: 'meta-row', 'data-field': 'where' }, ...where.flatMap((part, i) => i > 0 ? [' ', el('span', {}, part)] : [el('span', {}, part)])) : null),
         el('div', { 'data-field': 'phase' }, e.phase + (e.progress !== null && e.progress !== undefined ? ' (' + Math.round(e.progress * 100) + '%)' : '')),
         e.failure ? el('div', { class: 'failure', 'data-field': 'failure' }, e.failure) : null,
-        el('div', { class: 'meta' }, 'Since ', when(e.started_at), blocked ? el('span', { class: 'blocked-note', 'data-field': 'blocked' }, ' · no progress since ' + when(e.last_progress)) : null));
+        el('div', { class: 'meta meta-row' }, el('span', {}, 'Since ', when(e.started_at)), blocked ? ' ' : null, blocked ? el('span', { class: 'blocked-note', 'data-field': 'blocked' }, 'No progress since ' + when(e.last_progress)) : null));
     }));
   }
 
@@ -1230,7 +1243,7 @@
       const graph = group.edges?.length ? el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
         el('figcaption', {}, 'Dependencies'), ...group.edges.map(e => el('p', { 'data-edge': e.type },
           repoLabel(groupMembers(id).find(w => w.workstream === e.from)?.project || e.from) + ' → ' +
-          repoLabel(groupMembers(id).find(w => w.workstream === e.to)?.project || e.to) + ' · ' + e.type.replaceAll('_', ' ')))) : null;
+          repoLabel(groupMembers(id).find(w => w.workstream === e.to)?.project || e.to) + ', ' + e.type.replaceAll('_', ' ')))) : null;
       if (!c.summary) {
         c.summary = el('div', { class: 'workgroup-summary' });
         c.node.prepend(c.summary);
@@ -1240,7 +1253,7 @@
       c.summary.replaceChildren(members, ...(graph ? [graph] : []));
     }
     const decisions = groupInbox(id).map(e => labelGroupDecision(renderDecision(e),
-      e.workgroup ? 'Workgroup · ' + [...new Set(groupMembers(id).map(w => repoLabel(w.project)))].join(', ') : repoLabel(e.project)));
+      e.workgroup ? 'Workgroup, ' + [...new Set(groupMembers(id).map(w => repoLabel(w.project)))].join(', ') : repoLabel(e.project)));
     const proposals = groupProposals(id).map(p => labelGroupDecision(renderProposal(p),
       repoLabel(groupMembers(id).find(w => w.workstream === p.workstream)?.project)));
     place(c.decisions, [c.heading, ...decisions, ...proposals, inboxResult]);
@@ -1400,7 +1413,7 @@
       signals: el('span', { class: 'signals' }),
     };
     r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
-      r.title, el('span', { class: 'sub' }, r.kind, r.project, ' · ', r.state), r.signals);
+      r.title, el('span', { class: 'sub meta-row' }, r.kind, ' ', r.project, ' ', r.state), r.signals);
     r.button.addEventListener('click', () => select(id));
     r.node = el('li', {}, r.button);
     rows.set(id, r);
@@ -1578,7 +1591,7 @@
         const waiting = g.members.length > 1 ? groupInbox(g.id) : (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
         row.open.disabled = g.members.length < 2 && !members.some(w => !w.archived);
         const waitingCount = waiting.length + (g.members.length > 1 ? groupProposals(g.id).length : 0);
-        row.inbox.textContent = waitingCount + ' waiting for you · Open inbox';
+        row.inbox.textContent = waitingCount + ' waiting for you, open inbox';
         row.inbox.hidden = !waitingCount;
         if (waitingCount) row.inbox.dataset.groupInbox = g.id;
         else delete row.inbox.dataset.groupInbox;
@@ -1589,8 +1602,8 @@
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
-              repoLabel(streams().find(w => w.workstream === id)?.project || id), ' · ', id))),
-            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
+              metaRow(repoLabel(streams().find(w => w.workstream === id)?.project || id), el('code', { class: 'id' }, id))))),
+            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ', ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
       });
@@ -1615,7 +1628,7 @@
       const repoKey = JSON.stringify([p.name, p.repos]);
       if (row.repoKey !== repoKey) {
         row.repoKey = repoKey;
-        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id }, el('strong', {}, repoLabel(r.id)), ' · ', r.upstream)));
+        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id, class: 'meta-row' }, el('strong', {}, repoLabel(r.id)), ' ', el('span', { class: 'meta' }, r.upstream))));
       }
       place(row.groups, groupsView);
       row.none.hidden = !!groupsView.length;
@@ -2064,11 +2077,12 @@
     if (e.kind === 'image') return renderImage(e, agentLabel);
     const who = { message: 'You', action: (agentLabel || 'Chief of staff') + ' acted' }[e.kind] || agentLabel || 'Chief of staff';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, who), ' · ',
-        el('span', { 'data-ann': 'when' }, when(e.at)), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, who), ' ',
+        el('span', { 'data-ann': 'when' }, when(e.at)), ' ',
         el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state),
-        e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, ' · ' + e.queued_reason) : null),
+        e.queued_reason ? ' ' : null,
+        e.queued_reason ? el('span', { 'data-field': 'queued-reason' }, e.queued_reason) : null),
       el('div', { class: 'text', 'data-field': 'text' }, e.kind === 'message' ? e.text : renderMarkdown(e.text)));
   }
 
@@ -2095,9 +2109,9 @@
   function renderBriefEntry(e) {
     const b = e.brief;
     return el('li', { class: 'entry', 'data-kind': 'brief', 'data-review': b.review, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card', 'data-field': 'brief' }, ...briefBody(b.text, b.before_you_ship || [], b.screenshots || [])));
   }
@@ -2119,9 +2133,9 @@
   function renderImage(e, agentLabel) {
     const image = e.image;
     return el('li', { id: 'feed-image-' + image.id, class: 'entry', 'data-kind': 'image', 'data-image': image.id, 'data-turn': e.turn, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'image'), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'image'), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       image.placeholder
         ? el('p', { class: 'meta', 'data-field': 'placeholder' }, image.placeholder)
@@ -2134,9 +2148,9 @@
   function renderStatus(e, latest) {
     const s = e.status;
     return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
-      el('div', { class: 'meta' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
-        el('span', { 'data-ann': 'action' }, 'status'), ' · ',
+      el('div', { class: 'meta meta-row' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'action' }, 'status'), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card' },
         s.attention ? el('div', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, renderMarkdown(s.attention)) : null,
@@ -2147,10 +2161,10 @@
   function renderSession(e, c) {
     const s = e.session;
     const report = s.failure || s.summary;
-    const line = el('span', { 'data-field': 'session' },
-      el('strong', { 'data-ann': 'role' }, role(s.role)), s.unit ? ' on ' + s.unit : '',
-      ' · ', el('span', { 'data-field': 'profile' }, s.profile),
-      ' · ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
+    const line = el('span', { class: 'meta-row', 'data-field': 'session' },
+      el('span', {}, el('strong', { 'data-ann': 'role' }, role(s.role)), s.unit ? ' on ' + s.unit : ''),
+      ' ', el('span', { 'data-field': 'profile' }, s.profile),
+      ' ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
     const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta', 'data-ann': 'when' }, when(s.started_at))];
     const node = el('li', { id: 'feed-turn-' + s.turn, class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
     if (!report) {
@@ -2192,7 +2206,7 @@
     if (subject.startsWith('unit-') && subject.endsWith('-checks')) return 'Unit checks ' + (t.unit || subject.slice(5, -7));
     if (subject.startsWith('unit-') && t.unit && t.unit.length > 64) return 'Unit ' + t.unit;
     const label = subject.replaceAll(/[-_]/g, ' ');
-    return label.charAt(0).toUpperCase() + label.slice(1) + (t.unit ? ' · Unit ' + t.unit : '');
+    return label.charAt(0).toUpperCase() + label.slice(1) + (t.unit ? ', unit ' + t.unit : '');
   }
 
   function checkState(state) {
@@ -2203,10 +2217,10 @@
     if (!selection) return null;
     if (selection.mode === 'selected') {
       return el('p', { 'data-field': 'selection' },
-        selection.fallback_picks ? (running ? 'no check reached the threshold; checking the highest-scored checks · ' : 'no check reached the threshold; the highest-scored checks ran · ') : '', 'checking ',
+        selection.fallback_picks ? (running ? 'no check reached the threshold; checking the highest-scored checks, ' : 'no check reached the threshold; the highest-scored checks ran, ') : '', 'checking ',
         el('span', { 'data-field': 'selected' }, String(selection.selected)), ' of ',
         el('span', { 'data-field': 'judged' }, String(selection.judged)),
-        selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ' · narrowed from ' + selection.listed + ' listed') : null);
+        selection.listed > selection.judged ? el('span', { 'data-field': 'listed' }, ', narrowed from ' + selection.listed + ' listed') : null);
     }
     const reasons = {
       unconfigured: 'Jev is unconfigured', declined: 'Jev declined', too_many_checks: 'too many checks',
@@ -2217,14 +2231,14 @@
     const reason = reasons[selection.reason] || (selection.reason || '').replaceAll('_', ' ');
     return el('p', { 'data-field': 'selection' }, running ? 'checking every check' : 'every check ran',
       reason ? ': ' : '', el('span', { 'data-field': 'reason' }, reason),
-      selection.detail ? el('span', { 'data-field': 'detail' }, ' · ' + selection.detail) : null);
+      selection.detail ? el('span', { 'data-field': 'detail' }, ', ' + selection.detail) : null);
   }
 
   function renderChecks(e) {
     const unit = e.kind === 'unit_checks';
     const session = e.kind === 'session_checks';
     const run = unit ? e.unit_checks : session ? e.session_checks : e.final_checks;
-    const label = unit ? 'Unit ' + run.unit + ' · check run ' + run.run : session ? 'Session · check run ' + run.run + ' · ' + run.kind : 'Final review ' + run.review + ' · checks' + (run.attempt ? ' · attempt ' + run.attempt : '');
+    const label = unit ? 'Unit ' + run.unit + ', check run ' + run.run : session ? 'Session, check run ' + run.run + ', ' + run.kind : 'Final review ' + run.review + ', checks' + (run.attempt ? ', attempt ' + run.attempt : '');
     return el('li', { class: 'entry event check-entry', 'data-kind': e.kind, 'data-unit': run.unit || '', 'data-run': run.run || '', 'data-review': run.review || '', 'data-attempt': run.attempt || '', 'data-state': run.state },
       el('div', { class: 'event-line' },
         el('span', { class: 'dot', 'aria-hidden': 'true' }),
@@ -2254,9 +2268,9 @@
         el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, r.state),
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))),
       r.reader ? el('p', { 'data-field': 'reader' }, 'Reader ' + r.reader,
-        r.turn ? el('a', { href: '#feed-turn-' + r.turn, 'data-field': 'turn' }, ' · turn ' + r.turn) : null) : null,
-      r.state === 'reviewed' ? el('p', { 'data-field': 'findings' },
-        el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' · ',
+        r.turn ? ' ' : null, r.turn ? el('a', { href: '#feed-turn-' + r.turn, 'data-field': 'turn' }, 'turn ' + r.turn) : null) : null,
+      r.state === 'reviewed' ? el('p', { class: 'meta-row', 'data-field': 'findings' },
+        el('span', { 'data-field': 'blocking' }, r.blocking + ' blocking findings'), ' ',
         el('span', { 'data-field': 'gaps' }, r.gaps + ' uncovered criteria')) : null,
       r.failure ? el('p', { 'data-field': 'failure' }, r.failure) : null);
   }
@@ -2446,7 +2460,7 @@
         el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
         w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : ''),
-      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      el('div', { class: 'id meta-row' }, el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' ', el('code', {}, w.workstream), ' ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       renderUnitCounts(w.units), isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null));
   }
 
@@ -2751,8 +2765,8 @@
     }
     byId('session-title').textContent = w.title || w.workstream;
     byId('session-meta').replaceChildren(
-      el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' · ', w.workstream, ' · profile ',
-      el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' · ',
+      el('span', { 'data-field': 'project' }, repoLabel(w.project)), ' ', el('code', {}, w.workstream), ' profile ',
+      el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' ',
       el('span', { class: 'tag', 'data-field': 'state' }, w.state));
     renderSessionFeed(w.workstream);
     renderSessionChanges(w.workstream);
@@ -2973,7 +2987,7 @@
     const read = views['design/' + w.workstream]?.design;
     byId('design-title').textContent = (read ? read.title : w.title) || w.workstream;
     block(byId('design-destroy'), false);
-    byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream);
+    byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' ', el('code', {}, w.workstream));
     renderDesignFeed(w.workstream);
   }
 
@@ -3224,7 +3238,7 @@
     for (const field of [...fields, ...Object.keys(body).filter((field) => !(field in pinNames))]) {
       out.push((pinNames[field] || field) + ' ' + String(body[field]).slice(0, 12));
     }
-    return out.join(' · ');
+    return out.join(', ');
   }
 
   function decisionKey(entry) {
@@ -3455,7 +3469,7 @@
       head: el('div', { class: 'summary' }),
       detail: el('div', { 'data-field': 'detail' }),
       actions: el('div', { class: 'actions' }),
-      submit: el('button', { type: 'submit' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
+      submit: el('button', { type: 'submit', class: 'primary' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
       shown: null,
     };
     const fields = [];
@@ -3653,7 +3667,7 @@
         el('summary', { class: 'meta' }, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
         el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
           el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
-      ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
+      ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta mono', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
     switch (entry.kind) {
       case 'escalation':
@@ -3918,7 +3932,7 @@
       return;
     }
     const configured = views.config.effective.profiles || {};
-    const options = Object.keys(configured).sort().map((name) => [name, name + ' · ' + configured[name].agent]);
+    const options = Object.keys(configured).sort().map((name) => [name, name + ', ' + configured[name].agent]);
     const roles = Object.keys(views.runtime.profiles || {}).sort();
     for (const role of profileRows.keys()) {
       if (!roles.includes(role)) {
@@ -3929,7 +3943,7 @@
       const effective = views.runtime.profiles[role];
       const r = profileRow(role);
       const provider = configured[effective.name] ? configured[effective.name].agent : '';
-      r.profile.textContent = effective.name ? effective.name + (provider ? ' · ' + provider : '') : 'none';
+      r.profile.textContent = effective.name ? effective.name + (provider ? ', ' + provider : '') : 'none';
       r.source.textContent = profileSources[effective.source] || effective.source;
       r.source.title = effective.reason || '';
       const usage = usageOf(provider);
@@ -4255,7 +4269,7 @@
     const project = byId('project-edit').elements.project.value;
     const configured = projects().find(p => p.id === project);
     const state = configured?.charter_state;
-    byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ' · revision ' + state.revision + '.' :
+    byId('charter-state').textContent = state ? state.rules + (state.rules === 1 ? ' rule' : ' rules') + ', revision ' + state.revision + '.' :
       (project ? 'Charter state not reported.' : 'Choose a project to manage its charter and repos.');
     block(byId('project-remove'), !configured);
     renderProjectConfig();

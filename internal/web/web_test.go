@@ -21,10 +21,12 @@ func serve(method, path string) (*httptest.ResponseRecorder, bool) {
 // types and a policy that keeps the page to its own origin.
 func TestServeServesThePageAndItsAssets(t *testing.T) {
 	for path, want := range map[string]struct{ contentType, contains string }{
-		"/":            {"text/html; charset=utf-8", `<script src="/app.js" defer></script>`},
-		"/app.js":      {"text/javascript; charset=utf-8", "new EventSource(api + '/events')"},
-		"/style.css":   {"text/css; charset=utf-8", "grid-template-columns"},
-		"/favicon.svg": {"image/svg+xml", "<svg"},
+		"/":                                    {"text/html; charset=utf-8", `<script src="/app.js" defer></script>`},
+		"/app.js":                              {"text/javascript; charset=utf-8", "new EventSource(api + '/events')"},
+		"/style.css":                           {"text/css; charset=utf-8", "grid-template-columns"},
+		"/favicon.svg":                         {"image/svg+xml", "<svg"},
+		"/fonts/InstrumentSans-Variable.woff2": {"font/woff2", "wOF2"},
+		"/fonts/JetBrainsMono-Variable.woff2":  {"font/woff2", "wOF2"},
 	} {
 		w, ok := serve(http.MethodGet, path)
 		if !ok || w.Code != http.StatusOK {
@@ -42,7 +44,7 @@ func TestServeServesThePageAndItsAssets(t *testing.T) {
 			t.Fatalf("HEAD %s: served %v, status %d, headers %v", path, ok, head.Code, head.Header())
 		}
 	}
-	if !strings.Contains(policy, "default-src 'none'") || !strings.Contains(policy, "connect-src 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
+	if !strings.Contains(policy, "default-src 'none'") || !strings.Contains(policy, "connect-src 'self'") || !strings.Contains(policy, "font-src 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
 		t.Fatalf("policy %q", policy)
 	}
 }
@@ -155,6 +157,92 @@ func TestServeLeavesOtherRequests(t *testing.T) {
 	} {
 		if w, ok := serve(c.method, c.path); ok || w.Body.Len() != 0 || len(w.Header()) != 0 {
 			t.Fatalf("%s %s was served: %d %v", c.method, c.path, w.Code, w.Header())
+		}
+	}
+}
+
+// The two bundled fonts are the only font files, are small enough to ship
+// with the page, and each sits beside its licence in the source tree.
+func TestBundledFontsStayWithinTheirBudgetAndKeepTheirLicences(t *testing.T) {
+	total := 0
+	for path, licence := range map[string]string{
+		"/fonts/InstrumentSans-Variable.woff2": "fonts/instrument-sans/OFL.txt",
+		"/fonts/JetBrainsMono-Variable.woff2":  "fonts/jetbrains-mono/OFL.txt",
+	} {
+		w, ok := serve(http.MethodGet, path)
+		if !ok {
+			t.Fatalf("%s is not served", path)
+		}
+		total += w.Body.Len()
+		text, err := assets.ReadFile(licence)
+		if err != nil || !strings.Contains(string(text), "SIL Open Font License") {
+			t.Fatalf("%s is not the SIL Open Font License: %v", licence, err)
+		}
+	}
+	if total < 50_000 || total > 250_000 {
+		t.Fatalf("the bundled fonts total %d bytes, want about 200 KB or less", total)
+	}
+	var fonts int
+	for path := range paths {
+		if strings.HasPrefix(path, "/fonts/") {
+			fonts++
+		}
+	}
+	if fonts != 2 {
+		t.Fatalf("%d font files are served, want one sans and one mono", fonts)
+	}
+}
+
+// The stylesheet is dark only and keeps to the design language's rules: one
+// palette in OKLCH custom properties, no light branch, no capitals styling,
+// no transition on every property, reduced motion honoured and an outline
+// never removed from the composer.
+func TestStylesheetKeepsToTheDesignLanguage(t *testing.T) {
+	w, _ := serve(http.MethodGet, "/style.css")
+	css := w.Body.String()
+	root := css[strings.Index(css, ":root {"):]
+	root = root[:strings.Index(root, "\n}\n")]
+	if !strings.Contains(root, "color-scheme: dark") {
+		t.Fatal("the palette does not declare color-scheme: dark")
+	}
+	if strings.Contains(css, "prefers-color-scheme") || strings.Contains(css, "color-scheme: light") {
+		t.Fatal("the stylesheet has a light palette branch")
+	}
+	for _, banned := range []string{"text-transform", "transition: all", "outline: none", "outline:none"} {
+		if strings.Contains(css, banned) {
+			t.Fatalf("the stylesheet contains %q", banned)
+		}
+	}
+	for _, want := range []string{"prefers-reduced-motion: reduce", ":focus-visible", "scrollbar-color", "select option", "font-display: swap"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("the stylesheet lacks %q", want)
+		}
+	}
+	// Outside the palette block no rule holds a literal colour.
+	literal := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(`)
+	if found := literal.FindString(strings.Replace(css, root, "", 1)); found != "" {
+		t.Fatalf("a component rule holds the literal colour %q", found)
+	}
+	// The page itself asks for the dark scheme.
+	page, _ := serve(http.MethodGet, "/")
+	if !strings.Contains(page.Body.String(), `<meta name="color-scheme" content="dark">`) {
+		t.Fatal("the page does not declare the dark colour scheme")
+	}
+}
+
+// No element in the page repeats an attribute: a browser keeps only the first,
+// so a second class list would never apply.
+func TestPageElementsNeverRepeatAnAttribute(t *testing.T) {
+	w, _ := serve(http.MethodGet, "/")
+	tag := regexp.MustCompile(`<[a-zA-Z][^<>]*>`)
+	attr := regexp.MustCompile(`\s([a-zA-Z][\w:-]*)=("[^"]*"|'[^']*')`)
+	for _, el := range tag.FindAllString(w.Body.String(), -1) {
+		seen := map[string]bool{}
+		for _, m := range attr.FindAllStringSubmatch(el, -1) {
+			if seen[m[1]] {
+				t.Fatalf("element repeats the %s attribute: %s", m[1], el)
+			}
+			seen[m[1]] = true
 		}
 	}
 }

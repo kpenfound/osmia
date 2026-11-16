@@ -148,7 +148,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		amendment + "[data-field=question]":       "Change: Raise the per-unit budget. Reason: The upload unit needs more turns.",
 		amendment + "[data-field=options]":        "Options: " + strings.Join(amendments[0].Options, ", "),
 		amendment + "[data-field=recommendation]": "approve: no objection stands",
-		amendment + "[data-field=pins]":           "amendment 1 · packet revision 1",
+		amendment + "[data-field=pins]":           "amendment 1, packet revision 1",
 	} {
 		p.AwaitText(selector, want)
 	}
@@ -307,7 +307,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.AwaitText(card+"[data-field=question]", "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1")
 	p.AwaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 1 objection")
 	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
-	p.AwaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 1")
+	p.AwaitText(card+"[data-field=pins]", "spec revision 1, plan revision 1")
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
 	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+committeeAgent(1)+" in round 1 on spec#2")
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
@@ -345,7 +345,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.Click(card + `[data-decision-choice="redraft"]`)
 	// The redraft is debated, and the packet of the round that concludes it
 	// replaces the one the page showed.
-	p.AwaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 2")
+	p.AwaitText(card+"[data-field=pins]", "spec revision 1, plan revision 2")
 	p.AwaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
 	asked, err := shed.Redrafts(f.repository(), ws)
 	must(t, err)

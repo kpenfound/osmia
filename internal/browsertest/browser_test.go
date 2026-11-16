@@ -41,7 +41,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 		card + `[data-unit-state=ready]`:                                   "ready 1",
 		card + `[data-unit-state=planned]`:                                 "planned 1",
 		card + `[data-kind=transition][data-unit=upload]`:                  "Unit upload: implementing",
-		card + `[data-kind=session][data-role=mason] [data-field=session]`: "mason on upload · default · running",
+		card + `[data-kind=session][data-role=mason] [data-field=session]`: "mason on upload default running",
 		`#capacity [data-role=mason] [data-field=slots]`:                   "1 / 1 slots",
 		`#capacity [data-role=mason] [data-field=waiting]`:                 string(stream) + " unit audit: every slot is taken",
 		`#capacity [data-role=reviewer]`:                                   "Nothing waits.",
@@ -165,7 +165,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	var views []string
 	for _, path := range p.Paths() {
 		switch {
-		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg":
+		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg" || strings.HasPrefix(path, "/fonts/") && strings.HasSuffix(path, ".woff2"):
 		case strings.HasPrefix(path, Prefix+"/"):
 			views = append(views, path)
 		default:

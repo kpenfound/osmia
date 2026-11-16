@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>Osmia</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preload" href="/fonts/InstrumentSans-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/JetBrainsMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
 <script src="/app.js" defer></script>
 </head>
@@ -92,9 +94,9 @@
   <button type="button" data-workstream-action="debate">Debate actions</button>
   <button type="button" data-workstream-action="rebase">Check for drift</button>
   <button type="button" data-workstream-action="merged">Record my merge upstream</button>
-  <button type="button" data-workstream-action="abandon">Abandon…</button>
-  <button type="button" data-workstream-action="abandon-archive">Abandon and archive…</button>
-  <button type="button" data-workstream-action="archive">Archive permanently…</button>
+  <button type="button" class="danger" data-workstream-action="abandon">Abandon…</button>
+  <button type="button" class="danger" data-workstream-action="abandon-archive">Abandon and archive…</button>
+  <button type="button" class="danger" data-workstream-action="archive">Archive permanently…</button>
 </div>
 
 <div class="shell">
@@ -166,8 +168,8 @@
           <label>Specification <textarea name="spec" rows="10"></textarea></label>
           <label>Plan <textarea name="plan" rows="10"></textarea></label>
           <div class="actions">
-            <button type="submit" disabled>Save draft documents</button>
-            <button type="button" data-action="read">Read again</button>
+            <button type="submit" class="primary" disabled>Save draft documents</button>
+            <button type="button" class="quiet" data-action="read">Read again</button>
           </div>
           <p class="result" role="status"></p>
         </form>
@@ -176,8 +178,8 @@
           <input type="hidden" name="workstream">
           <label>Base <select name="base"><option value="">Project upstream</option></select></label>
           <div class="actions">
-            <button type="submit" disabled>Save dependency</button>
-            <button type="button" data-action="read">Read again</button>
+            <button type="submit" class="primary" disabled>Save dependency</button>
+            <button type="button" class="quiet" data-action="read">Read again</button>
           </div>
           <p class="meta">Dependencies can be changed before ratification.</p>
           <p class="result" role="status"></p>
@@ -194,7 +196,7 @@
           </select></label>
           <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
           <label class="check" data-field="archive-once"><input name="archive" type="checkbox"> Permanently archive once abandoned: delete all history, decisions, turns and check output; retain only the title. Cannot be undone.</label>
-          <div class="actions"><button type="submit">Apply action</button></div>
+          <div class="actions"><button type="submit" class="primary">Apply action</button></div>
           <p class="result" role="status"></p>
         </form>
       </div>
@@ -204,7 +206,7 @@
           <input type="hidden" name="workstream">
           <label>Trace <select name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select></label>
           <label>Unit, criterion, or commit <input name="selector" type="text" autocomplete="off"></label>
-          <div class="actions"><button type="submit">Read trace</button></div>
+          <div class="actions"><button type="submit" class="primary">Read trace</button></div>
           <p class="result" role="status"></p>
           <div id="trace-content" class="trace"></div>
         </form>
@@ -218,7 +220,7 @@
         <label>Repo <select name="project" data-repo-select required></select></label>
         <label>Profile <select name="profile" required></select></label>
         <label>Title (optional) <input name="title" type="text"></label>
-        <div class="actions"><button type="submit">Open an exploratory session</button></div>
+        <div class="actions"><button type="submit" class="primary">Open an exploratory session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -247,7 +249,7 @@
       <form id="session-commit-form" class="control">
         <h3>Commit</h3>
         <label>Message <textarea name="message" rows="3" required></textarea></label>
-        <div class="actions"><button type="submit">Commit</button></div>
+        <div class="actions"><button type="submit" class="primary">Commit</button></div>
         <p class="result" role="status"></p>
       </form>
       <div class="control">
@@ -257,9 +259,9 @@
       </div>
       <div class="control">
         <div class="actions">
-          <button type="button" id="session-push">Push</button>
-          <button type="button" id="session-end">End session</button>
-          <button type="button" id="session-destroy">Destroy</button>
+          <button type="button" id="session-push" class="primary">Push</button>
+          <button type="button" id="session-end" class="quiet">End session</button>
+          <button type="button" id="session-destroy" class="danger">Destroy</button>
         </div>
         <p id="session-control-result" class="result" role="status"></p>
       </div>
@@ -272,7 +274,7 @@
         <label><input type="checkbox" name="new_project"> New project</label>
         <p class="meta">New project designs a project that does not exist yet; Start creates its repository. The session lives in the project chosen above, or in the first active project when none is chosen.</p>
         <p class="meta">The agent reads the project's charter and every repo's entity map, read-only. It cannot write, use version control, or start any work itself.</p>
-        <div class="actions"><button type="submit">Open a design session</button></div>
+        <div class="actions"><button type="submit" class="primary">Open a design session</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -297,11 +299,11 @@
       <div class="control">
         <h3>Start</h3>
         <p class="meta">Once the agent has drafted a brief, starting the workgroup hands it to the architect and committee. This thread then continues as the workgroup's chief-of-staff thread.</p>
-        <div class="actions"><button type="button" id="design-start">Start workgroup from brief</button></div>
+        <div class="actions"><button type="button" id="design-start" class="primary">Start workgroup from brief</button></div>
         <p id="design-start-result" class="result" role="status"></p>
       </div>
       <div class="control">
-        <div class="actions"><button type="button" id="design-destroy">Destroy</button></div>
+        <div class="actions"><button type="button" id="design-destroy" class="danger">Destroy</button></div>
         <p id="design-destroy-result" class="result" role="status"></p>
       </div>
     </section>
@@ -315,7 +317,7 @@
         <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
         <label>Feature description or issue URL <textarea name="content" rows="8" required></textarea></label>
         <label class="check"><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
-        <div class="actions"><button type="submit">Hand in a feature</button></div>
+        <div class="actions"><button type="submit" class="primary">Hand in a feature</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -328,7 +330,7 @@
         <label>Your fork (optional) <input name="fork" type="text" placeholder="Omit to push feature branches to upstream"></label>
         <label>Clone path on the service machine <input name="clone" type="text" required></label>
         <label>Base branch <input name="base_branch" type="text" value="main" required></label>
-        <div class="actions"><button type="submit">Create project</button></div>
+        <div class="actions"><button type="submit" class="primary">Create project</button></div>
         <p class="result" role="status"></p>
       </form>
     </section>
@@ -339,12 +341,12 @@
         <label>Project <select name="project" data-project-select required></select></label>
         <p id="charter-state" class="meta" role="status"></p>
         <h3>Project charter</h3>
-        <div class="actions"><button type="button" data-action="read-charter">Read charter</button></div>
+        <div class="actions"><button type="button" class="quiet" data-action="read-charter">Read charter</button></div>
         <p id="charter-revision" class="meta"></p>
         <p id="charter-changed" role="status" hidden>Charter changed elsewhere. Your draft and its revision are kept. Read charter to load the latest revision.</p>
         <label>Optional guidance for agents, in addition to the repository's AGENTS.md <textarea name="content" rows="10"></textarea></label>
         <div class="actions">
-          <button type="submit" disabled>Save charter</button>
+          <button type="submit" class="primary" disabled>Save charter</button>
         </div>
         <p class="result" role="status"></p>
       </form>
@@ -353,16 +355,16 @@
         <p id="config-file" class="meta"></p>
         <p id="config-load-error" class="attention" role="status" hidden></p>
         <p id="config-changed" role="status" hidden>Configuration changed elsewhere. Your draft and the version it was read at are kept. Read settings to load the latest file values.</p>
-        <div class="actions"><button type="button" data-action="read-config">Read settings</button></div>
+        <div class="actions"><button type="button" class="quiet" data-action="read-config">Read settings</button></div>
         <div id="config-fields" class="settings"></div>
         <div class="actions">
-          <button type="submit" disabled>Save settings</button>
+          <button type="submit" class="primary" disabled>Save settings</button>
         </div>
         <p class="result" role="status"></p>
       </form>
       <div class="control">
         <div class="actions">
-          <button type="button" id="project-remove">Remove project from active work</button>
+          <button type="button" id="project-remove" class="danger">Remove project from active work</button>
         </div>
         <p id="project-result" class="result" role="status"></p>
         <h3>Repos</h3>
@@ -377,8 +379,8 @@
         <p id="priority-current" class="meta"></p>
         <ol id="priority-list" class="priority"></ol>
         <div class="actions">
-          <button type="submit">Set order</button>
-          <button type="button" id="priority-clear">Clear order</button>
+          <button type="submit" class="primary">Set order</button>
+          <button type="button" id="priority-clear" class="quiet">Clear order</button>
         </div>
         <p id="priority-result" class="result" role="status"></p>
       </form>

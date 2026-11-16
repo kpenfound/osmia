@@ -240,7 +240,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.Choose(row+"select", "other")
 	p.Click(row + "[data-field=set]")
 	p.AwaitText("#profile-result", "mason runs other")
-	p.AwaitText(row+"[data-field=profile]", "other · codex")
+	p.AwaitText(row+"[data-field=profile]", "other, codex")
 	p.AwaitText(row+"[data-field=source]", "owner override")
 	p.AwaitText(row+"[data-field=usage]", "codex: USD")
 	p.AwaitText(`#providers [data-provider=codex] [data-field=spend]`, "USD")

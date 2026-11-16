@@ -290,7 +290,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	for _, project := range []config.ProjectID{f.project, f.project2} {
 		card := `#project-pane [data-project="` + string(project) + `"]`
 		p.Await("one shared decision under the member's project card", `document.querySelectorAll(`+quote(card+` [data-group-inbox]`)+`).length === 1 && document.querySelector(`+quote(card+` [data-group-inbox]`)+`).dataset.groupInbox === `+quote(string(selected.Group)))
-		p.AwaitText(card+` [data-group-inbox]`, "1 waiting for you · Open inbox")
+		p.AwaitText(card+` [data-group-inbox]`, "1 waiting for you, open inbox")
 	}
 	p.Click(`#project-pane [data-project="` + string(f.project2) + `"] [data-group-inbox]`)
 	p.Await("the project inbox opens the workgroup", `!document.querySelector('[data-view=workgroup]').hidden && location.hash === `+quote("#workgroup="+string(selected.Group)))

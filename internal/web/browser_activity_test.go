@@ -70,7 +70,7 @@ func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testi
 		`document.querySelector('[data-activity="git-2"]').dataset.blocked === 'false'`)
 	p.await("the stalled archive cleanup shown as blocked",
 		`document.querySelector('[data-activity="cleanup-1"]').dataset.blocked === 'true'`)
-	p.awaitText(`[data-activity="cleanup-1"] [data-field="blocked"]`, "no progress")
+	p.awaitText(`[data-activity="cleanup-1"] [data-field="blocked"]`, "No progress")
 
 	p.await("the stalled but merely busy check shown as not blocked",
 		`document.querySelector('[data-activity="check-1"]').dataset.blocked === 'false'`)

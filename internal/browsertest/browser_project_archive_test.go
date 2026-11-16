@@ -54,7 +54,7 @@ func TestBrowserProjectPaneGroupsCleanedArchivesAcrossRestart(t *testing.T) {
 				label = "cancelled"
 			}
 			p.AwaitText(row+" [data-field=state]", label)
-			p.AwaitText(row, "Archived · trace deleted")
+			p.AwaitText(row, "Archived, trace deleted")
 			p.Await("exactly one archived row in its workgroup", `document.querySelectorAll(`+quote(row)+`).length === 1 && document.querySelector(`+quote(row+" [data-drilldown]")+`).disabled`)
 			if i == 0 {
 				p.AwaitText(row+" [data-field=wait]", "no pinned merge or cancel evidence")
