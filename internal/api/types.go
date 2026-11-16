@@ -1051,6 +1051,9 @@ const (
 	InboxDelivery     = "delivery"
 	InboxPublication  = "publication"
 	InboxFinalChecks  = "checks"
+	// InboxChecksChoice asks whether the final review of a push waits for
+	// check results that did not appear or continues without them.
+	InboxChecksChoice = "checks-choice"
 	InboxDrift        = "drift"
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
@@ -1076,7 +1079,12 @@ const (
 // approval being published and its Options are empty. A checks entry reports
 // a final review whose checks did not complete maxIncompleteChecks times in a
 // row: it takes no decision, its Revision is the final review and its Options
-// are empty. Project names the project whose workstream
+// are empty. A checks-choice entry asks whether the final review of a push
+// keeps waiting for check results that did not appear or continues without
+// them: its Options are keep_waiting and continue, its Revision is the offer
+// the answer belongs to, and its Answer body pins the push (number, pull
+// request, pushed commit and the operation that recorded it). Project names
+// the project whose workstream
 // the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	// Workgroup identifies a shared decision kept in the workgroup trace.
@@ -1340,20 +1348,111 @@ type FeedUnitChecks struct {
 	FinishedAt *time.Time          `json:"finished_at,omitempty"`
 }
 
+// CheckSourcePullRequest is the source of a final check result read from the
+// Dagger Cloud statuses of the workstream's pull request. A final check
+// result without a source was produced by a local check run.
+const CheckSourcePullRequest = "pull_request"
+
+// CheckCounts are the check counts of a Dagger Cloud run.
+type CheckCounts struct {
+	Total     int `json:"total"`
+	Passed    int `json:"passed"`
+	Failed    int `json:"failed"`
+	Cancelled int `json:"cancelled"`
+}
+
+// CheckFailure is one check a Dagger Cloud run reported failed. TraceID is the
+// `dagger trace` id its status names, when it names one, and StatusID the id
+// of the failing commit status.
+type CheckFailure struct {
+	Name     string `json:"name"`
+	TraceID  string `json:"trace_id,omitempty"`
+	StatusID int64  `json:"status_id,omitempty"`
+}
+
+// CheckStatusRef identifies one posting of a commit status. Two postings of
+// the same status on one commit have different IDs.
+type CheckStatusRef struct {
+	ID        int64     `json:"id"`
+	State     string    `json:"state,omitempty"`
+	TargetURL string    `json:"target_url,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// CheckRerun is the one rerun of a push's failed checks. Original is the
+// failing "Run Dagger Checks" posting that asked for it, and Failed the checks
+// that failed in it. Fresh is the posting that settled the rerun, once one has,
+// and Flakes the originally failed checks the rerun's evidence shows passed.
+// Error says why the request itself failed, when it did.
+type CheckRerun struct {
+	RequestedAt time.Time       `json:"requested_at"`
+	Original    CheckStatusRef  `json:"original"`
+	Failed      []CheckFailure  `json:"failed,omitempty"`
+	Fresh       *CheckStatusRef `json:"fresh,omitempty"`
+	Flakes      []string        `json:"flakes,omitempty"`
+	Error       string          `json:"error,omitempty"`
+}
+
+// The owner's answers to a checks-choice entry.
+const (
+	ChecksChoiceKeepWaiting = "keep_waiting"
+	ChecksChoiceContinue    = "continue"
+)
+
+// ChecksChoiceRequest is the owner's answer to a checks-choice inbox entry:
+// keep waiting for the check results of a push, or continue its final review
+// without them. The fields but Decision are the entry's answer body, which
+// pin the push it concerns: its number, pull request, pushed commit, the
+// operation that recorded the push and the revision of the offer. An answer
+// whose pin is not the workstream's current push and open offer is refused as
+// a conflict.
+type ChecksChoiceRequest struct {
+	Push         int    `json:"push"`
+	PullRequest  int    `json:"pull_request"`
+	PushedCommit string `json:"pushed_commit"`
+	Operation    string `json:"operation"`
+	Offer        int    `json:"offer"`
+	Decision     string `json:"decision" enum:"keep_waiting,continue"`
+}
+
+// ChecksChoiceResponse reports a recorded answer to a checks-choice entry.
+type ChecksChoiceResponse struct {
+	Project      config.ProjectID    `json:"project"`
+	Workstream   config.WorkstreamID `json:"workstream"`
+	Push         int                 `json:"push"`
+	PullRequest  int                 `json:"pull_request"`
+	PushedCommit string              `json:"pushed_commit"`
+	Decision     string              `json:"decision"`
+	Detail       string              `json:"detail"`
+	At           time.Time           `json:"at"`
+}
+
 // FeedFinalChecks is one check attempt for a final review.
 // Attempt and StartedAt are absent without durable attempt start evidence;
 // such entries describe recorded results only, never running checks.
+// A result read from the pull request's Dagger Cloud statuses has Source
+// "pull_request" and names the pull request, the push whose commit it
+// covers, the status the overall result came from, the counts, the failed
+// checks with their trace ids and the reruns; Failed then lists the failed
+// check names. Results of local runs have none of these.
 type FeedFinalChecks struct {
-	TraceURL   string              `json:"trace_url,omitempty"`
-	Selection  *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
-	Review     int                 `json:"review"`
-	Attempt    int                 `json:"attempt,omitempty"`
-	State      string              `json:"state" enum:"running,passed,failed,incomplete"`
-	Failed     []string            `json:"failed,omitempty"`
-	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
-	Error      string              `json:"error,omitempty"`
-	StartedAt  *time.Time          `json:"started_at,omitempty"`
-	FinishedAt *time.Time          `json:"finished_at,omitempty"`
+	TraceURL     string              `json:"trace_url,omitempty"`
+	Selection    *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
+	Review       int                 `json:"review"`
+	Attempt      int                 `json:"attempt,omitempty"`
+	State        string              `json:"state" enum:"running,passed,failed,incomplete,continued"`
+	Source       string              `json:"source,omitempty" enum:"pull_request" description:"Absent for results of local check runs."`
+	PullRequest  int                 `json:"pull_request,omitempty"`
+	Push         int                 `json:"push,omitempty"`
+	StatusURL    string              `json:"status_url,omitempty"`
+	Counts       *CheckCounts        `json:"counts,omitempty"`
+	FailedChecks []CheckFailure      `json:"failed_checks,omitempty"`
+	Reruns       []CheckRerun        `json:"reruns,omitempty"`
+	Failed       []string            `json:"failed,omitempty"`
+	Flaky        []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
+	Error        string              `json:"error,omitempty"`
+	StartedAt    *time.Time          `json:"started_at,omitempty"`
+	FinishedAt   *time.Time          `json:"finished_at,omitempty"`
 }
 
 // FeedSessionChecks summarizes one completed exploratory session check run.

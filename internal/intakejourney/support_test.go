@@ -226,15 +226,39 @@ func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, conf
 // controller. Intake, debate and ratification are covered by lifecycle tests.
 func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
-	return newFinalFixtureWith(t, key, "")
+	f, stream, repository, a := newFinalFixtureWith(t, key, "")
+	hostFinalReviews(t, f, stream)
+	return f, stream, repository, a
 }
 
-// newFinalFixtureWith is newFinalFixture with extra configuration appended.
+// newFinalFixtureWith is newFinalFixture with extra configuration appended and
+// no pull request host, so the service holds the fixture's default clients.
 func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, extra, nil)
 	stream, repository := f.buildFixture().SeedGit(t, key)
 	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
+}
+
+// hostFinalReviews gives the stopped service a credential for the pull request
+// host: a local bare fork of owner/dagger as the clone's origin and a fake host
+// that follows the fork's feature branch. The fixture's options already read a
+// passing Cloud run for every pushed commit with no wait after a push, so a
+// final review publishes its draft and reads that result at once. The
+// restarted service holds the same host.
+func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) *fixturekit.FakePulls {
+	t.Helper()
+	var fork string
+	var pulls *fixturekit.FakePulls
+	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, featureBranch(stream))
+		return tip
+	})
+	pulls.SyncHead = true
+	f.opts.PullRequests = pulls
+	f.s.options.PullRequests = pulls
+	service.InspectForTest(f.s.core()).SetStoppedPullRequests(pulls)
+	return pulls
 }
 
 // newMasonController returns the mason controller of the service's

@@ -17,8 +17,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -151,58 +149,6 @@ func assertEngineCheckOutput(t *testing.T, output, mode, token, runner, candidat
 	}
 	if strings.Contains(output, engineTestToken) {
 		t.Fatal("token in captured output")
-	}
-}
-
-func TestServiceCloudFinalChecks(t *testing.T) {
-	fake := fixturekit.InstallEngineCLIs(t)
-	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
-	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(o *Options) {
-		appendEngineConfig(t, o, engineConfig("cloud", "OSMIA_ENGINE_TEST_TOKEN"))
-		o.reviewChecks = nil
-	})
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	w, repo := seedBuild(t, f, "cloud-final", validPlan, config.WorkspacesGit, base)
-	defer repo.Close()
-	candidate := moveFeature(t, f, w, map[string]string{"candidate.txt": "cloud candidate\n"})
-	a := &delivery.FinalReviewer{S: f.s.delivery(), Repository: repo}
-	run, err := a.FinalChecks(t.Context(), f.s.current(), w, FinalReport{Review: 1, Operation: "cloud-final", Commit: candidate, Upstream: &seal.Base{Commit: base}})
-	must(t, err)
-	if run.Status != ChecksPassed || run.TraceURL != engineTestTrace {
-		t.Fatalf("final run: %+v", run)
-	}
-	docs, err := trace.Read[trace.Document](repo, w)
-	must(t, err)
-	output := ""
-	for _, d := range docs {
-		if strings.Contains(d.Content, "ENGINE=cloud") {
-			output = d.Content
-		}
-		if strings.Contains(d.Content, engineTestToken) {
-			t.Fatal("token in final trace")
-		}
-	}
-	assertEngineCheckOutput(t, output, "cloud", "OSMIA_ENGINE_TEST_TOKEN", "", candidate)
-	feed, err := feedChecks(repo, w)
-	must(t, err)
-	found := false
-	for _, e := range feed {
-		if e.FinalChecks != nil && e.FinalChecks.TraceURL == engineTestTrace {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("final feed: %+v", feed)
-	}
-	_, settings, err := f.s.current().Execution("mason", "default")
-	must(t, err)
-	data, _ := json.Marshal(settings)
-	if settings.Dagger != nil || strings.Contains(string(data), engineTestToken) || strings.Contains(string(data), "cloud") {
-		t.Fatalf("mason settings: %s", data)
-	}
-	if fake.Commands(t) != "" {
-		t.Fatalf("Cloud touched docker: %s", fake.Commands(t))
 	}
 }
 
@@ -370,32 +316,6 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 				t.Fatalf("conflict reached engine: %s", log)
 			}
 		})
-	}
-}
-
-// Serial: final-review checks use fake CLIs in the process environment.
-func TestServiceDockerFinalChecks(t *testing.T) {
-	fake := fixturekit.InstallEngineCLIs(t)
-	t.Setenv("DOCKER_HOST", "ssh://engine.example.ts.net")
-	t.Setenv("DOCKER_CONTEXT", "default")
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(o *Options) {
-		appendEngineConfig(t, o, engineConfig("managed", ""))
-		o.reviewChecks = nil
-	})
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	w, repo := seedBuild(t, f, "docker-final", validPlan, config.WorkspacesGit, base)
-	defer repo.Close()
-	candidate := moveFeature(t, f, w, map[string]string{"candidate.txt": "remote engine candidate\n"})
-	a := &delivery.FinalReviewer{S: f.s.delivery(), Repository: repo}
-	run, err := a.FinalChecks(t.Context(), f.s.current(), w, FinalReport{Review: 1, Operation: "docker-final", Commit: candidate, Upstream: &seal.Base{Commit: base}})
-	must(t, err)
-	if run.Status != ChecksPassed {
-		t.Fatalf("%+v", run)
-	}
-	log, err := os.ReadFile(fake.Environments)
-	must(t, err)
-	if !strings.Contains(string(log), "dagger|check --progress=report --fail-fast --parallel 4|docker-container://osmia-dagger-engine|ssh://engine.example.ts.net\n") {
-		t.Fatalf("final check environment: %s", log)
 	}
 }
 

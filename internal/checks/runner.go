@@ -71,6 +71,9 @@ type DaggerChecks struct {
 	CloudToken string `json:"-"`
 	// CIIdentityExport requests real candidate metadata in check exports.
 	CIIdentityExport bool
+	// Program is the Dagger CLI a Cloud rerun runs; empty means "dagger" from
+	// the search path.
+	Program string
 }
 
 // Identity names the candidate checked by a unit, final review or session.

@@ -176,7 +176,7 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 }
 
 // draftDelivery drafts the title and body as DraftDelivery does and also
-// reports whether the body says the pull request opens as a draft, which is
+// reports whether the body says the pull request stays a draft, which is
 // whether PendingMergeOrderReferences returned a reference for it.
 func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, opensAsDraft bool, err error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -212,14 +212,13 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 		body += "\n" + ref + "\n"
 	}
 	// A workgroup merge-order edge whose upstream has not yet merged keeps
-	// the pull request a draft; the owner sees the dependency stated here,
-	// as part of the one delivery approval, so marking it ready later needs
-	// no separate owner prompt (spec#12).
+	// the pull request a draft after the owner approves marking it ready; the
+	// owner sees the dependency stated here.
 	if references, err := s.PendingMergeOrderReferences(repository, stream); err != nil {
 		return "", "", false, err
 	} else if len(references) > 0 {
 		opensAsDraft = true
-		body += fmt.Sprintf("\nThis depends on %s, which must merge first. This pull request opens as a draft. After updating to the merged dependencies, checks, final review and a fresh owner delivery approval are required before marking it ready.\n", strings.Join(references, ", "))
+		body += fmt.Sprintf("\nThis depends on %s, which must merge first, so this pull request stays a draft. After updating to the merged dependencies, checks, final review and a fresh owner approval to mark it ready for review are required.\n", strings.Join(references, ", "))
 	}
 	// Only the "Before you ship" items of the brief recorded for this same
 	// final review (number, revision and commit) enter the body; a stale brief
@@ -296,6 +295,11 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 			merge = &m
 		}
 		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}
+		if ready, recorded, err := ReadyAt(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
+		} else if recorded {
+			presented.Ready = &ready
+		}
 		if brief, found, err := BriefForReport(repository, stream, report, review.Revision); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
 		} else if found {
@@ -356,7 +360,11 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Brief: brief}, nil
+	checks, err := PresentChecks(repository, stream, report.Review, report.Commit)
+	if err != nil {
+		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read check result"}
+	}
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
 }
 
 func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
@@ -409,16 +417,8 @@ func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req Delive
 	if presented.Approval != nil {
 		messages = slices.Clone(presented.Approval.Messages)
 	}
-	if req.Messages != nil {
-		if len(req.Messages) != len(messages) {
-			return DeliveryApproval{}, &APIError{Code: Validation, Message: "supply every delivery commit message"}
-		}
-		for i, m := range req.Messages {
-			if m.Commit != messages[i].Commit || strings.TrimSpace(m.Message) == "" || strings.ContainsRune(m.Message, 0) {
-				return DeliveryApproval{}, &APIError{Code: Validation, Message: "delivery messages must name the presented commits and contain nonempty text"}
-			}
-			messages[i].Message = m.Message
-		}
+	if req.Messages != nil && !slices.Equal(req.Messages, messages) {
+		return DeliveryApproval{}, &APIError{Code: Validation, Message: "the delivery commit messages were fixed when the commits were pushed to the pull request; they cannot be edited"}
 	}
 	review, prior, existing, err := DeliveryDocuments(repository, stream)
 	if err != nil {
@@ -496,13 +496,13 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 		return DeliveryApproval{}, "", err
 	}
 	if approval == nil {
-		return DeliveryApproval{}, "no owner delivery approval is recorded", nil
+		return DeliveryApproval{}, "the owner has not marked the pull request ready for review", nil
 	}
 	if privateCheckTrace(PublishedTitle(*approval, stream)) {
 		return *approval, "pull request titles must not include private Dagger Cloud trace links", nil
 	}
 	if approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.Seal != report.Seal || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter {
-		return *approval, "the owner approval is stale; review and approve the current branch", nil
+		return *approval, "the owner approval is stale; review the current branch and mark it ready again", nil
 	}
 	if approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 {
 		return *approval, "delivery messages and style require current owner approval", nil

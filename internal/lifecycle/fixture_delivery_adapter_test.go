@@ -44,6 +44,10 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return d.driver().Apply(ctx, op)
 }
 
+func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
+	return d.driver().PublishDraft(ctx, cfg, stream, op, report)
+}
+
 var latestFinalReport = delivery.LatestFinalReport
 
 func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {
@@ -52,7 +56,6 @@ func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 
 type FinalCheckRun = delivery.FinalCheckRun
 
-var finalChecksDocument = delivery.FinalChecksDocument
 
 func (s *Service) deliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return s.delivery().DeliveryPresentation(ctx, raw)
@@ -132,10 +135,6 @@ func (d *finalReviewer) followup(stream config.WorkstreamID, report FinalReport,
 
 var finalSystemPrompt = delivery.FinalSystemPrompt
 var finalPrompt = delivery.FinalPrompt
-
-func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
-	return d.driver().IncompleteChecks(stream, k, commit)
-}
 
 const ownPullRequestOutcomePath = delivery.OwnPullRequestOutcomePath
 

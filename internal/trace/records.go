@@ -458,14 +458,15 @@ func unitPath(parts []string) bool {
 }
 
 // finalPath reports whether parts name a final review record of a
-// workstream, including its rebase, check runs, review, the delivery brief
+// workstream, including its rebase, check runs, check reruns, the choice about a push's missing check results, review, the delivery brief
 // recorded for each review (brief-<review>.json), follow-ups, delivery
-// decision, publication and the owner's own merge into upstream.
+// decision, publication, the marking of the pull request ready for review and the
+// owner's own merge into upstream.
 func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
-	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) {
+	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
@@ -475,7 +476,7 @@ func finalPath(parts []string) bool {
 	if brief, ok := strings.CutPrefix(parts[1], "brief-"); ok && strings.HasSuffix(brief, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(brief, ".json")) {
 		return true
 	}
-	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "ready.json" || parts[1] == "merge.json"
 }
 
 func checkSelectionName(name string) bool {
@@ -489,6 +490,35 @@ func finalCheckAttemptName(name string) bool {
 	}
 	review, attempt, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-started.json"), "-attempt-")
 	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+attempt)
+}
+
+// finalCheckRerunName reports whether name is checks-<review>-push-<push>-rerun.json,
+// the record of the one rerun of a push's failed checks.
+func finalCheckRerunName(name string) bool {
+	if !strings.HasPrefix(name, "checks-") || !strings.HasSuffix(name, "-rerun.json") {
+		return false
+	}
+	review, push, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-rerun.json"), "-push-")
+	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+push)
+}
+
+// finalChecksChoiceName reports whether name is checks-push-<push>-choice.json,
+// the record of the choice to keep waiting for a push's check results or to
+// continue without them.
+func finalChecksChoiceName(name string) bool {
+	push, ok := strings.CutSuffix(strings.TrimPrefix(name, "checks-push-"), "-choice.json")
+	return strings.HasPrefix(name, "checks-push-") && ok && shedRound.MatchString("round-"+push)
+}
+
+// finalChecksRequestName reports whether name is
+// checks-push-<push>-request-<n>.json, the record of the n-th rerun of every
+// check of a push the chief of staff asked for.
+func finalChecksRequestName(name string) bool {
+	if !strings.HasPrefix(name, "checks-push-") || !strings.HasSuffix(name, ".json") {
+		return false
+	}
+	push, n, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-push-"), ".json"), "-request-")
+	return ok && shedRound.MatchString("round-"+push) && shedRound.MatchString("round-"+n)
 }
 
 func checkOutputName(name string) bool {

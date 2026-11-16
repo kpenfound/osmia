@@ -550,6 +550,55 @@
         }
       }
     },
+    "/v1/checks-choice/{workstream}": {
+      "post": {
+        "summary": "Answer the question whether a push's final review keeps waiting for check results or continues without them; refused as a conflict when the push it concerns is superseded",
+        "operationId": "postChecksChoiceByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChecksChoiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecksChoiceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config": {
       "get": {
         "summary": "Show the loaded configuration, its disk drift and diagnostics",
@@ -4211,6 +4260,68 @@
         },
         "type": "object"
       },
+      "CheckCounts": {
+        "properties": {
+          "cancelled": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CheckFailure": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CheckRerun": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/CheckFailure"
+            },
+            "type": "array"
+          },
+          "flakes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fresh": {
+            "$ref": "#/components/schemas/CheckStatusRef"
+          },
+          "original": {
+            "$ref": "#/components/schemas/CheckStatusRef"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CheckSelection": {
         "properties": {
           "breadth_judgment": {
@@ -4272,6 +4383,82 @@
               "null",
               "integer"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "CheckStatusRef": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChecksChoiceRequest": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "keep_waiting",
+              "continue"
+            ],
+            "type": "string"
+          },
+          "offer": {
+            "type": "integer"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_commit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChecksChoiceResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_commit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -5259,6 +5446,35 @@
         },
         "type": "object"
       },
+      "DeliveryChecks": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "flaky": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryDecision": {
         "properties": {
           "accept_blocking": {
@@ -5313,6 +5529,9 @@
           "brief": {
             "$ref": "#/components/schemas/DeliveryBrief"
           },
+          "checks": {
+            "$ref": "#/components/schemas/DeliveryChecks"
+          },
           "delivered": {
             "type": "boolean"
           },
@@ -5345,6 +5564,9 @@
           },
           "publication": {
             "$ref": "#/components/schemas/DeliveryPublication"
+          },
+          "ready": {
+            "$ref": "#/components/schemas/DeliveryReady"
           },
           "report": {
             "$ref": "#/components/schemas/FinalReport"
@@ -5402,8 +5624,18 @@
           "pull_request": {
             "type": "integer"
           },
+          "push": {
+            "type": "integer"
+          },
+          "pushed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "remote": {
             "type": "string"
+          },
+          "review": {
+            "type": "integer"
           },
           "reviewed": {
             "type": "string"
@@ -5415,6 +5647,36 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryReady": {
+        "properties": {
+          "approval": {
+            "type": "integer"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "source": {
             "type": "string"
           },
           "upstream": {
@@ -5840,12 +6102,21 @@
           "attempt": {
             "type": "integer"
           },
+          "counts": {
+            "$ref": "#/components/schemas/CheckCounts"
+          },
           "error": {
             "type": "string"
           },
           "failed": {
             "items": {
               "type": "string"
+            },
+            "type": "array"
+          },
+          "failed_checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckFailure"
             },
             "type": "array"
           },
@@ -5863,12 +6134,31 @@
             },
             "type": "array"
           },
+          "pull_request": {
+            "type": "integer"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "reruns": {
+            "items": {
+              "$ref": "#/components/schemas/CheckRerun"
+            },
+            "type": "array"
+          },
           "review": {
             "type": "integer"
           },
           "selection": {
             "$ref": "#/components/schemas/FeedCheckSelection",
             "description": "Absent for historical runs and failures before selection."
+          },
+          "source": {
+            "description": "Absent for results of local check runs.",
+            "enum": [
+              "pull_request"
+            ],
+            "type": "string"
           },
           "started_at": {
             "format": "date-time",
@@ -5882,8 +6172,12 @@
               "running",
               "passed",
               "failed",
-              "incomplete"
+              "incomplete",
+              "continued"
             ],
+            "type": "string"
+          },
+          "status_url": {
             "type": "string"
           },
           "trace_url": {

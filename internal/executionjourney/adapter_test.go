@@ -274,8 +274,8 @@ func (s *Service) delivery() *delivery.Controller {
 		c.Jev = s.jev
 	}
 	c.Committee = s.options.Committee
-	c.Checks = s.options.reviewChecks
 	c.PullRequests = s.options.PullRequests
+	c.CloudStatuses, c.CloudStatusFetcher, c.CloudRerun, c.PostPushWait = s.options.CloudStatuses, s.options.CloudStatusFetcher, s.options.CloudRerun, s.options.FinalChecksWait
 	if s.options.Reconciliation.Now != nil {
 		c.Now = s.options.Reconciliation.Now
 	}

@@ -1,87 +1,12 @@
 package executionjourney
 
 import (
-	context "context"
 	chromedp "github.com/chromedp/chromedp"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	strconv "strconv"
 	"strings"
 	testing "testing"
 )
-
-func TestBrowserFinalReviewChecksStartLiveAfterPreparation(t *testing.T) {
-	t.Parallel()
-	f, stream, repo, reviewer := newFinalFixture(t, "browser-final-checks")
-	_, _ = assembleBoth(t, f, repo, reviewer, stream,
-		map[string]string{"internal/trace/resume.go": "package trace\n"},
-		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "The branch works together.", "findings": []any{}})
-		return err
-	})
-	must(t, repo.Close())
-	checks := newHeldChecks()
-	preparing, release := make(chan string, 1), make(chan struct{})
-	f.opts.boundary = func(ctx context.Context, name string) error {
-		if name == "final-rebase-replaying" || name == "final-checks-exporting" {
-			preparing <- name
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return nil
-	}
-	allow := startFeedChecks(t, f, checks, FinalReviewAction)
-	p := openCheckFeed(t, f, stream)
-	const entry = `[data-kind=final_checks][data-review="1"][data-attempt="1"]`
-	allow()
-	for _, boundary := range []string{"final-rebase-replaying", "final-checks-exporting"} {
-		if got := awaitCheck(t, preparing); got != boundary {
-			t.Fatalf("preparing %s, want %s", got, boundary)
-		}
-		if starts := finalCheckStarts(t, f.repository(), stream); len(starts) != 0 {
-			t.Fatalf("checks started during %s: %+v", boundary, starts)
-		}
-		p.Await("no check entry during "+boundary, `!document.querySelector('[data-kind=final_checks]')`)
-		release <- struct{}{}
-	}
-	if ran := awaitCheck(t, checks.entered); len(ran) != 0 {
-		t.Fatalf("final checks selected links: %v", ran)
-	}
-	awaitFeedEvent(p, stream)
-	p.Await("the final checks running", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'running'`)
-	p.AwaitText(entry+` [data-field=selection]`, "checking every check: Jev is unconfigured")
-	p.AwaitText(entry+` [data-field=selection-description]`, "every check ran: Jev did not select them (unconfigured")
-	p.Await("no final outcome while checks run", `!document.querySelector('[data-kind=final_review]') && !document.querySelector('[data-kind=session][data-turn='+`+quote(turn)+`+']')`)
-	assertFeedAnnotations(t, p, entry, 1)
-	checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
-	awaitFeedEvent(p, stream)
-	p.Await("the final checks passed", `document.querySelector(`+quote(entry)+`)?.dataset.state === 'passed'`)
-	const outcome = `[data-kind=final_review][data-review="1"]`
-	p.AwaitText(outcome+` [data-field=outcome]`, "reviewed")
-	p.AwaitText(outcome+` [data-field=blocking]`, "0 blocking findings")
-	p.AwaitText(outcome+` [data-field=gaps]`, "0 uncovered criteria")
-	p.AwaitText(outcome+` [data-field=turn]`, turn)
-	session := `[data-kind=session][data-turn="` + turn + `"]`
-	p.Await("the final reader's completed turn", `document.querySelector(`+quote(session)+`)?.dataset.state === 'done'`)
-	p.AwaitText(session+` [data-field=profile]`, "default")
-	const transition = `[data-kind=transition][data-subject=final-review][data-to=reviewed-1]`
-	p.AwaitText(transition+` [data-field=subject]`, "Final review")
-	p.AwaitText(transition+` [data-field=from]`, "requested-1")
-	p.AwaitText(transition+` [data-field=to]`, "reviewed-1")
-	p.AwaitText(transition+` [data-field=reason]`, "final review 1 read")
-	assertFeedAnnotations(t, p, entry+", "+outcome+", "+transition, 3)
-	// The link identifies the same agent turn shown in the feed.
-	var linked bool
-	p.Eval(`document.querySelector(`+quote(outcome+` [data-field=turn]`)+`).hash === '#' + document.querySelector(`+quote(session)+`).id`, &linked)
-	if !linked {
-		t.Fatal("final review does not link its reader turn")
-	}
-}
 
 func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {
 	t.Parallel()

@@ -23,10 +23,11 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 		{name: "project-request", style: "commit-per-unit", projectRequest: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newPublicationFixture(t, tc.style)
+			p := newUnpushedPublicationFixture(t, tc.style, "")
 			if tc.noFork {
 				useUpstreamForPush(t, p)
 			}
+			p.publishDraft(t)
 			ctx := context.Background()
 			p.approve(t, nil)
 			result := settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher())

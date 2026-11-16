@@ -201,9 +201,9 @@ The member view is laid out like a chat client:
   number of pauses in force, a button for a new workstream and a settings
   menu. The slots open to each role's use and the work waiting for a slot and
   why. Check slots appear alongside mason, reviewer and committee slots: the
-  factory shares `capacity.checks` (default 2) across every project's unit,
-  final-review and session checks. Waiting entries name the workstream and unit,
-  final review number or session. The architect pool has no
+  factory shares `capacity.checks` (default 2) across every project's unit and
+  session checks; a final review runs no check and takes no check slot.
+  Waiting entries name the workstream and unit, or session. The architect pool has no
   factory-wide limit: it shows as unbounded (`<n> active (unbounded; 1 per
   workstream)`) with a note that no configuration setting controls them, never
   as zero slots, and the header's slot total (`used/limit`) counts only the
@@ -324,24 +324,29 @@ From the page you can:
 - Answer an escalation, accept its quick reply, or pick one of its options.
 - Ratify a plan, sustain or overrule an objection, or ask for a redraft.
 - Decide a contested unit, an amendment or a charter proposal.
-- Accept the final review and approve each workstream's delivery with one
-  click. The delivery card shows the PR title and a collapsed **What will be
-  published** section with the description and each commit message as plain,
-  read-only text, and one button that says what approving does: **Open pull
-  request**, **Open draft pull request** while an upstream merge-order
-  dependency has not merged, or **Update pull request** when a delivered
-  workstream is refreshed after its dependencies merged. When the final review
-  has blocking findings the label starts with **Accept findings and**, because
-  approving accepts them as they are. The note beside the button says approval
-  authorizes publication with your Git identity, signature and sign-off, and
-  there is no confirmation dialog. The page offers no editor. To change what
-  is published, amend the commits or edit the pull request afterwards. The API
-  and CLI still accept an edited description and commit messages. A delivery
-  offered again after a refused publication previews, and publishes when you
-  approve it again, the text of its earlier approval, including any text
-  edited that way. Draft publication, updates and marking ready each require
-  that member's own fresh approval and service-owned signing; there is no
-  group-wide publication approval.
+- Accept the final review and mark each workstream's pull request ready for
+  review with one click. The delivery card shows the final report's findings,
+  the recorded check result, the chief of staff's brief and the PR title, and a
+  collapsed **What will be published** section with the description (the
+  brief's **Before you ship** items included) and each commit message as plain,
+  read-only text. Its one button says what approving does: **Mark ready for
+  review**, or **Update pull request** when a delivered workstream is refreshed
+  after its dependencies merged. When the final review has blocking findings
+  the label starts with **Accept findings and**, because approving accepts them
+  as they are. The pull request is already open as a draft; approving puts the
+  description on it, marks it ready for review and delivers the workstream. It
+  opens no pull request and pushes nothing, and Jev is never asked. While a
+  merge-order dependency has not merged, approving is recorded and the pull
+  request stays a draft until it has (see
+  [Draft pull request and Cloud checks](#draft-pull-request-and-cloud-checks)).
+  The page offers no editor. To change what is published, edit the pull
+  request afterwards. The API and CLI still accept an edited description; the
+  commit messages were fixed when the commits were pushed. A decision offered
+  again after a refused marking previews, and publishes when you approve it
+  again, the text of its earlier approval, including any text edited that way.
+  Each member workstream needs its own approval; there is no group-wide one.
+- Answer a **Checks missing** entry: keep waiting, or continue the final review
+  without check results (see the section below).
 - Opening a workgroup, workstream, design or exploratory conversation shows
   its newest entry, including direct links and returning to Feed. New entries
   scroll the shown conversation to its end even while reading older history.
@@ -392,6 +397,93 @@ is lit while a reload has something to apply.
 When the connection drops, the page shows that it is reconnecting and retries
 with a growing delay up to 10 seconds, immediately when the browser comes back
 online or the page becomes visible again.
+
+### Draft pull request and Cloud checks
+
+When every unit of a workstream has merged, the service rebases the feature
+branch onto upstream one last time, signs the commits with your Git identity,
+pushes the branch to your repository or fork and opens the pull request against
+the upstream base as a **draft**. You approve nothing for this, and the
+workstream stays `assembled`. The draft carries the drafted title and
+description without the brief's **Before you ship** items, which do not exist
+yet. `GITHUB_TOKEN` must be set in the service's environment: it opens the pull
+request and reads the commit statuses below. Without it the final review waits at publication: nothing is pushed or opened, the workstream stays `assembled`, no final read starts, and the status wait and a chief of staff notice name the missing `GITHUB_TOKEN`. Restart `osmia serve` with the token and the review pushes, opens the draft and watches the checks as usual.
+
+Every later commit of the workstream goes to the same pull request, draft or
+ready, with no approval: the commit of a revision for blocking findings or
+failed checks, and the commit of a drift rebase. Each push starts a new check
+cycle. Nothing is pushed to a merged or closed pull request; the final review
+fails with that reason and the chief of staff is told.
+
+The service runs no final check of its own. Dagger Cloud runs the project's
+checks on the pull request, and the service watches the combined commit
+statuses of the pushed head commit in the upstream repository:
+
+- After each push it reads nothing for 2 minutes. It then reads the statuses at
+  the `pull_request_poll` interval (default 10 minutes).
+- `load` is a status of its own, and a failed `load` is a failed result. The
+  overall result comes only from the **Run Dagger Checks** status, whose link
+  holds a small JSON file with `dagger.status` and the counts of total, passed,
+  failed and cancelled checks. No individual check is polled for it. On a
+  failure the failed checks' names and their `dagger trace` ids come from the
+  failing per-check statuses of the same read.
+- A completed run passes only when no check failed, none was cancelled and the
+  counts account for the total. A run with cancelled or unaccounted checks is
+  never a pass: it counts as an incomplete run, as does a run still pending
+  `checks_timeout` after the push. The final review then waits with a doubling
+  delay, up to an hour, and after three incomplete runs in a row it shows in
+  your inbox with the last failure. It takes no answer and closes once a run
+  completes.
+- On a failure the service asks Dagger Cloud once to rerun the failed checks:
+  `dagger cloud checks rerun --failed --pr <N>`, run from the workstream's
+  checkout with the token the `[dagger] cloud_token_env` setting names. The
+  `dagger` CLI must be on the service's search path and the variable must be set
+  in its environment; without them the rerun cannot be made and the final
+  review keeps waiting and says so. The rerun runs on the same commit, so the
+  original failure keeps showing; it is never taken as the rerun's result. Only
+  a **Run Dagger Checks** status posted after the request settles it, and when
+  none completes within `checks_timeout` of the request the run is incomplete. A
+  check that failed and then passed on the rerun is recorded as flaky and
+  counts as a pass; one that fails again stays failed. At most one rerun is made
+  for a push.
+- Everything is recorded, so a restart resumes where the watch was: the wait is
+  measured from the recorded push, and no push, rerun or notice is repeated.
+
+The committee's final read starts only on a completed result for the exact
+commit that was pushed, and its prompt carries the outcome, the counts, the
+failed checks with their trace ids and the flaky checks. The chief of staff
+triages blocking findings as before: the ones that need code go into one plan
+revision, whose commit is pushed to the open pull request and starts a new
+cycle, and it records the delivery brief for the review.
+
+**Load never ran.** When the first read after the 2 minutes finds no `load`
+status, the chief of staff gets one notice for that push, and the watch goes on.
+The chief can poll the statuses at once or ask Dagger Cloud to rerun every check
+of the pull request (`dagger cloud checks rerun --all --pr <N>`), and it can
+bring you a **Checks missing** entry with two answers: keep waiting, or continue
+the final review without check results. This is also the way for a project that
+has no Cloud Checks. Only your answer continues without results, and it applies
+to that push alone: the final read of that commit is told that no check results
+exist and that you chose to continue. A later push closes the entry, an answer
+to it is refused as stale, and the later push waits for its own results. Answer
+with `osmia checks <workstream-id> keep-waiting|continue`, through the API or on
+the page.
+
+**Mark ready for review.** The delivery card appears once the chief of staff
+has recorded the brief for the final review, or its turn ended without one. It
+is pinned to that review, its commit and its description, so an approval made
+before a later push replaced the commit is refused as stale. Approving adds the
+brief's **Before you ship** items to the draft's description, marks the pull
+request ready for review and moves the workstream to `delivered`. If you mark
+the draft ready on GitHub yourself, the next `pull_request_poll` notices it and
+records the workstream delivered by you. If a merge-order dependency has not
+merged, the approval is recorded and the pull request stays a draft until it
+has; you approve again once the dependency update has been reviewed.
+
+Osmia has not verified that Cloud Checks run on draft pull requests, or that
+statuses land on the upstream head commit of a pull request opened from a
+fork. When they do not, the project has no statuses to read, and it takes the
+load-never-ran path above.
 
 ## Dictation
 
@@ -468,7 +560,7 @@ credentials, review your session's work and move it along yourself:
   commit. It runs the same smart selection of checks a unit's own check run
   uses for the files that changed since the session's starting commit; when
   Jev's API key is not set or Jev does not select, it runs the full
-  `dagger check` the service runs before every review. Either way it tells you whether the
+  `dagger check` the service runs before each unit's review. Either way it tells you whether the
   run was smart or full, its status and exit code, and keeps its output.
   Only one check runs at a time.
 - **Push** `osmia session push <session>` sends the session's branch to the

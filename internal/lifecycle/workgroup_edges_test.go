@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -68,19 +69,6 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	t.Helper()
 	ctx := context.Background()
 	f, stream, repository, report, repo2, upstream := newCrossRepoEdgeDependent(t)
-	checkCalls := 0
-	f.s.options.reviewChecks = checkFunc(func(_ context.Context, directory string) (CheckResult, error) {
-		checkCalls++
-		dependency, err := os.ReadFile(filepath.Join(directory, "dependency.txt"))
-		if err != nil || strings.TrimSpace(string(dependency)) != "aabbccddeeff0011223344556677889900aabbccdd" {
-			return CheckResult{}, fmt.Errorf("checks missed merged dependency reference: %q, %v", dependency, err)
-		}
-		if repair && checkCalls == 1 {
-			return CheckResult{ExitCode: 1, Output: failedReport("dag://?check=go/packages/tests/test&go-test=TestDedupe") + "TestDedupe fails after the dependency update\n"}, nil
-		}
-		return CheckResult{Output: "dependency checks pass"}, nil
-	})
-
 	// The dependent's own fork and a fake pull-request host shared by both
 	// repos, set up directly (not through newPublicationFixtureWith, which
 	// would also touch the single-project Landing convenience field that
@@ -148,6 +136,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 
 	// The dependent's own delivery approval: the first owner prompt.
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
+	pub.publishDraft(t)
 	approval := pub.approve(t, nil)
 	if !strings.Contains(approval.Description, "owner/other#77") {
 		t.Fatalf("the drafted description does not link the upstream pull request: %q", approval.Description)
@@ -158,17 +147,20 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
 	if got := pub.feature(t); got != DeliveredState {
-		t.Fatalf("the dependent is %s, want delivered: a draft pull request is still a published pull request", got)
+		t.Fatalf("the dependent is %s, want delivered: the approval is applied and the pull request stays a draft", got)
 	}
 	pull.Mu.Lock()
-	if len(pull.Prs) != 2 || !pull.Prs[1].Draft {
-		t.Fatalf("the dependent's own pull request did not open as a draft linking the dependency: %+v", pull.Prs)
+	if len(pull.Prs) != 2 || !pull.Prs[1].Draft || pull.Readies != 0 || !strings.Contains(pull.Prs[1].Body, "owner/other#77") {
+		t.Fatalf("the dependent's own pull request is not a draft linking the dependency: %+v, ready calls %d", pull.Prs, pull.Readies)
 	}
 	pull.Mu.Unlock()
+	if ready, recorded, err := delivery.ReadyAt(repository, stream); err != nil || !recorded || !ready.Draft || ready.Approval != 1 {
+		t.Fatalf("the approval of the draft is not recorded: %+v, %v", ready, err)
+	}
 	firstPublication, found, err := currentOwnPublication(repository, stream)
 	must(t, err)
-	if !found || firstPublication.Approval != 1 || !strings.Contains(demoGit(t, home, "-C", f.clone, "cat-file", "-p", firstPublication.Commit), "gpgsig") {
-		t.Fatalf("draft publication lacks owner approval and signing: %+v", firstPublication)
+	if !found || !strings.Contains(demoGit(t, home, "-C", f.clone, "cat-file", "-p", firstPublication.Commit), "gpgsig") {
+		t.Fatalf("draft push lacks signing: %+v", firstPublication)
 	}
 
 	// Simulate the upstream merge: the only recorded event a merge-order
@@ -242,11 +234,6 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !found || fresh.EdgeResolved == "" || fresh.Commit == report.Commit {
 			t.Fatalf("fresh review did not read the dependency update: %+v", fresh)
 		}
-		_, checks, err := a.incompleteChecks(stream, in.Review, fresh.Commit)
-		must(t, err)
-		if checks.Commit != fresh.Commit {
-			t.Fatalf("checks did not read the update: %+v", checks)
-		}
 		assertContext(true)
 		return fresh
 	}
@@ -266,19 +253,11 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		mergeDirectly(t, f, repository, stream, units[1].Unit.ID, map[string]string{"dedupe.go": "package demo\n\nfunc Dedupe() bool { return true }\n"})
 		fresh = runReview(false)
 	}
-	wantChecks := 1
-	if repair {
-		wantChecks = 2
-	}
-	if checkCalls != wantChecks {
-		t.Fatalf("checks ran %d times, want %d", checkCalls, wantChecks)
-	}
 
-	// Only a fresh delivery approval (the second and only other owner
-	// prompt) authorises marking the existing pull request ready: never
-	// before it (spec#13, spec#14).
+	// Only a fresh approval of "Mark ready for review" authorises marking the
+	// existing pull request ready: never before it.
 	if pull.Readies != 0 {
-		t.Fatal("the dependent's pull request was marked ready before any fresh delivery approval")
+		t.Fatal("the dependent's pull request was marked ready before any fresh approval")
 	}
 	freshApproval := pub.approve(t, nil)
 	if freshApproval.Review != fresh.Review {

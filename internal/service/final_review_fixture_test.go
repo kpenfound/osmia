@@ -1,8 +1,14 @@
 package service
 
 import (
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	testing "testing"
@@ -13,7 +19,45 @@ import (
 // controller. Intake, debate and ratification are covered by lifecycle tests.
 func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
-	return newFinalFixtureWith(t, key, "")
+	f, stream, repository, a := newFinalFixtureWith(t, key, "")
+	hostFinalReviews(t, f, stream)
+	return f, stream, repository, a
+}
+
+// hostFinalReviews gives the service a credential for the pull request host:
+// a local bare fork of owner/dagger as the clone's origin and a fake host
+// that follows the fork's feature branch and shows a passing Cloud run for
+// every pushed commit. A final review then publishes its draft and reads the
+// result at once, as the fixtures' zero wait after a push lets it.
+func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) {
+	t.Helper()
+	var fork string
+	var pulls *fakePulls
+	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, featureBranch(stream))
+		return tip
+	})
+	pulls.SyncHead = true
+	wait := fixturekit.NoPostPushWait()
+	for _, o := range []*Options{&f.s.options, &f.opts} {
+		o.PullRequests, o.FinalChecksWait, o.CloudStatusFetcher = pulls, wait, passingCloudFetcher()
+	}
+}
+
+// passingCloudRun is the JSON of a completed "Run Dagger Checks" status in
+// which every check passed.
+const passingCloudRun = `{"dagger":{"status":"completed","checks":{"total":3,"passed":3,"failed":0,"cancelled":0}}}`
+
+type passingCloudTransport struct{}
+
+func (passingCloudTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(passingCloudRun)), Request: r}, nil
+}
+
+// passingCloudFetcher answers every read of a "Run Dagger Checks" JSON with a
+// passing run, without a network.
+func passingCloudFetcher() CloudStatusFetcher {
+	return CloudStatusFetcher{HTTP: &http.Client{Transport: passingCloudTransport{}}, Allow: func(*url.URL) bool { return true }}
 }
 
 // newFinalFixtureWith is newFinalFixture with extra configuration appended.

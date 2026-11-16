@@ -4,17 +4,9 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-func finalCheckStarts(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []FinalCheckAttempt {
-	t.Helper()
-	return fixturekit.DocumentValues(t, repo, stream, func(doc trace.Document, start FinalCheckAttempt) bool {
-		return start.Attempt > 0 && doc.ID == finalCheckAttemptDocument(start.Review, start.Attempt)
-	})
-}
 
 func (f *shedFixture) buildFixture() intakefixture.BuildFixture {
 	return intakefixture.BuildFixture{

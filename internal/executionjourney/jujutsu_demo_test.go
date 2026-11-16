@@ -125,7 +125,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
-	prs := &fakePulls{Fork: forkBranch}
+	prs := &fakePulls{Fork: forkBranch, SyncHead: true}
 	f.opts.PullRequests = prs
 
 	problems := &demoProblems{}

@@ -61,6 +61,7 @@ func failFinalReview(t *testing.T, f *shedFixture, repository *trace.Repository,
 func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "move-rerun")
+	hostFinalReviews(t, f, stream)
 	f.s.setSole(&activeProject{repository: repository})
 	ctx := context.Background()
 	_, op := assembleBoth(t, f, repository, a, stream,
@@ -126,6 +127,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "chief-move")
+	hostFinalReviews(t, f, stream)
 	f.s.setSole(&activeProject{repository: repository})
 	ctx := context.Background()
 	_, op := assembleBoth(t, f, repository, a, stream,
@@ -267,17 +269,19 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 	if result := settleOperation(t, p.s, p.repository, p.stream, op, reviewer); result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	if tip, _ := p.forkBranch(t); tip != before {
-		t.Fatal("the pull request changed before the owner's approval")
+	// The final review of the repaired branch pushed it to the open pull
+	// request without an approval.
+	pushed, _ := p.forkBranch(t)
+	if pushed == before || p.pulls.Creates != 1 || p.pulls.Prs[0].HeadCommit != pushed {
+		t.Fatalf("the repaired branch was not pushed to the same pull request: tip %s, was %s, creates %d, pull request %+v", pushed, before, p.pulls.Creates, p.pulls.Prs[0])
 	}
 	description := "Resumable uploads\n\nRepaired after upstream moved."
 	p.approve(t, &description)
 	if result := settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher()); result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	tip, _ := p.forkBranch(t)
-	if tip == before || p.pulls.Creates != 1 || p.pulls.Updates == 0 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
-		t.Fatalf("the repaired delivery: tip %s, creates %d, updates %d, body %q, state %s", tip, p.pulls.Creates, p.pulls.Updates, p.pulls.Prs[0].Body, p.feature(t))
+	if p.pulls.Creates != 1 || p.pulls.Updates == 0 || p.pulls.Prs[0].Body != description || p.feature(t) != DeliveredState {
+		t.Fatalf("the repaired delivery: creates %d, updates %d, body %q, state %s", p.pulls.Creates, p.pulls.Updates, p.pulls.Prs[0].Body, p.feature(t))
 	}
 }
 
@@ -285,7 +289,7 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 // is in flight, and never reopening a pull request that is merged or closed.
 func TestWorkstreamMoveRefusals(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
+	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	ctx := context.Background()
 	move := func(to, note string) *APIError {
 		_, api := p.s.ownerMoveWorkstream(ctx, string(p.stream), WorkstreamMoveRequest{To: to, Note: note})
@@ -300,6 +304,7 @@ func TestWorkstreamMoveRefusals(t *testing.T) {
 	if api := move(DeliveredState, "Deliver it."); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "delivered through the owner's delivery approval") {
 		t.Fatalf("an assembled workstream moved to delivered: %v", api)
 	}
+	p.publishDraft(t)
 	p.approve(t, nil)
 	publish := p.request(t)
 	if api := move(BuildingState, "Reopen it."); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "publication is in flight") {

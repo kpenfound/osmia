@@ -168,6 +168,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			buildReady := make(chan struct{})
 			var reviewCalls, answerCalls, finalCalls atomic.Int32
 			var stream config.WorkstreamID
+			hostRunningService(t, f, func() config.WorkstreamID { return stream })
 			f.engine.Mu.Lock()
 			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				switch {

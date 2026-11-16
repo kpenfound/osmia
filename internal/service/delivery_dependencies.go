@@ -10,11 +10,13 @@ import (
 )
 
 func (s *Service) delivery() *delivery.Controller {
-	cfg := s.current()
-	return s.deliveryWithChecks(s.configuredChecks(cfg), s.configuredCloudChecks(cfg))
+	return s.deliveryFor(s.current())
 }
 
-func (s *Service) deliveryWithChecks(checks, cloud ReviewChecks) *delivery.Controller {
+// deliveryFor binds the delivery controller to the configuration of its
+// operation: a running operation keeps its Dagger Cloud rerun runner when
+// reload installs new stages.
+func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 	return delivery.New(delivery.Dependencies{
 		Now: s.now, About: s.about, Current: s.current, Effective: s.effective,
 		ConversationTrace: s.conversationTrace, Execution: s.execution, ResolveBase: s.resolveBase,
@@ -24,10 +26,8 @@ func (s *Service) deliveryWithChecks(checks, cloud ReviewChecks) *delivery.Contr
 		TrackTurn: s.turns.add, AgentProfile: s.agentProfile, RoleExecution: s.roleExecution,
 		ContextFor: s.contextFor, Stoppable: s.stoppable, ThreadRunner: s.threadRunner,
 		Held: s.held, ContinueStopped: s.continueStopped, MemoryTurns: memoryTurns, Step: s.step,
-		Committee: s.options.Committee, Checks: checks, CloudChecks: cloud, PullRequests: s.options.PullRequests, Jev: s.jev,
-		AcquireReviewCheckSlot: func(ctx context.Context, p config.ProjectID, w config.WorkstreamID, review int, operation string) (func(), error) {
-			return s.acquireReviewCheckSlot(ctx, CheckSlotRun{Project: p, Workstream: w, Review: review}, operation)
-		},
+		Committee: s.options.Committee, PullRequests: s.options.PullRequests, Jev: s.jev,
+		CloudStatuses: s.options.CloudStatuses, CloudStatusFetcher: s.options.CloudStatusFetcher, CloudRerun: s.configuredRerun(cfg), PostPushWait: s.options.FinalChecksWait,
 		ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
 		UpstreamDeliveryPending: upstreamDeliveryPending, UnresolvedWork: unresolvedWork, ReopenHeld: reopenHeld,
 		BaseObservationAt: func(r *trace.Repository, w config.WorkstreamID) (bool, int, error) {

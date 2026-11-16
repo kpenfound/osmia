@@ -45,6 +45,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
   upstream <workstream-id> <base-workstream-id> [--json]
+  checks <workstream-id> <keep-waiting|continue> [--json]
   archive <workstream-id> [--json]  permanently delete trace; retain title
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
@@ -59,7 +60,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   merged <workstream-id> [--json]
   rebase <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
-  approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept] [--json]
+  approve <workstream-id> [description-file] [--accept] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   feed <workstream-id|workgroup-id> [--json]
@@ -93,7 +94,6 @@ serve runs in the foreground unless --detach is set. Detached logs are in root/s
 
 type options struct {
 	root, socket, reason, project, base             string
-	messageFile, messagesFile                       string
 	upstream, fork, clone, baseBranch               string
 	repo, description, charterFile, id              string
 	profile, title, from                            string
@@ -118,7 +118,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -130,10 +130,6 @@ func parse(args []string) (o options, err error) {
 				return o, errors.New("empty value")
 			}
 			switch key {
-			case "--message-file":
-				o.messageFile = value
-			case "--messages-file":
-				o.messagesFile = value
 			case "--root":
 				o.root = value
 			case "--socket":
@@ -275,6 +271,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon", "upstream":
 		valid = len(a) == 2
+	case "checks":
+		valid = len(a) == 2 && (a[1] == "keep-waiting" || a[1] == "continue")
 	case "packet", "ratify", "archive", "unarchive", "merged", "rebase":
 		valid = len(a) == 1
 	case "amendment":
@@ -330,7 +328,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -371,7 +369,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -672,6 +670,49 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Drift rebase %d requested for workstream %s\n", result.Drift, result.Workstream)
 		return 0
 	}
+	if cmd == "checks" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		list, err := c.Inbox(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		// The answer pins the push and offer the inbox entry names, so it
+		// can only apply to the question the owner read.
+		var entry *wire.InboxEntry
+		for i, e := range list.Entries {
+			if e.Kind == wire.InboxChecksChoice && e.Workstream == id {
+				entry = &list.Entries[i]
+			}
+		}
+		if entry == nil {
+			fmt.Fprintf(stderr, "no question about the check results of workstream %s waits for you\n", id)
+			return 1
+		}
+		raw, err := json.Marshal(entry.Answer.Body)
+		if err != nil {
+			return fail(err)
+		}
+		var req wire.ChecksChoiceRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fail(err)
+		}
+		req.Decision = wire.ChecksChoiceKeepWaiting
+		if a[1] == "continue" {
+			req.Decision = wire.ChecksChoiceContinue
+		}
+		result, err := c.ChecksChoice(ctx, id, req)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Workstream %s, push %d (pull request #%d, commit %s): %s\n%s\n", result.Workstream, result.Push, result.PullRequest, result.PushedCommit, result.Decision, result.Detail)
+		return 0
+	}
 	if cmd == "upstream" {
 		id, err := config.ParseWorkstreamID(a[0])
 		if err != nil {
@@ -866,6 +907,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 					fmt.Fprintf(stdout, "Advisory: %s\n", finding.Describe())
 				}
 			}
+			if checks := presentation.Checks; checks != nil {
+				fmt.Fprintf(stdout, "Checks: %s\n", checks.Summary)
+			}
 			for _, criterion := range presentation.Report.Criteria {
 				if criterion.Gap != "" {
 					fmt.Fprintf(stdout, "Unshown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Gap)
@@ -877,7 +921,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				for _, m := range presentation.Messages {
 					fmt.Fprintf(stdout, "\nDelivery commit %s:\n%s\n", m.Commit, m.Message)
 				}
-				fmt.Fprintf(stdout, "\nDraft pull request description:\n%s", presentation.Draft)
+				fmt.Fprintf(stdout, "\nPull request description that marking it ready for review publishes:\n%s", presentation.Draft)
 			}
 			if presentation.Approval != nil {
 				for _, m := range presentation.Approval.Messages {
@@ -890,9 +934,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			if p := presentation.Publication; p != nil {
 				if p.Status == "opened" {
-					fmt.Fprintf(stdout, "\nPublished %s of %s at %s (%s) as pull request #%d: %s\n", p.Branch, p.Fork, p.Commit, p.Style, p.PullRequest, p.URL)
+					fmt.Fprintf(stdout, "\nPushed %s of %s at %s (%s) to pull request #%d: %s\n", p.Branch, p.Fork, p.Commit, p.Style, p.PullRequest, p.URL)
 				} else {
-					fmt.Fprintf(stdout, "\nPublishing %s of %s at %s (%s)\n", p.Branch, p.Fork, p.Commit, p.Style)
+					fmt.Fprintf(stdout, "\nPushing %s of %s at %s (%s)\n", p.Branch, p.Fork, p.Commit, p.Style)
+				}
+			}
+			if r := presentation.Ready; r != nil {
+				if r.Source == wire.ReadyOnHost {
+					fmt.Fprintf(stdout, "\nYou marked pull request #%d ready for review on the pull request host: %s\n", r.PullRequest, r.URL)
+				} else if r.Draft {
+					fmt.Fprintf(stdout, "\nApproved marking pull request #%d ready for review; it stays a draft until its dependency merges: %s\n", r.PullRequest, r.URL)
+				} else {
+					fmt.Fprintf(stdout, "\nMarked pull request #%d ready for review: %s\n", r.PullRequest, r.URL)
 				}
 			}
 			return 0
@@ -914,31 +967,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			value := string(content)
 			decision.Description = &value
 		}
-		if o.messageFile != "" {
-			if len(presentation.Messages) != 1 {
-				fmt.Fprintln(stderr, "--message-file requires one delivery commit; use --messages-file for multiple commits")
-				return 2
-			}
-			content, err := os.ReadFile(o.messageFile)
-			if err != nil {
-				return fail(err)
-			}
-			decision.Messages = slices.Clone(presentation.Messages)
-			decision.Messages[0].Message = string(content)
-		}
-		if o.messagesFile != "" {
-			content, err := os.ReadFile(o.messagesFile)
-			if err != nil {
-				return fail(err)
-			}
-			if err := json.Unmarshal(content, &decision.Messages); err != nil {
-				return fail(err)
-			}
-			if len(decision.Messages) == 0 {
-				fmt.Fprintln(stderr, "messages file must contain the delivery messages array")
-				return 2
-			}
-		}
 		approved, err := c.ApproveDelivery(ctx, id, decision)
 		if err != nil {
 			return fail(err)
@@ -946,7 +974,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, approved)
 		}
-		fmt.Fprintf(stdout, "Approved final review %d at %s with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
+		fmt.Fprintf(stdout, "Approved marking final review %d at %s ready for review with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
 		return 0
 	}
 	if cmd == "trace" {
@@ -2028,6 +2056,9 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 		case wire.InboxDelivery:
 			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
 			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
+		case wire.InboxChecksChoice:
+			block("Decided on", fmt.Sprintf("push %v (pull request #%v, commit %v)", e.Answer.Body["push"], e.Answer.Body["pull_request"], e.Answer.Body["pushed_commit"]))
+			block("Answer", fmt.Sprintf("osmia checks %s keep-waiting, or osmia checks %s continue to continue the final review without check results for this push only", stream, stream))
 		case wire.InboxPublication:
 			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")

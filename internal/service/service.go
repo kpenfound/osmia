@@ -108,6 +108,20 @@ type Options struct {
 	// workstreams. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
 	PullRequests pulls.Client
+	// CloudStatuses reads the combined commit statuses of a pushed commit,
+	// which the final review watches. It defaults to PullRequests when that
+	// reads statuses, as the GitHub client does.
+	CloudStatuses pulls.StatusReader
+	// CloudStatusFetcher reads the JSON a "Run Dagger Checks" status points
+	// at. Its zero value reads https://dagger.cloud only.
+	CloudStatusFetcher CloudStatusFetcher
+	// CloudRerun requests the rerun of a pull request's failed Cloud checks.
+	// It defaults to the Dagger CLI with the token dagger.cloud_token_env
+	// names.
+	CloudRerun CloudRerunner
+	// FinalChecksWait replaces the 2 minutes after a push during which the
+	// final review reads no status. Nil keeps them.
+	FinalChecksWait *time.Duration
 	// Repositories reads and creates the GitHub repositories of project
 	// creation. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
@@ -1346,8 +1360,8 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	overlap := &overlaps{s: s, repository: repository}
 	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
-	finals := &delivery.FinalReviewer{S: s.deliveryWithChecks(checkClient, cloudClient), Repository: repository}
-	publish := &delivery.Publisher{S: s.deliveryWithChecks(checkClient, cloudClient), Repository: repository}
+	finals := &delivery.FinalReviewer{S: s.deliveryFor(cfg), Repository: repository}
+	publish := &delivery.Publisher{S: s.deliveryFor(cfg), Repository: repository}
 	amend := &amendmentDrafter{Drafter: draft}
 	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}

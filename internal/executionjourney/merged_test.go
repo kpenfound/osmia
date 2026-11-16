@@ -74,7 +74,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 			upstream := advanceUpstream(t, f, map[string]string{"feature.go": "feature\n"})
 			requestPublication(t, f, repo, stream, 1)
 			f.s.options.PullRequests = &fakePulls{}
-			if _, api := f.s.mergedOutside(ctx, repo, stream); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "may still open a pull request") {
+			if _, api := f.s.mergedOutside(ctx, repo, stream); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "may still be applied") {
 				t.Fatalf("recorded merged while a publication could still open a pull request: %v", api)
 			}
 			if feature, err := repo.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {

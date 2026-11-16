@@ -133,24 +133,41 @@ draft until the upstream merges. The service polls GitHub for merges; an
 owner-recorded merge with `osmia merged` also counts. Merge is the only release
 signal; tags, versions and agent completion do not release dependencies.
 
-While waiting, dependent roles receive the upstream branch or commit. After
-its own delivery approval, a published dependent PR is a draft linking the
-upstream PR and stating the dependency. When the merge is recorded, the
-dependent updates its reference to the merged commit, repairs check or review
-failures within its slice, re-runs checks and final review, and presents a fresh
-delivery approval before pushing and marking ready. No new owner-started
+While waiting, dependent roles receive the upstream branch or commit. A
+published dependent PR is a draft linking the upstream PR and stating the
+dependency; approving **Mark ready for review** in the meantime is recorded but
+leaves it a draft. When the merge is recorded, the dependent updates its
+reference to the merged commit, repairs check or review failures within its
+slice, re-runs final review and presents a fresh delivery approval before
+the update is pushed and the PR is marked ready. No new owner-started
 workstream is needed for that repair; only a design gap needs escalation.
 Expected waits appear in status, such as `waiting on owner: repo-a#123 merge`,
-and create no inbox entry or notification.
+and create no inbox entry or notification. An assembled workstream whose final
+review waits because `osmia serve` was started without `GITHUB_TOKEN` shows
+`waiting on owner: final review N waits for a GitHub credential: ...`: nothing
+is pushed or opened until `serve` is restarted with the token.
 
-Every PR needs its own workstream's owner delivery approval of the description
-and commit message, then service-owned signing as the owner. This covers draft
-publication, updates and marking ready. There is no group-wide delivery
-approval or pre-authorized update. Final-review acceptance remains a separate
-gate. The factory never merges a PR, releases it or pushes a base branch.
+A workstream's pull request opens as a draft at assembly with no approval, and
+every later commit of an assembled workstream is pushed to it without one; each
+push is signed as the owner by the service. The owner's decision is **Mark
+ready for review**, per workstream, of the description. A delivered
+workstream's update after a drift refresh or a dependency merge needs its own
+fresh approval before it is pushed. There is no group-wide delivery approval or
+pre-authorized update. Final-review acceptance remains a separate gate. The
+factory never merges a PR, releases it or pushes a base branch.
+After each push the service reads no Dagger Cloud status for 2 minutes, then
+reads the pushed commit's combined statuses at `pull_request_poll`. The overall
+result is the **Run Dagger Checks** status; a completed run with cancelled or
+unaccounted checks is incomplete, never a pass, and a failure is rerun once with
+`dagger cloud checks rerun --failed --pr <N>` and settled only by a posting made
+after the rerun was requested. `osmia delivery` shows the result,
+`osmia checks <workstream-id> keep-waiting|continue` answers a **Checks
+missing** question about one push, and [the running guide](running.md#draft-pull-request-and-cloud-checks)
+describes the whole flow.
+
 The project pane shows planning, ready, building, paused, blocked (naming its
 wait), PR open, delivered (merged) and cancelled. Stored workflow state
-`delivered` also records PR publication, so it alone does not prove merge.
+`delivered` also records a PR marked ready for review, so it alone does not prove merge.
 A ready but unmerged PR keeps its member unresolved, just as a draft does.
 Resolution requires cancellation/abandonment or delivery with an owner-recorded
 merge or a recorded merged outcome matching the current publication's PR.
@@ -192,7 +209,7 @@ osmia conversation <workstream-id>
 
 The committee debates only the amendment delta. The chief presents one impact
 summary; approve or reject it in the same chat. This is the amend's only owner
-approval prompt; later publication approvals remain per workstream.
+approval prompt; later approvals to mark a pull request ready remain per workstream.
 
 | Item | Impact | Action |
 | --- | --- | --- |
@@ -314,7 +331,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
 - `inbox` lists every owner decision waiting for you across the workstreams
   across active projects, oldest first: escalated questions, ratification
   packets, contested units, amendments presented on the current seal, held drift rebases,
-  delivery approvals, failing publications, parked bases, notices held from
+  **Mark ready for review** decisions, **Checks missing** questions, final
+  reviews whose pull request checks did not complete, failing publications,
+  parked bases, notices held from
   the chief of staff and loop guard pauses. The service retires undecided
   amendments when the sealed spec or plan moves past their filing seal; the
   owner receives no card for them, even before the retirement pass runs.
@@ -330,16 +349,17 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   revision, or the final review, report revision and commit) and the command
   that answers it: `answer`, with `answer <number> --accept` when there is a
   quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
-  `approve`. A publication the service holds because it was started without
-  `GITHUB_TOKEN` is listed as soon as it is asked for: nothing is pushed or
-  asked of GitHub until you restart `serve` with the token, or you merge the
-  branch into upstream yourself and record it with `merged`. Any other failing
-  publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
+  `approve`. A marking ready that the service holds because it was started
+  without `GITHUB_TOKEN` is listed as soon as it is asked for: nothing is
+  pushed or asked of GitHub until you restart `serve` with the token, you mark
+  the pull request ready on GitHub yourself, or you merge the branch into
+  upstream yourself and record it with `merged`. Any other failing publication
+  is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
-  an attempt publishes. A final review whose project checks did not complete
-  three times in a row is listed with the last failure and when the checks run
-  next; it takes no answer, and it leaves the inbox once a run completes. A
+  an attempt succeeds. A final review whose pull request checks did not complete
+  three times in a row is listed with the last failure and when the statuses are
+  read next; it takes no answer, and it leaves the inbox once a run completes. A
   held drift rebase, whose conflict resolution review
   sent back `shed.max_bounces` times, or whose drift mason or reviewer turn
   failed or ended without a verdict, is answered with `rebase`, which
@@ -445,7 +465,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   It stays building until a revision filed after the move is decided and its
   units land, or until you move it to `assembled`, and its final review then
   runs again. The open pull request is updated only after that final review
-  and your delivery approval. `delivered` returns a reopened workstream to
+  and your approval of marking it ready. `delivered` returns a reopened workstream to
   delivered while its feature branch is still what its open pull request
   carries. A workstream whose pull request is merged or closed, or whose merge
   you recorded with `merged`, does not reopen. A move the workstream's state
@@ -500,6 +520,16 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   approval or push; closed or merged PRs cannot be updated. The workstream
   stays delivered. `project rebase` asks the same of every eligible
   workstream of a project.
+- `checks <workstream-id> keep-waiting|continue` answers the `Checks missing`
+  inbox entry the chief of staff opened when a push's Dagger Cloud check
+  results did not appear (or the project has no Cloud Checks). `keep-waiting`
+  leaves the watch of the pull request's statuses running and records no
+  result. `continue` lets the final review of that pushed commit start
+  without check results; the final read is told that no check results exist
+  and that you chose to continue. The answer applies to the push the entry
+  names only: when a later push supersedes it the entry closes, and the
+  command fails with `conflict` (exit 5) instead of applying to the new push.
+  Only you can give the answer; the chief of staff cannot.
 - `upstream <workstream-id> <base-workstream-id>` continues a workstream
   parked on its abandoned base from upstream instead. The base is the
   abandoned workstream the inbox entry names. The service fetches the
@@ -638,34 +668,41 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   documents and survives restarts without another decision or ruling.
   Approval and overrule of a stale request are refused. An upstream base
   move alone retires nothing; current-seal options and gates stay in force.
-- `delivery <workstream-id>` shows an assembled workstream's final report.
+- `delivery <workstream-id>` shows an assembled workstream's final report and
+  the **Mark ready for review** decision about its draft pull request.
   It starts with the chief of staff's delivery brief for that review: the
   brief's text, each **Before you ship** item and a link (the image's path on
   the service) per screenshot, or "No brief was recorded for this review", or a
   line saying the chief of staff is still writing it. The `brief` field of
   `--json` carries the same with a `state` of `waiting`, `recorded` or
   `none_recorded`, and `feed` lists the brief as its own `brief` entry. Then it
-  shows the report's summary, blocking then advisory findings, and every criterion with the
-  merged units that serve it, unserved first, and the drafted pull request
-  description, then any
-  approved description and the state of its publication. For a delivered
-  workstream it shows the report, the approved description and the pull
-  request it was delivered as, or the merge you recorded with `merged`.
-- `approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept]` approves the drafted
-  description, or the file's text instead, for the presented final report.
-  A report with blocking findings or an unserved criterion is approved only
-  with `--accept`, which accepts them as they are; the approval records what
-  it accepted.
-  `--message-file` supplies the commit message when delivery has one commit.
-  For multiple commits, `--messages-file` reads a JSON array of
-  `{"commit":"<presented revision>","message":"<edited text>"}` objects, in the
-  order returned by `delivery --json` in `messages`. Include every commit.
-  The service attributes the outgoing commits to your Git identity, removes
-  agent co-author trailers, adds your sign-off and signs before pushing the
-  branch to your repository or fork and opening the pull request; `delivery` shows its progress. A report with blocking findings approved
-  without `--accept`, a presentation that changed and a delivered workstream
-  fail with `conflict` (exit 5). After
-  a publication was refused, approving again asks for another one.
+  shows the report's summary, blocking then advisory findings, a `Checks:` line
+  with the recorded Dagger Cloud check result of the reviewed commit (passed,
+  failed with the failed checks, or did not complete; flaky checks that passed
+  their rerun are named; `checks` in `--json`), and every criterion with the
+  merged units that serve it, unserved first. It then shows the delivery
+  commits, the drafted pull request description that marking it ready
+  publishes, any approved description, and the pushes: the branch, commit and
+  pull request of the latest one. Once decided it says that the pull request was
+  marked ready for review, that it stays a draft until its merge-order
+  dependency merges, or that you marked it ready on GitHub yourself. For a
+  delivered workstream it shows the report, the approved description and the
+  pull request it was delivered as, or the merge you recorded with `merged`.
+- `approve <workstream-id> [description-file] [--accept]` approves marking the
+  draft pull request ready for review for the presented final report, with the
+  drafted description, or the file's text instead. The service puts that
+  description, with the brief's **Before you ship** items, on the open draft,
+  marks it ready and moves the workstream to `delivered`. It opens no pull
+  request and pushes nothing, and Jev is never asked. A report with blocking
+  findings or an unserved criterion is approved only with `--accept`, which
+  accepts them as they are; the approval records what it accepted. The delivery
+  commits were signed and pushed when the draft opened, and their messages cannot
+  be edited. A report with blocking findings approved without `--accept`, a
+  presentation that changed (a newer push or brief, for example) and a delivered
+  workstream fail with `conflict` (exit 5); read `delivery` again. After a
+  marking was refused, approving again asks for another. While a merge-order
+  dependency has not merged the approval is recorded and the pull request stays a
+  draft.
 - `merged <workstream-id>` records an assembled workstream delivered because
   you merged its feature branch into upstream yourself, outside the factory.
   The service fetches the project's base branch and checks that it already
@@ -851,7 +888,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   the spec and the plan wait for your `ratify`. The output then ends with
   `Debate: skipped; ratify the spec and the plan once they are drafted`.
   The skip applies to every selected member. Each member still needs its own
-  final-review acceptance and delivery approval before publication.
+  final-review acceptance and its own approval to mark its pull request ready.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   owner-attributed pause; the default mode is soft. A soft pause holds new work
   and lets running turns finish; `--hard` also stops the turns running in its
@@ -907,7 +944,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   Jev configured, it runs the same smart-check selection a unit's own check run
   uses, scoped to what changed between the session's starting commit and its
   head; without Jev's API key, or when Jev does not select, it runs the full
-  `dagger check` the service runs before every review. The output names the run number, the checked commit,
+  `dagger check` the service runs before each unit's review. The output names the run number, the checked commit,
   whether the run was smart or full (with its selected checks when smart),
   its status and exit code. Only one check per session runs at a time; a
   second request while one is still running, or one sent after the session
@@ -1052,7 +1089,7 @@ the upstream request, or retargeting the existing request when no fork is
 configured. Publication relationships remain in the trace.
 
 When `fork` is omitted, Osmia pushes its feature branch to `upstream` and
-opens the pull request there against `base_branch`. A fork equal to upstream
+opens the draft pull request there against `base_branch`. A fork equal to upstream
 (case-insensitive) is normalized to omission. The clone can have just an
 `origin` remote matching upstream. Existing configurations with a separate
 fork continue to push there. Osmia never pushes to the configured base branch

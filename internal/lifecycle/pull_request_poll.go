@@ -10,6 +10,7 @@ import (
 
 const (
 	ArchivePoll = "archive"
+	DraftPoll   = "draft"
 	EdgePoll    = "edge"
 )
 

@@ -400,6 +400,12 @@ const InboxPublication = api.InboxPublication
 
 const InboxFinalChecks = api.InboxFinalChecks
 
+const InboxChecksChoice = api.InboxChecksChoice
+
+type ChecksChoiceRequest = api.ChecksChoiceRequest
+
+type ChecksChoiceResponse = api.ChecksChoiceResponse
+
 const InboxDrift = api.InboxDrift
 
 const InboxNotices = api.InboxNotices

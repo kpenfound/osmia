@@ -16,8 +16,6 @@ type CheckResult = api.CheckResult
 
 type CheckSelection = api.CheckSelection
 
-const checksRole = execution.ChecksRole
-
 const ChecksIncomplete = execution.ChecksIncomplete
 
 const Conflict = api.Conflict
@@ -31,6 +29,10 @@ const BriefRecorded = api.BriefRecorded
 const BriefWaiting = api.BriefWaiting
 
 type DeliveryApproval = api.DeliveryApproval
+
+type DeliveryChecks = api.DeliveryChecks
+
+type DeliveryReady = api.DeliveryReady
 
 type DeliveryBrief = api.DeliveryBrief
 
@@ -55,6 +57,12 @@ const InboxDelivery = api.InboxDelivery
 type InboxEntry = api.InboxEntry
 
 const InboxFinalChecks = api.InboxFinalChecks
+
+const InboxChecksChoice = api.InboxChecksChoice
+
+type ChecksChoiceRequest = api.ChecksChoiceRequest
+
+type ChecksChoiceResponse = api.ChecksChoiceResponse
 
 const InboxPublication = api.InboxPublication
 

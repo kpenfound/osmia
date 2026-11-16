@@ -169,6 +169,32 @@ func (s *Service) chiefThread(ctx context.Context, repository *trace.Repository,
 	return t, err == nil, err
 }
 
+// checksTool and checksChoiceTool are the chief-only tools that ask for a
+// fresh read or a rerun of the current push's Cloud checks, and that bring the
+// owner the choice to keep waiting for check results or to continue without
+// them.
+const (
+	checksTool       = delivery.ChecksToolName
+	checksChoiceTool = delivery.ChecksChoiceToolName
+)
+
+// pullRequestChecks returns the pull_request_checks tool of one chief-of-staff turn.
+func (c *runtimeControls) pullRequestChecks(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return delivery.ChecksToolOf(c.deliveryController, repo, scope)
+}
+
+// askOwnerAboutChecks returns the ask_owner_about_checks tool of one chief-of-staff turn.
+func (c *runtimeControls) askOwnerAboutChecks(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return delivery.ChecksChoiceToolOf(c.deliveryController, repo, scope)
+}
+
+func (c *runtimeControls) deliveryController() *delivery.Controller {
+	if s := c.service.Load(); s != nil {
+		return s.delivery()
+	}
+	return nil
+}
+
 // triageTool is the chief-only tool that records the triage of a blocking
 // finding of a final review.
 const triageTool = delivery.TriageToolName

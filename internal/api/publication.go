@@ -1,11 +1,18 @@
 package api
 
 import (
+	"time"
+
 	"github.com/kpenfound/osmia/internal/config"
 )
 
 // DeliveryPublication is the document final/publication.json: the delivery
-// of one owner approval. Reviewed is the reviewed branch commit and Commit
+// of one owner approval, or one push of the feature branch to the
+// workstream's pull request. Push numbers the automatic pushes the service
+// makes without an approval, from 1, and is 0 for a publication an owner
+// approval asked for; such a record names the final review whose rebased
+// branch it signs as Review, and PushedAt is when its commit reached Branch
+// of Fork. Reviewed is the reviewed branch commit and Commit
 // the commit pushed to Branch of Fork through the clone's Remote; with the
 // squash style it is one commit holding Reviewed's tree. PullRequest and URL
 // name the pull request opened against Base of Upstream with Title and the
@@ -16,6 +23,9 @@ type DeliveryPublication struct {
 	BaseWorkstream config.WorkstreamID `json:"base_workstream,omitempty"`
 	PriorURL       string              `json:"prior_url,omitempty"`
 	Approval       int                 `json:"approval"`
+	Push           int                 `json:"push,omitempty"`
+	Review         int                 `json:"review,omitempty"`
+	PushedAt       time.Time           `json:"pushed_at,omitzero"`
 	Operation      string              `json:"operation"`
 	Status         string              `json:"status"`
 	// Draft records whether the recorded pull request opened, or stays,

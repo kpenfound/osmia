@@ -20,7 +20,7 @@ import (
 
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
 // through a final review with an advisory finding, which builds nothing, to
-// the owner's decision and publication.
+// the owner's decision to mark the pull request ready for review.
 func TestDeliveryDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -67,7 +67,11 @@ func TestDeliveryDemonstration(t *testing.T) {
 	}
 	f.engine.Mu.Unlock()
 
-	stream := f.builtPaused(t, factory, "delivery")[0]
+	// The service holds a pull request credential: its final review pushes the
+	// feature branch to a local bare fork and opens the draft there.
+	var stream config.WorkstreamID
+	fork, hosted := hostRunningService(t, f, func() config.WorkstreamID { return stream })
+	stream = f.builtPaused(t, factory, "delivery")[0]
 	// Move upstream after the seal. The final reviewer must inspect the
 	// rebased assembly, not the original feature tip.
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
@@ -99,13 +103,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	defer repository.Close()
 	f.s.setSole(&activeProject{repository: repository})
 	f.s.cfg.Project.Landing = "commit-per-unit"
-	home := filepath.Dir(f.clone)
-	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork}
-	p.pulls = &fakePulls{Fork: func() string { commit, _ := p.forkBranch(t); return commit }}
+	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork, pulls: hosted}
 	f.s.options.PullRequests = p.pulls
 	edited := presented.Draft + "\nOwner's delivery note.\n"
 	approval := p.approve(t, &edited)
@@ -117,7 +115,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
-	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.feature(t) != DeliveredState {
+	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.pulls.Updates != 1 || p.pulls.Readies != 1 || p.pulls.Prs[0].Draft || p.feature(t) != DeliveredState {
 		t.Fatalf("duplicate delivery: %+v", p.pulls)
 	}
 	tip, _ := p.forkBranch(t)
@@ -134,7 +132,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	}
 	records, err := publications(p.repository, stream)
 	must(t, err)
-	if len(records) != 2 || records[1].Approval != 1 || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].DescriptionHash != approval.DescriptionHash || records[1].PullRequest != p.pulls.Prs[0].Number {
+	if len(records) != 2 || records[1].Push != 1 || records[1].Status != publicationOpened || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].PullRequest != p.pulls.Prs[0].Number {
 		t.Fatalf("publication provenance %+v", records)
 	}
 	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 1 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {

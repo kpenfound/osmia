@@ -121,7 +121,7 @@ func testAmendOpenPullRequest(t *testing.T, changeDescription bool) {
 	op = p.request(t)
 	inPublish, err := decodePublish(op)
 	must(t, err)
-	if inPublish.Retarget == nil || inPublish.Retarget.Number != oldPR.Number || inPublish.Maintenance {
+	if inPublish.Retarget != nil || inPublish.Maintenance {
 		t.Fatalf("wrong PR rework operation: %+v", inPublish)
 	}
 	result, err = p.publisher().Apply(ctx, op)

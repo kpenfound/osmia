@@ -44,10 +44,18 @@ type Dependencies struct {
 	Step                        func(string) error
 	Committee                   *intake.Committee
 	Jev                         *jev.Judge
-	AcquireReviewCheckSlot      func(context.Context, config.ProjectID, config.WorkstreamID, int, string) (func(), error)
-	Checks                      checks.ReviewChecks
-	CloudChecks                 checks.ReviewChecks
 	PullRequests                pulls.Client
+	// CloudStatuses reads the combined statuses of the pushed commit. When nil,
+	// PullRequests is used if it reads statuses.
+	CloudStatuses pulls.StatusReader
+	// CloudStatusFetcher reads the JSON a "Run Dagger Checks" status points at.
+	CloudStatusFetcher checks.CloudStatusFetcher
+	// PostPushWait replaces FinalChecksWait, the time after a push before the
+	// statuses of its commit are read. Nil keeps FinalChecksWait.
+	PostPushWait *time.Duration
+	// CloudRerun requests the one rerun of a push's failed checks. It is nil
+	// when none can be requested.
+	CloudRerun checks.CloudRerunner
 	ChangeHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld        func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
 	UpstreamDeliveryPending     func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)
@@ -73,3 +81,23 @@ type Dependencies struct {
 type Controller struct{ Dependencies }
 
 func New(d Dependencies) *Controller { return &Controller{d} }
+
+// postPushWait is how long after a push its statuses are not read.
+func (s *Controller) postPushWait() time.Duration {
+	if s.PostPushWait != nil {
+		return *s.PostPushWait
+	}
+	return FinalChecksWait
+}
+
+// statusReader is the reader of commit statuses the controller uses, or nil
+// when it has none.
+func (s *Controller) statusReader() pulls.StatusReader {
+	if s.CloudStatuses != nil {
+		return s.CloudStatuses
+	}
+	if r, ok := s.PullRequests.(pulls.StatusReader); ok {
+		return r
+	}
+	return nil
+}

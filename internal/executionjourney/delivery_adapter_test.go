@@ -7,7 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -50,6 +49,10 @@ func (d *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 
 func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return d.driver().Apply(ctx, op)
+}
+
+func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
+	return d.driver().PublishDraft(ctx, cfg, stream, op, report)
 }
 
 var finalReviewNotice = delivery.FinalReviewNotice
@@ -200,9 +203,3 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 func (d *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
 	return d.driver().IncompleteChecks(stream, k, commit)
 }
-
-func (d *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
-	return d.driver().FinalChecks(ctx, cfg, stream, report)
-}
-
-var feedChecks = service.TestFeedChecks

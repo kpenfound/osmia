@@ -520,6 +520,14 @@ func (c *Client) ApproveDelivery(ctx context.Context, id config.WorkstreamID, de
 	return v, err
 }
 
+// ChecksChoice answers the question whether the final review of a push keeps
+// waiting for its check results or continues without them.
+func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req api.ChecksChoiceRequest) (api.ChecksChoiceResponse, error) {
+	var v api.ChecksChoiceResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/checks-choice/"+url.PathEscape(string(id)), req, &v)
+	return v, err
+}
+
 // RecordMerge records an assembled workstream delivered by the owner's own
 // merge of its feature branch into upstream.
 func (c *Client) RecordMerge(ctx context.Context, id config.WorkstreamID) (api.MergeResponse, error) {

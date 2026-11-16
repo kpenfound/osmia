@@ -281,15 +281,17 @@ The decisions, in the order a workstream meets them:
 | A question a worker escalated | escalation card: answer, accept the recommendation or use an option | `osmia answer <number> "ruling"` or `--accept` |
 | An amendment to the sealed spec or plan | amendment card | `osmia amendment <workstream-id> <n> approve\|reject\|round\|overrule [note]` |
 | A contested unit the chief of staff raised to you | contested card, with its findings | `osmia contested <workstream-id> <unit> review\|revise "note"` |
-| Approve delivery | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
+| Mark the pull request ready for review | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
+| Whether to wait for missing Cloud check results | checks card | `osmia checks <workstream-id> keep-waiting\|continue` |
 
 Publishing needs `GITHUB_TOKEN` in the environment of `osmia serve`, set to a
-token that can open pull requests on the upstream. Without it the service
-pushes nothing and holds the publication in the inbox until you restart it with
-the token. A publication that keeps failing, such as when GitHub refuses the
-token, also shows in the inbox with its last failure. It takes no answer: fix the cause and
-the next attempt publishes. Attempts wait longer after each failure, up to five
-minutes apart.
+token that can open pull requests on the upstream and read its commit statuses.
+Without it the service pushes nothing, opens no pull request and reads no
+statuses; marking a pull request ready that way waits in the inbox until you
+restart it with the token. A marking ready that keeps failing, such as when
+GitHub refuses the token, also shows in the inbox with its last failure. It
+takes no answer: fix the cause and the next attempt succeeds. Attempts wait
+longer after each failure, up to five minutes apart.
 
 Ratifying seals the spec and plan: the service fetches upstream, creates the
 feature branch in a worktree or Jujutsu workspace of your clone, and masons
@@ -318,27 +320,45 @@ the brief until you approve. Reply in the workstream's conversation to push
 back: the chief of staff sends the work back to building, and after the new
 final review it writes a new brief.
 
-Read the brief, the final report's findings and the drafted pull
-request description under **What will be published**, which is read only.
+When every unit has landed the service does not wait for you: it rebases the
+branch onto upstream, signs it as you, pushes it to your repository or fork and
+opens the pull request against the upstream as a **draft**, with the drafted
+description. No agent pushes, and nothing in this needs your approval. Dagger
+Cloud then runs the project's checks on the pull request. The service waits 2
+minutes after the push and reads the pushed commit's commit statuses (`load`,
+then **Run Dagger Checks**); a failed check is rerun once, and only a result
+posted after the rerun counts. The final review reads the branch against that
+result. Blocking findings the chief of staff triages as needing code become one
+plan revision, and its commit is pushed to the same pull request and checked
+again. If Dagger Cloud posts no `load` status, the chief of staff investigates
+and may ask you whether to keep waiting or to continue without check results
+for that push (`osmia checks`). See
+[the running guide](running.md#draft-pull-request-and-cloud-checks).
+
+Read the brief, the final report's findings, the check result and the drafted
+pull request description under **What will be published**, which is read only.
 Approving a report with blocking findings accepts them as they are (the button
 then starts with **Accept findings and**); otherwise the chief of staff plans
-the work that resolves them and a new final review follows. Approve it with one
-click on the page, or with `osmia approve <workstream-id> [description-file]`,
-which can still supply an edited description. The
-service then pushes the branch to your repository or fork and opens the pull request against
-the upstream itself, with the approved description; no agent pushes. `osmia delivery
-<workstream-id>` shows the pull request it was delivered as, and the workstream
-records workflow state `delivered`. The project pane shows **PR open** until
-a detected or owner-recorded merge, then **delivered (merged)**. The owner
-merges the PR; Osmia never merges or pushes a base branch.
+the work that resolves them and a new final review follows. **Mark ready for
+review** with one click on the page, or with
+`osmia approve <workstream-id> [description-file]`, which can still supply an
+edited description. The service then adds the brief's **Before you ship** items
+to the draft's description and marks the pull request ready for review; it
+opens nothing and pushes nothing. `osmia delivery <workstream-id>` shows the
+pull request it was delivered as, and the workstream records workflow state
+`delivered`. You can also mark the draft ready on GitHub yourself, and the
+service records the workstream delivered by you. The project pane shows
+**PR open** until a detected or owner-recorded merge, then
+**delivered (merged)**. The owner merges the PR; Osmia never merges or pushes a
+base branch.
 
-Each PR needs its own owner approval of its description and commit message and
-is signed as the owner. This covers drafts, updates and marking ready; there
-is no workgroup-wide publication approval. A merge-order dependent publishes
-a draft linking the upstream PR, then updates to the merged upstream commit,
-repairs within its slice, re-runs checks and final review and asks for fresh
-delivery approval before becoming ready. Merge is the only release signal.
-Expected waits appear in status without an inbox entry or notification.
+Each workstream's pull request is signed as the owner and needs that
+workstream's own approval to be marked ready; there is no workgroup-wide
+approval. A merge-order dependent publishes a draft linking the upstream PR,
+then updates to the merged upstream commit, repairs within its slice, re-runs
+final review and asks for fresh approval before becoming ready. Merge is the
+only release signal. Expected waits appear in status without an inbox entry or
+notification.
 
 Resolution retires each member's own documents and workspaces from active
 context. The shared workgroup spec stays active for the chief and unresolved

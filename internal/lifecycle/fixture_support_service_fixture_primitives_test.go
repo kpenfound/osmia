@@ -5,7 +5,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-var failedReport = fixturekit.FailedReport
 
 type fakePulls = fixturekit.FakePulls
 

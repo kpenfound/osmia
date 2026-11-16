@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -26,6 +28,11 @@ type publicationFixture struct {
 	report     FinalReport
 	fork       string
 	pulls      *fakePulls
+	// pushed is the commit the draft push left on the fork's feature branch,
+	// and finds how many times the host had been asked for pull requests by
+	// then.
+	pushed string
+	finds  int
 }
 
 // newPublicationFixture reviews an assembled workstream, gives the clone a
@@ -38,12 +45,45 @@ func newPublicationFixture(t *testing.T, style string) *publicationFixture {
 
 func newPublicationFixtureWith(t *testing.T, style, extra string) *publicationFixture {
 	t.Helper()
+	p := newUnpushedPublicationFixture(t, style, extra)
+	p.publishDraft(t)
+	return p
+}
+
+// newUnpushedPublicationFixture is a publication fixture whose reviewed
+// commit has no recorded push: the service has not yet signed it, pushed it or
+// opened the draft pull request.
+func newUnpushedPublicationFixture(t *testing.T, style, extra string) *publicationFixture {
+	t.Helper()
 	f, stream, repository, report := deliveryFixtureWith(t, extra)
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report}
 	p.fork, p.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := p.forkBranch(t); return commit })
 	f.s.cfg.Project.Landing = style
 	f.s.options.PullRequests = p.pulls
 	return p
+}
+
+// tryPublishDraft has the final review's publication sign the reviewed
+// commit, push it and open the draft pull request, as the review does before
+// its checks are watched, and returns why it refused and any error.
+func (p *publicationFixture) tryPublishDraft(t *testing.T) (string, error) {
+	t.Helper()
+	report := p.report
+	report.Review, report.Operation, report.Branch = 1, "operation_final_review_1", featureBranch(p.stream)
+	reason, err := (&finalReviewer{s: p.s, repository: p.repository}).PublishDraft(context.Background(), p.s.cfg, p.stream, coreadapter.Operation{ID: report.Operation}, report)
+	if err == nil && reason == "" {
+		p.pushed, _ = p.forkBranch(t)
+		p.finds = p.pulls.Finds
+	}
+	return reason, err
+}
+
+// publishDraft is tryPublishDraft for a publication that must succeed.
+func (p *publicationFixture) publishDraft(t *testing.T) {
+	t.Helper()
+	if reason, err := p.tryPublishDraft(t); err != nil || reason != "" {
+		t.Fatalf("publishing the draft: %q, %v", reason, err)
+	}
 }
 
 func (p *publicationFixture) forkBranch(t *testing.T) (string, bool) {
@@ -81,13 +121,16 @@ func (p *publicationFixture) reopen(t *testing.T) {
 	p.s.setSole(&activeProject{repository: p.repository})
 }
 
-func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t *testing.T) {
+// Marking ready for review updates the draft the final review pushed and
+// opened, marks it ready and delivers the workstream. It pushes nothing and
+// opens no pull request.
+func TestMarkingReadyUpdatesTheDraftOfThePushedCommit(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
 	ctx := context.Background()
 	must(t, p.publisher().Pass(ctx))
 	if ops := p.operations(t); len(ops) != 0 {
-		t.Fatalf("published without an owner approval: %+v", ops)
+		t.Fatalf("marked ready without an owner approval: %+v", ops)
 	}
 	approval := p.approve(t, nil)
 	op := p.request(t)
@@ -97,7 +140,7 @@ func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t
 	}
 	result, err := p.publisher().Apply(ctx, op)
 	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("publication %+v: %v", result, err)
+		t.Fatalf("marking ready %+v: %v", result, err)
 	}
 	tip, _ := p.forkBranch(t)
 	if tip == p.report.Commit {
@@ -109,11 +152,11 @@ func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t
 			t.Fatalf("the delivered branch does not keep the commit that landed %s: %q", unit, log)
 		}
 	}
-	if p.pulls.Creates != 1 || len(p.pulls.Prs) != 1 {
-		t.Fatalf("opened %d pull requests", p.pulls.Creates)
+	if p.pulls.Creates != 1 || p.pulls.Updates != 0 || p.pulls.Readies != 1 || len(p.pulls.Prs) != 1 {
+		t.Fatalf("%d pull requests opened, %d updated, %d marked ready", p.pulls.Creates, p.pulls.Updates, p.pulls.Readies)
 	}
 	pr := p.pulls.Prs[0]
-	if pr.Body != approval.Description || pr.Base != "main" || pr.Head != featureBranch(p.stream) || pr.HeadRepository != "owner/dagger" || pr.Title != "Resumable uploads" {
+	if pr.Body != approval.Description || pr.Draft || pr.Base != "main" || pr.Head != featureBranch(p.stream) || pr.HeadRepository != "owner/dagger" || pr.Title != "Resumable uploads" || pr.HeadCommit != tip {
 		t.Fatalf("pull request %+v", pr)
 	}
 	if got := p.feature(t); got != DeliveredState {
@@ -122,32 +165,64 @@ func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t
 	recorded, err := publications(p.repository, p.stream)
 	must(t, err)
 	last := recorded[len(recorded)-1]
-	want := DeliveryPublication{Approval: 1, Operation: op.ID, Status: publicationOpened, Style: "commit-per-unit", Fork: "owner/dagger", Remote: "origin", Branch: featureBranch(p.stream), Reviewed: p.report.Commit, Commit: tip,
-		Upstream: "dagger/dagger", Base: "main", PullRequest: pr.Number, URL: pr.URL, Title: "Resumable uploads", Description: approval.Description, DescriptionHash: approval.DescriptionHash}
-	if last != want {
-		t.Fatalf("publication %+v, want %+v", last, want)
+	if last.Push != 1 || last.Status != publicationOpened || last.Reviewed != p.report.Commit || last.Commit != tip || last.PullRequest != pr.Number || last.URL != pr.URL {
+		t.Fatalf("publication %+v", last)
 	}
 	if body := noticeOf(t, p.repository, p.stream, DeliveredState); !strings.Contains(body, pr.URL) {
 		t.Fatalf("delivery notice %q", body)
 	}
 	again, err := p.publisher().Apply(ctx, op)
-	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 {
-		t.Fatalf("a retry of a recorded publication %+v, %v, %d pull requests", again, err, p.pulls.Creates)
+	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 || p.pulls.Readies != 1 {
+		t.Fatalf("a retry of a recorded marking %+v, %v, %d pull requests, %d ready calls", again, err, p.pulls.Creates, p.pulls.Readies)
 	}
 	must(t, p.publisher().Pass(ctx))
 	if ops := p.operations(t); len(ops) != 1 {
-		t.Fatalf("asked to publish a delivered workstream: %d", len(ops))
+		t.Fatalf("asked to mark a delivered workstream ready: %d", len(ops))
 	}
-	presented, api := p.s.deliveryPresentation(ctx, string(p.stream))
-	if api != nil || !presented.Delivered || presented.Publication == nil || *presented.Publication != want {
-		t.Fatalf("delivered presentation %+v: %v", presented, api)
+	presented, apiErr := p.s.deliveryPresentation(ctx, string(p.stream))
+	if apiErr != nil || !presented.Delivered || presented.Ready == nil || presented.Ready.PullRequest != pr.Number || presented.Ready.Source != api.ReadyByApproval {
+		t.Fatalf("delivered presentation %+v: %v", presented, apiErr)
 	}
 	if _, api := p.s.approveDelivery(ctx, string(p.stream), DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: p.report.Commit, DraftHash: approval.DraftHash}); api == nil || api.Code != Conflict {
 		t.Fatalf("approved a delivered workstream: %v", api)
 	}
 }
 
-func TestPublicationSquashDeliversOneCommitWithTheReviewedTree(t *testing.T) {
+// A reviewed commit with no recorded push is never published by marking
+// ready: the owner's approval is refused with the reason, nothing is pushed,
+// no pull request is opened or marked ready, and the workstream is not
+// delivered.
+func TestMarkingReadyRefusesAReviewedCommitWithNoRecordedPush(t *testing.T) {
+	t.Parallel()
+	for _, style := range []string{"commit-per-unit", "squash"} {
+		t.Run(style, func(t *testing.T) {
+			t.Parallel()
+			p := newUnpushedPublicationFixture(t, style, "")
+			ctx := context.Background()
+			p.approve(t, nil)
+			op := p.request(t)
+			result, err := p.publisher().Apply(ctx, op)
+			if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "records no push of the reviewed commit "+p.report.Commit) || !strings.Contains(result.Evidence, "nothing was pushed, opened or marked ready") {
+				t.Fatalf("marking ready %+v: %v", result, err)
+			}
+			if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 || p.pulls.Creates != 0 || p.pulls.Updates != 0 || p.pulls.Readies != 0 || len(p.pulls.Prs) != 0 {
+				t.Fatalf("the refused marking pushed %v, asked the host %d times, opened %d, updated %d and marked %d ready", pushed, p.pulls.Finds, p.pulls.Creates, p.pulls.Updates, p.pulls.Readies)
+			}
+			if got := p.feature(t); got != AssembledState {
+				t.Fatalf("the workstream is %s, want assembled", got)
+			}
+			if pushes, err := delivery.Pushes(p.repository, p.stream); err != nil || len(pushes) != 0 {
+				t.Fatalf("pushes %+v: %v", pushes, err)
+			}
+			transition, _ := publishIDs(1)
+			if body := noticeOf(t, p.repository, p.stream, transition+"-refused"); !strings.Contains(body, "records no push of the reviewed commit") || !strings.Contains(body, "not marked ready") {
+				t.Fatalf("refusal notice %q", body)
+			}
+		})
+	}
+}
+
+func TestMarkingReadySquashDeliversOneCommitWithTheReviewedTree(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "squash")
 	ctx := context.Background()
@@ -177,12 +252,12 @@ func TestPublicationSquashDeliversOneCommitWithTheReviewedTree(t *testing.T) {
 	}
 	recorded, err := publications(p.repository, p.stream)
 	must(t, err)
-	if last := recorded[len(recorded)-1]; last.Style != "squash" || last.Commit != tip || last.Reviewed != p.report.Commit {
+	if last := recorded[len(recorded)-1]; last.Style != "squash" || last.Commit != tip || last.Reviewed != p.report.Commit || last.Push != 1 {
 		t.Fatalf("publication %+v", last)
 	}
 }
 
-func TestPublicationRefusesAStaleApprovalBeforeAnySideEffect(t *testing.T) {
+func TestMarkingReadyRefusesAStaleApprovalBeforeAnySideEffect(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*testing.T, *publicationFixture){
 		"branch moved": func(t *testing.T, p *publicationFixture) {
@@ -204,82 +279,33 @@ func TestPublicationRefusesAStaleApprovalBeforeAnySideEffect(t *testing.T) {
 			if err != nil || result.Outcome != "failed" {
 				t.Fatalf("publication %+v: %v", result, err)
 			}
-			if _, exists := p.forkBranch(t); exists || p.pulls.Finds != 0 || p.pulls.Creates != 0 {
-				t.Fatalf("a stale approval touched the fork or pull requests: %d finds, %d creates", p.pulls.Finds, p.pulls.Creates)
+			if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds || p.pulls.Creates != 1 || p.pulls.Updates != 0 || p.pulls.Readies != 0 {
+				t.Fatalf("a stale approval touched the fork or pull requests: %d finds, %d creates, %d updates, %d ready calls", p.pulls.Finds, p.pulls.Creates, p.pulls.Updates, p.pulls.Readies)
 			}
 			if got := p.feature(t); got != AssembledState {
 				t.Fatalf("the workstream is %s", got)
 			}
 			transition, _ := publishIDs(1)
-			if body := noticeOf(t, p.repository, p.stream, transition+"-refused"); !strings.Contains(body, "not published") {
+			if body := noticeOf(t, p.repository, p.stream, transition+"-refused"); !strings.Contains(body, "not marked ready") {
 				t.Fatalf("refusal notice %q", body)
 			}
 		})
 	}
 }
 
-func TestPublicationResumesInterruptedPushAndPullRequestCreationAcrossRestart(t *testing.T) {
+// Marking ready with an edited description after an interruption at any step
+// leaves one pull request, one description update and one ready call, and
+// records one durable result.
+func TestMarkingReadyRecoveryRecordsOneDurableResult(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	ctx := context.Background()
-	p.approve(t, nil)
-	op := p.request(t)
-	stop := "publish-pushed"
-	p.s.boundary = func(step string) error {
-		if step == stop {
-			return errors.New("stopped at " + step)
-		}
-		return nil
-	}
-	if _, err := p.publisher().Apply(ctx, op); err == nil {
-		t.Fatal("the push was not interrupted")
-	}
-	pushed, exists := p.forkBranch(t)
-	if !exists || len(p.pulls.Prs) != 0 {
-		t.Fatalf("interrupted after the push: branch %q, pull requests %+v", pushed, p.pulls.Prs)
-	}
-	recorded, err := publications(p.repository, p.stream)
-	must(t, err)
-	if len(recorded) != 1 || recorded[0].Status != publicationPushing || recorded[0].Commit != pushed {
-		t.Fatalf("publication before the push %+v", recorded)
-	}
-	p.reopen(t)
-	stop = "publish-opened"
-	if _, err := p.publisher().Apply(ctx, op); err == nil {
-		t.Fatal("the pull request creation was not interrupted")
-	}
-	if tip, _ := p.forkBranch(t); tip != pushed || p.pulls.Creates != 1 || p.feature(t) != AssembledState {
-		t.Fatalf("the retry pushed %s over %s, opened %d pull requests, and the workstream is %s", tip, pushed, p.pulls.Creates, p.feature(t))
-	}
-	p.reopen(t)
-	stop = ""
-	result, err := p.publisher().Apply(ctx, op)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("publication %+v: %v", result, err)
-	}
-	if p.pulls.Creates != 1 || len(p.pulls.Prs) != 1 || p.feature(t) != DeliveredState {
-		t.Fatalf("opened %d pull requests; the workstream is %s", p.pulls.Creates, p.feature(t))
-	}
-	recorded, err = publications(p.repository, p.stream)
-	must(t, err)
-	if len(recorded) != 2 || recorded[1].PullRequest != p.pulls.Prs[0].Number || recorded[1].Commit != pushed {
-		t.Fatalf("publications %+v", recorded)
-	}
-}
-
-func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
-	t.Parallel()
-	for _, point := range []string{"publish-recorded", "publish-pushed", "publish-opened", "after-trace"} {
+	for _, point := range []string{"ready-described", "ready-marked", "after-trace"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			p := newPublicationFixture(t, "squash")
-			p.approve(t, nil)
+			edited := "# Edited\n"
+			p.approve(t, &edited)
 			op := p.request(t)
-			pushIntents := 0
 			p.s.boundary = func(step string) error {
-				if step == "publish-recorded" {
-					pushIntents++
-				}
 				if step == point {
 					return errors.New("interrupted")
 				}
@@ -291,18 +317,13 @@ func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
 					t.Fatalf("delivery %+v: %v", result, err)
 				}
 			} else if err == nil {
-				t.Fatal("publication was not interrupted")
+				t.Fatal("marking ready was not interrupted")
 			}
 			p.reopen(t)
-			p.s.boundary = func(step string) error {
-				if step == "publish-recorded" {
-					pushIntents++
-				}
-				return nil
-			}
+			p.s.boundary = nil
 			result = settleOperation(t, p.s, p.repository, p.stream, op, p.publisher())
-			if result.Outcome != "succeeded" || p.pulls.Creates != 1 || p.feature(t) != DeliveredState {
-				t.Fatalf("recovered %+v, creates %d, state %s", result, p.pulls.Creates, p.feature(t))
+			if result.Outcome != "succeeded" || p.pulls.Creates != 1 || p.pulls.Updates != 1 || p.pulls.Readies != 1 || p.pulls.Prs[0].Draft || p.feature(t) != DeliveredState {
+				t.Fatalf("recovered %+v, creates %d, updates %d, ready calls %d, state %s", result, p.pulls.Creates, p.pulls.Updates, p.pulls.Readies, p.feature(t))
 			}
 			ops, err := p.repository.Operations(p.stream)
 			must(t, err)
@@ -313,58 +334,14 @@ func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
 			if got := streamDocuments(t, p.repository, p.stream, publicationDocument); len(got) > 2 {
 				t.Fatalf("duplicate publication records: %d", len(got))
 			}
-			if point == "publish-opened" {
-				recorded, err := publications(p.repository, p.stream)
-				must(t, err)
-				if len(recorded) != 2 || recorded[1].PullRequest != p.pulls.Prs[0].Number || recorded[1].Status != publicationOpened {
-					t.Fatalf("publications %+v", recorded)
-				}
-			}
-			wantPushIntents := 1
-			if point == "publish-recorded" {
-				wantPushIntents = 2
-			}
-			if pushIntents != wantPushIntents {
-				t.Fatalf("push attempts %d, want %d", pushIntents, wantPushIntents)
+			if got := streamDocuments(t, p.repository, p.stream, delivery.ReadyDocument); len(got) != 1 {
+				t.Fatalf("ready records: %d", len(got))
 			}
 		})
 	}
 }
 
-func TestPublicationVerifiesHeadAfterAutomaticPRAdvance(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
-	first := p.request(t)
-	p.pulls.Prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "closed", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", Base: "main"}}
-	if result, err := p.publisher().Apply(context.Background(), first); err != nil || result.Outcome != "failed" {
-		t.Fatalf("first publication %+v: %v", result, err)
-	}
-	old, _ := p.forkBranch(t)
-	p.pulls.Prs = nil
-	newDescription := "# A newly approved description\n"
-	p.approve(t, &newDescription)
-	second := p.request(t)
-	p.pulls.Prs = []pulls.PullRequest{{Number: 8, URL: "https://github.com/dagger/dagger/pull/8", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: old, Base: "main", Title: "Resumable uploads", Body: newDescription}}
-	p.s.boundary = func(step string) error {
-		if step == "publish-pushed" {
-			p.pulls.Prs[0].HeadCommit, _ = p.forkBranch(t)
-			return errors.New("interrupted after GitHub advanced the PR head")
-		}
-		return nil
-	}
-	if _, err := p.publisher().Apply(context.Background(), second); err == nil {
-		t.Fatal("the publication was not interrupted")
-	}
-	p.reopen(t)
-	p.s.boundary = nil
-	result := settleOperation(t, p.s, p.repository, p.stream, second, p.publisher())
-	if result.Outcome != "succeeded" || p.pulls.Creates != 0 || p.pulls.Prs[0].HeadCommit == old {
-		t.Fatalf("publication %+v, creates %d, PR %+v", result, p.pulls.Creates, p.pulls.Prs[0])
-	}
-}
-
-func TestPublicationRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.T) {
+func TestMarkingReadyRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.T) {
 	t.Parallel()
 	t.Run("foreign branch", func(t *testing.T) {
 		t.Parallel()
@@ -372,20 +349,22 @@ func TestPublicationRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.T
 		ctx := context.Background()
 		p.approve(t, nil)
 		foreign := p.report.Upstream.Commit
-		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "origin", foreign+":refs/heads/"+featureBranch(p.stream))
+		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "--force", "origin", foreign+":refs/heads/"+featureBranch(p.stream))
+		p.pulls.Prs[0].HeadCommit = foreign
 		op := p.request(t)
 		result, err := p.publisher().Apply(ctx, op)
-		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "no publication of this workstream pushed") {
+		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "no push of this workstream made") {
 			t.Fatalf("publication %+v: %v", result, err)
 		}
-		if tip, _ := p.forkBranch(t); tip != foreign || p.pulls.Creates != 0 || p.feature(t) != AssembledState {
-			t.Fatalf("the fork branch is at %s; %d creates; the workstream is %s", tip, p.pulls.Creates, p.feature(t))
+		if tip, _ := p.forkBranch(t); tip != foreign || p.pulls.Creates != 1 || p.pulls.Readies != 0 || p.feature(t) != AssembledState {
+			t.Fatalf("the fork branch is at %s; %d creates; %d ready calls; the workstream is %s", tip, p.pulls.Creates, p.pulls.Readies, p.feature(t))
 		}
 		must(t, p.publisher().Pass(ctx))
 		if ops := p.operations(t); len(ops) != 1 {
 			t.Fatalf("asked again without a new approval: %d", len(ops))
 		}
-		demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "branch", "-D", featureBranch(p.stream))
+		demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "--force", "origin", p.pushed+":refs/heads/"+featureBranch(p.stream))
+		p.pulls.Prs[0].HeadCommit = p.pushed
 		if again := p.approve(t, nil); again.Commit != p.report.Commit {
 			t.Fatalf("approval %+v", again)
 		}
@@ -403,14 +382,15 @@ func TestPublicationRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.T
 		p := newPublicationFixture(t, "commit-per-unit")
 		ctx := context.Background()
 		p.approve(t, nil)
-		p.pulls.Prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: p.report.Commit, Base: "main", Body: "Someone else's description"}}
+		own := p.pulls.Prs[0]
+		p.pulls.Prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: p.pushed, Base: "main", Body: "Someone else's description"}}
 		op := p.request(t)
 		result, err := p.publisher().Apply(ctx, op)
-		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "#7") {
+		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, fmt.Sprintf("#%d", own.Number)) {
 			t.Fatalf("publication %+v: %v", result, err)
 		}
-		if tip, exists := p.forkBranch(t); exists || p.pulls.Creates != 0 || p.feature(t) != AssembledState {
-			t.Fatalf("the fork branch is at %s; %d creates; the workstream is %s", tip, p.pulls.Creates, p.feature(t))
+		if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Creates != 1 || p.pulls.Readies != 0 || p.feature(t) != AssembledState {
+			t.Fatalf("the fork branch is at %s; %d creates; %d ready calls; the workstream is %s", tip, p.pulls.Creates, p.pulls.Readies, p.feature(t))
 		}
 	})
 }
@@ -442,136 +422,29 @@ func assertDeliveryTree(t *testing.T, p *publicationFixture, tip string) {
 	}
 }
 
-func TestPublicationSigningFailureBlocksPushUntilApprovedAgain(t *testing.T) {
+// A draft publication whose commits cannot be signed pushes nothing, and
+// publishes once they can.
+func TestDraftPublicationSigningFailureBlocksPushUntilSigned(t *testing.T) {
 	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
+	p := newUnpushedPublicationFixture(t, "squash", "")
 	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
-	result, err := p.publisher().Apply(context.Background(), p.request(t))
-	if err != nil || result.Outcome != "failed" {
-		t.Fatalf("signing failure: %+v %v", result, err)
+	reason, err := p.tryPublishDraft(t)
+	if err != nil || !strings.Contains(reason, "pre-publication amendment failed") {
+		t.Fatalf("signing failure: %q %v", reason, err)
 	}
-	if _, exists := p.forkBranch(t); exists || p.pulls.Finds != 0 || p.pulls.Creates != 0 {
+	if _, exists := p.forkBranch(t); exists || p.pulls.Creates != 0 {
 		t.Fatal("signing failure touched publication")
 	}
 	if p.feature(t) != AssembledState {
 		t.Fatal("signing failure delivered the workstream")
 	}
 	configureDeliverySigner(t, p.clone)
+	p.publishDraft(t)
 	p.approve(t, nil)
-	result, err = p.publisher().Apply(context.Background(), p.request(t))
+	result, err := p.publisher().Apply(context.Background(), p.request(t))
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("retry: %+v %v", result, err)
 	}
-}
-
-func TestPublicationReusesSignedCommitBeforePushAfterRestart(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
-	op := p.request(t)
-	p.s.boundary = func(step string) error {
-		if step == "publish-recorded" {
-			return errors.New("interrupted")
-		}
-		return nil
-	}
-	if _, err := p.publisher().Apply(context.Background(), op); err == nil {
-		t.Fatal("publication was not interrupted")
-	}
-	records, err := publications(p.repository, p.stream)
-	must(t, err)
-	if len(records) != 1 {
-		t.Fatalf("records: %+v", records)
-	}
-	signed := records[0].Commit
-	if _, exists := p.forkBranch(t); exists {
-		t.Fatal("pushed before durable record boundary")
-	}
-	p.reopen(t)
-	p.s.boundary = nil
-	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
-	result, err := p.publisher().Apply(context.Background(), op)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("recovery: %+v %v", result, err)
-	}
-	if tip, _ := p.forkBranch(t); tip != signed {
-		t.Fatal("recovery replaced the signed commit")
-	}
-}
-
-// TestPublicationSigningReusesTheSameCommitWhenRetriedBeforeRecording
-// interrupts publication after signing succeeds but before anything about
-// it is durably recorded, breaks signing itself, then retries. The retry
-// must return the commit core's signer already made under the delivery's
-// signing ID, not attempt to sign again.
-func TestPublicationSigningReusesTheSameCommitWhenRetriedBeforeRecording(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	ctx := context.Background()
-	p.approve(t, nil)
-	op := p.request(t)
-	p.pulls.FindErr = errors.New("transient host failure")
-	if _, err := p.publisher().Apply(ctx, op); err == nil {
-		t.Fatal("publication was not interrupted before recording")
-	}
-	records, err := publications(p.repository, p.stream)
-	must(t, err)
-	if len(records) != 0 {
-		t.Fatalf("publication recorded before any signed commit was durable: %+v", records)
-	}
-	signed := strings.TrimSpace(demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "for-each-ref", "--format=%(objectname)", "refs/core-sign"))
-	if signed == "" {
-		t.Fatal("signing was not recorded before the interruption")
-	}
-	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
-	p.pulls.FindErr = nil
-	result, err := p.publisher().Apply(ctx, op)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("retry: %+v %v", result, err)
-	}
-	if tip, _ := p.forkBranch(t); tip != signed {
-		t.Fatalf("retry pushed %s instead of reusing the signed commit %s", tip, signed)
-	}
-	if again := strings.TrimSpace(demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "for-each-ref", "--format=%(objectname)", "refs/core-sign")); again != signed {
-		t.Fatalf("retry signed again under a new ref: %s", again)
-	}
-	recorded, err := publications(p.repository, p.stream)
-	must(t, err)
-	if len(recorded) != 2 || recorded[1].Status != publicationOpened || recorded[1].Commit != signed {
-		t.Fatalf("publications %+v", recorded)
-	}
-}
-
-func TestPublicationUsesOwnerMessageAndRejectsSupersededMessage(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
-	stale := p.request(t)
-	view, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
-	if api != nil {
-		t.Fatal(api)
-	}
-	messages := slices.Clone(view.Messages)
-	messages[0].Message = "Owner's subject\n\nOwner's explanation.\n\nCo-authored-by: Claude <noreply@anthropic.com>\nCo-authored-by: Human <human@example.invalid>"
-	_, api = p.s.approveDelivery(context.Background(), string(p.stream), DeliveryDecision{Review: view.Report.Review, ReviewRevision: view.ReviewRevision, Commit: view.Report.Commit, DraftHash: view.DraftHash, Messages: messages})
-	if api != nil {
-		t.Fatal(api)
-	}
-	result, err := p.publisher().Apply(context.Background(), stale)
-	if err != nil || result.Outcome != "failed" {
-		t.Fatalf("stale message published: %+v %v", result, err)
-	}
-	result, err = p.publisher().Apply(context.Background(), p.request(t))
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("publish: %+v %v", result, err)
-	}
-	tip, _ := p.forkBranch(t)
-	msg := demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "show", "-s", "--format=%B", tip)
-	if !strings.HasPrefix(msg, "Owner's subject\n") || strings.Contains(msg, "noreply@anthropic.com") || !strings.Contains(msg, "Co-authored-by: Human") || strings.Count(msg, "Signed-off-by: Delivery Owner <delivery@example.invalid>") != 1 {
-		t.Fatalf("message: %s", msg)
-	}
-	assertDeliveryTree(t, p, tip)
 }
 
 // TestRepeatedPublicationFailuresReachTheInbox shows a publication the host
@@ -618,7 +491,7 @@ func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
 				t.Fatalf("raised after %d failures: %+v", attempt+1, e)
 			}
 		} else {
-			want := fmt.Sprintf("Publishing owner approval %d has failed 3 times in a row. Last failure: Effect returned error: %s", in.Approval, refusal)
+			want := fmt.Sprintf("Marking the pull request ready for review (owner approval %d) has failed 3 times in a row. Last failure: Effect returned error: %s", in.Approval, refusal)
 			retryAt := clock.Now().Add(wait).UTC().Format(time.RFC3339)
 			if !found || e.Workstream != p.stream || e.Question != want || len(e.Options) != 0 || e.Revision != in.Approval ||
 				!e.OpenedAt.Equal(firstFailure) || !strings.Contains(e.Blocked, "tries again at "+retryAt) || e.Answer.Method != http.MethodGet {
@@ -628,8 +501,8 @@ func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
 		// The next attempt waits twice as long as the one before.
 		clock.Advance(wait - time.Second)
 		must(t, c.Pass(ctx))
-		if p.pulls.Finds != attempt+1 {
-			t.Fatalf("attempted %d times before the retry was due, want %d", p.pulls.Finds, attempt+1)
+		if p.pulls.Finds-p.finds != attempt+1 {
+			t.Fatalf("attempted %d times before the retry was due, want %d", p.pulls.Finds-p.finds, attempt+1)
 		}
 		clock.Advance(time.Second)
 	}
@@ -644,8 +517,9 @@ func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
 }
 
 // TestPublicationWaitsForAGitHubToken shows a service without a credential
-// holding a publication without pushing or asking the host anything, raising
-// it to the inbox at once, and publishing once it has one.
+// holding the marking ready of a pushed draft without changing or asking the
+// host anything, raising it to the inbox at once, and marking it ready once
+// it has one.
 func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -666,8 +540,8 @@ func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 		must(t, c.Pass(ctx))
 		clock.Advance(time.Hour)
 	}
-	if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 || p.pulls.Creates != 0 {
-		t.Fatalf("a publication without a credential pushed %v, found %d times and opened %d pull requests", pushed, p.pulls.Finds, p.pulls.Creates)
+	if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds || p.pulls.Creates != 1 || p.pulls.Readies != 0 {
+		t.Fatalf("a publication without a credential left the branch at %s, found %d times, opened %d pull requests and marked %d ready", tip, p.pulls.Finds-p.finds, p.pulls.Creates, p.pulls.Readies)
 	}
 	ops, err := p.repository.Operations(p.stream)
 	must(t, err)
@@ -693,7 +567,7 @@ func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 	if _, err := p.publisher().Apply(ctx, op); !errors.Is(err, errNoPullRequestCredential) {
 		t.Fatalf("an attempt without a credential: %v", err)
 	}
-	if _, pushed := p.forkBranch(t); pushed || p.pulls.Finds != 0 {
+	if tip, _ := p.forkBranch(t); tip != p.pushed || p.pulls.Finds != p.finds {
 		t.Fatal("a refused attempt pushed or asked the host")
 	}
 	p.pulls.Mu.Lock()
@@ -709,5 +583,25 @@ func TestPublicationWaitsForAGitHubToken(t *testing.T) {
 	}
 	if slices.ContainsFunc(inbox.Entries, func(e InboxEntry) bool { return e.Kind == InboxPublication }) {
 		t.Fatal("the published workstream stays raised")
+	}
+}
+
+// Commit messages are fixed when the commits are pushed to the pull request,
+// so an approval that edits them is refused and records nothing.
+func TestApprovingRefusesEditedCommitMessages(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	view, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
+	if api != nil {
+		t.Fatal(api)
+	}
+	messages := slices.Clone(view.Messages)
+	messages[0].Message = "Owner's subject\n\nOwner's explanation.\n"
+	_, api = p.s.approveDelivery(context.Background(), string(p.stream), DeliveryDecision{Review: view.Report.Review, ReviewRevision: view.ReviewRevision, Commit: view.Report.Commit, DraftHash: view.DraftHash, Messages: messages})
+	if api == nil || api.Code != Validation {
+		t.Fatalf("edited commit messages: %v", api)
+	}
+	if docs := streamDocuments(t, p.repository, p.stream, deliveryDocument); len(docs) != 0 {
+		t.Fatalf("an approval was recorded: %+v", docs)
 	}
 }

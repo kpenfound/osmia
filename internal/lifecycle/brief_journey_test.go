@@ -298,6 +298,7 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	j := newBriefFixture(t, "")
 	first, repository := j.buildFixture().SeedGit(t, "group-first")
 	j.stream, j.repository = first, repository
+	j.host(t)
 	j.s.setSole(&activeProject{repository: repository})
 	second := j.secondMember(t, "group-second")
 	_, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{first, second}, demoStart, ownerActor, "fixture")

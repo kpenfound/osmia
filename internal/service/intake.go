@@ -473,6 +473,7 @@ func (s *Service) intake() *intake.Controller {
 		DriftEntry:               driftEntry,
 		Effective:                s.effective,
 		FactoryContext:           factoryContext,
+		ChecksChoiceEntry:        checksChoiceEntry,
 		FinalChecksEntry:         finalChecksEntry,
 		FinalRoundsWithBlocking:  finalRoundsWithBlocking,
 		FirstLiveWorkgroupMember: s.firstLiveWorkgroupMember,

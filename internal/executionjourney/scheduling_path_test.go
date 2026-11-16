@@ -610,11 +610,12 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 
 func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 	t.Parallel()
-	for _, point := range []string{"publish-pushed", "publish-opened"} {
+	for _, point := range []string{"ready-marked"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
-			p := newPublicationFixture(t, "commit-per-unit")
+			p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 			demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "config", "core.logAllRefUpdates", "true")
+			p.publishDraft(t)
 			p.approve(t, nil)
 			must(t, p.repository.Close())
 			gate := newPathGate(t)
@@ -628,7 +629,7 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 			p.start(t)
 			awaitPollSignal(t, gate.entered)
 			pushed, found := p.forkBranch(t)
-			if !found {
+			if !found || pushed != p.pushed {
 				t.Fatal("push did not reach fork")
 			}
 			p.stop(t)
@@ -656,8 +657,8 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 			}
 			p.pulls.Mu.Lock()
 			defer p.pulls.Mu.Unlock()
-			if p.pulls.Creates != 1 || len(p.pulls.Prs) != 1 {
-				t.Fatalf("PR effects creates=%d PRs=%d", p.pulls.Creates, len(p.pulls.Prs))
+			if p.pulls.Creates != 1 || p.pulls.Updates != 0 || p.pulls.Readies != 1 || len(p.pulls.Prs) != 1 {
+				t.Fatalf("PR effects creates=%d updates=%d readies=%d PRs=%d", p.pulls.Creates, p.pulls.Updates, p.pulls.Readies, len(p.pulls.Prs))
 			}
 			repo, err := trace.Open(p.s.cfg.Root, p.s.cfg.Project)
 			must(t, err)
