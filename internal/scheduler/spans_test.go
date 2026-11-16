@@ -488,10 +488,11 @@ func TestUnboundedPoolsCarryTheMarkerAndNoLimit(t *testing.T) {
 	s, err := New(repo, Options{Now: r.clock.Now, Capacity: limits, Shared: pool})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	release, admitted, err := pool.TryReserve(repo, stream, "librarian", "librarian", limits)
+	must(t, repo.CreateWorkstream(ctx, other, f.clock.Now(), owner))
+	release, admitted, err := pool.TryReserve(repo, other, "architect", "reserved", limits)
 	must(t, err)
 	if !admitted {
-		t.Fatal("librarian refused")
+		t.Fatal("architect reservation refused")
 	}
 	r.clock.Advance(time.Minute)
 	release()
@@ -500,19 +501,13 @@ func TestUnboundedPoolsCarryTheMarkerAndNoLimit(t *testing.T) {
 	must(t, s.Pass(ctx))
 	held := r.spans("osmia.slot.held")
 	if len(held) != 2 {
-		t.Fatalf("%d held spans, want the architect turn and the librarian reservation", len(held))
+		t.Fatalf("%d held spans, want the architect turn and the architect reservation", len(held))
 	}
-	roles := []string{}
 	for _, h := range held {
 		a := attrs(h)
-		roles = append(roles, a["osmia.role"])
 		if _, limited := a["osmia.pool.limit"]; limited || a["osmia.pool.unbounded"] != "true" || a["osmia.pool.id"] != a["osmia.role"] {
 			t.Fatalf("unbounded pool attributes %v", a)
 		}
-	}
-	slices.Sort(roles)
-	if !slices.Equal(roles, []string{"architect", "librarian"}) {
-		t.Fatalf("roles %v", roles)
 	}
 }
 

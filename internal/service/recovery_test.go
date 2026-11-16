@@ -27,7 +27,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	must(t, repo.CreateWorkstream(ctx, stream, demoStart, ownerActor))
 	roles := []struct{ agent, role string }{
 		{trace.ChiefOfStaff, trace.ChiefOfStaff}, {"recovery_mason", masonRole}, {"recovery_reviewer", reviewerRole},
-		{"recovery_architect", architectRole}, {"recovery_committee", committeeRole}, {"recovery_librarian", librarianRole},
+		{"recovery_architect", architectRole}, {"recovery_committee", committeeRole}, {"recovery_librarian", "librarian"},
 		{driftMasonAgent, masonRole}, {driftReviewerAgent, reviewerRole}, {"undispatched_reviewer", reviewerRole},
 		{"final_committee", committeeRole},
 	}

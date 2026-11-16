@@ -54,8 +54,7 @@ func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
 func (f *handInFixture) repository() *trace.Repository { return f.s.sole().repository }
 
 // head returns how many commits the project's trace and each of its
-// workstreams' traces hold, apart from the librarian's workstream, which the
-// project's extraction writes to.
+// workstreams' traces hold, apart from the librarian's workstream of an older trace.
 func (f *handInFixture) head(t *testing.T) map[string]int {
 	t.Helper()
 	return intakefixture.HandInHead(t, f.trace, func() []config.WorkstreamID { return f.streams(t) }, func(stream config.WorkstreamID) string {

@@ -28,7 +28,7 @@ one SQLite database, `trace.db`, in its own directory.
 |---|---|
 | `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`, and `actor` when the chief of staff archived it because its pull request merged), profile overrides |
 | `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
-| `projects/<p>/trace.db` | The project's charter, KB, entity map, role notes and lasting decisions |
+| `projects/<p>/trace.db` | The project's charter, entity map and lasting decisions |
 | `workstreams/<p>/<w>/trace.db` | The workstream's complete trace |
 | `units/<p>/<w>/<u>`, `drifts/<p>/<w>` | Unit and drift resolution workspaces |
 
@@ -52,11 +52,13 @@ The records you will read most, by `schema`:
 | `osmia.trace.status` | The chief of staff's status revisions: `goal`, `note`, `agents` |
 | `osmia.trace.document` | Every document revision: `$.path` names the document and `$.content` holds it. The latest revision of a document is its row with the highest `seq`. `tools/<id>.json` is one audit record per tool call (`scope.Role`, `scope.Turn`, `name`); `units/<u>/` holds `report.json`, `review.json`, `rebase.json`, `landing.json` and `checks-<n>.json`; `drift/rebase.json` is the latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
 
-Each repo's librarian has a workstream of its own, `w_` followed by the
-first 32 hex digits of `sha256("librarian:<project id>")`. Its workflow holds
-the knowledge base extraction and refresh operations.
+An older project trace can hold a workstream named `w_` followed by the
+first 32 hex digits of `sha256("librarian:<project id>")`, with knowledge-base
+extraction and refresh operations. The service closes each of them still
+pending with the result `retired`, never adds to the workstream, and hides it
+from status and the page.
 
-Here `<p>` is the one-repo project's ID; its charter, KB and settings are its
+Here `<p>` is the one-repo project's ID; its charter, entity map and settings are its
 own. For a cross-project workgroup also inspect
 `workgroups/<group-id>/trace.db`: the authoritative workgroup spec, membership, original
 shared chief conversation, consolidated questions and approved change journals
@@ -246,7 +248,7 @@ what they achieve.
    (run from `~/.local/share/osmia/workstreams`)
 
 4. Work repeated per item: reviews per merged unit, re-checks caused by
-   rebases, librarian refreshes per landing.
+   rebases.
 5. Simulate a change on recorded data before you build it. Re-batch the
    recorded notices under a longer delivery window, or count the refreshes a
    different trigger would have run. That puts a number on the saving.
@@ -266,5 +268,5 @@ threshold between the two with a margin.
 - Operation records come back sorted by event ID, not by time.
 - The ledger includes zero-cost judgment calls. Count them separately from
   agent sessions.
-- A project-wide gate can hide behind a quiet workstream: a pending extraction
-  or refresh in the librarian's workstream holds back work everywhere.
+- A project-wide gate can hide behind a quiet workstream: look for pending or
+  unacknowledged operations in any workstream of the project.

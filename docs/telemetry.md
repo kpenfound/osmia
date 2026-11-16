@@ -82,16 +82,16 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.state`, `osmia.next_state` | state names | `osmia.workstream.state`, `osmia.unit.state` |
 | `osmia.cause` | see [causes](#cause-values) | state spans, the root, stopped or failed turns |
 | `osmia.outcome` | see [outcomes](#outcome-values) | the root, turns, check runs, slot spans, pool limit spans, pauses, uptime |
-| `osmia.role` | `mason`, `reviewer`, `committee`, `architect`, `librarian`, `checks`, `chief_of_staff` | turns, slot spans, role pauses |
+| `osmia.role` | `mason`, `reviewer`, `committee`, `architect`, `checks`, `chief_of_staff` | turns, slot spans, role pauses |
 | `osmia.backend`, `osmia.model`, `osmia.profile` | names | turns |
 | `osmia.slot_wait_ms` | milliseconds from the turn's request to its runner's claim | turns |
 | `osmia.cost_known`, `osmia.cost_usd` | `cost_usd` only when the backend reported a cost; otherwise `cost_known=false` and no cost | turns |
 | `osmia.kind` | `unit`, `final`, `session` | `osmia.check.run` |
 | `osmia.covered` | how many of the project's listed checks the run covered, when the selection recorded it | `osmia.check.run` |
-| `osmia.pool.id` | the pool's identity: the role it serves, shared by every project that draws on it (`mason`, `reviewer`, `committee`, `architect`, `librarian`, `checks`) | slot spans, `osmia.pool.limit` |
+| `osmia.pool.id` | the pool's identity: the role it serves, shared by every project that draws on it (`mason`, `reviewer`, `committee`, `architect`, `checks`) | slot spans, `osmia.pool.limit` |
 | `osmia.pool.roles` | the roles the pool serves | slot spans, `osmia.pool.limit` |
 | `osmia.pool.limit` | the pool's limit at the span's start (slot spans) or throughout (pool limit spans) | bounded pools |
-| `osmia.pool.unbounded` | `true` | pools with no factory-wide limit (`architect`, `librarian`) |
+| `osmia.pool.unbounded` | `true` | pools with no factory-wide limit (`architect`) |
 | `osmia.wait_reason` | `capacity`, `workstream-cap` | `osmia.slot.wait` |
 | `osmia.pause.scope` | `factory`, `role`, `project`, `workstream` | `osmia.pause`, `osmia.loop_guard.trip` |
 | `osmia.pause.source` | `owner`, `daily-budget`, `provider-usage-limit`, `loop-guard` | `osmia.pause`, `osmia.loop_guard.trip` |
@@ -234,7 +234,7 @@ Intervals that exist only in the service's memory are kept in two small files
 in the root, written only while telemetry is on:
 
 - `slot-intervals.json` holds the slots held and waited for, the waits for a
-  shared workflow reservation (architect, committee and librarian operations)
+  shared workflow reservation (architect and committee operations)
   included. After a restart the interval keeps its original start and IDs and
   its span is sent once when it closes. An interval nothing takes up within ten
   minutes of the start is sent `interrupted`, ending at the start of the run;
@@ -362,8 +362,7 @@ result.
 
 **Worked example.** Over 10:00 to 11:00, two mason slots are held for the whole
 hour; the mason limit is 2 until 10:30 and 4 after. The reviewer pool (limit 1)
-holds nothing. The librarian pool is unbounded and holds one slot from 10:10 to
-10:30. The checks pool (limit 2) holds slots 10:00 to 10:20, 10:10 to 10:40
+holds nothing. The checks pool (limit 2) holds slots 10:00 to 10:20, 10:10 to 10:40
 and 10:15 to 10:30. The architect pool is unbounded and holds one slot from
 10:05 to 10:21; the service was down from 10:40 to 10:50, so its limit spans
 leave that gap:
@@ -372,7 +371,6 @@ leave that gap:
 | --- | --- | --- | --- | --- |
 | architect | 3000 | 0 | 960 | 2040 |
 | checks | 3600 | 1200 | 2400 | 1200 |
-| librarian | 3600 | 0 | 1200 | 2400 |
 | mason | 3600 | 1800 | 3600 | 0 |
 | reviewer | 3600 | 0 | 0 | 3600 |
 

@@ -30,10 +30,7 @@ import (
 // exitDemoRoles runs every role in a container, the only sandbox the fake
 // engine's boundary check accepts, with a committee of two and a cap of two
 // rounds.
-const exitDemoRoles = `[roles.librarian]
-sandbox = "container"
-image = "fixture-image"
-[roles.committee]
+const exitDemoRoles = `[roles.committee]
 sandbox = "container"
 image = "fixture-image"
 [roles.chief_of_staff]
@@ -205,18 +202,6 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 		}
 	}
 	engine.Turns["*"] = d.Chief
-	seed, err := kb.Seed(clone)
-	must(t, err)
-	var librarian []error
-	f.script("extract-1-1", nil, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		for path, content := range map[string]string{"output/kb/trace.md": "# trace\n\nState lives in files under the root.\n", "output/kb/entities.json": entitiesWith(t, seed, "history")} {
-			if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); err != nil {
-				librarian = append(librarian, err)
-			}
-		}
-		return errors.Join(librarian...)
-	})
-
 	awaitAttention := func(stream config.WorkstreamID, want string) StatusView {
 		t.Helper()
 		deadline := time.Now().Add(demoTimeout)
@@ -250,9 +235,6 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	added, err := f.c.AddProject(ctx, request(clone))
 	must(t, err)
 	f.project, f.trace, d.Trace, d.Root, d.Project = added.Project.ID, added.Project.Trace, added.Project.Trace, f.s.current().Root, added.Project.ID
-	if x := awaitExtraction(t, f.c); x.State != "succeeded" {
-		t.Fatalf("extraction: %+v", x)
-	}
 	writeCharter(t, f.c, added.Project.ID, exitCharter)
 	onboarded, err := f.c.Configuration(ctx)
 	must(t, err)

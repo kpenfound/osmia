@@ -71,7 +71,6 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	_, err = file.WriteString(text)
 	must(t, errors.Join(err, file.Close()))
 	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
-	opts.Librarian = nil
 	f.opts = opts
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {

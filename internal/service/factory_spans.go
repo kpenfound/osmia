@@ -48,7 +48,7 @@ type poolSpec struct {
 }
 
 // poolsOf lists every pool the capacity table defines, in a fixed order. The
-// architect and librarian pools have no configured limit.
+// architect pool has no configured limit.
 func poolsOf(c config.Capacity) []poolSpec {
 	bounded := func(role string, limit int) poolSpec {
 		id := telemetry.PoolID(role)
@@ -63,7 +63,6 @@ func poolsOf(c config.Capacity) []poolSpec {
 		bounded(reviewerRole, c.Reviewers),
 		bounded(committeeRole, c.Committee),
 		unbounded(architectRole),
-		unbounded(librarianRole),
 		bounded(checksRole, c.Checks),
 	}
 }
@@ -336,7 +335,7 @@ func (f *factorySpans) pauseEnded(p runtime.Pause, at time.Time, replaced bool) 
 		at = p.SetAt
 	}
 	f.sink.Emit(telemetry.Span{Name: telemetry.SpanName("pause"), Trace: f.trace(),
-		ID: telemetry.FactorySpan(factoryRun, "pause", p.Target.Scope, string(p.Target.Project), string(p.Target.Workstream), p.Target.Role, p.Source, strconv.FormatInt(p.SetAt.UnixNano(), 10)),
+		ID:    telemetry.FactorySpan(factoryRun, "pause", p.Target.Scope, string(p.Target.Project), string(p.Target.Workstream), p.Target.Role, p.Source, strconv.FormatInt(p.SetAt.UnixNano(), 10)),
 		Start: p.SetAt, End: at, Attrs: attrs})
 }
 

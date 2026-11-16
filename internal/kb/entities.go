@@ -1,4 +1,4 @@
-// Package kb holds the local knowledge base records Osmia keeps in a project
+// Package kb holds the entity map record Osmia keeps in a project
 // trace: the typed entity map in kb/entities.json, its deterministic seed from
 // a target clone, and footprint resolution that needs nothing but that map.
 package kb

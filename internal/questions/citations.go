@@ -5,11 +5,8 @@ package questions
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/charter"
@@ -20,18 +17,16 @@ import (
 
 // CitationForms lists the citations an answer may rest on, for prompts and
 // refusals.
-const CitationForms = "source#<record> (a recorded remote source), inspection#<record> (a recorded code inspection), charter#<n> or <project>/charter#<n> (a charter rule; project is its p_ ID), kb/<subsystem>.md (a knowledge-base file), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
+const CitationForms = "source#<record> (a recorded remote source), inspection#<record> (a recorded code inspection), charter#<n> or <project>/charter#<n> (a charter rule; project is its p_ ID), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
 
 var (
-	proseCitation  = regexp.MustCompile(`^kb/([^/]+)\.md$`)
 	rulingCitation = regexp.MustCompile(`^ruling#([A-Za-z0-9][A-Za-z0-9_-]{0,127})$`)
 	planCitation   = regexp.MustCompile(`^plan#(.+)$`)
 )
 
 // IsCharter reports whether citation has the form of a charter rule,
-// charter#<n>, and IsProse the form of a knowledge-base file, kb/<subsystem>.md.
+// charter#<n>.
 func IsCharter(citation string) bool { _, _, ok := charter.Citation(citation); return ok }
-func IsProse(citation string) bool   { return proseCitation.MatchString(citation) }
 
 // Unresolved is why a citation cannot support an answer.
 type Unresolved struct{ Citation, Reason string }
@@ -41,11 +36,10 @@ func (e *Unresolved) Error() string {
 }
 
 // Resolve checks that citation names something recorded for the workstream:
-// a rule of the latest charter, an existing knowledge-base file, a ruling of
-// the workstream, or a criterion or unit of the workstream's latest recorded
-// spec or plan. It returns *Unresolved for a citation that names nothing or
-// whose knowledge-base file or plan cannot be read, and any other error for a
-// trace that cannot be read.
+// a rule of the latest charter, a ruling of the workstream, or a criterion or
+// unit of the workstream's latest recorded spec or plan. It returns
+// *Unresolved for a citation that names nothing or whose plan cannot be read,
+// and any other error for a trace that cannot be read.
 func Resolve(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, citation string) error {
 	unresolved := func(format string, args ...any) error {
 		return &Unresolved{Citation: citation, Reason: fmt.Sprintf(format, args...)}
@@ -75,24 +69,6 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 		return nil
 	}
 
-	if m := proseCitation.FindStringSubmatch(citation); m != nil {
-		project, err := repository.ProjectFor(stream)
-		if err != nil {
-			return err
-		}
-		subsystems, err := project.Subsystems()
-		if err != nil {
-			return err
-		}
-		if slices.Contains(subsystems, m[1]) {
-			if _, err := project.Prose(m[1]); err == nil {
-				return nil
-			} else if !errors.Is(err, fs.ErrNotExist) {
-				return unresolved("%s cannot be read: %v", citation, err)
-			}
-		}
-		return unresolved("the knowledge base has no file %s", citation)
-	}
 	if m := rulingCitation.FindStringSubmatch(citation); m != nil {
 		rulings, err := trace.Read[trace.Ruling](repository, stream)
 		if err != nil {

@@ -32,7 +32,7 @@ const (
 	// CharterConflict reports incompatible rules of two member projects; only the owner settles it.
 	CharterConflict Kind = "charter_conflict"
 	// Fit says the plan does not realise the handed design, or works against
-	// a decision the knowledge base holds. It is advice to the owner.
+	// a recorded decision. It is advice to the owner.
 	Fit Kind = "fit"
 	// Size advises splitting when it improves practical capacity or reviewability.
 	Size Kind = "size"

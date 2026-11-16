@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -93,9 +92,6 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		id = ToolCallID(scope, tool.Name, raw)
 	}
 	call := ToolCall{Scope: scope, Name: tool.Name, Effect: tool.Effect, Input: toolPayload(raw), State: "started"}
-	if strings.HasPrefix(tool.Name, "notes_") {
-		call.Input.Content = ""
-	}
 	data, err := json.Marshal(call)
 	if err != nil {
 		return nil, err
@@ -140,9 +136,6 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		}
 		call.State, call.Failed = "completed", callErr != nil
 		value := toolPayload(output)
-		if strings.HasPrefix(tool.Name, "notes_") {
-			value.Content = ""
-		}
 		call.Output = &value
 		data, err := json.Marshal(call)
 		if err != nil {

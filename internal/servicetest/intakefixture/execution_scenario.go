@@ -370,22 +370,3 @@ func CheckpointEntry(t *testing.T, directory string, paths []string) string {
 	}
 	return c.Entry
 }
-
-func AwaitRefresh(t *testing.T, repository *trace.Repository, project config.ProjectID, action, agent string) trace.OperationRecord {
-	t.Helper()
-	deadline := time.Now().Add(fixturekit.DemoTimeout)
-	for time.Now().Before(deadline) {
-		ops, err := repository.Operations(intake.LibrarianWorkstream(project))
-		Must(t, err)
-		for _, op := range ops {
-			if op.Operation.Action == action && op.Result != nil {
-				return op
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	ops, _ := repository.Operations(intake.LibrarianWorkstream(project))
-	thread, threadErr := repository.Thread(intake.LibrarianWorkstream(project), agent)
-	t.Fatalf("refresh did not complete within %s: operations %+v; librarian thread %+v (error %v)", fixturekit.DemoTimeout, ops, thread, threadErr)
-	return trace.OperationRecord{}
-}

@@ -42,19 +42,16 @@ memory = "2g"
 [roles.architect]
 sandbox = "sbx"
 memory = "2g"
-[roles.librarian]
-sandbox = "sbx"
-memory = "2g"
 `
 
 func TestSandboxMemoryAboveHostWarns(t *testing.T) {
-	// 4 masons × 4g + 2 reviewers × 2g + 3 committee × 2g + architect and
-	// librarian once each at 2g = 30 GiB.
+	// 4 masons × 4g + 2 reviewers × 2g + 3 committee × 2g + the architect
+	// once at 2g = 28 GiB.
 	checks := sizing(t, 16*gib, sizedRoles)
 	c := find(t, checks, "sandbox memory")
-	expect(t, c, Warn, "could hold 30.0 GiB")
+	expect(t, c, Warn, "could hold 28.0 GiB")
 	expect(t, c, Warn, "above the host's 16.0 GiB")
-	expect(t, c, Warn, "architect and librarian are counted once each")
+	expect(t, c, Warn, "the architect is counted once")
 	expect(t, c, Warn, "mason 4 × 4.0 GiB (memory)")
 	if Failed(checks) {
 		t.Fatalf("a memory warning failed doctor: %+v", checks)
@@ -64,7 +61,7 @@ func TestSandboxMemoryAboveHostWarns(t *testing.T) {
 func TestSandboxMemoryWithinHostPasses(t *testing.T) {
 	c := find(t, sizing(t, 32*gib, sizedRoles), "sandbox memory")
 	expect(t, c, Pass, "within the host's 32.0 GiB")
-	expect(t, c, Pass, "could hold 30.0 GiB")
+	expect(t, c, Pass, "could hold 28.0 GiB")
 }
 
 func TestUnsizedRolesCountAtSbxDefault(t *testing.T) {
@@ -103,7 +100,7 @@ func TestOnlySbxRolesCount(t *testing.T) {
 	roles := "[roles.mason]\nsandbox = \"container\"\nimage = \"alpine\"\n[roles.reviewer]\nsandbox = \"none\"\n"
 	absent(t, sizing(t, 1*gib, roles), "sandbox memory")
 	// Only the sbx role is counted.
-	c := find(t, sizing(t, 16*gib, roles+"[roles.librarian]\nsandbox = \"sbx\"\nmemory = \"1g\"\n"), "sandbox memory")
+	c := find(t, sizing(t, 16*gib, roles+"[roles.architect]\nsandbox = \"sbx\"\nmemory = \"1g\"\n"), "sandbox memory")
 	expect(t, c, Pass, "could hold 1.0 GiB")
 }
 

@@ -126,7 +126,7 @@ func memoryTurnConfig(t *testing.T, hearsay config.Hearsay, scope string) (*conf
 func memoryTurnTools(t *testing.T, cfg *config.Config, repo *trace.Repository) (map[string][]string, map[string][]string) {
 	t.Helper()
 	turns := memoryTurns(&isolation.Turns{Grants: map[string]coreadapter.Capabilities{
-		trace.ChiefOfStaff: {}, masonRole: {}, reviewerRole: {}, architectRole: {}, committeeRole: {}, librarianRole: {},
+		trace.ChiefOfStaff: {}, masonRole: {}, reviewerRole: {}, architectRole: {}, committeeRole: {},
 		sessionRole: {Tools: []string{"show_image"}},
 	}}, cfg, repo)
 	granted, scoped := map[string][]string{}, map[string][]string{}
@@ -154,7 +154,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 		for _, class := range []struct {
 			role   string
 			assert bool
-		}{{trace.ChiefOfStaff, true}, {masonRole, true}, {reviewerRole, true}, {architectRole, true}, {committeeRole, true}, {librarianRole, false}, {sessionRole, false}} {
+		}{{trace.ChiefOfStaff, true}, {masonRole, true}, {reviewerRole, true}, {architectRole, true}, {committeeRole, true}, {sessionRole, false}} {
 			for _, read := range hearsayReadTools {
 				if !slices.Contains(names[class.role], read) {
 					t.Errorf("%s %s lacks %s: %v", role, class.role, read, names[class.role])
@@ -185,7 +185,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 	// Without a work source and without an override the roles stay as before.
 	cfg, repo = memoryTurnConfig(t, override, "")
 	granted, scoped = memoryTurnTools(t, cfg, repo)
-	for role, names := range map[string][]string{"granted": slices.Concat(granted[masonRole], granted[sessionRole], granted[trace.ChiefOfStaff]), "scoped": slices.Concat(scoped[masonRole], scoped[sessionRole], scoped[librarianRole])} {
+	for role, names := range map[string][]string{"granted": slices.Concat(granted[masonRole], granted[sessionRole], granted[trace.ChiefOfStaff]), "scoped": slices.Concat(scoped[masonRole], scoped[sessionRole])} {
 		for _, name := range names {
 			if slices.Contains(hearsayReadTools, name) || name == "assert" {
 				t.Errorf("%s: file mode granted %s", role, name)

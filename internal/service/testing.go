@@ -148,7 +148,7 @@ func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
 // Now returns the service's configured fixture clock.
 func (a TestAccess) Now() time.Time { return a.s.now() }
 
-// LibrarianWorkstreamForTest identifies the service's knowledge extraction trace.
+// LibrarianWorkstreamForTest identifies the librarian workstream an older trace can hold.
 func LibrarianWorkstreamForTest(id config.ProjectID) config.WorkstreamID {
 	return librarianWorkstream(id)
 }

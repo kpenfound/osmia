@@ -57,8 +57,6 @@ type Diagnostic = intakefixture.Diagnostic
 
 type RepoView = api.RepoView
 
-type ExtractionState = api.ExtractionState
-
 type CharterState = api.CharterState
 
 type HandInRequest = api.HandInRequest

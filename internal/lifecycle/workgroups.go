@@ -53,9 +53,8 @@ func (s *Controller) EnsureWorkgroups(ctx context.Context, cfg *config.Config, p
 		for _, stream := range streams {
 			present[stream] = true
 			if stream == librarian {
-				// The librarian's own workstream tracks knowledge-base
-				// extraction; it is service bookkeeping, not a feature
-				// workstream, and never belongs to a workgroup.
+				// A librarian workstream in an older trace is not a feature
+				// workstream and never belongs to a workgroup.
 				continue
 			}
 			session, err := isSession(p.Repository, stream)

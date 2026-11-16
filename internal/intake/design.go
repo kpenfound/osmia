@@ -422,7 +422,7 @@ func DesignLock(repository *trace.Repository, stream config.WorkstreamID) *sync.
 // states the agent's read-only, gate-free standing and the readiness pass it
 // runs before handoff.
 const DesignRolePrompt = "You are the design agent for a project the owner is scoping before any work starts. " +
-	"You have a catalog of every active project below. Brief projects have their charter and knowledge base inline; " +
+	"You have a catalog of every active project below. Brief projects have their charter and entity map inline; " +
 	"other projects have those documents in your view. Read any active project's committed source code through read_repo. You hold no write tool, no version control tool, no credential and no " +
 	"owner gate: you cannot write a file, commit, push, open a pull request, rule on anything or start work yourself.\n\n" +
 	"Run a readiness pass before handoff. Ask the owner only about choices that are expensive to undo (contracts, data " +
@@ -465,7 +465,7 @@ func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.R
 	for _, project := range s.Current().Projects {
 		references := "inline below"
 		if !slices.Contains(brief.Projects, project.ID) {
-			references = fmt.Sprintf("projects/%s/charter.md, projects/%s/kb.md", project.ID, project.ID)
+			references = fmt.Sprintf("projects/%s/charter.md, projects/%s/entities.md", project.ID, project.ID)
 		}
 		fmt.Fprintf(&b, "%s | %s | %s | %t | %s\n", project.ID, project.Name, project.Upstream, slices.Contains(brief.Projects, project.ID), references)
 	}
@@ -478,17 +478,17 @@ func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.R
 		if err != nil {
 			return "", err
 		}
-		knowledge, err := DesignRepoKnowledge(repo)
+		entities, err := DesignRepoEntities(repo)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&b, "\n## Project %s charter\n%s\n## Project %s knowledge base\n%s", project, charterDoc.Content, project, knowledge)
+		fmt.Fprintf(&b, "\n## Project %s charter\n%s\n## Project %s entity map\n%s", project, charterDoc.Content, project, entities)
 	}
 	return b.String(), nil
 }
 
-// designRepoKnowledge renders one repo's entity map and knowledge-base prose.
-func DesignRepoKnowledge(repo *trace.Repository) (string, error) {
+// DesignRepoEntities renders one repo's entity map.
+func DesignRepoEntities(repo *trace.Repository) (string, error) {
 	m, _, err := kb.LoadRevision(repo)
 	if err != nil {
 		return "", err
@@ -500,20 +500,6 @@ func DesignRepoKnowledge(repo *trace.Repository) (string, error) {
 		for _, e := range m.Entities {
 			fmt.Fprintf(&b, "- %s (%s): %s\n", e.ID, e.Name, e.Primary())
 		}
-	}
-	names, err := repo.Subsystems()
-	if err != nil {
-		return "", err
-	}
-	if len(names) == 0 {
-		b.WriteString("(no knowledge-base prose yet)\n")
-	}
-	for _, name := range names {
-		prose, err := repo.Prose(name)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&b, "\n### %s\n%s\n", name, prose)
 	}
 	return b.String(), nil
 }
@@ -563,7 +549,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 	}
 	prompt, err := s.DesignSystemPrompt(ctx, repository, stream)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the active projects' charters and knowledge bases", stream)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the active projects' charters and entity maps", stream)}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -840,11 +826,11 @@ func (s *Controller) StageDesignWorkspace(ctx context.Context, repository *trace
 		if err != nil {
 			return nil, err
 		}
-		knowledge, err := DesignRepoKnowledge(repo)
+		entities, err := DesignRepoEntities(repo)
 		if err != nil {
 			return nil, err
 		}
-		for _, doc := range []struct{ name, content string }{{"charter.md", charterDoc.Content}, {"kb.md", knowledge}} {
+		for _, doc := range []struct{ name, content string }{{"charter.md", charterDoc.Content}, {"entities.md", entities}} {
 			path := filepath.Join("projects", string(project.ID), doc.name)
 			full := filepath.Join(workspace, path)
 			if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {

@@ -260,6 +260,17 @@ func (r *Repository) latestDocumentByID(scope config.WorkstreamID, id, path stri
 	return d, nil
 }
 
+// LatestProjectDocument returns the latest revision of the project document id
+// at path, and whether one is recorded. It reads the one row the record index
+// finds, never the project's documents.
+func (r *Repository) LatestProjectDocument(id, path string) (Document, bool, error) {
+	d, err := r.latestDocumentByID("", id, path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Document{}, false, nil
+	}
+	return d, err == nil, err
+}
+
 // recordedIDs returns which of ids have a record committed at path.
 func recordedIDs(ctx context.Context, q querier, path string, ids []string) (map[string]bool, error) {
 	found := map[string]bool{}

@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -63,24 +64,26 @@ func fileOf(t *testing.T, r *Repository, name string) string {
 	return string(data)
 }
 
-// kbFiles returns the project's knowledge base by file name: each
-// subsystem's latest prose, and the latest entity map when one is recorded.
+// kbFiles returns the project's kb files by file name: the latest revision of
+// each prose file whose content is not empty, and the latest entity map when
+// one is recorded.
 func kbFiles(t *testing.T, r *Repository) map[string]string {
 	t.Helper()
-	names, err := r.Subsystems()
+	documents, err := r.ProjectDocuments()
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string]string{}
-	for _, name := range names {
-		prose, err := r.Prose(name)
-		if err != nil {
-			t.Fatal(err)
+	latest := map[string]Document{}
+	for _, d := range documents {
+		if (prose(d.Path) || d.Path == EntitiesPath) && d.Revision > latest[d.Path].Revision {
+			latest[d.Path] = d
 		}
-		out[name+".md"] = prose
 	}
-	if data, err := r.file(EntitiesPath); err == nil {
-		out["entities.json"] = string(data)
+	out := map[string]string{}
+	for path, d := range latest {
+		if d.Content != "" {
+			out[strings.TrimPrefix(path, "kb/")] = d.Content
+		}
 	}
 	return out
 }

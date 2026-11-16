@@ -58,8 +58,8 @@ const (
 	SkippedValue   = "skipped"
 	SkipTransition = "shed-owner-skip"
 	// maxRoundAttempts bounds the turns one member may start in one round
-	// after service stops interrupt earlier ones: the librarian's bound.
-	MaxRoundAttempts = MaxExtractionAttempts
+	// after service stops interrupt earlier ones.
+	MaxRoundAttempts = MaxTurnAttempts
 )
 
 var ShedActor = trace.Actor{Kind: "service", ID: "shed"}
@@ -1492,7 +1492,7 @@ func (d *Debate) Record(ctx context.Context, operation string, stream config.Wor
 }
 
 func CommitteeSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the decisions the knowledge base holds. You read; you hold no tool that writes or runs. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
+	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the recorded decisions. You read; you hold no tool that writes or runs. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
 }
 
 func CommitteePrompt(in RoundInput, standing []shed.Dissent, answers []string) string {
@@ -1503,13 +1503,13 @@ Your view holds:
 - spec.md and plan.json: the revision under debate. Cite a criterion as spec#<n> and a unit as plan#<unit>.
 - handed/: what the owner handed in, unchanged. It says what to build.
 - charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. Context labels all workgroup member charters by project ID. Each governs its member's slice, plan and units; check the workgroup spec and contracts against all of them. Cite another member as <project-id>/charter#<n>. Use kind charter_conflict and cite both rules when member charters conflict: only the owner resolves it.
-- context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Cite a knowledge-base file as kb/<subsystem>.md and an entity as %s<entity>.
+- context.md: the project context bundle: the charter's rules, the entity map and the recorded decisions. Cite an entity as %s<entity>.
 - repo/: the tracked files of the owner's clone, read-only.
 - shed/round-<n>/: what every member contributed in earlier rounds, and the architect's reply to each as reply.json, when there are any.
 
 Apply two tests and one judgement, and call %s once for each thing you find:
 - charter: a part that violates a charter rule. This is a veto on that part; cite the rule.
-- fit: the plan does not realise the handed design, or works against a decision the knowledge base holds. This is advice to the owner.
+- fit: the plan does not realise the handed design, or works against a recorded decision. This is advice to the owner.
 - size: a unit whose practical capacity or reviewability would improve enough from splitting to justify coordination; this is advice. Name the unit as the part.
 - acceptance: unclear outcomes, missing ownership boundaries or insufficient verification; this is engineering advice. Name the unit as the part.
 

@@ -86,10 +86,6 @@ type Options struct {
 	// rulings before the mason controller starts more work.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
-	// Librarian supplies the execution boundary of the librarian's
-	// knowledge-base extraction and refresh turns. Without it those operations
-	// fail with a recorded reason and the project stays usable.
-	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
 	// turns, of its replies to shed rounds and of the redrafts the owner asks
 	// for. Without it no draft, reply and redraft is requested, one already
@@ -202,8 +198,10 @@ type Service struct {
 	// gateWorkers maps each active project's trace to its gate worker, so a
 	// scheduling pass can wake it.
 	gateWorkers sync.Map
-	mu          sync.Mutex // guards cfg, projects, pending and reloadErr
-	cfg         *config.Config
+	// reseeders maps each project to the re-seeder of its entity map.
+	reseeders sync.Map
+	mu        sync.Mutex // guards cfg, projects, pending and reloadErr
+	cfg       *config.Config
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
@@ -1166,6 +1164,7 @@ func (s *Service) launch(active *activeProject) {
 		<-publishDone
 		<-gatesDone
 		s.gateWorkers.Delete(active.repository)
+		s.reseeders.Delete(active.id)
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
 		}
@@ -1236,7 +1235,7 @@ func (s *Service) migrationLog(format string, args ...any) {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's own reconcilers for knowledge-base extraction and refresh, architect drafts,
+// service's own reconcilers for the retirement of librarian operations, architect drafts,
 // committee rounds and the architect's replies to them, and final reviews, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
@@ -1347,7 +1346,6 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	overlap := &overlaps{s: s, repository: repository}
 	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
-	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &delivery.FinalReviewer{S: s.deliveryWithChecks(checkClient, cloudClient), Repository: repository}
 	publish := &delivery.Publisher{S: s.deliveryWithChecks(checkClient, cloudClient), Repository: repository}
 	amend := &amendmentDrafter{Drafter: draft}
@@ -1355,9 +1353,9 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
-	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
+	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
-	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
+	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})

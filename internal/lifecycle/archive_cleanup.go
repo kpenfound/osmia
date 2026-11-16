@@ -22,8 +22,7 @@ import (
 // Deletion of a workstream's trace is deferred, with a logged reason,
 // while it has an unfinished turn, a pending or unacknowledged operation,
 // or a temporary workspace still being cleaned; while a retained
-// workstream still depends on it as a base; or until the librarian refresh
-// covering its landed units and any knowledge gap it filed has completed.
+// workstream still depends on it as a base.
 // Once every deferral clears, the trace repository is moved aside by one
 // atomic rename -- durable, restart-safe intent to delete it, after which
 // it is never again discoverable as live -- and its actual removal runs in
@@ -197,11 +196,6 @@ func (c *ArchiveCleanup) Prepare(ctx context.Context, a runtime.Archive) (eligib
 		if present {
 			return false, "a temporary workspace is still being cleaned", nil
 		}
-	}
-	if incorporated, err := c.S.LearningsIncorporated(repo, a.Workstream); err != nil {
-		return false, "", err
-	} else if !incorporated {
-		return false, "the librarian has not yet incorporated the workstream's learnings into project knowledge", nil
 	}
 	return true, "", nil
 }

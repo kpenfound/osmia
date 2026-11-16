@@ -212,7 +212,7 @@ func TestFeedFinalReviewOutcomesAndEveryClaimedRole(t *testing.T) {
 	must(t, err)
 	defer repo.Close()
 	ctx := context.Background()
-	for i, role := range []string{masonRole, committeeRole, architectRole, "foreman", librarianRole} {
+	for i, role := range []string{masonRole, committeeRole, architectRole, "foreman", "librarian"} {
 		id := fmt.Sprintf("agent_feed_%d", i)
 		queueRoleTurn(t, repo, stream, id, role, "", demoStart)
 		_, err := repo.ClaimTurn(ctx, stream, id, "token_"+id, filepath.Join(t.TempDir(), id), demoStart)

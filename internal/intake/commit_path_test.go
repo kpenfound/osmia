@@ -3,9 +3,7 @@ package intake
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,34 +71,5 @@ func TestReadCommitPathReadsOneCommittedEntry(t *testing.T) {
 		if _, err := ReadCommitPath(ctx, clone, commit, name); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("%s: err = %v, want not exist", name, err)
 		}
-	}
-}
-
-// TestCopyCommitStagesCommittedRegularFiles covers staging a whole commit:
-// every regular file with its exact committed bytes, and no symlink.
-func TestCopyCommitStagesCommittedRegularFiles(t *testing.T) {
-	t.Parallel()
-	clone, commit := committedFixture(t)
-	dst := t.TempDir()
-	fixturekit.Must(t, CopyCommit(context.Background(), clone, commit, dst))
-	staged := map[string]string{}
-	fixturekit.Must(t, filepath.WalkDir(dst, func(name string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(dst, name)
-		if err != nil {
-			return err
-		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("staged non-regular file %s", rel)
-		}
-		data, err := os.ReadFile(name)
-		staged[filepath.ToSlash(rel)] = string(data)
-		return err
-	}))
-	want := map[string]string{"README.md": "committed\n", "core/llm.go": "package core\n", "core/deep/x.go": "package deep\n\n\x00"}
-	if !maps.Equal(staged, want) {
-		t.Fatalf("staged %q, want %q", staged, want)
 	}
 }

@@ -38,15 +38,14 @@ func (f *shedFixture) ruling(t *testing.T, stream config.WorkstreamID, requester
 	return intakefixture.AmendmentRuling(t, f.repository(), stream, requester)
 }
 
-func newLibrarianFixture(t *testing.T) *librarianFixture {
+func newCloneFixture(t *testing.T) *cloneFixture {
 	t.Helper()
-	data := fixturekit.NewLibrarianSetup(t)
+	data := fixturekit.NewCloneSetup(t)
 	opts := testOptions(data.Config)
 	opts.Workstreams = nil
 	opts.reviewChecks = fixturekit.PassingChecks
 	opts.Reconciliation.Now = data.Clock.Now
-	opts.Librarian = &Librarian{Engine: data.Engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: data.Sessions}}}
-	return &librarianFixture{opts: opts, clone: data.Clone, engine: data.Engine, sessions: data.Sessions, clock: data.Clock}
+	return &cloneFixture{opts: opts, clone: data.Clone, engine: data.Engine, sessions: data.Sessions, clock: data.Clock}
 }
 
 func notifyFixture(t *testing.T, webhook string) (Options, *fakeInbox) {
@@ -197,9 +196,9 @@ func newHandInFixture(t *testing.T) *handInFixture {
 	return f
 }
 
-// librarianFixture is a project root, a clone with tracked and untracked files
-// and the fake engine the librarian's turns run in.
-type librarianFixture struct {
+// cloneFixture is a project root, a clone with tracked and untracked files and
+// the fake engine the role turns run in.
+type cloneFixture struct {
 	opts     Options
 	clone    string
 	engine   *demoEngine
@@ -232,12 +231,6 @@ func start(t *testing.T, o Options) (*Service, *Client) {
 func (w *fakeWebhook) records(opts Options) *fakeWebhook {
 	w.Webhook.Records(opts.Config.Root)
 	return w
-}
-
-// awaitExtraction polls status until the latest extraction is terminal.
-func awaitExtraction(t *testing.T, c *Client) ExtractionState {
-	t.Helper()
-	return intakefixture.AwaitExtraction(t, c.Configuration)
 }
 
 func (s *Service) deltaTool(wt *trace.Repository, c WorkgroupChange, agent, name string) coreadapter.Tool {

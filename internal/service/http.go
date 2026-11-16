@@ -88,21 +88,8 @@ func (s *Service) configuration() ConfigResponse {
 	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
-	// Each project has its own charter and knowledge-base extraction.
-	extractions := map[config.ProjectID]*ExtractionState{}
-	for _, p := range cfg.Projects {
-		directory, _ := cfg.Root.ProjectTrace(p.ID)
-		extraction, err := s.projectExtraction(p.ID)
-		if err == nil {
-			extractions[p.ID] = extraction
-		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{Field: "extraction", Code: Internal, Message: "cannot read the knowledge-base extraction state; check the trace repository at " + directory})
-		}
-	}
 	for _, p := range cfg.Projects {
 		view := projectView(cfg.Root, p)
-		view.Repos[0].Extraction = extractions[p.ID]
-		view.Extraction = extractions[p.ID]
 		// A project without a trace, or removed since the snapshot, has no
 		// charter to report.
 		state, err := s.charterState(p.ID)
@@ -623,19 +610,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			result, api = s.removeProject(v)
 		}
-		if api != nil {
-			failWith(w, api)
-			return
-		}
-		respond(w, 200, result)
-		return
-	}
-	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/extract" {
-		var v ProjectExtractRequest
-		if !decode(w, r, &v) {
-			return
-		}
-		result, api := s.extractProject(r.Context(), v)
 		if api != nil {
 			failWith(w, api)
 			return

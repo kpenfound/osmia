@@ -47,7 +47,6 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		intakefixture.ConfigureProductionDesign(t, opts.Config.Root)
 		opts.Reconciliation.Now = clock.Now
 		opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
-		opts.Librarian = nil
 		if configuration.options != nil {
 			configuration.options(&opts)
 		}

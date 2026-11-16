@@ -12,7 +12,7 @@ nothing about hand-in or design depends on what it holds. Every agent's
 briefing carries the charter's Markdown with HTML comments removed, and lists
 its numbered items as rules that plans, reviews and the committee can cite.
 
-Each project is one repo with its own charter, KB, entities and settings. In a
+Each project is one repo with its own charter, entities and settings. In a
 cross-project workgroup each charter governs its member's slice, plan and units;
 the workgroup spec and contracts must satisfy all member charters. Unqualified
 `charter#n` means the member's own rule; `<project>/charter#n` names another

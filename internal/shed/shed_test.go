@@ -41,7 +41,7 @@ var (
 )
 
 func objection(round int, member string, k int) shed.Objection {
-	return shed.Objection{ID: shed.ObjectionID(round, member, k), Kind: shed.Fit, Part: "spec#1", Argument: "It works against the store.", Citations: []string{"kb/store.md"}}
+	return shed.Objection{ID: shed.ObjectionID(round, member, k), Kind: shed.Fit, Part: "spec#1", Argument: "It works against the store.", Citations: []string{"kb/entities.json#internal.store"}}
 }
 
 func record(round int, member string, pin shed.Pin, objections int, conceded ...string) shed.Record {
@@ -171,7 +171,7 @@ type fixture struct {
 	repo *trace.Repository
 }
 
-// setup creates a trace with a ruled charter, one knowledge-base file, an
+// setup creates a trace with a ruled charter, an
 // entity map and two revisions of the workstream's spec and plan.
 func setup(t *testing.T) fixture {
 	t.Helper()
@@ -197,7 +197,6 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{repo: repo}
-	f.documents(t, "", document("", "subsystem-store", "kb/store.md", "# Store\nState lives in files under the root.\n", 1))
 	if err := kb.Store(ctx, repo, kb.Map{Version: 1, Entities: []kb.Entity{{ID: "internal.store", Name: "Store", Aliases: []string{"the store"}, Paths: []string{"internal/store/**"}}}}, start, owner, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +299,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		{"unit that does not exist", input{"fit", "spec#1", "x", []string{"plan#upload"}}, "plan.json revision 1 has no unit upload exactly once"},
 		{"unit of a later revision only", input{"fit", "spec#1", "x", []string{"plan#restart"}}, "plan.json revision 1 has no unit restart exactly once"},
 		{"empty unit", input{"fit", "spec#1", "x", []string{"plan#"}}, "plan.json revision 1 has no unit  exactly once"},
-		{"knowledge-base file that does not exist", input{"fit", "spec#1", "x", []string{"kb/queue.md"}}, "the knowledge base has no file kb/queue.md"},
+		{"knowledge-base file", input{"fit", "spec#1", "x", []string{"kb/queue.md"}}, `citation "kb/queue.md" is not one of`},
 		{"knowledge-base path that escapes", input{"fit", "spec#1", "x", []string{"kb/../charter.md"}}, `citation "kb/../charter.md" is not one of`},
 		{"entity that does not exist", input{"fit", "spec#1", "x", []string{"kb/entities.json#internal.queue"}}, `the entity map has no entity "internal.queue"`},
 		{"empty entity", input{"fit", "spec#1", "x", []string{"kb/entities.json#"}}, `the entity map has no entity ""`},
@@ -308,7 +307,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		{"ruling", input{"fit", "spec#1", "x", []string{"ruling#ruling_1"}}, `citation "ruling#ruling_1" is not one of`},
 		{"free text", input{"fit", "spec#1", "x", []string{"the README"}}, `citation "the README" is not one of`},
 		{"one invalid citation among valid ones", input{"fit", "spec#1", "x", []string{"charter#1", "spec#9"}}, "has no acceptance criterion numbered 9"},
-		{"charter objection without a charter citation", input{"charter", "spec#1", "x", []string{"spec#1", "kb/store.md"}}, "a charter objection must cite the charter rule the part violates"},
+		{"charter objection without a charter citation", input{"charter", "spec#1", "x", []string{"spec#1", "spec#2"}}, "a charter objection must cite the charter rule the part violates"},
 		{"part that is free text", input{"fit", "the introduction", "x", []string{"charter#1"}}, `part "the introduction" is not one of spec#<n>`},
 		{"part naming a missing criterion", input{"fit", "spec#7", "x", []string{"charter#1"}}, `part "spec#7" names nothing in the pinned revision`},
 		{"part naming a missing unit", input{"size", "plan#upload", "x", []string{"charter#1"}}, `part "plan#upload" names nothing in the pinned revision`},
@@ -332,7 +331,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 	}
 	accepted := []input{
 		{"charter", "spec#2", "Progress has no test.", []string{"charter#1", "spec#2"}},
-		{"fit", "plan", "The plan ignores the store.", []string{"kb/store.md", "kb/entities.json#internal.store", "kb/entities.json#The Store"}},
+		{"fit", "plan", "The plan ignores the store.", []string{"spec#1", "kb/entities.json#internal.store", "kb/entities.json#The Store"}},
 		{"size", "plan#resume", "It addresses everything.", []string{"plan#resume"}},
 		{"acceptance", "plan#resume", "No reviewer could verify it.", []string{"spec#2"}},
 		{"fit", "spec", "It misses the design.", []string{"charter#2"}},

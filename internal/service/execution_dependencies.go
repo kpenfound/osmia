@@ -16,7 +16,6 @@ func (s *Service) execution() *execution.Controller {
 
 func (s *Service) executionWithChecks(checks, cloud ReviewChecks) *execution.Controller {
 	return execution.New(execution.Dependencies{
-		RefreshPendingStreams: refreshPendingStreams,
 		RefreshBudget: func(ctx context.Context, r *trace.Repository) error {
 			return (dailyBudget{s: s, repository: r}).Pass(ctx)
 		},
@@ -33,7 +32,7 @@ func (s *Service) executionWithChecks(checks, cloud ReviewChecks) *execution.Con
 			}
 			return cfg, out
 		},
-		RefreshPending: refreshPending, EdgeWaiting: edgeWaiting, ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
+		EdgeWaiting: edgeWaiting, ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
 		WorkgroupEdgePending: workgroupEdgePending, CarryBase: func(r *trace.Repository, w config.WorkstreamID, onto string) (string, bool, error) {
 			d, found, err := carryDrift(r, w, onto)
 			return d.Before, found, err

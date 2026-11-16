@@ -110,8 +110,6 @@ func TestPoolTimesFollowLimitChangesWhileSlotsStayHeld(t *testing.T) {
 		poolSpan(held, "mason", 2, at("10:00"), at("11:00")),
 		poolSpan(held, "mason", 2, at("10:00"), at("11:00")),
 		poolSpan(limit, "reviewer", 1, at("10:00"), at("11:00")),
-		poolSpan(limit, "librarian", 0, at("10:00"), at("11:00")),
-		poolSpan(held, "librarian", 0, at("10:10"), at("10:30")),
 		poolSpan(limit, "checks", 2, at("10:00"), at("11:00")),
 		poolSpan(held, "checks", 2, at("10:00"), at("10:20")),
 		poolSpan(held, "checks", 2, at("10:10"), at("10:40")),
@@ -124,7 +122,6 @@ func TestPoolTimesFollowLimitChangesWhileSlotsStayHeld(t *testing.T) {
 	want := map[string]PoolTime{
 		"architect": {Running: 50 * m, Busy: 16 * m, Idle: 34 * m},
 		"checks":    {Running: 60 * m, AtCapacity: 20 * m, Busy: 40 * m, Idle: 20 * m},
-		"librarian": {Running: 60 * m, Busy: 20 * m, Idle: 40 * m},
 		"mason":     {Running: 60 * m, AtCapacity: 30 * m, Busy: 60 * m},
 		"reviewer":  {Running: 60 * m, Idle: 60 * m},
 	}

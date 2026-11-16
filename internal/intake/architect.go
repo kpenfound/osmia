@@ -46,9 +46,9 @@ const (
 	DraftSubject = "draft"
 	// maxDrafts bounds the drafts the service asks the architect for on one
 	// workstream, and maxDraftAttempts the turns one draft may start after
-	// service stops interrupt earlier ones: the librarian's bounds.
-	MaxDrafts        = MaxExtractionAttempts
-	MaxDraftAttempts = MaxExtractionAttempts
+	// service stops interrupt earlier ones.
+	MaxDrafts        = MaxTurnAttempts
+	MaxDraftAttempts = MaxTurnAttempts
 )
 
 var (
@@ -442,6 +442,10 @@ func (d *Drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
 	n := in.Draft
+	// A draft starts from the entity map of the upstream head as it is now.
+	if d.S.Reseed != nil {
+		d.S.Reseed(ctx, d.Repository)
+	}
 	// Abandoning the workstream cancels the running turn, not the recording
 	// of what it left.
 	running, cancel := context.WithCancel(ctx)
@@ -760,7 +764,7 @@ const (
 // draftJudge returns the verdict the service would give what the attempt
 // delivered if its turn ended now, with every problem of an invalid draft.
 // It is the same judgment the service records once the attempt completes.
-type DraftJudge func(stream config.WorkstreamID, attempt string) (string, []string, error)
+type DraftJudge func(ctx context.Context, stream config.WorkstreamID, attempt string) (string, []string, error)
 
 // draftStatus is draft_write's result: the file it delivered and the
 // attempt's draft as it now stands.
@@ -780,7 +784,7 @@ var DraftNext = map[string]string{
 
 // judge is the draftJudge of a workstream's own draft: both files must be
 // delivered within the attempt and pass validation.
-func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+func (d *Drafter) Judge(_ context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
 	files, problems, err := d.Delivered(stream, attempt)
 	if err != nil || len(problems) > 0 {
 		return DraftInvalid, problems, err
@@ -804,7 +808,7 @@ func (d *Drafter) Judge(stream config.WorkstreamID, attempt string) (string, []s
 func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge DraftJudge) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json","decline.txt"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
-		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }
 			dec := json.NewDecoder(bytes.NewReader(raw))
 			dec.DisallowUnknownFields()
@@ -827,7 +831,7 @@ func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge Draft
 			if err := os.WriteFile(filepath.Join(directory, input.Path), []byte(input.Content), 0600); err != nil {
 				return nil, err
 			}
-			verdict, problems, err := judge(config.WorkstreamID(scope.Workstream), attempt)
+			verdict, problems, err := judge(ctx, config.WorkstreamID(scope.Workstream), attempt)
 			if err != nil {
 				return nil, err
 			}
@@ -1064,7 +1068,7 @@ func ArchitectGrant(tools ...string) coreadapter.Capabilities {
 }
 
 func ArchitectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its entity map, in the vocabulary the entity map gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
@@ -1082,7 +1086,7 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, an
 Your view holds:
 - %s: what the owner handed in, unchanged. It says what to build.
 - charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
-- context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
+- context.md: the project context bundle: the charter's rules, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
 Deliver two files with %s; only what you deliver is kept.
 

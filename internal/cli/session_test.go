@@ -17,11 +17,9 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-// fakeSessionEngine refuses every turn, so the librarian's extraction a
-// project registration starts automatically fails cleanly, the way it does
-// with no runner configured, instead of reaching a live model. Session
-// open, commit, check, push and end never start a turn, so nothing in these
-// tests depends on it beyond keeping project registration from panicking.
+// fakeSessionEngine refuses every turn, so no test reaches a live model.
+// Session open, commit, check, push and end never start a turn, so nothing in
+// these tests depends on it beyond giving the service an engine.
 type fakeSessionEngine struct{}
 
 func (fakeSessionEngine) Enforcer(coreadapter.ExecutionSettings) (agent.Enforcer, error) {

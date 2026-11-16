@@ -62,7 +62,7 @@ func TestPoolLimitSpansCoverEveryConfiguredPoolAtShutdown(t *testing.T) {
 	must(t, s.Close())
 
 	pools := poolSpans(exporter)
-	want := map[string]int{masonRole: cfg.Masons, reviewerRole: cfg.Reviewers, committeeRole: cfg.Committee, checksRole: cfg.Checks, architectRole: 0, librarianRole: 0}
+	want := map[string]int{masonRole: cfg.Masons, reviewerRole: cfg.Reviewers, committeeRole: cfg.Committee, checksRole: cfg.Checks, architectRole: 0}
 	if len(pools) != len(want) {
 		t.Fatalf("pool limit spans for %d pools, want %d: %+v", len(pools), len(want), pools)
 	}
@@ -370,8 +370,8 @@ func TestNextStartClosesTheIntervalsOfARunThatNeverShutDown(t *testing.T) {
 			interrupted = append(interrupted, s)
 		}
 	}
-	if len(interrupted) != 7 {
-		t.Fatalf("%d spans of the interrupted run, want its six pools and its uptime", len(interrupted))
+	if len(interrupted) != 6 {
+		t.Fatalf("%d spans of the interrupted run, want its five pools and its uptime", len(interrupted))
 	}
 	for _, s := range interrupted {
 		if !s.EndTime.Equal(last) {

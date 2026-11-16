@@ -41,9 +41,9 @@ func Unbounded(role string, used int, waiting []api.SlotWait) api.RoleCapacity {
 // CapacityWire checks the JSON a service serialized for its capacity view
 // (the "capacity" member of the chief's capacity tool result or of
 // /v1/status) and returns the decoded pool entries in order. The pools
-// bounded factory-wide carry a numeric limit; architect and librarian carry
-// none, say in words that they have no factory-wide limit, run at most one
-// turn per workstream and have no configuration setting, and no field of any
+// bounded factory-wide carry a numeric limit; the architect carries
+// none, says in words that it has no factory-wide limit, runs at most one
+// turn per workstream and has no configuration setting, and no field of any
 // entry is a limit of 0.
 func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 	t.Helper()
@@ -66,7 +66,7 @@ func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 		}
 		_, limited := r["limit"]
 		switch role {
-		case "architect", "librarian":
+		case "architect":
 			note, _ := r["note"].(string)
 			note = strings.ToLower(note)
 			if limited || r["unbounded"] != true || r["scope"] != "per_workstream" {
@@ -94,7 +94,7 @@ func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 			t.Fatalf("%s entry has no waiting list: %v", role, r)
 		}
 	}
-	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,librarian,checks"; got != want {
+	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,checks"; got != want {
 		t.Fatalf("capacity pool order %s, want %s", got, want)
 	}
 	return doc.Capacity.Roles

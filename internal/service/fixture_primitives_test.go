@@ -24,8 +24,6 @@ const demoThread = intakefixture.DemoThread
 
 const demoRole = fixturekit.DemoRole
 
-const demoSecret = intakefixture.DemoSecret
-
 var demoStart = fixturekit.DemoStart
 
 const demoTimeout = intakefixture.DemoTimeout
@@ -66,15 +64,11 @@ const stream = intakefixture.Stream
 
 var must = intakefixture.Must
 
-var traceQuery = intakefixture.TraceQuery
-
 var workstreamTraceDirectory = intakefixture.WorkstreamTraceDirectory
 
 var workstreamDocument = fixturekit.WorkstreamDocument
 
 var traceCommits = fixturekit.TraceCommits
-
-var traceFile = fixturekit.TraceFile
 
 type checkOutcome = fixturekit.CheckOutcome
 
@@ -89,8 +83,6 @@ func testOptions(cfg config.Options) Options {
 type blockingTurns = fixturekit.BlockingTurns
 
 type completedRunner = fixturekit.CompletedRunner
-
-type faults = intakefixture.Faults
 
 var amendmentOp = intakefixture.AmendmentOp
 

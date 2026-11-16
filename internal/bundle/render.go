@@ -93,23 +93,6 @@ func (b Bundle) Render() string {
 		}
 	}
 
-	line("## Knowledge base")
-	if len(b.Knowledge) == 0 && len(b.Missing) == 0 {
-		line("No knowledge-base prose exists.")
-	}
-	for _, m := range b.Missing {
-		line("- missing: no prose for entity %s; looked for %s", m.Entity, strings.Join(m.Looked, ", "))
-	}
-	for _, p := range b.Knowledge {
-		line("")
-		line("### %s (subsystem %s)", p.Source, p.Subsystem)
-		w.WriteString(p.Content)
-		if !strings.HasSuffix(p.Content, "\n") {
-			w.WriteString("\n")
-		}
-		line("### end of %s", p.Source)
-	}
-
 	line("")
 	line("## Entities")
 	if b.Entities.Revision == 0 {

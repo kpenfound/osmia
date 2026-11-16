@@ -211,7 +211,7 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	for _, id := range []config.ProjectID{project, elsewhere} {
 		repo, err := trace.Create(ctx, cfg.Root, projectOf(cfg, id), p.clock.Now(), owner)
 		must(t, err)
-		must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), librarianActor, "planted"))
+		must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
 		streams := []config.WorkstreamID{a, b, c, paused, delivered}
 		if id == elsewhere {
 			streams = []config.WorkstreamID{a}
@@ -326,7 +326,7 @@ func TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive(t *testing.T) {
 	planted := config.Project{ID: project, Clone: t.TempDir()}
 	repo, err := trace.Create(ctx, root, planted, p.clock.Now(), owner)
 	must(t, err)
-	must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), librarianActor, "planted"))
+	must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
 	for _, stream := range []config.WorkstreamID{a, b} {
 		must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
 		p.plant(repo, stream, 1, "internal.trace")

@@ -34,7 +34,13 @@ func Seed(clone string) (Map, error) {
 		return Map{}, err
 	}
 	defer root.Close()
-	fsys := root.FS()
+	return SeedFS(root.FS())
+}
+
+// SeedFS builds the entity map of a tree from its CODEOWNERS file and its
+// directory structure. It returns the same map for the same tree, whether
+// fsys reads a checkout or the objects of a commit.
+func SeedFS(fsys fs.FS) (Map, error) {
 	rules, err := codeowners(fsys)
 	if err != nil {
 		return Map{}, err

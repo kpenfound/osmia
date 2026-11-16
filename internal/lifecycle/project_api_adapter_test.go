@@ -9,8 +9,6 @@ type pendingProject = service.TestPendingProject
 
 var conversationEntries = service.TestConversationEntries
 
-const ExtractAction = service.ExtractAction
-
 func (s *Service) dailyBudgetStatus() *api.DailyBudgetStatus {
 	return service.InspectForTest(s.core()).DailyBudget()
 }

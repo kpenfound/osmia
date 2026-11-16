@@ -70,7 +70,6 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 		{Role: reviewerRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
-		fixturekit.Unbounded(librarianRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(s.CheckSlots().Limit), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
@@ -146,7 +145,6 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 		{Role: reviewerRole, Limit: fixturekit.Limit(s.cfg.Capacity.Reviewers), Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: fixturekit.Limit(s.cfg.Capacity.Committee), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
-		fixturekit.Unbounded(librarianRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(s.cfg.Capacity.Checks), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {

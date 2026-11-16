@@ -15,5 +15,3 @@ func runChecks(t *testing.T, s *Service, repository *trace.Repository, stream co
 		return attemptOperation(t, s, repository, stream, op, r)
 	})
 }
-
-var unitState = intakefixture.UnitState

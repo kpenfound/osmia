@@ -167,8 +167,6 @@ type objectionDecisionRequest = intake.ObjectionDecisionRequest
 
 var serviceActor = intake.ServiceActor
 
-
-
 const reviewerRole = intakefixture.ReviewerRole
 
 var reviewerAgent = intake.ReviewerAgent

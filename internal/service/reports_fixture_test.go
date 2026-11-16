@@ -17,8 +17,6 @@ func newMasonController(s *Service, repository *trace.Repository) *masons {
 	return &masons{s: s, cfg: s.cfg, repository: repository}
 }
 
-var done = intakefixture.Done
-
 func reportDone(outcome string) func(context.Context, agent.Request, *mcp.ClientSession) error {
 	return intakefixture.ReportDone(outcome)
 }

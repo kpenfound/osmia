@@ -6,13 +6,13 @@ approved. Follow the steps in order.
 ## Supported features
 
 - One-repo projects with their own charter and clone,
-  settings, knowledge base and entity map.
+  settings and entity map.
 - Feature workgroups with one shared chief of staff, optional project design
   chat, cross-repo contracts and merge dependencies.
 - Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
   builds each workstream's feature branch in them and pushes it to your repository or fork
   itself.
-- File-based context: the charter, the knowledge base and your rulings reach
+- File-based context: the charter, the entity map and your rulings reach
   agents as files.
 - The web page on your tailnet, beside the command line on the local socket.
 
@@ -75,7 +75,7 @@ webhook = "https://ntfy.sh/your-private-topic"
 - **Profiles and roles.** A profile names an `agent` (`claude`, `codex` or
   `opencode`) and a `model`, and optionally `effort`, `fallback`, `timeout` and
   `max_turns`. Every role (`architect`, `committee`, `chief_of_staff`,
-  `foreman`, `librarian`, `mason`, `reviewer`) uses the profile named `default`
+  `foreman`, `mason`, `reviewer`) uses the profile named `default`
   unless you bind it in a `[roles.<role>]` table with `profile = "<name>"`,
   and, if you want confinement, `sandbox`. Keys and defaults are in the
   [configuration reference](configuration.md#top-level-configtoml).
@@ -187,9 +187,9 @@ branch; it does not push to that base branch or merge the request.
 
 The command prints the project ID (`p_…`). The service creates the project's
 trace, `<root>/projects/<project-id>/trace.db`, outside your clone, seeds
-a map of the repository's subsystems, and asks the librarian for the first
-knowledge-base extraction. `osmia status` shows the extraction
-`succeeded` when it has finished. Registration never writes to your clone; see
+an entity map of the repository's directories and CODEOWNERS as its first
+revision, and starts no agent turn. The service re-seeds that map by itself when
+a draft starts and before a plan is sealed. Registration never writes to your clone; see
 [project registration](configuration.md#project-registration).
 
 The project can take work right away. Its charter is optional: guidance for
@@ -227,7 +227,7 @@ Register another repo as its own project:
 osmia project add other --upstream owner/other --clone ~/src/other
 ```
 
-Give that project its own charter if it needs one. Projects have independent configuration and KBs. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
+Give that project its own charter if it needs one. Projects have independent configuration and entity maps. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
 
 ## 5. Start a workgroup and decide
 

@@ -363,7 +363,7 @@ func TestMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
 			source := t.TempDir()
 			must(t, os.WriteFile(filepath.Join(source, "README"), []byte("widgets\n"), 0600))
 			views := isolation.Views{Directory: t.TempDir()}
-			for role, wantRepository := range map[string]bool{"mason": true, "reviewer": false, "committee": false, "architect": false, "librarian": false} {
+			for role, wantRepository := range map[string]bool{"mason": true, "reviewer": false, "committee": false, "architect": false} {
 				_, settings, err := cfg.Execution(role, "default")
 				must(t, err)
 				if settings.RunsDagger() != wantRepository {

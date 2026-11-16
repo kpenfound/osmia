@@ -20,16 +20,6 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 	}, key, graph, backend, base)
 }
 
-func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
-	t.Helper()
-	return intakefixture.SeedBuilding(t, f.clone, key, graph, func() (string, error) {
-		b, err := f.s.newWorkspaces(context.Background(), f.s.about(f.repository()))
-		return b.Backend, err
-	}, func(k, g, b, base string) config.WorkstreamID {
-		return recordBuild(t, f, f.repository(), k, g, b, base)
-	}, f.s.refreshRuntime)
-}
-
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
 	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)

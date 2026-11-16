@@ -114,8 +114,6 @@ const RebaseAction = execution.RebaseAction
 
 var rebaseDocument = execution.RebaseDocument
 
-var decodeRebase = execution.DecodeRebase
-
 const doneTool = execution.DoneTool
 
 const masonDone = execution.MasonDone

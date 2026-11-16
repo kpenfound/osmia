@@ -68,12 +68,8 @@ var _ coreadapter.Reconciler = (*foreman)(nil)
 
 // Pass keeps each workstream's unfinished units on its feature branch and
 // asks to land its first approved unit once its own rebases have settled.
-// A pending landing, drift or knowledge refresh holds only its workstream.
+// A pending landing or drift holds only its workstream.
 func (f *foreman) Pass(ctx context.Context) error {
-	pending, err := f.s.RefreshPendingStreams(f.repository)
-	if err != nil {
-		return err
-	}
 	streams, err := nonSessionWorkstreams(f.repository)
 	if err != nil {
 		return err
@@ -139,7 +135,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("workstream %s landing: %w", stream, err)
 		}
-		if found && !landing[stream] && !pending[stream] && !drifting[stream] && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
+		if found && !landing[stream] && !drifting[stream] && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			candidates = append(candidates, b)
 		}
 	}

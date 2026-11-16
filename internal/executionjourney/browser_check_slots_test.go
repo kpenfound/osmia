@@ -133,7 +133,7 @@ func TestBrowserCheckSlotsAcrossProjectsDrainWithSmartFinalReview(t *testing.T) 
 		soon(t, "check capacity from the status API", func() bool {
 			status, err := f.c.Statuses(ctx)
 			must(t, err)
-			if status.Capacity == nil || len(status.Capacity.Roles) != 6 {
+			if status.Capacity == nil || len(status.Capacity.Roles) != 5 {
 				return false
 			}
 			got := roleCapacity(t, status.Capacity, checksRole)

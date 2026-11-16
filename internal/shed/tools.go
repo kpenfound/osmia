@@ -33,7 +33,7 @@ const (
 )
 
 // CitationForms lists what an objection may cite, for prompts and refusals.
-const CitationForms = "charter#<n> or <project>/charter#<n> (a member charter rule; project is its p_ ID), spec#<n> (an acceptance criterion of the spec), plan#<unit> (a unit of the plan), kb/<subsystem>.md (a knowledge-base file) or " + EntityCitation + "<entity> (an entity of the entity map)"
+const CitationForms = "charter#<n> or <project>/charter#<n> (a member charter rule; project is its p_ ID), spec#<n> (an acceptance criterion of the spec), plan#<unit> (a unit of the plan), or " + EntityCitation + "<entity> (an entity of the entity map)"
 
 // PartForms lists the parts an objection may concern.
 const PartForms = "spec#<n> (an acceptance criterion), plan#<unit> (a unit), spec (the spec as a whole) or plan (the plan as a whole)"
@@ -220,10 +220,9 @@ func (t Turn) pinned(reference string) error {
 }
 
 // Resolve checks that citation names something that exists: a criterion or a
-// unit of the pinned spec or plan, a rule of the latest charter, a
-// knowledge-base file or an entity of the recorded entity map. It returns
-// *Invalid for a citation that names nothing, and any other error for a trace
-// that cannot be read.
+// unit of the pinned spec or plan, a rule of the latest charter or an entity
+// of the recorded entity map. It returns *Invalid for a citation that names
+// nothing, and any other error for a trace that cannot be read.
 func (t Turn) Resolve(ctx context.Context, citation string) error {
 	_, criterion := plan.ParseCitation(citation)
 	switch {
@@ -242,7 +241,7 @@ func (t Turn) Resolve(ctx context.Context, citation string) error {
 			return invalid("citation %q does not resolve: the entity map has no entity %q", citation, name)
 		}
 		return nil
-	case questions.IsCharter(citation) || questions.IsProse(citation):
+	case questions.IsCharter(citation):
 		err := questions.Resolve(ctx, t.Repository, t.Stream, citation)
 		var unresolved *questions.Unresolved
 		if errors.As(err, &unresolved) {

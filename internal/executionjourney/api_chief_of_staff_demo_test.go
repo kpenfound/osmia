@@ -10,7 +10,6 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	envelope "github.com/kpenfound/osmia/internal/envelope"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
-	kb "github.com/kpenfound/osmia/internal/kb"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
@@ -71,9 +70,9 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// An onboarded project: added through the API, its knowledge base written
-	// by a fake librarian and its charter written by the owner.
-	lf := newLibrarianFixture(t)
+	// An onboarded project: added through the API, with its charter written by
+	// the owner.
+	lf := newCloneFixture(t)
 	opts, engine, sessions := lf.opts, lf.engine, lf.sessions
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
@@ -82,9 +81,6 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	// Every backend session can be resumed, so a thread's next turn names the
 	// session of its previous one.
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	seed, err := kb.Seed(lf.clone)
-	must(t, err)
-	lf.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n\nState lives in files.\n", "output/kb/entities.json": entitiesWith(t, seed, "history")}, nil)
 
 	// The clock stands still, so an event window closes only when the test
 	// advances it.
@@ -138,9 +134,6 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	added, err := c.AddProject(ctx, request(lf.clone))
 	must(t, err)
 	id := added.Project.ID
-	if x := awaitExtraction(t, c); x.State != "succeeded" {
-		t.Fatalf("extraction: %+v", x)
-	}
 	writeCharter(t, c, added.Project.ID, chiefDemoCharter)
 	onboarded, err := c.Configuration(ctx)
 	must(t, err)
@@ -539,7 +532,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if th := threadOf(repo, "agent_mason2"); th.Parked() || len(th.Turns) != 1 || th.Turns[0].Status() != "idle" {
 		t.Fatalf("second mason: %+v", th.Turns)
 	}
-	if got := runs(); !reflect.DeepEqual(got, map[string]int{"extract-1-1": 1, "message": 1, "build": 1, "build2": 1, "review": 1}) {
+	if got := runs(); !reflect.DeepEqual(got, map[string]int{"message": 1, "build": 1, "build2": 1, "review": 1}) {
 		t.Fatalf("runs after asking: %v", got)
 	}
 
@@ -700,7 +693,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 
 	// 6. Only the chief of staff received event turns, and the trace holds
 	// the question, the choice, the ruling and what was sent back.
-	if got := runs(); !reflect.DeepEqual(got, map[string]int{"extract-1-1": 1, "message": 3, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
+	if got := runs(); !reflect.DeepEqual(got, map[string]int{"message": 3, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
 	repo, err = trace.Open(cfg.Root, cfg.Project)

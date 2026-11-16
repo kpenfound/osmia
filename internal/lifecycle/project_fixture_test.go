@@ -11,7 +11,6 @@ import (
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	testing "testing"
-	time "time"
 )
 
 func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
@@ -46,44 +45,6 @@ func mutation(t *testing.T, c *Client, method, kind string, input any) {
 
 func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 	return service.InspectForTest(s.core()).Capacity(list)
-}
-
-// awaitExtraction polls status until the latest extraction is terminal.
-func awaitExtraction(t *testing.T, c *Client) ExtractionState {
-	t.Helper()
-	return intakefixture.AwaitExtraction(t, c.Configuration)
-}
-
-// awaitExtractionAcknowledged polls the librarian workstream until the latest
-// extraction operation is acknowledged. The reconcile controller records the
-// acknowledgement as a commit after the one carrying the result, so a terminal
-// extraction state is not yet the operation's last commit.
-func awaitExtractionAcknowledged(t *testing.T, s *Service) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		if s.sole() != nil {
-			ops, err := s.sole().repository.Operations(librarianWorkstream(s.sole().repository.Project()))
-			must(t, err)
-			extractions, acknowledged := 0, 0
-			for _, o := range ops {
-				if o.Operation.Action != ExtractAction {
-					continue
-				}
-				extractions++
-				if o.Acknowledged {
-					acknowledged++
-				}
-			}
-			if extractions > 0 && extractions == acknowledged {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("extraction was not acknowledged")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 func budgetStatus(t *testing.T, s *Service) DailyBudgetStatus {

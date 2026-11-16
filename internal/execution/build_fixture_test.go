@@ -45,14 +45,10 @@ func newBuildFixture(t *testing.T, key string) *buildFixture {
 	fixturekit.RecordCharter(t, u.repository, intakefixture.ShedCharter)
 	f := &buildFixture{unitsFixture: u, clock: &fixturekit.DemoClock{At: demoStart}}
 	f.s = New(Dependencies{
-		RefreshPendingStreams: func(*trace.Repository) (map[config.WorkstreamID]bool, error) {
-			return map[config.WorkstreamID]bool{}, nil
-		},
 		RefreshBudget: func(context.Context, *trace.Repository) error { return nil },
 		AcquireCheckSlot: func(context.Context, config.ProjectID, config.WorkstreamID, string) (func(), error) {
 			return func() {}, nil
 		},
-		RefreshPending:       func(*trace.Repository) (bool, error) { return false, nil },
 		EdgeWaiting:          func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
 		ChangeRepositoryHeld: func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error) { return false, nil },
 		WorkgroupEdgePending: func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },

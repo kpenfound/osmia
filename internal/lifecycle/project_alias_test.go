@@ -12,8 +12,6 @@ import (
 
 var projectContext = service.TestProjectContext
 
-type ExtractionState = api.ExtractionState
-
 const ProjectActive = api.ProjectActive
 
 type PriorityRequest = api.PriorityRequest

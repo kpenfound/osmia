@@ -192,11 +192,11 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	}
 	slices.Sort(paths)
 	for mine, other := range map[config.WorkstreamID]config.WorkstreamID{lo: hi, hi: lo} {
-		message := fmt.Sprintf("Workstream %s of this project builds in subsystem internal, internal.audit, internal.upload: both sealed footprints cover internal.audit, internal.trace, internal.upload (seal 1 of this workstream, seal 1 of that one). Its changes may conflict with this workstream's before both pull requests are open. This is an advisory and blocks neither workstream; the owner can pause or reprioritise either.", other)
+		message := fmt.Sprintf("Workstream %s of this project builds in subsystem internal: both sealed footprints cover internal.audit, internal.trace, internal.upload (seal 1 of this workstream, seal 1 of that one). Its changes may conflict with this workstream's before both pull requests are open. This is an advisory and blocks neither workstream; the owner can pause or reprioritise either.", other)
 		f.awaitEventTurns(t, mine, message)
 		st, err := f.c.Status(ctx, mine)
 		must(t, err)
-		want := []OverlapAdvisory{{Workstream: other, Seal: 1, OtherSeal: 1, Subsystems: []string{"internal", "internal.audit", "internal.upload"}, Entities: []string{"internal.audit", "internal.trace", "internal.upload"}, Paths: paths, Message: message}}
+		want := []OverlapAdvisory{{Workstream: other, Seal: 1, OtherSeal: 1, Subsystems: []string{"internal"}, Entities: []string{"internal.audit", "internal.trace", "internal.upload"}, Paths: paths, Message: message}}
 		if st.State == nil || *st.State != BuildingState || !reflect.DeepEqual(st.Advisories, want) {
 			t.Fatalf("status of %s: state %v, advisories %+v, want %+v", mine, st.State, st.Advisories, want)
 		}

@@ -5,5 +5,3 @@ import (
 )
 
 const chiefRole = intakefixture.ChiefRole
-
-type chief = intakefixture.Chief

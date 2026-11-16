@@ -118,8 +118,6 @@ var TestMasonGrant = masonGrant
 var TestReviewerGrant = reviewerGrant
 var TestChiefContext = chiefContext
 
-func RefreshKeyForTest(in refreshInput) string { return in.key() }
-
 type TestNotifyLedger = notifyLedger
 
 const TestNotificationPending = notificationPending

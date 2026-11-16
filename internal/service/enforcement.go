@@ -111,7 +111,7 @@ var unitMasonGrant = execution.UnitMasonGrant
 // reads instead of a unit's.
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, reviewtools.DiffToolName}}
 
-// Enforce returns opts with Librarian, Architect, Committee and Threads
+// Enforce returns opts with Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
 // staff, mason and reviewer; a turn of any other role fails with a recorded
 // reason. A chief-of-staff turn reads a view of its workstream's documents,
@@ -142,7 +142,6 @@ func Enforce(opts Options, e Enforcement) Options {
 		opts.cloudChecks = e.CloudChecks
 	}
 	opts.skills = e.Skills
-	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Committee = &Committee{Engine: e.Engine, Hosts: e.Hosts}
 	clock := opts.Reconciliation.Now

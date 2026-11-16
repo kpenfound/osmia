@@ -31,7 +31,7 @@ var ErrLocked = errors.New("trace repository already open")
 //
 // A Repository value is one trace directory and its database: either the
 // project's own trace, holding only durable project knowledge (the charter,
-// the knowledge base, notes and lasting project decisions), or one
+// the entity map and lasting project decisions), or one
 // workstream's dedicated trace, holding that workstream's complete trace.
 // stream is empty for the project's own instance and set to the workstream
 // a workstream instance is dedicated to. The project instance alone opens

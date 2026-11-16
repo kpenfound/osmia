@@ -12,22 +12,9 @@ import (
 	testing "testing"
 )
 
-func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons) {
-	t.Helper()
-	f, masons := newMasonFixture(t, 1, drafted)
-	chief := &chief{P: &faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
-	intakefixture.ScriptLanding(f.engine, masons, masonTurnID, chief.Turn)
-	return f, masons
-}
-
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	return intakefixture.LandOperations(t, repository, stream, LandAction)
-}
-
-func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit string) {
-	t.Helper()
-	intakefixture.AwaitMerged(t, f.sharedTurns(), stream, unit, func(t *testing.T) []trace.OperationRecord { return landOperations(t, f.repository(), stream) })
 }
 
 func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, unit, criterion string) {
@@ -36,11 +23,6 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
 	}, reviewTurnID, reviewDocument, r.one, UnitApproved)
-}
-
-func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
-	t.Helper()
-	return newApprovedFixtureOn(t, key, config.WorkspacesGit)
 }
 
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {

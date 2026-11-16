@@ -2,160 +2,37 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The project onboarding demonstration: a project is added from a local fixture
-// clone, a scripted fake librarian writes its knowledge base across a service
-// restart, the owner writes the charter, and the project's local context
-// resolves without any network. See docs/onboarding-demonstration.md.
-
-// onboardingEntities is the entity map the fake librarian writes. Entity IDs
-// name the kb/<subsystem>.md file holding their prose.
-const onboardingEntities = `{
-  "version": 1,
-  "entities": [
-    {"id": "demo", "name": "Demo command", "aliases": ["cli"], "paths": ["cmd/demo"], "owners": ["@tools"], "part_of": []},
-    {"id": "internal", "name": "Internal packages", "aliases": [], "paths": ["internal"], "owners": ["@core"], "part_of": []},
-    {"id": "service", "name": "Service", "aliases": ["daemon"], "paths": ["internal/service"], "owners": ["@core"], "part_of": ["internal"]},
-    {"id": "trace", "name": "Trace", "aliases": ["history"], "paths": ["internal/trace"], "owners": ["@core", "@storage"], "part_of": ["internal"]}
-  ]
-}
-`
-
-var onboardingProse = map[string]string{
-	"kb/trace.md":   "# trace\n\nThe trace repository is append-only. Run the trace tests after touching it.\n",
-	"kb/service.md": "# service\n\nOne process owns the socket.\n",
-	"kb/demo.md":    "# demo\n\nThe command-line entry point.\n",
-}
+// clone, registration records the entity map seeded from its tracked files as
+// the only knowledge, the owner writes the charter, and the project's local
+// context resolves without any network.
 
 const onboardingCharter = `# Charter
 
 1. Keep the trace append-only.
 2. Every change ships with a test.
 `
-
-// fakeLibrarian is the execution engine the librarian's turns run in, behind
-// core's fake enforcer. Its
-// first turn waits until the service stops it; later turns write the scripted
-// knowledge base through the turn's file tools.
-type fakeLibrarian struct {
-	mu      sync.Mutex
-	clients map[string]*mcp.ClientSession
-	runs    []string
-	entered chan struct{}
-}
-
-func (f *fakeLibrarian) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
-	return &enforcertest.Enforcer{Sandbox: s.Mode, Image: s.Image, Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
-		return f.Run(ctx, turn.Request)
-	}}, nil
-}
-
-func (f *fakeLibrarian) Verify(req agent.Request) (*agent.Turn, error) {
-	return (&agent.Runner{}).Verify(req)
-}
-
-func (f *fakeLibrarian) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
-	if _, err := f.Verify(req); err != nil {
-		return nil, err
-	}
-	f.mu.Lock()
-	f.runs = append(f.runs, req.Name)
-	first := len(f.runs) == 1
-	tools := f.clients[req.Env["OSMIA_MCP_TOKEN"]]
-	f.mu.Unlock()
-	if first {
-		close(f.entered)
-	}
-	if tools == nil {
-		return nil, fmt.Errorf("turn %s has no tools", req.Name)
-	}
-	if first {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	files := map[string]string{"output/kb/entities.json": onboardingEntities}
-	for path, content := range onboardingProse {
-		files["output/"+path] = content
-	}
-	for path, content := range files {
-		result, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: "file_write", Arguments: map[string]any{"path": path, "content": content}})
-		if err == nil && result.IsError {
-			err = errors.New("tool error")
-		}
-		if err != nil {
-			return nil, fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Knowledge base written", SessionDir: req.SessionDir, NumTurns: 1}, nil
-}
-
-func (f *fakeLibrarian) ranTurns() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.runs)
-}
-
-// fakeMCP serves a turn's scoped MCP server in memory and hands the client
-// side to the fake engine under the turn's token.
-type fakeMCP struct {
-	f *fakeLibrarian
-}
-
-type releaseFunc func(context.Context) error
-
-func (r releaseFunc) Release(ctx context.Context) error { return r(ctx) }
-
-func (m *fakeMCP) Start(ctx context.Context, server *mcp.Server) (coreadapter.Endpoint, coreadapter.Lease, error) {
-	serverSide, clientSide := mcp.NewInMemoryTransports()
-	served, err := server.Connect(ctx, serverSide, nil)
-	if err != nil {
-		return coreadapter.Endpoint{}, nil, err
-	}
-	client, err := mcp.NewClient(&mcp.Implementation{Name: "fake-librarian", Version: "1"}, nil).Connect(ctx, clientSide, nil)
-	if err != nil {
-		served.Close()
-		return coreadapter.Endpoint{}, nil, err
-	}
-	m.f.mu.Lock()
-	token := rand.Text()
-	m.f.clients[token] = client
-	m.f.mu.Unlock()
-	release := releaseFunc(func(context.Context) error {
-		m.f.mu.Lock()
-		delete(m.f.clients, token)
-		m.f.mu.Unlock()
-		return errors.Join(client.Close(), served.Wait())
-	})
-	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, release, nil
-}
 
 // onboardingGit runs git with no user or system configuration.
 func onboardingGit(t *testing.T, home string, args ...string) string {
@@ -215,10 +92,6 @@ func TestProjectOnboarding(t *testing.T) {
 	// and a few subsystems.
 	opts, clone := emptyFixture(t)
 	home := filepath.Dir(clone)
-	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString("[roles.librarian]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
-	must(t, errors.Join(err, configFile.Close()))
 	for path, content := range map[string]string{
 		"CODEOWNERS":                "* @core\n/cmd/ @tools\n/internal/trace/ @core @storage\n",
 		"README.md":                 "# demo\n",
@@ -232,8 +105,6 @@ func TestProjectOnboarding(t *testing.T) {
 	onboardingGit(t, home, "-C", clone, "add", ".")
 	onboardingGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	cloneBefore := treeHash(t, clone)
-	librarian := &fakeLibrarian{clients: map[string]*mcp.ClientSession{}, entered: make(chan struct{})}
-	opts.Librarian = &service.Librarian{Engine: librarian, Hosts: &coreadapter.MCPHost{Transport: &fakeMCP{f: librarian}}}
 	opts.ShutdownTimeout = 100 * time.Millisecond
 	root := opts.Config.Root
 	s, err := service.Start(ctx, opts)
@@ -260,71 +131,35 @@ func TestProjectOnboarding(t *testing.T) {
 	}
 	db := trace.TraceDatabase(traceDir)
 
-	// 5. The service stops while the librarian's first turn runs, and the
-	// extraction finishes after a restart.
-	select {
-	case <-librarian.entered:
-	case <-time.After(5 * time.Minute):
-		t.Fatal("extraction did not start")
-	}
-	if x := onboardingStatus(t, root).Project.Extraction; x == nil || x.Extraction != 1 || x.State != "running" {
-		t.Fatalf("extraction before the restart: %+v", x)
-	}
-	must(t, s.Close())
-	stopped = true
-	s, err = service.Start(ctx, opts)
+	// 3. Registration recorded the seeded entity map as the owner's first
+	// revision and nothing else: no knowledge prose and no further map.
+	seeded, err := kb.Seed(clone)
 	must(t, err)
-	stopped = false
-	x := awaitExtraction(t, root)
-	if x.Extraction != 1 || x.State != "succeeded" {
-		t.Fatalf("extraction after the restart: %+v", x)
-	}
-	if runs := librarian.ranTurns(); len(runs) != 2 || runs[0] == runs[1] {
-		t.Fatalf("librarian turns %v", runs)
-	}
-	for path, want := range onboardingProse {
-		if got := latestDocument(t, db, "documents.jsonl", path).Content; got != want {
-			t.Fatalf("%s: %q", path, got)
-		}
-	}
-	want, err := kb.Parse([]byte(onboardingEntities))
+	want, err := kb.Encode(seeded)
 	must(t, err)
-	if got, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content)); err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("entities: %+v %v", got, err)
-	}
-	// One revision per produced file, plus the seed: nothing was recorded
-	// twice across the restart.
 	docs := traceDocuments(t, db, "documents.jsonl")
-	counts := map[string]int{}
-	for doc, revisions := range docs {
-		counts[doc] = len(revisions)
+	if entities := docs["kb-entities"]; len(entities) != 1 || entities[0].Revision != 1 || entities[0].Content != string(want) || entities[0].Actor != (trace.Actor{Kind: "owner", ID: "local"}) {
+		t.Fatalf("entity map revisions: %+v", entities)
 	}
-	if want := map[string]int{"charter": 1, "kb-entities": 2, "subsystem-trace": 1, "subsystem-service": 1, "subsystem-demo": 1}; !reflect.DeepEqual(counts, want) {
-		t.Fatalf("document revisions %v, want %v", counts, want)
-	}
-	// Registration records the seed as the owner; the librarian's revisions
-	// follow it.
-	if seed := docs["kb-entities"][0]; seed.Actor != (trace.Actor{Kind: "owner", ID: "local"}) {
-		t.Fatalf("seed revision: %+v", seed.Header)
-	}
-	for doc, revisions := range docs {
-		last := revisions[len(revisions)-1]
-		if doc != "charter" && (last.Actor != (trace.Actor{Kind: "agent", ID: "agent_librarian"}) || last.Cause == "") {
-			t.Fatalf("%s is not a librarian revision: %+v", doc, last.Header)
+	for doc := range docs {
+		if doc != "charter" && doc != "kb-entities" {
+			t.Fatalf("registration recorded %s", doc)
 		}
+	}
+	if status := successful(t, root, "status"); strings.Contains(status, "Knowledge base") {
+		t.Fatalf("status reports a knowledge base:\n%s", status)
 	}
 	if treeHash(t, clone) != cloneBefore {
 		t.Fatal("onboarding changed the clone")
 	}
 
-	// 3. The owner writes rules with osmia edit; status shows them and the
-	// context file-based.
+	// 4. The owner writes rules with osmia edit; status shows them and the
+	// context is file-based.
 	setCharter(t, root, id, onboardingCharter)
 	status := successful(t, root, "status")
 	for _, want := range []string{
 		"Charter: 2 rules, revision 2; edit it with osmia edit charter " + string(id) + "\n",
 		"Context: " + string(id) + " context_mode=file",
-		"Knowledge base: extraction 1 succeeded",
 	} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("status lacks %q:\n%s", want, status)
@@ -334,19 +169,20 @@ func TestProjectOnboarding(t *testing.T) {
 	if edit := charters[len(charters)-1]; len(charters) != 2 || edit.Revision != 2 || edit.Actor != (trace.Actor{Kind: "owner", ID: "local"}) || edit.Cause != "owner-edit" || edit.Content != onboardingCharter {
 		t.Fatalf("charter revisions: %+v", charters)
 	}
-	if commits := commitCount(t, db); commits < 3 {
+	if commits := commitCount(t, db); commits < 2 {
 		t.Fatalf("trace history: %d commits", commits)
 	}
 
-	// 4. Resolution reads the local entity map alone.
+	// 5. Resolution reads the local entity map alone.
 	local, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content))
 	must(t, err)
-	fp := local.ResolveEntities([]string{"history", "internal"})
-	if !slices.Equal(fp.Entities, []string{"internal", "service", "trace"}) || !slices.Equal(fp.Paths, []string{"internal", "internal/service", "internal/trace"}) || len(fp.Unresolved) != 0 {
+	fp := local.ResolveEntities([]string{"trace", "internal"})
+	entities := slices.Sorted(slices.Values(fp.Entities))
+	if !slices.Equal(entities, []string{"internal", "internal.service", "internal.trace"}) || !slices.Equal(slices.Sorted(slices.Values(fp.Paths)), []string{"internal", "internal/service", "internal/trace"}) || len(fp.Unresolved) != 0 {
 		t.Fatalf("entities to paths: %+v", fp)
 	}
 	loc := local.ResolvePaths([]string{"internal/trace/git.go", "cmd/demo/main.go", "docs/unknown.md"})
-	if want := []kb.PathMatch{{Path: "internal/trace/git.go", Entities: []string{"trace"}}, {Path: "cmd/demo/main.go", Entities: []string{"demo"}}}; !reflect.DeepEqual(loc.Matches, want) || !slices.Equal(loc.Unresolved, []string{"docs/unknown.md"}) {
+	if want := []kb.PathMatch{{Path: "internal/trace/git.go", Entities: []string{"internal", "internal.trace"}}, {Path: "cmd/demo/main.go", Entities: []string{"cmd", "cmd.demo"}}}; len(loc.Matches) != len(want) || !slices.Equal(loc.Unresolved, []string{"docs/unknown.md"}) {
 		t.Fatalf("paths to entities: %+v", loc)
 	}
 	// The service's file provider assembles a footprint's bundle.
@@ -354,25 +190,19 @@ func TestProjectOnboarding(t *testing.T) {
 	if provider.Mode(id) != bundle.ModeFile {
 		t.Fatalf("mode %s", provider.Mode(id))
 	}
-	b, err := provider.Assemble(ctx, id, bundle.Scope{Entities: []string{"history"}})
+	b, err := provider.Assemble(ctx, id, bundle.Scope{Entities: []string{"trace"}})
 	must(t, err)
-	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 2 || len(b.Decisions) != 0 || b.Entities.Revision != 2 {
+	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 2 || len(b.Decisions) != 0 || b.Entities.Revision != 1 {
 		t.Fatalf("bundle: %+v", b)
 	}
-	if len(b.Knowledge) != 1 || b.Knowledge[0].Subsystem != "trace" || b.Knowledge[0].Content != onboardingProse["kb/trace.md"] || len(b.Missing) != 0 {
-		t.Fatalf("bundle prose: %+v %+v", b.Knowledge, b.Missing)
-	}
-	if len(b.Entities.Entities) != 1 || b.Entities.Entities[0].ID != "trace" {
+	if len(b.Entities.Entities) != 1 || b.Entities.Entities[0].ID != "internal.trace" {
 		t.Fatalf("bundle entities: %+v", b.Entities)
 	}
 	rendered := b.Render()
-	for _, want := range []string{"context mode: file", "- charter#1 [Charter]: Keep the trace append-only.", "- charter#2 [Charter]: Every change ships with a test.", "No rulings are recorded.", "### kb/trace.md (subsystem trace)", "The trace repository is append-only."} {
+	for _, want := range []string{"context mode: file", "- charter#1 [Charter]: Keep the trace append-only.", "- charter#2 [Charter]: Every change ships with a test.", "No rulings are recorded."} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered bundle lacks %q:\n%s", want, rendered)
 		}
-	}
-	if strings.Contains(rendered, "One process owns the socket.") {
-		t.Fatalf("bundle carries prose outside the footprint:\n%s", rendered)
 	}
 
 	// 6. Removing the project keeps the trace and the clone.

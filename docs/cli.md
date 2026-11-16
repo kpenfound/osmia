@@ -1,6 +1,6 @@
 # Command line
 
-A project is exactly one repo with its own charter, settings, KB and entities. A feature request runs as a workgroup across an owner-selected set of projects with one shared chief of staff, one workgroup spec and one ratification. Each member has its own workstream, branch and pull request. The web project pane shows the group under every member's project, labelled by project name, with exploratory sessions outside workgroups.
+A project is exactly one repo with its own charter, settings and entities. A feature request runs as a workgroup across an owner-selected set of projects with one shared chief of staff, one workgroup spec and one ratification. Each member has its own workstream, branch and pull request. The web project pane shows the group under every member's project, labelled by project name, with exploratory sessions outside workgroups.
 
 The shared design's displayed name is **workgroup spec**. Stored paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the flag `--project-spec-revision` keep their names.
 
@@ -28,7 +28,6 @@ osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project create "New project" --repo new-project --charter-file charter.md --description "What it is for"
 osmia project memory p_0123456789abcdef0123456789abcdef
-osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
 osmia rebase w_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
@@ -92,7 +91,7 @@ placeholder after its image bytes have been removed.
 
 ## Design Sessions
 
-`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and KB are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
+`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
 
 Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active. Paused projects are allowed; the session's project can be removed while another remains.
 
@@ -231,7 +230,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   `stop` requests local shutdown over the Unix socket. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
-  runs the librarian, architect, committee and chief-of-staff turns in each role's
+  runs the architect, committee and chief-of-staff turns in each role's
   configured sandbox. A startup failure prints no detail; run `doctor`.
 - `doctor [--json] [--root PATH]` checks what `serve` needs; see
   [doctor](#doctor).
@@ -239,10 +238,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   file on disk against the loaded configuration as `config` prints it, the
   active projects and repos
   and their trace paths (or that none is configured), its charter state (rule
-  count, recorded revision and numbering diagnostics), its latest
-  knowledge-base extraction (number, `pending`, `running`, `succeeded` or
-  `failed`, the time of its last activity and the reason when it failed or
-  waits to retry), diagnostics, the last failed reload (`Last reload failed at
+  count, recorded revision and numbering diagnostics), diagnostics, the last failed reload (`Last reload failed at
   <time>: <file>: <field>: <reason>`) until a reload succeeds, effective
   runtime controls and the project's
   context mode (`file`, a normal mode), with
@@ -259,7 +255,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   capacity (`Capacity (per workstream <n>):`, then
   `<role>: <used> of <limit> slot(s) in use` for mason, reviewer,
   committee and checks, and `<role>: <used> in use, unbounded (no factory-wide
-  limit; at most one turn per workstream)` for architect and librarian, which
+  limit; at most one turn per workstream)` for the architect, which
   no configuration setting limits, each followed by `Waiting: <workstream> turn <turn> of <agent>
   (<reason>)` or `Waiting: <workstream> unit <unit> (<reason>)` for the work
   waiting for a slot), each
@@ -543,9 +539,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   cleanup automatically, with their title, outcome and delivery link filled in
   while the trace is still present. Cleanup is deferred, with a logged reason,
   while the workstream has unfinished turns, pending or unacknowledged
-  operations or a temporary workspace still being cleaned, while a retained
-  workstream depends on it as a base, or until the knowledge base has
-  incorporated its learnings; failures are retried, and an interrupted deletion
+  operations or a temporary workspace still being cleaned, or while a retained
+  workstream depends on it as a base; failures are retried, and an interrupted deletion
   is resumed, not mistaken for a live trace. The web archived list distinguishes
   pending cleanup from a deleted trace.
 - `shed object <workstream-id> <argument>` adds your own objection to the
@@ -711,16 +706,17 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
   `projects/<id>/config.toml`, creates the trace repository with a charter
-  template and an entity map seeded from the clone's tracked files, lists the ID in
-  `active_projects`, requests the librarian's first knowledge-base extraction
-  and activates the project without a restart. The clone path is made
+  template and an entity map seeded from the clone's tracked files as its
+  first revision, lists the ID in `active_projects` and activates the project
+  without a restart. The service then re-seeds the entity map by itself, from
+  CODEOWNERS and the directory structure of the upstream default branch, when
+  an architect draft starts and again before a sealing resolves footprints; it
+  records a new revision only when the map changes. The clone path is made
   absolute by the client and must be an existing local Git repository outside
   the Osmia root; nothing is written to it. The output names the project ID,
   the trace path and the next step: writing the charter with
-  `osmia edit charter <project-id>`. The extraction runs in the service after the command
-  returns; `status` shows its state, and the project is usable whether it
-  succeeds or fails; after a failure `osmia project extract` starts a new
-  attempt. Adding a
+  `osmia edit charter <project-id>`. Registration starts no agent turn and
+  requests no other work. Adding a
   project while others are active is supported with a separate clone. Repeating
   an active project's exact registration returns it again.
 
@@ -792,14 +788,6 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   why it is stuck, or complete with the registered project, which stays
   complete after the journal is removed.
 
-- `project extract <repo-id>` starts a new
-  knowledge-base extraction of the active
-  repo registration: a librarian turn that rewrites `kb/<subsystem>.md` and
-  `kb/entities.json` from the clone. The command returns once the extraction
-  is recorded as pending; follow it with `status`. A project ID that is not the
-  active project fails with `not_found` (exit 4). While an extraction is still
-  pending or running, another is refused with `conflict` (exit 5) naming the
-  extraction to wait for.
 - `project rebase <repo-id>` asks for a drift rebase
   of every `building` or `assembled` workstream of that active repo that is
   not paused, whatever its `upstream_rebase` cadence. The command returns once
@@ -945,7 +933,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   or changes remote branches, pull requests or issues. A running or starting
   turn or a commit, check, push or end still in progress is refused with
   `conflict` (exit 5), changing nothing. Ordinary workstreams, workgroups,
-  the librarian workstream and started designs cannot be destroyed. Unknown
+  started designs cannot be destroyed. Unknown
   or already destroyed sessions return `not_found` (exit 4). Both destroy
   commands print a short confirmation, or with `--json` the API response:
   `project`, `workstream` and `destroyed: true`.
@@ -988,7 +976,7 @@ which workstream starts units and takes freed turn slots first.
 
 All client commands accept `--json`. Status returns an object with `health`,
 `configuration`, `runtime` and `status` API responses, where `status` lists
-every workstream except the librarian's with its full status (`null` before
+every workstream with its full status (`null` before
 the first) and each role's effective profile and source;
 `status <workstream-id>` returns that workstream's status response; profiles returns the runtime
 response; `config` returns the API's configuration response; `reload` returns the API's reload response: `digest` and
@@ -999,8 +987,7 @@ API's conversation response.
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
-branch and trace path) and `next_step`; `project extract` returns
-the project view and the pending extraction. `handin` returns the API's
+branch and trace path) and `next_step`. `handin` returns the API's
 hand-in response: `project`, `workstream`, `state`, `source`, and
 `skip_debate` when the hand-in skipped debate. `edit` has no JSON output. Output is one JSON value plus
 newline, without progress text. Profile map keys are sorted in human output and
@@ -1022,7 +1009,7 @@ never raw file contents.
 | 2 | Invalid command, flags, arguments or root, or an unreadable `edit --from` file |
 | 3 | Missing socket, connection failure or unavailable service |
 | 4 | API malformed-input or validation rejection (including an `edit` draft that does not validate), no project is configured, unknown project or workstream, stdin over the hand-in limit or not UTF-8, or `edit` without `--from` while neither `VISUAL` nor `EDITOR` is set |
-| 5 | API conflict (including an extraction already running, abandoning a delivered or abandoned workstream, or an `edit` of a revision that has since changed or a ratified draft), project already active, unsupported operation, restart required or internal failure |
+| 5 | API conflict (including abandoning a delivered or abandoned workstream, or an `edit` of a revision that has since changed or a ratified draft), project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup failure, including ownership conflict, or a failure that stopped a running service |
 
 For exit 3, start the service and verify matching root/socket and permissions.
@@ -1106,8 +1093,8 @@ restarting or pruning them.
 When a role uses `sandbox = "sbx"`, doctor adds a `sandbox memory` check. It
 estimates the memory the sandboxes could hold at once: each of the mason,
 reviewer and committee pools counts `capacity.masons`, `capacity.reviewers` or
-`capacity.committee` sandboxes of its role's `memory`, and the architect and
-librarian count once each, since they have no factory-wide limit and run one
+`capacity.committee` sandboxes of its role's `memory`, and the architect
+counts once, since it has no factory-wide limit and runs one
 turn per workstream (the chief of staff and foreman count once each too, when
 they use `sbx`). A role without `memory` counts at `sbx`'s default, half the
 host's memory between 512 MiB and 32 GiB. Only `sbx` roles count. When the

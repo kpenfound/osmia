@@ -86,15 +86,13 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 	defer closeChanges()
 	deadline := time.Now().Add(demoTimeout)
 	for {
-		extraction, err := extractionState(r)
-		must(t, err)
 		resolved, _, err := trace.ResolvedWorkgroups(r)
 		must(t, err)
-		if extraction != nil && extraction.Extraction == 1 && extraction.State != "pending" && extraction.State != "running" && slices.Contains(resolved, group.ID) {
+		if slices.Contains(resolved, group.ID) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("registration extraction or successful abandonment did not settle: extraction=%+v resolved=%v", extraction, resolved)
+			t.Fatalf("successful abandonment did not settle: resolved=%v", resolved)
 		}
 		changes()
 	}

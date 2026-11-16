@@ -224,13 +224,6 @@ func (m *masons) Pass(ctx context.Context) error {
 		}
 		read = append(read, b)
 	}
-	pending, err := m.s.RefreshPending(m.repository)
-	if err != nil {
-		return err
-	}
-	if pending {
-		return nil
-	}
 	// A turn can complete while this pass follows existing units. Refresh
 	// its recorded spend before reusing the slot that completion freed.
 	if err := m.s.RefreshBudget(ctx, m.repository); err != nil {
@@ -964,7 +957,7 @@ func (m *masons) enqueueTurn(ctx context.Context, req trace.TurnRequest) error {
 func masonPrompt(m bundle.Mason) string {
 	return fmt.Sprintf(`Build unit %s of this workstream.
 
-Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Do the unit's task below until every acceptance item holds, following the project's own conventions for tests. The unit's footprint schedules it; it does not limit what you change. The spec below is the one the owner ratified; build against it. When the task is done and its acceptance holds, call done with the outcome of your work: what it now does and how you checked the acceptance. Include any new project facts you learned in learnings; leave that list empty when there are none. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Do the unit's task below until every acceptance item holds, following the project's own conventions for tests. The unit's footprint schedules it; it does not limit what you change. The spec below is the one the owner ratified; build against it. When the task is done and its acceptance holds, call done with the outcome of your work: what it now does and how you checked the acceptance. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
 
 %s`, m.Unit, m.Render())
 }

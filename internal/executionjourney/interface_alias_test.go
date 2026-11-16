@@ -50,8 +50,6 @@ const InboxRatification = api.InboxRatification
 
 var draftingActor = intake.DraftingActor
 
-type ExtractionState = api.ExtractionState
-
 const amendmentRuled = intake.AmendmentRuled
 
 const EventInbox = api.EventInbox
@@ -168,8 +166,6 @@ type ChangeRequest = lifecycle.ChangeRequest
 
 type SendRequest = api.SendRequest
 
-var traceFile = fixturekit.TraceFile
-
 const Malformed = api.Malformed
 
 type stagedWorkspaces = intakefixture.StagedWorkspaces
@@ -259,8 +255,6 @@ const InboxDelivery = api.InboxDelivery
 type SessionView = api.SessionView
 
 const handedDesign = intakefixture.HandedDesign
-
-var entitiesWith = intakefixture.EntitiesWith
 
 type TraceEvent = api.TraceEvent
 

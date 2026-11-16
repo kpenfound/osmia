@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,9 +58,10 @@ func TestDesignBriefProjectsValidationInheritanceAndContext(t *testing.T) {
 	for _, p := range []config.ProjectID{home, other} {
 		r, err := s.repository(p)
 		must(t, err)
-		h := intake.OwnerHeader("subsystem-design", p, "", "knowledge-base", time.Now().UTC())
-		h.Schema = "osmia.trace.document"
-		must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: "kb/design.md", Content: "KB text for " + string(p)}}))
+		m, err := kb.Load(r)
+		must(t, err)
+		m.Entities = append(m.Entities, kb.Entity{ID: "design-notes", Name: "Entity text for " + string(p), Aliases: []string{}, Paths: []string{"design-notes/**"}, Owners: []string{}, PartOf: []string{}})
+		must(t, kb.Store(ctx, r, m, time.Now().UTC(), ownerActor, "fixture"))
 	}
 	opened, err := c.OpenDesign(ctx, home)
 	must(t, err)
@@ -81,7 +83,7 @@ func TestDesignBriefProjectsValidationInheritanceAndContext(t *testing.T) {
 			}
 		}
 		if strings.Contains(req.Prompt, "check context") {
-			if !strings.Contains(req.SystemPrompt, "Client charter rule") || !strings.Contains(req.SystemPrompt, "KB text for "+string(other)) || strings.Contains(req.SystemPrompt, "Keep changes small") || strings.Contains(req.SystemPrompt, "KB text for "+string(home)) {
+			if !strings.Contains(req.SystemPrompt, "Client charter rule") || !strings.Contains(req.SystemPrompt, "Entity text for "+string(other)) || strings.Contains(req.SystemPrompt, "Keep changes small") || strings.Contains(req.SystemPrompt, "Entity text for "+string(home)) {
 				return nil, fmt.Errorf("context does not follow brief projects: %s", req.SystemPrompt)
 			}
 			if _, err := readTool(ctx, tools, "projects/"+string(home)+"/charter.md"); err != nil {

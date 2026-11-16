@@ -230,10 +230,6 @@ type ProjectConfigSaveResponse = api.ProjectConfigSaveResponse
 
 type RepoView = api.RepoView
 
-type ExtractionState = api.ExtractionState
-
-type ProjectExtractRequest = api.ProjectExtractRequest
-
 type ProjectRebaseRequest = api.ProjectRebaseRequest
 
 type ProjectRebaseResponse = api.ProjectRebaseResponse
@@ -243,8 +239,6 @@ type WorkstreamRebaseResponse = api.WorkstreamRebaseResponse
 type DriftCoverage = api.DriftCoverage
 
 type DriftSkip = api.DriftSkip
-
-type ExtractionResponse = api.ExtractionResponse
 
 type CharterState = api.CharterState
 

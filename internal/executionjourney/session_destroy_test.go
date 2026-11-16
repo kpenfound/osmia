@@ -10,6 +10,7 @@ import (
 	readview "github.com/kpenfound/osmia/internal/readview"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	slog "log/slog"
 	os "os"
@@ -624,7 +625,8 @@ func TestDestroyRefusesOtherKindsAndStartedDesign(t *testing.T) {
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "started-test", Revision: 1, Project: project, Workstream: opened.Design.Workstream, At: s.now(), Actor: ownerActor, Cause: "started-test"}
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: designSessionSubject, From: designOpenValue, To: designClosedValue, Reason: "owner started workgroup"}})
 	must(t, err)
-	for _, id := range []config.WorkstreamID{ordinary.Workstream, opened.Design.Workstream, librarianWorkstream(project)} {
+	librarian := intakefixture.PlantLibrarian(t, repo, s.now(), ownerActor)
+	for _, id := range []config.WorkstreamID{ordinary.Workstream, opened.Design.Workstream, librarian} {
 		before, err := repo.WorkflowStates(id)
 		must(t, err)
 		_, err = c.DestroySession(ctx, id)

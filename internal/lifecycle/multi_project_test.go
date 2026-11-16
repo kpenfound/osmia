@@ -137,9 +137,8 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	}
 	unknown := config.ProjectID("p_00000000000000000000000000000000")
 	for name, call := range map[string]func() error{
-		"extract": func() error { _, err := c.ExtractProject(ctx, ""); return err },
-		"rebase":  func() error { _, err := c.RebaseProject(ctx, ""); return err },
-		"answer":  func() error { _, err := c.Answer(ctx, 1, "yes", ""); return err },
+		"rebase": func() error { _, err := c.RebaseProject(ctx, ""); return err },
+		"answer": func() error { _, err := c.Answer(ctx, 1, "yes", ""); return err },
 	} {
 		if err := call(); !errors.As(err, &api) || api.Code != Validation || !strings.Contains(api.Message, both) {
 			t.Fatalf("%s without a project: %v", name, err)

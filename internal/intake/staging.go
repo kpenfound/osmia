@@ -3,8 +3,6 @@ package intake
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,28 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const (
-	LibrarianRole   = "librarian"
-	LibrarianAgent  = "agent_librarian"
-	LibrarianThread = "thread_librarian"
-	// maxExtractionAttempts bounds the librarian turns one extraction may
-	// start after service stops interrupt earlier ones.
-	MaxExtractionAttempts = 3
-)
+// MaxTurnAttempts bounds the turns one unit of agent work (a draft, a debate
+// round or a reply) may start after service stops interrupt earlier ones.
+const MaxTurnAttempts = 3
 
-// librarianWorkstream is the project's workstream holding the librarian
-// thread and its extraction operations, derived from the project ID.
-func LibrarianWorkstream(project config.ProjectID) config.WorkstreamID {
-	sum := sha256.Sum256([]byte("librarian:" + string(project)))
-	return config.WorkstreamID("w_" + hex.EncodeToString(sum[:16]))
-}
-
-// progress derives an operation's state from its record: running while a
+// Progress derives an operation's state from its record: running while a
 // live claim has started the effect, pending while it is queued or waiting to
 // retry (with the retry's reason), otherwise its result's outcome, with the
 // failure's evidence as the reason. The time is the record's last action up to
@@ -67,7 +52,7 @@ func Progress(record trace.OperationRecord) (state, reason string, at time.Time)
 	return state, reason, at
 }
 
-// stagedWorkspaces lends a service-staged directory as a turn's workspace.
+// StagedWorkspaces lends a service-staged directory as a turn's workspace.
 type StagedWorkspaces struct{}
 
 type NoLease struct{}
@@ -84,7 +69,7 @@ func (StagedWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRe
 	return coreadapter.WorkspaceLease{Workspace: coreadapter.Workspace{ID: filepath.Base(req.SourceDirectory), Directory: req.SourceDirectory, Access: req.Access}, Lease: NoLease{}}, nil
 }
 
-// copyTracked copies the clone's tracked regular files into dst. Git only
+// CopyTracked copies the clone's tracked regular files into dst. Git only
 // lists the index; the clone is never written.
 func CopyTracked(ctx context.Context, clone, dst string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", clone, "ls-files", "-z")

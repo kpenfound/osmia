@@ -18,8 +18,8 @@ import (
 
 // While an architect draft is in flight, the capacity view a running service
 // serializes in /v1/status shows the architect pool unbounded with its use,
-// and the web page rendering that response labels the architect and librarian
-// pools unbounded, keeps the header's slot totals numeric over the bounded
+// and the web page rendering that response labels the architect
+// pool unbounded, keeps the header's slot totals numeric over the bounded
 // pools' limits alone, and still shows the architect's use.
 func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	t.Parallel()
@@ -66,8 +66,8 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.AwaitText(`#capacity [data-role=architect] [data-field=slots]`, fmt.Sprintf("%d active (unbounded; 1 per workstream)", int(architect)))
-	p.AwaitText(`#capacity [data-role=librarian] [data-field=slots]`, "0 active (unbounded; 1 per workstream)")
-	for _, role := range []string{"architect", "librarian"} {
+	p.Await("no librarian pool", `document.querySelector('#capacity [data-role=librarian]') === null`)
+	for _, role := range []string{"architect"} {
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "No factory-wide limit")
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "at most one turn per workstream")
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "no configuration setting")
@@ -75,7 +75,7 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	}
 	p.Await("the architect meter title", `document.querySelector('[data-meter=architect]').title === `+quote(fmt.Sprintf("architect: %d active (unbounded; 1 per workstream)", int(architect))))
 	p.AwaitText(`#meter-total`, fmt.Sprintf("%d/%d", int(used), int(limit)))
-	p.Await("the capacity button title", `document.getElementById('capacity-button').title === `+quote(fmt.Sprintf("%d of %d slots in use; %d architect/librarian sessions", int(used), int(limit), int(architect))))
+	p.Await("the capacity button title", `document.getElementById('capacity-button').title === `+quote(fmt.Sprintf("%d of %d slots in use; %d architect sessions", int(used), int(limit), int(architect))))
 	var text string
 	p.Eval(`document.getElementById('capacity').textContent + ' ' + document.getElementById('meter-total').textContent + ' ' + document.getElementById('capacity-button').title`, &text)
 	for _, bad := range []string{"NaN", "undefined", "/ 0 slots", "of 0 slots", "0/0", "null"} {

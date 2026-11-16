@@ -40,7 +40,6 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		{Role: reviewerRole, Limit: &limits.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: &limits.Committee, Waiting: []SlotWait{}},
 		unboundedCapacity(architectRole),
-		unboundedCapacity(librarianRole),
 	}}
 	slots := s.pool.Slots(cfg.ProjectIDs())
 	state, _ := s.effective()
@@ -209,7 +208,7 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 
 // capacity exposes the shared slot accounting without handing scheduling to a model.
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks) is its configured factory-wide limit: it comes from config.toml and applies on reload. A pool with no limit field and unbounded true (architect, librarian) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks) is its configured factory-wide limit: it comes from config.toml and applies on reload. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err

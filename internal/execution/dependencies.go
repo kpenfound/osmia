@@ -15,10 +15,8 @@ import (
 // Dependencies supplies the service capabilities used by unit execution.
 // Repository handles are the same handles owned by the running service.
 type Dependencies struct {
-	RefreshPendingStreams func(*trace.Repository) (map[config.WorkstreamID]bool, error)
-	RefreshBudget         func(context.Context, *trace.Repository) error
-	AcquireCheckSlot      func(context.Context, config.ProjectID, config.WorkstreamID, string) (func(), error)
-	RefreshPending        func(repo *trace.Repository) (bool, error)
+	RefreshBudget    func(context.Context, *trace.Repository) error
+	AcquireCheckSlot func(context.Context, config.ProjectID, config.WorkstreamID, string) (func(), error)
 
 	EdgeWaiting func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 

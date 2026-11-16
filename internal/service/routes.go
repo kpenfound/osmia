@@ -54,7 +54,6 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/create/identity", Summary: "Reserve a project creation identity, the ID the created project will have, to record before the create request is sent", Response: api.ProjectCreationIdentity{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/create/{id}", Summary: "Report where the creation under an identity stands: not started, pending with the step reached and why it is stuck, or complete with the registered project", Response: api.ProjectCreationState{}},
 	{Method: http.MethodDelete, Path: api.Prefix + "/projects", Summary: "Remove a project from active work", Request: api.ProjectRemoveRequest{}, Response: api.ProjectResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/projects/extract", Summary: "Start a knowledge-base extraction", Request: api.ProjectExtractRequest{}, Response: api.ExtractionResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: api.ProjectRebaseRequest{}, Response: api.ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: api.MemorySetup{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/config/{project}", Summary: "Read a project's config.toml as it is on disk: every setting's file value, whether it is a default, the value in effect and the pin of the file bytes", Response: api.ProjectConfigResponse{}},

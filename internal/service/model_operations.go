@@ -21,8 +21,6 @@ func modelOperationRole(op coreadapter.Operation) string {
 	switch op.Action {
 	case DraftAction, ReplyAction, RedraftAction, AmendmentDraftAction, AmendmentReplyAction:
 		return architectRole
-	case ExtractAction, RefreshAction:
-		return librarianRole
 	case FinalReviewAction, deliveryReviewAction:
 		return committeeRole
 	}
@@ -159,9 +157,7 @@ func (s *Service) reserveModelOperation(repository *trace.Repository, op coreada
 	limits := cfg.Capacity
 	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
 	agent := architectAgent
-	if role == librarianRole {
-		agent = librarianAgent
-	} else if role == committeeRole {
+	if role == committeeRole {
 		agent = committeeAgent(1)
 	}
 	release, admitted, err := s.pool.TryReserve(repository, stream, role, agent, &limits)
