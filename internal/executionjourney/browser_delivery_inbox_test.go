@@ -167,7 +167,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
 	p.AwaitText(card+"[data-field=question]", "Mark ready for review: Resumable uploads? Final review 1 of commit "+report.Commit)
-	p.AwaitText(card+"[data-field=options]", "Options: approve")
+	p.AwaitText(card+"[data-field=options]", "Mark ready for review")
 	p.AwaitText(card+"[data-field=pins]", pins(1, first))
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()

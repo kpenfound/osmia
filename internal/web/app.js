@@ -2431,7 +2431,7 @@
           t.from ? el('span', { 'data-field': 'from' }, t.from) : null, t.from ? ' → ' : '',
           el('strong', { 'data-field': 'to', 'data-ann': 'action' }, t.to)),
         t.reason ? el('span', { class: 'reason', 'data-field': 'reason' }, t.reason) : null,
-        t.actor === 'service:jev' ? el('span', { class: 'meta decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
+        t.actor === 'service:jev' ? el('span', { class: 'footnote decided-by', 'data-field': 'decided-by' }, 'decided by Jev') : null,
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 
@@ -3974,10 +3974,10 @@
     const note = d.note.value.trim();
     const send = (method, path, body, done, dismissKey) => {
       d.pending = true;
-      for (const action of d.actions.children) block(action, true);
+      for (const choiceButton of d.node.querySelectorAll('[data-decision-choice]')) block(choiceButton, true);
       return submit(d.form, button, method, path, body, done, undefined, dismissKey).finally(() => {
         d.pending = false;
-        for (const action of d.actions.children) block(action, false);
+        for (const choiceButton of d.node.querySelectorAll('[data-decision-choice]')) block(choiceButton, false);
       });
     };
     switch (entry.kind) {
@@ -4055,6 +4055,7 @@
       actions: el('div', { class: 'actions' }),
       submit: el('button', { type: 'submit', class: 'primary' }, entry.kind === 'delivery' ? deliveryLabel(entry, null) : entry.kind === 'escalation' ? 'Answer' : 'Decide'),
       shown: null,
+      opened: {},
     };
     const fields = [];
     if (entry.kind === 'escalation') {
@@ -4106,12 +4107,18 @@
         el('pre', {}, JSON.stringify(view.project_spec, null, 2))) : null,
       dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
         el('div', { class: 'line' },
-          el('strong', {}, o.id),
+          el('strong', { class: 'mono' }, o.id),
           el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
         el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + (o.part ? ' on ' + o.part : '')),
         el('div', { 'data-field': 'argument' }, o.argument),
         o.escalation ? el('div', { class: 'meta', 'data-field': 'escalation' }, 'Chief of staff: ' + o.escalation) : null,
-        o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null))),
+        o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null,
+        // Each objection is ruled on by its own pair of buttons, which send
+        // the card's note with the objection they sit under.
+        el('div', { class: 'objection-actions', role: 'group', 'aria-label': 'Rule on ' + o.id, 'data-field': 'objection-actions' },
+          choiceButton(d, 'sustain ' + o.id, 'Sustain', 'secondary', 'Sustain ' + o.id),
+          choiceButton(d, 'overrule ' + o.id, 'Overrule', 'secondary', 'Overrule ' + o.id))))),
+      dissent.length === 0 ? null : el('p', { class: 'meta', 'data-field': 'objection-hint' }, 'Sustain, overrule and redraft send the note below.'),
       dismissed.length === 0 ? null : el('details', { 'data-field': 'dismissed' },
         el('summary', { class: 'meta' }, 'Dismissed by the chief of staff (' + dismissed.length + ')'),
         el('ul', { class: 'dissent' }, ...dismissed.map((o) => el('li', { 'data-objection': o.id },
@@ -4146,19 +4153,25 @@
     // workstream's title changes later.
     const title = view.approval ? (view.approval.title || view.title) : view.title;
     const findings = view.report.findings || [];
+    // The card reads as a release note: the brief, the findings, the
+    // criteria, then what will be published, and the button last.
     d.detail.replaceChildren(...[
       renderDeliveryBrief(view),
       el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
       renderPullRequest(view),
       view.draft_pull_request ? el('p', { class: 'meta', 'data-field': 'draft-note' }, 'A merge-order dependency has not merged. Approving records your decision and the pull request stays a draft.') : null,
-      view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
       renderDeliveryChecks(view),
-      findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
-        el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
-        f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null))),
-      el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
-        el('strong', {}, c.criterion), ' ', c.text,
-        el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))),
+      view.report.summary || findings.length > 0 ? el('section', { class: 'release-section', 'data-field': 'review' },
+        el('h4', {}, 'Findings'),
+        view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
+        findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
+          el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
+          f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null)))) : null,
+      el('section', { class: 'release-section', 'data-field': 'criteria-section' },
+        el('h4', {}, 'Criteria'),
+        el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
+          el('strong', { class: 'mono' }, c.criterion), ' ', c.text,
+          el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap))))),
     ].filter((node) => node !== null));
     // What ApproveDelivery publishes when the page sends no text: the text
     // of the approval the presentation carries, and the draft otherwise.
@@ -4166,6 +4179,7 @@
     const messages = view.approval ? view.approval.messages : (view.messages || []);
     d.preview.replaceChildren(
       d.preview.querySelector('summary'),
+      el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
       el('div', { class: 'meta' }, 'Pull request description'),
       el('pre', { 'data-field': 'description' }, description),
       ...messages.flatMap((m, i) => [
@@ -4203,16 +4217,35 @@
     return action.charAt(0).toUpperCase() + action.slice(1);
   }
 
+  // recommendedChoice names the option an entry's recommendation points at:
+  // the one it opens with ("ratify: no objection stands"). With no
+  // recommendation to read, a lone option is the recommended one. A
+  // contested unit's note is the chief of staff's account, not a pick.
+  function recommendedChoice(entry) {
+    const options = entry.options || [];
+    const text = (entry.recommendation || '').trim().toLowerCase();
+    if (entry.kind !== 'contested' && text !== '') {
+      const lead = text.split(/[:.]/)[0].trim();
+      return options.find((o) => o.toLowerCase() === lead) || '';
+    }
+    return options.length === 1 ? options[0] : '';
+  }
+
+  // choiceButton is one decision of a card: primary when it is the
+  // recommendation, secondary otherwise. label is what it says and name,
+  // when given, is the longer name assistive technology reads.
+  function choiceButton(d, choice, label, variant, name) {
+    const button = el('button', { type: 'button', class: variant, 'data-decision-choice': choice, ...(name ? { 'aria-label': name } : {}) }, label);
+    block(button, !!d.pending);
+    button.addEventListener('click', () => decide(d, choice, button));
+    return button;
+  }
+
   function decisionButtons(d, options) {
     const key = JSON.stringify(options);
     if (d.actions.dataset.options === key) return;
     d.actions.dataset.options = key;
-    place(d.actions, options.map(([choice, label]) => {
-      const button = el('button', { type: 'button', 'data-decision-choice': choice }, label);
-      block(button, !!d.pending);
-      button.addEventListener('click', () => decide(d, choice, button));
-      return button;
-    }));
+    place(d.actions, options.map(([choice, label, variant]) => choiceButton(d, choice, label, variant)));
   }
 
   function renderDecision(entry) {
@@ -4224,60 +4257,81 @@
       return d.node;
     }
     d.shown = key;
+    const recommended = recommendedChoice(entry);
+    const variant = (option) => (option === recommended ? 'primary' : 'secondary');
     let options = null;
     if (entry.kind === 'escalation') {
-      options = entry.options.length === 0 ? null : el('div', { class: 'choices', 'data-field': 'options' }, 'Options:', ...entry.options.map((o) => {
-        const button = el('button', { type: 'button', 'data-field': 'option' }, o);
+      options = entry.options.length === 0 ? null : el('div', { class: 'choices', role: 'group', 'aria-label': 'Options', 'data-field': 'options' }, ...entry.options.map((o) => {
+        const button = el('button', { type: 'button', class: 'secondary', 'data-field': 'option' }, o);
         button.addEventListener('click', () => {
           d.text.value = o;
         });
         return button;
       }));
-    } else {
+    } else if (entry.options.length === 0) {
       const none = ['ratification', 'publication', 'checks', 'drift', 'notices', 'loop', 'base'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
-      options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
+      options = el('p', { class: 'meta', 'data-field': 'options' }, 'Options: ' + none);
     }
+    // The details a card carries are footnotes: closed, small and mono, and
+    // kept open or closed as the owner left them across repaints.
+    const footnote = (name, ...parts) => {
+      const note = el('details', { class: 'footnote ' + name, 'data-field': 'footnote-' + name }, ...parts);
+      note.open = !!d.opened[name];
+      note.addEventListener('toggle', () => {
+        d.opened[name] = note.open;
+      });
+      return note;
+    };
     d.head.replaceChildren(...[
-      el('div', { class: 'line' },
-        el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
-        el('span', { class: 'meta' }, when(entry.opened_at))),
+      // The question comes first; what kind of card it is and when it was
+      // raised follow in a quiet row with the footnotes.
       el('p', { class: 'question', 'data-field': 'question' }, entry.question),
+      el('div', { class: 'card-meta' },
+        el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
+        el('span', { class: 'meta', 'data-field': 'opened' }, when(entry.opened_at)),
+        // The question above is the chief of staff's rephrasing; what each
+        // role asked in its own words stays one tap away.
+        entry.asked.length === 0 ? null : footnote('asked',
+          el('summary', {}, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
+          el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
+            el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
+        ['publication', 'checks'].includes(entry.kind) ? null : footnote('revisions',
+          el('summary', {}, 'Details'),
+          el('p', { class: 'mono', 'data-field': 'pins' }, 'Answers ' + pins(entry)))),
       entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
+      entry.recommendation ? el('p', { class: 'recommendation', 'data-field': 'recommendation' }, (entry.kind === 'contested' ? 'Note: ' : 'Recommendation: ') + entry.recommendation) : null,
       options,
-      entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, (entry.kind === 'contested' ? 'Note: ' : 'Recommendation: ') + entry.recommendation) : null,
-      // The question above is the chief of staff's rephrasing; what each
-      // role asked in its own words stays one tap away.
-      entry.asked.length === 0 ? null : el('details', { class: 'asked' },
-        el('summary', { class: 'meta' }, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
-        el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
-          el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
-      ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta mono', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
+    d.actions.removeAttribute('data-field');
     switch (entry.kind) {
       case 'escalation':
         d.accept.textContent = 'Accept: ' + entry.quick_reply;
-        place(d.actions, entry.quick_reply ? [d.submit, d.accept] : [d.submit]);
+        d.accept.className = 'primary';
+        d.submit.className = entry.quick_reply ? 'secondary' : 'primary';
+        place(d.actions, entry.quick_reply ? [d.accept, d.submit] : [d.submit]);
         break;
       case 'project-selection':
         place(d.actions, [d.submit]);
         break;
       case 'delivery':
         renderDelivery(d, name);
+        d.actions.setAttribute('data-field', 'options');
         place(d.actions, [d.submit]);
         break;
       case 'publication':
       case 'checks':
         break;
       case 'ratification': {
-        const dissent = renderDissent(d, name);
+        renderDissent(d, name);
+        d.actions.setAttribute('data-field', 'options');
         decisionButtons(d, [
-          ...(entry.options.includes('ratify') ? [['ratify', 'Ratify']] : []),
-          ...dissent.flatMap((o) => [['sustain ' + o.id, 'Sustain ' + o.id], ['overrule ' + o.id, 'Overrule ' + o.id]]),
-          ['redraft', 'Ask for a Redraft']]);
+          ...(entry.options.includes('ratify') ? [['ratify', 'Ratify', variant('ratify')]] : []),
+          ['redraft', 'Ask for a redraft', 'secondary']]);
         break;
       }
       default:
-        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o]));
+        d.actions.setAttribute('data-field', 'options');
+        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o, variant(o)]));
         // A parked base takes no note, and no decision here unless its own
         // base was abandoned.
         if (entry.kind === 'base') {

@@ -143,14 +143,19 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		written + "[data-field=pins]":             "inbox entry 2",
 		contest + "[data-field=kind]":             "Contested unit",
 		contest + "[data-field=question]":         "Unit index is contested: moved to contested",
-		contest + "[data-field=options]":          "Options: review",
+		contest + "[data-field=options]":          "Review the unit again",
 		contest + "[data-field=pins]":             "unit index",
 		amendment + "[data-field=question]":       "Change: Raise the per-unit budget. Reason: The upload unit needs more turns.",
-		amendment + "[data-field=options]":        "Options: " + strings.Join(amendments[0].Options, ", "),
 		amendment + "[data-field=recommendation]": "approve: no objection stands",
 		amendment + "[data-field=pins]":           "amendment 1, packet revision 1",
 	} {
 		p.AwaitText(selector, want)
+	}
+	// The amendment offers each of its options as a button.
+	var offered []string
+	p.Eval(`[...document.querySelectorAll(`+quote(amendment+"[data-decision-choice]")+`)].map((b) => b.dataset.decisionChoice)`, &offered)
+	if !slices.Equal(offered, amendments[0].Options) {
+		t.Fatalf("the amendment's option buttons: %v, want %v", offered, amendments[0].Options)
 	}
 	// The card leads with the rephrasing; what the role asked in its own
 	// words starts collapsed.

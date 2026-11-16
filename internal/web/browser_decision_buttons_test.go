@@ -94,16 +94,39 @@ func assertDecisionButtons(p *page, card string, labels map[string]string) {
 	if !reflect.DeepEqual(got, labels) {
 		p.t.Fatalf("buttons: %v, want %v", got, labels)
 	}
+	// The card's own buttons sit below the note; an objection's buttons sit
+	// in that objection and name it.
 	var valid bool
 	p.eval(`(() => {
   const card = document.querySelector(`+quote(card)+`);
   const note = card.querySelector('[name=note]');
+  const buttons = [...card.querySelectorAll('[data-decision-choice]')];
   return !card.querySelector('select[name=decision]') && !card.textContent.includes('Choose a decision') &&
    ![...card.querySelectorAll('button')].some(b => b.textContent === 'Decide') &&
-   [...card.querySelectorAll('[data-decision-choice]')].every(b => !!(note.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+   buttons.filter(b => !b.closest('[data-objection]')).every(b => !!(note.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)) &&
+   buttons.filter(b => b.closest('[data-objection]')).every(b => b.dataset.decisionChoice.split(' ')[1] === b.closest('[data-objection]').dataset.objection);
  })()`, &valid)
 	if !valid {
-		p.t.Fatal("decision controls must be buttons below the note")
+		p.t.Fatal("decision controls must be buttons below the note, and an objection's buttons must sit in that objection")
+	}
+}
+
+// assertButtonStyles checks which choices are primary buttons and that every
+// other one is secondary.
+func assertButtonStyles(p *page, card string, primary ...string) {
+	p.t.Helper()
+	var got struct {
+		Primary, Other []string
+	}
+	p.eval(`(() => {
+  const buttons = [...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)];
+  return {
+    primary: buttons.filter(b => b.classList.contains('primary')).map(b => b.dataset.decisionChoice),
+    other: buttons.filter(b => !b.classList.contains('primary') && !b.classList.contains('secondary')).map(b => b.dataset.decisionChoice),
+  };
+})()`, &got)
+	if strings.Join(got.Primary, ",") != strings.Join(primary, ",") || len(got.Other) != 0 {
+		p.t.Fatalf("primary buttons: %v, want %v; buttons that are neither primary nor secondary: %v", got.Primary, primary, got.Other)
 	}
 }
 
@@ -142,6 +165,7 @@ func TestBrowserDecisionButtonsSendOfferedRulings(t *testing.T) {
 			f := newDecisionButtonFixture(t, entry)
 			card := `[data-decision][data-kind="` + tc.kind + `"] `
 			assertDecisionButtons(f.p, card, map[string]string{tc.choice: tc.label})
+			assertButtonStyles(f.p, card, tc.choice)
 			if tc.kind == "contested" {
 				f.p.click(card + `[data-decision-choice="` + tc.choice + `"]`)
 				f.p.awaitText("#inbox-result", "Give a note for the ruling.")
@@ -171,7 +195,8 @@ func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
 	t.Parallel()
 	f := newDecisionButtonFixture(t, strings.Replace(ratificationEntry("w_000"), `["ratify"]`, `[]`, 1))
 	card := decisionSelector("ratification", "w_000", "")
-	assertDecisionButtons(f.p, card, map[string]string{"redraft": "Ask for a Redraft"})
+	assertDecisionButtons(f.p, card, map[string]string{"redraft": "Ask for a redraft"})
+	assertButtonStyles(f.p, card)
 	f.p.click(card + `[data-decision-choice="redraft"]`)
 	f.p.awaitText("#inbox-result", "Say what the redraft should change.")
 	if len(f.got()) != 0 {
@@ -184,34 +209,50 @@ func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
 	assertDecisionRequest(t, f, "/v1/shed/redraft/w_000", map[string]any{"note": "Split the unit."})
 }
 
+// Each objection carries its own Sustain and Overrule buttons, and a button
+// acts on the objection it sits under, whichever objection that is.
 func TestBrowserRatificationObjectionButtonsSendDispositions(t *testing.T) {
 	t.Parallel()
-	for _, choice := range []string{"sustain", "overrule"} {
-		t.Run(choice, func(t *testing.T) {
-			f := newDecisionButtonFixture(t, ratificationEntry("w_000"))
-			f.mu.Lock()
-			f.packet = `{"packet":{"revision":{"spec":1,"plan":1},"dissent":[{"id":"objection-1","by":"owner"}]}}`
-			f.mu.Unlock()
-			f.api.setInbox(strings.Replace(ratificationEntry("w_000"), `"revision":1`, `"revision":2`, 1))
-			f.api.pushEvent("inbox")
-			card := decisionSelector("ratification", "w_000", "")
-			f.p.awaitVisible("objection buttons", card+`[data-decision-choice="sustain objection-1"]`)
-			assertDecisionButtons(f.p, card, map[string]string{"ratify": "Ratify", "redraft": "Ask for a Redraft", "sustain objection-1": "Sustain objection-1", "overrule objection-1": "Overrule objection-1"})
-			f.p.typeInto(card+`[name=note]`, "Keep the contract.")
-			f.p.click(card + `[data-decision-choice="` + choice + ` objection-1"]`)
-			f.p.awaitOutcome("Decision recorded.")
-			f.p.awaitVisible("the ratification card", card)
-			body := map[string]any{"objection": "objection-1"}
-			path := "/v1/shed/overrule/w_000"
-			if choice == "sustain" {
-				path = "/v1/shed/rule/w_000"
-				body["disposition"] = "sustain"
-				body["note"] = "Keep the contract."
-			} else {
-				body["reason"] = "Keep the contract."
-			}
-			assertDecisionRequest(t, f, path, body)
-		})
+	for _, objection := range []string{"objection-1", "objection-2"} {
+		for _, choice := range []string{"sustain", "overrule"} {
+			t.Run(objection+"/"+choice, func(t *testing.T) {
+				f := newDecisionButtonFixture(t, ratificationEntry("w_000"))
+				f.mu.Lock()
+				f.packet = `{"packet":{"revision":{"spec":1,"plan":1},"dissent":[{"id":"objection-1","by":"owner"},{"id":"objection-2","by":"owner"}]}}`
+				f.mu.Unlock()
+				f.api.setInbox(strings.Replace(ratificationEntry("w_000"), `"revision":1`, `"revision":2`, 1))
+				f.api.pushEvent("inbox")
+				card := decisionSelector("ratification", "w_000", "")
+				f.p.awaitVisible("objection buttons", card+`[data-decision-choice="sustain objection-2"]`)
+				assertDecisionButtons(f.p, card, map[string]string{
+					"ratify": "Ratify", "redraft": "Ask for a redraft",
+					"sustain objection-1": "Sustain", "overrule objection-1": "Overrule",
+					"sustain objection-2": "Sustain", "overrule objection-2": "Overrule"})
+				assertButtonStyles(f.p, card, "ratify")
+				var own map[string][]string
+				f.p.eval(`Object.fromEntries([...document.querySelectorAll(`+quote(card+"[data-objection]")+`)].map(li => [li.dataset.objection, [...li.querySelectorAll('button')].map(b => b.dataset.decisionChoice)]))`, &own)
+				want := map[string][]string{
+					"objection-1": {"sustain objection-1", "overrule objection-1"},
+					"objection-2": {"sustain objection-2", "overrule objection-2"}}
+				if !reflect.DeepEqual(own, want) {
+					t.Fatalf("each objection's own buttons: %v, want %v", own, want)
+				}
+				f.p.typeInto(card+`[name=note]`, "Keep the contract.")
+				f.p.click(card + `[data-objection="` + objection + `"] [data-decision-choice="` + choice + ` ` + objection + `"]`)
+				f.p.awaitOutcome("Decision recorded.")
+				f.p.awaitVisible("the ratification card", card)
+				body := map[string]any{"objection": objection}
+				path := "/v1/shed/overrule/w_000"
+				if choice == "sustain" {
+					path = "/v1/shed/rule/w_000"
+					body["disposition"] = "sustain"
+					body["note"] = "Keep the contract."
+				} else {
+					body["reason"] = "Keep the contract."
+				}
+				assertDecisionRequest(t, f, path, body)
+			})
+		}
 	}
 }
 
@@ -219,7 +260,7 @@ func TestBrowserDecisionButtonsBlockDuringRequestAndKeepNoteOnFailure(t *testing
 	t.Parallel()
 	f := newDecisionButtonFixture(t, ratificationEntry("w_000"))
 	card := decisionSelector("ratification", "w_000", "")
-	assertDecisionButtons(f.p, card, map[string]string{"ratify": "Ratify", "redraft": "Ask for a Redraft"})
+	assertDecisionButtons(f.p, card, map[string]string{"ratify": "Ratify", "redraft": "Ask for a redraft"})
 	release := sync.OnceFunc(f.action.holdResponse())
 	t.Cleanup(release)
 	f.action.failNext("The packet changed.")
@@ -250,7 +291,7 @@ func TestBrowserDecisionButtonsRefreshWhilePendingPreservesNoteAndBlocksNewChoic
 	entry := strings.Replace(ratificationEntry("w_000"), `["ratify"]`, `[]`, 1)
 	f := newDecisionButtonFixture(t, entry)
 	card := decisionSelector("ratification", "w_000", "")
-	assertDecisionButtons(f.p, card, map[string]string{"redraft": "Ask for a Redraft"})
+	assertDecisionButtons(f.p, card, map[string]string{"redraft": "Ask for a redraft"})
 	release := sync.OnceFunc(f.action.holdResponse())
 	t.Cleanup(release)
 	f.action.failNext("Read the new packet.")

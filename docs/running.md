@@ -385,10 +385,14 @@ From the page you can:
 
 Ratification, contested-unit, amendment and parked-base cards offer a button
 for each available decision below the note field, where the card takes a note.
-Click **Ratify** to approve the displayed revisions, or **Ask for a Redraft**
-with a note saying what should change. Standing objections have **Sustain**
-and **Overrule** buttons. While a decision is sending, the card blocks further
-decisions.
+The recommended option is the primary button and the others are secondary.
+Click **Ratify** to approve the displayed revisions, or **Ask for a redraft**
+with a note saying what should change. Each standing objection has its own
+**Sustain** and **Overrule** buttons, which send the note with that objection.
+While a decision is sending, the card blocks further decisions. Revisions,
+commit and what each role asked sit in closed footnotes on the card. A delivery
+card reads as a release note: the brief, the findings, the criteria and the
+preview of what will be published, then the button that publishes it.
 
 Submitting a feed action, such as a ruling on a contested unit or ratifying a
 proposal, removes its card from the feed right away, before the service has

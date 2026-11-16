@@ -230,7 +230,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	f.awaitUnit(t, stream, "dedupe", UnitContested)
 	raiseFixtureContest(t, f.repository(), stream, "dedupe")
 	card = decisionCard(entry(InboxContested))
-	p.AwaitText(card+"[data-field=options]", "revise")
+	p.AwaitText(card+"[data-field=options]", "Revise the unit")
 	p.TypeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
 	p.Click(card + `[data-decision-choice="revise"]`)
 	p.AwaitOutcome("Ruled revise on unit dedupe.")

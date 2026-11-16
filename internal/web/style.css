@@ -1796,6 +1796,90 @@ button.danger:disabled:hover {
   white-space: pre-wrap;
 }
 
+/* Decision cards. The question leads, the recommended option is the one
+   primary button and the others are secondary. Details are footnotes. */
+
+.decision .question {
+  margin: 0;
+  font-size: var(--fs-prose);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.decision .recommendation {
+  margin: 0.5rem 0;
+  color: var(--text);
+}
+
+.decision [data-field="blocked"] {
+  margin: 0.35rem 0 0;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.9rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
+/* A footnote is small, mono and quiet. What was asked, a card's revisions
+   and commit, and who decided all use it. */
+.footnote {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-feature-settings: "zero" 1, "calt" 0;
+  color: var(--text-muted);
+}
+
+details.footnote[open] {
+  flex: 1 0 100%;
+}
+
+details.footnote > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.footnote > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.footnote > summary::before {
+  content: "\25B8  ";
+}
+
+details.footnote[open] > summary::before {
+  content: "\25BE  ";
+}
+
+details.footnote > summary:hover {
+  color: var(--text);
+}
+
+details.footnote > :not(summary) {
+  margin: 0.3rem 0 0;
+  padding-left: 1rem;
+}
+
+.footnote .meta,
+.footnote .mono {
+  font-size: inherit;
+}
+
+.asked ul {
+  list-style: none;
+}
+
+.asked li {
+  padding: 0.15rem 0;
+  font-family: var(--font-sans);
+}
+
+.decision [data-field="preview"] {
+  margin: 0.5rem 0 0;
+}
+
 .decision [data-field="preview"] summary {
   cursor: pointer;
 }
@@ -1806,10 +1890,33 @@ button.danger:disabled:hover {
   margin: 0.25rem 0 0.75rem;
 }
 
+.decision [data-field="authorization"] {
+  margin: 0.5rem 0;
+}
+
+/* The delivery card reads as a release note: sections in order, each with
+   a quiet heading, and the publish button last. */
+.release-section {
+  margin: 0.75rem 0 0;
+}
+
+.release-section h4 {
+  margin: 0 0 0.25rem;
+}
+
+.decision form {
+  margin-top: 0.75rem;
+}
+
+.decision form .actions {
+  margin-top: 0.5rem;
+}
+
 .choices {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.4rem;
+  margin: 0.5rem 0;
 }
 
 .choices button {
@@ -1817,21 +1924,16 @@ button.danger:disabled:hover {
   white-space: pre-wrap;
 }
 
-.asked summary {
-  cursor: pointer;
+.objection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
-.asked ul {
-  margin: 0.35rem 0 0;
-  padding-left: 1rem;
-  border-left: 2px solid var(--line);
-  list-style: none;
-}
-
-.asked li,
 .dissent li,
 .criteria li {
-  padding: 0.25rem 0;
+  padding: 0.5rem 0;
 }
 
 .dissent li + li,

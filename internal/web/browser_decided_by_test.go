@@ -30,4 +30,11 @@ func TestBrowserActivityLabelsJevDecisions(t *testing.T) {
 	if want := "ratified=decided by Jev,building=,assembled="; labels != want {
 		t.Fatalf("decision labels = %q, want %q", labels, want)
 	}
+	// The label is a footnote, the same kind of note as a card's "What was
+	// asked".
+	var footnotes int
+	p.eval(`document.querySelectorAll('#workstream-activity [data-field=decided-by].footnote').length`, &footnotes)
+	if footnotes != 1 {
+		t.Fatalf("%d decided by labels are footnotes, want 1", footnotes)
+	}
 }

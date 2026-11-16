@@ -302,7 +302,7 @@ func TestBrowserFeedDismissingOneItemLeavesOthersUnaffected(t *testing.T) {
 	p.awaitGone("the contested unit", contested)
 	// The ratification card is untouched: still visible, with its options
 	// unchanged.
-	p.awaitText(ratification+"[data-field=options]", "Options: ratify")
+	p.awaitText(ratification+"[data-field=options]", "Ratify")
 	var gone bool
 	p.eval(`document.querySelector(`+quote(ratification)+`) === null`, &gone)
 	if gone {

@@ -268,10 +268,13 @@ can answer it from either place:
 - **The command line.** `osmia inbox` lists the same entries, each with the
   command that answers it.
 
-On ratification, contested-unit, amendment and parked-base cards, click the
-button for your decision below the note field, where one is offered.
-**Ratify** approves the displayed revisions; **Ask for a Redraft** needs a note
-saying what should change. Contested rulings also need a note.
+Every card puts its question first. On ratification, contested-unit, amendment
+and parked-base cards, click the button for your decision below the note field,
+where one is offered; the option the recommendation names is the primary
+button and the others are secondary. **Ratify** approves the displayed
+revisions; **Ask for a redraft** needs a note saying what should change.
+Contested rulings also need a note. A closed footnote on each card holds its
+revisions and commit, and what each role asked in its own words.
 
 The decisions, in the order a workstream meets them:
 
