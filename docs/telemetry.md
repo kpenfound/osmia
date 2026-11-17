@@ -231,7 +231,8 @@ On the exits of a workstream and of a final review's rounds, the route span
 names a target by a fixed word where the subject's own state carries a number or
 is not entered at all. The words are `reviewed`, `failed`, `requested`,
 `reopen_building` and `fresh_review` for a final review's round,
-`exhausted`, `new_draft` and `wait` for the draft and the concluded debate,
+`exhausted` and `wait` for the draft and the concluded debate, `no_move` for
+a proposal to reopen a workstream past `maxFinalRounds` that leaves it where it is,
 `debate_round` and `redraft` for the owner's choices after a debate,
 `ratified`, `abandoned` and `delivered` for an owner's gate decision, and
 `building`, `assembled` and `delivered` for a workstream's move. The

@@ -32,11 +32,16 @@ var ErrDriftAwaits = errors.New("drift rebase awaits its conflict resolution")
 // Drift rebase is held for the owner: review sent the resolution back
 // shed.max_bounces times, its mason left conflict markers after
 // mason.max_clean_turns reminders, or maxRecoveries turns of its mason or
-// reviewer in a row were interrupted.
+// reviewer in a row were interrupted. The mason.max_clean_turns reminders are a
+// soft policy: the router may ask for the drift rebase again. The other two
+// are hard limits.
 type DriftHeldError struct {
 	Why string
 	// Trigger is the trigger of the exit that holds the drift rebase.
 	Trigger string
+	// Hard says a limit that stays hard stopped the resolution (shed.max_bounces,
+	// maxRecoveries): asking for the drift rebase again is not offered.
+	Hard bool
 }
 
 func (e DriftHeldError) Error() string {
@@ -457,7 +462,7 @@ func (d Drifter) Resolve(ctx context.Context, stream config.WorkstreamID, rebase
 			continue
 		case driftRejected:
 			if rebase.Review >= d.cfg.Shed.MaxBounces {
-				return rebase, DriftHeldError{fmt.Sprintf("review sent its resolution of the conflicts in %s back %d times, reaching shed.max_bounces", strings.Join(rebase.Conflicts, ", "), rebase.Review), TriggerDriftReviewBounces}
+				return rebase, DriftHeldError{fmt.Sprintf("review sent its resolution of the conflicts in %s back %d times, reaching shed.max_bounces", strings.Join(rebase.Conflicts, ", "), rebase.Review), TriggerDriftReviewBounces, true}
 			}
 			paths, err := d.Conflicted(stream, rebase.Drift)
 			if err != nil {
@@ -583,11 +588,11 @@ func (d Drifter) MasonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	switch last.Status() {
 	case "interrupted":
 		if n := interruptedInARow(th); n >= maxRecoveries {
-			return false, DriftHeldError{fmt.Sprintf("its mason's latest %d turns were interrupted in a row", n), TriggerDriftTurnFailed}
+			return false, DriftHeldError{fmt.Sprintf("its mason's latest %d turns were interrupted in a row", n), TriggerDriftTurnFailed, true}
 		}
 		return false, d.Follow(ctx, stream, last, "recover", last.Request.Prompt+"\n\n"+interruption(last)+" Your view holds the files that turn left. Go on from them, and call done once the resolution is complete.")
 	case "failed":
-		return false, DriftHeldError{TurnFailure("mason", last), TriggerDriftTurnFailed}
+		return false, DriftHeldError{TurnFailure("mason", last), TriggerDriftTurnFailed, false}
 	case "idle":
 	default:
 		return false, nil
@@ -607,7 +612,7 @@ func (d Drifter) MasonDone(ctx context.Context, stream config.WorkstreamID, w wo
 		}
 	}
 	if reminded >= d.cfg.Mason.MaxCleanTurns {
-		return false, DriftHeldError{fmt.Sprintf("its mason left conflict markers in %s after %d reminders, exhausting mason.max_clean_turns", strings.Join(marked, ", "), reminded), TriggerDriftTurnFailed}
+		return false, DriftHeldError{fmt.Sprintf("its mason left conflict markers in %s after %d reminders, exhausting mason.max_clean_turns", strings.Join(marked, ", "), reminded), TriggerDriftTurnFailed, false}
 	}
 	return false, d.Follow(ctx, stream, last, "markers", fmt.Sprintf("Your last turn ended, and these files still carry conflict markers: %s. Resolve each conflict against the sealed spec, remove every marker, and call done again.", strings.Join(marked, ", ")))
 }
@@ -683,7 +688,7 @@ func (d Drifter) Reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 	switch last.Status() {
 	case "interrupted":
 		if n := interruptedInARow(th); n >= maxRecoveries {
-			return UnitVerdict{}, false, DriftHeldError{fmt.Sprintf("its reviewer's latest %d turns were interrupted in a row", n), TriggerDriftTurnFailed}
+			return UnitVerdict{}, false, DriftHeldError{fmt.Sprintf("its reviewer's latest %d turns were interrupted in a row", n), TriggerDriftTurnFailed, true}
 		}
 		req := last.Request
 		req.TurnID = fmt.Sprintf("%s-recover-%d", turn, last.Sequence)
@@ -700,14 +705,14 @@ func (d Drifter) Reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 		_, err := d.repository.EnqueueTurn(ctx, req)
 		return UnitVerdict{}, false, err
 	case "failed":
-		return UnitVerdict{}, false, DriftHeldError{TurnFailure("reviewer", last), TriggerDriftTurnFailed}
+		return UnitVerdict{}, false, DriftHeldError{TurnFailure("reviewer", last), TriggerDriftTurnFailed, false}
 	case "idle":
 	default:
 		return UnitVerdict{}, false, nil
 	}
 	outcome := last.Response.Result.Outcome
 	if outcome == nil || outcome.Status != verdictOutcome {
-		return UnitVerdict{}, false, DriftHeldError{fmt.Sprintf("its reviewer's turn %s ended without recording a verdict", last.Request.TurnID), TriggerDriftHeld}
+		return UnitVerdict{}, false, DriftHeldError{fmt.Sprintf("its reviewer's turn %s ended without recording a verdict", last.Request.TurnID), TriggerDriftHeld, false}
 	}
 	var verdict UnitVerdict
 	if err := json.Unmarshal([]byte(outcome.Report), &verdict); err != nil {

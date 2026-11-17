@@ -75,15 +75,17 @@ func contestFailure(ctx context.Context, s *Controller, repo *trace.Repository, 
 		return false, err
 	}
 	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile: %s", role, last.Request.TurnID, unit, failureHistory(last))
-	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, "the infrastructure failure repeats")
+	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, "the infrastructure failure repeats", true)
 }
 
 // contestTurn routes the exit of a unit whose latest turn failed or was
 // interrupted again and again. The default is to contest it; the router may
-// instead queue the turn once more. The exit is handed to the router's worker.
-func (s *Controller) contestTurn(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, id, reason, failure string) error {
+// instead queue the turn once more, unless retry is false: the turns
+// interrupted in a row reached maxRecoveries, a limit that stays hard, so the
+// retry is not offered. The exit is handed to the router's worker.
+func (s *Controller) contestTurn(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, id, reason, failure string, retry bool) error {
 	targets := []string{UnitContested}
-	if from == UnitImplementing || from == UnitReviewing {
+	if retry && (from == UnitImplementing || from == UnitReviewing) {
 		targets = append(targets, from)
 	}
 	_, err := s.raise(ctx, true, UnitExitInput{
@@ -132,7 +134,7 @@ func contestInterrupted(ctx context.Context, s *Controller, repo *trace.Reposito
 	last := th.Turns[len(th.Turns)-1]
 	id := trace.EventID(last.Response.ID, "contested")
 	reason := fmt.Sprintf("the latest %d %s turns of unit %s were interrupted in a row, the latest %s, so the unit is contested instead of its work continuing again", n, role, unit, last.Request.TurnID)
-	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, fmt.Sprintf("%d turns in a row were interrupted", n))
+	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, fmt.Sprintf("%d turns in a row were interrupted", n), false)
 }
 
 // contestFailure contests an implementing unit whose mason's latest turn

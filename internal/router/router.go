@@ -28,6 +28,12 @@ type Router struct {
 	// Rebuild defines how each machine rebuilds an exit from its route record,
 	// so Recover can finish a pick that was recorded but not applied.
 	Rebuild *Rebuilders
+	// Stops reports why work cannot start on the exit's workstream now: a pause
+	// of the owner, the daily budget or a provider's usage limit, or the loop
+	// guard having counted its limit of sessions. It is the hard limit on the
+	// targets marked Works, offered to Jev and checked again at apply time; nil
+	// stops nothing.
+	Stops func(ctx context.Context, x Exit) (string, error)
 	// Spans receives the route span of each decided exit; nil sends none.
 	Spans func(SpanRoute)
 	Now   func() time.Time
@@ -126,6 +132,11 @@ func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error)
 			return "no candidate is known for the subject", nil
 		}
 		if why, err := x.Prereq.Candidate(ctx); err != nil || why != "" {
+			return why, err
+		}
+	}
+	if t.Works && r.Stops != nil && !x.Authority.pinned() && !(x.Enter != nil && t.Name == x.Default) {
+		if why, err := r.Stops(ctx, x); err != nil || why != "" {
 			return why, err
 		}
 	}

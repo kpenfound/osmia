@@ -214,7 +214,7 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 	}
 	visible := fmt.Sprintf("Drift rebase %d onto upstream %s is held for the owner: %s. The feature branch and the seal stay, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back with a note for its drift mason and reviewer.", rebase.Drift, rebase.Upstream.Commit, held.Why)
 	id := transition + "-" + DriftHeld
-	retry := router.Target{Name: DriftRetryTarget, State: fmt.Sprintf("requested-%d", rebase.Drift+1), Bar: router.BarModest,
+	retry := router.Target{Name: DriftRetryTarget, State: fmt.Sprintf("requested-%d", rebase.Drift+1), Bar: router.BarModest, Works: true,
 		Description: "Ask for the drift rebase again from the start: the conflicts are replayed and fresh turns of the drift mason and reviewer resolve them.",
 		Reason:      fmt.Sprintf("Jev asked for drift rebase %d again instead of holding drift rebase %d: %s", rebase.Drift+1, rebase.Drift, held.Why)}
 	retry.Corroborate = held.corroborate()
@@ -226,16 +226,17 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 	if len(rebase.Conflicts) > 0 {
 		records = append(records, router.Entry{Kind: "drift-conflicts", Text: strings.Join(rebase.Conflicts, ", ")})
 	}
+	targets := []router.Target{{Name: DriftHoldTarget, State: fmt.Sprintf("%s-%d", DriftHeld, rebase.Drift), Reason: reason,
+		Description: "Hold the drift rebase for the owner: the feature branch and the seal stay, and no drift rebase is asked for until the owner asks or the chief of staff hands it back."}}
+	if !held.Hard {
+		targets = append(targets, retry)
+	}
 	return router.Exit{
 		Repo: d.repository, Project: d.repository.Project(), Workstream: stream, Machine: DriftMachine,
 		Subject: DriftSubject, From: state.Value, Version: state.Version, Trigger: trigger, Cause: fmt.Sprintf("%s-held", transition), HeaderCause: operation, Actor: foremanActor,
 		At:      d.s.Now(),
 		Default: DriftHoldTarget,
-		Targets: []router.Target{
-			{Name: DriftHoldTarget, State: fmt.Sprintf("%s-%d", DriftHeld, rebase.Drift), Reason: reason,
-				Description: "Hold the drift rebase for the owner: the feature branch and the seal stay, and no drift rebase is asked for until the owner asks or the chief of staff hands it back."},
-			retry,
-		},
+		Targets: targets,
 		Questions: held.questions(),
 		Evidence:  router.Evidence{Intent: "Keep the workstream's feature branch current with upstream without losing its work.", Facts: facts, Records: records},
 		TransitionID: func(t router.Target) string {
@@ -253,21 +254,11 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 // corroborate says what the answers must show for the router to ask for the
 // drift rebase again.
 func (e DriftHeldError) corroborate() []router.Condition {
-	switch e.Trigger {
-	case TriggerDriftReviewBounces:
-		return []router.Condition{{Question: "actionable", AtLeast: router.LevelModest}, {Question: "progress", AtLeast: router.LevelModest}}
-	}
 	return []router.Condition{{Question: "transient", AtLeast: router.LevelModest}, {Question: "repeats", AtMost: router.LevelHalf}}
 }
 
 // questions are the trigger's own narrow questions of a held drift rebase.
 func (e DriftHeldError) questions() []router.Question {
-	switch e.Trigger {
-	case TriggerDriftReviewBounces:
-		return []router.Question{
-			question("actionable", "The reviewer's findings tell the drift mason what to resolve differently."),
-			question("progress", "Successive resolutions got closer to the reviewer's approval.")}
-	}
 	return []router.Question{
 		question("transient", "The failure looks like infrastructure and not like the behaviour of the work."),
 		question("repeats", "The same failure repeats across the turns of the drift rebase.")}

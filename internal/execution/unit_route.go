@@ -78,11 +78,11 @@ func unitTarget(name string) router.Target {
 	case TargetWait:
 		return router.Target{Name: name, Description: "Leave the unit where it is and keep waiting; nothing moves.", Stay: true, NoMove: true}
 	case UnitImplementing:
-		return router.Target{Name: name, Description: "Give the unit's mason a turn with a fresh clean-turn allowance to revise the unit.", Bar: router.BarModest}
+		return router.Target{Name: name, Description: "Give the unit's mason a turn with a fresh clean-turn allowance to revise the unit.", Bar: router.BarModest, Works: true}
 	case UnitChecking:
-		return router.Target{Name: name, Description: "Run the checks again on the unit's recorded candidate.", Bar: router.BarModest, NeedsCandidate: true}
+		return router.Target{Name: name, Description: "Run the checks again on the unit's recorded candidate.", Bar: router.BarModest, NeedsCandidate: true, Works: true}
 	case UnitReviewing:
-		return router.Target{Name: name, Description: "Have the unit's reviewer review the recorded candidate again.", Bar: router.BarModest, NeedsCandidate: true}
+		return router.Target{Name: name, Description: "Have the unit's reviewer review the recorded candidate again.", Bar: router.BarModest, NeedsCandidate: true, Works: true}
 	case UnitApproved:
 		return router.Target{Name: name, Description: "Approve the recorded candidate so the foreman lands it.", Approval: true, NeedsCandidate: true}
 	case UnitContested:

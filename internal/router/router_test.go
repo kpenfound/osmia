@@ -943,3 +943,100 @@ func TestRecoverFinishesRecordedPicksWithoutTheCaller(t *testing.T) {
 		})
 	}
 }
+
+// worksExit is the exit of the fixture with the targets that start agent work
+// marked as such.
+func worksExit(f *fx) router.Exit {
+	x := f.exit()
+	for i := range x.Targets {
+		switch x.Targets[i].Name {
+		case "implementing", "checking":
+			x.Targets[i].Works = true
+		}
+	}
+	return x
+}
+
+// A pause, a spent budget or the loop guard stops the targets that start work:
+// they are not offered to Jev, a pick whose limit is reached while Jev answers
+// is refused with one notice, a proposal whose default starts work is held, and
+// only an owner's pinned decision and a default entered through its trigger's
+// own records go on.
+func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
+	const why = "work is paused (daily-budget): the budget is spent"
+	t.Run("the targets are not offered", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
+		x := worksExit(f)
+		x.Default = "contested"
+		x.Trigger = "unit.move_proposal"
+		route(t, f, x)
+		_, options := request(t, f.provider, 0)
+		if contains(options, "implementing") || contains(options, "checking") || !contains(options, "contested") {
+			t.Fatalf("options = %v", options)
+		}
+	})
+
+	t.Run("a pick is refused when work stops while Jev answers", func(t *testing.T) {
+		stopped := false
+		provider := departing("checking", 0.9)
+		provider.Wait = func(context.Context) error { stopped = true; return nil }
+		f := newFx(t, provider)
+		f.seed("checking")
+		f.track("checking", "implementing", "contested")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) {
+			if stopped {
+				return why, nil
+			}
+			return "", nil
+		}
+		x := worksExit(f)
+		x.Default = "contested"
+		res := route(t, f, x)
+		if res.Committed || res.Journal != router.StateRefused || res.Outcome != router.OutcomeHeld || f.state().Value != "checking" {
+			t.Fatalf("result = %+v", res)
+		}
+		if f.ran("checking") != 0 || f.ran("contested") != 0 || len(f.moves()) != 0 {
+			t.Fatal("an effect ran or the unit moved")
+		}
+		if n := f.notices(); len(n) != 1 || !strings.Contains(n[0], "budget is spent") {
+			t.Fatalf("notices = %v", n)
+		}
+	})
+
+	t.Run("a default that starts work and carries no records of its own is held", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
+		res := route(t, f, worksExit(f))
+		if res.Committed || res.Hold != router.HoldDefaultIllegal || len(f.moves()) != 0 || len(f.notices()) != 1 {
+			t.Fatalf("result = %+v", res)
+		}
+	})
+
+	t.Run("a default entered through its trigger's own records goes on", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
+		x := worksExit(f)
+		x.Enter = func(context.Context, router.Plan) (router.Effect, error) { return router.Effect{}, nil }
+		res := route(t, f, x)
+		if !res.Committed || res.State != "implementing" || res.Outcome != router.OutcomeFollowed {
+			t.Fatalf("result = %+v", res)
+		}
+	})
+
+	t.Run("an owner's pinned decision goes on", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
+		x := worksExit(f)
+		x.Trigger, x.Actor = "unit.move_owner", owner
+		x.Authority = &router.Authority{Kind: router.AuthorityOwner, Target: "implementing"}
+		res := route(t, f, x)
+		if !res.Committed || res.State != "implementing" || len(f.provider.Requests()) != 0 {
+			t.Fatalf("result = %+v", res)
+		}
+	})
+}

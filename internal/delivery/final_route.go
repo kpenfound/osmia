@@ -80,8 +80,8 @@ func (a *FinalReviewer) finalExit(in finalExitInput) router.Exit {
 	targets := []router.Target{ExitTarget(trigger, router.Target{Name: def, State: fmt.Sprintf("%s-%d", in.Report.Outcome, k), Description: "Record the final review."})}
 	if trigger != TriggerFinalClean && !in.Report.Maintenance {
 		targets = append(targets,
-			ExitTarget(trigger, router.Target{Name: TargetFreshReview, State: fmt.Sprintf("rerequested-%d", k), Description: "Ask for a fresh final review.", Bar: router.BarModest}),
-			ExitTarget(trigger, router.Target{Name: TargetReopenBuilding, State: fmt.Sprintf("reopened-%d", k), Description: "Reopen the workstream for repair units.", Bar: router.BarStrict}))
+			ExitTarget(trigger, router.Target{Name: TargetFreshReview, State: fmt.Sprintf("rerequested-%d", k), Description: "Ask for a fresh final review.", Bar: router.BarModest, Works: true}),
+			ExitTarget(trigger, router.Target{Name: TargetReopenBuilding, State: fmt.Sprintf("reopened-%d", k), Description: "Reopen the workstream for repair units.", Bar: router.BarStrict, Works: true}))
 	}
 	repo := a.Repository
 	stream := in.Stream

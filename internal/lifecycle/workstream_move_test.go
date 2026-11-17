@@ -13,6 +13,9 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -188,7 +191,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 		must(t, err)
 		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
 	}
-	if out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`); !strings.Contains(out, "reopening the workstream for further revisions is the owner's decision") {
+	if out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`); !strings.Contains(out, "reopening it for further revisions is the owner's decision") {
 		t.Fatalf("the chief of staff reopened after three blocking reviews: %s", out)
 	}
 	if out := callMove(t, tool, `{"to":"assembled","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
@@ -427,4 +430,86 @@ func TestReviewersTreatRebaseChangesAsInScope(t *testing.T) {
 	if conflicts, err := unitRebaseConflicts(repository, stream, "resume", "other"); err != nil || conflicts != nil {
 		t.Fatalf("conflicts of a rebase onto another base %v %v", conflicts, err)
 	}
+}
+
+// atTheFinalRoundLimit returns a workstream whose final reviews found something
+// blocking maxFinalRounds times, assembled, and the chief of staff's tool to
+// move it.
+func atTheFinalRoundLimit(t *testing.T, key string) (*shedFixture, *trace.Repository, config.WorkstreamID, coreadapter.Tool) {
+	t.Helper()
+	f, stream, repository, a := newFinalFixture(t, key)
+	hostFinalReviews(t, f, stream)
+	f.s.setSole(&activeProject{repository: repository})
+	_, op := assembleBoth(t, f, repository, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	report := failFinalReview(t, f, repository, stream, a, 1, op)
+	for k := 2; k <= 4; k++ {
+		report.Review, report.Outcome, report.Failure = k, finalReviewed, ""
+		report.Findings = []FinalFinding{{Severity: FindingBlocking, Finding: "The feature does not resume."}}
+		content, err := json.Marshal(report)
+		must(t, err)
+		revision, err := nextRevision(repository, stream, finalReportDocument)
+		must(t, err)
+		must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
+	}
+	return f, repository, stream, chiefMoveTool(t, f, repository, stream, "events_1", false)
+}
+
+// maxFinalRounds sets the default of the chief of staff's proposal to reopen
+// the workstream: once the final reviews found something blocking that many
+// times, the default leaves the workstream where it is for the owner, as the
+// tool refused it before, and reopening stays on offer. With a Jev that finds
+// the default fits the chief of staff is told the move waits for the owner; a
+// scripted departure reopens the workstream past the limit and records the
+// departure with the rule that chose it.
+func TestTheFinalRoundLimitSetsTheDefaultOfAChiefReopening(t *testing.T) {
+	t.Parallel()
+	t.Run("the default fits", func(t *testing.T) {
+		t.Parallel()
+		f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-default")
+		routeJev(f.s, &jevfixture.Transitions{})
+		out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
+		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "reopening it for further revisions is the owner's decision") {
+			t.Fatalf("the chief of staff reopened after the limit: %s", out)
+		}
+		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
+			t.Fatalf("the workstream %+v %v", feature, err)
+		}
+		records := routeFor(t, repository, stream, "ws.move_proposal")
+		if len(records) != 1 || records[0].Default != lifecycle.NoMoveTarget || records[0].Target != lifecycle.NoMoveTarget || records[0].Outcome != router.OutcomeFollowed ||
+			!slices.Contains(records[0].Offered, "building") || !slices.Contains(records[0].Offered, lifecycle.NoMoveTarget) {
+			t.Fatalf("route %+v", records)
+		}
+		if got := lastOn(t, repository, stream, trace.FeatureSubject); got.To == BuildingState {
+			t.Fatalf("the workstream's latest transition %+v", got)
+		}
+	})
+
+	t.Run("a scripted departure", func(t *testing.T) {
+		t.Parallel()
+		f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-departure")
+		routeJev(f.s, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
+			if a.Trigger == "ws.move_proposal" {
+				return jevfixture.Departs(a, "building", 0.96, 0.96)
+			}
+			return jevfixture.DefaultFits(a)
+		}})
+		out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
+		if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
+			t.Fatalf("the departure did not reopen the workstream: %s", out)
+		}
+		moved := lastOn(t, repository, stream, trace.FeatureSubject)
+		if moved.To != BuildingState || moved.DefaultTo != lifecycle.NoMoveTarget || moved.DecidedBy != trace.DecidedByJev || !moved.Departed() || moved.Judgment == "" ||
+			!strings.Contains(moved.Reason, "decide-transition table "+router.TableVersion+", rule 6:departure") {
+			t.Fatalf("the transition %+v", moved)
+		}
+		records := routeFor(t, repository, stream, "ws.move_proposal")
+		if len(records) != 1 || records[0].Outcome != router.OutcomeDeparted || records[0].Target != "building" || records[0].Judgment != moved.Judgment || records[0].Reason == "" {
+			t.Fatalf("route %+v", records)
+		}
+		if n := departuresInFeed(t, f.s, repository, stream); n != 1 {
+			t.Fatalf("%d departures in the feed, want one", n)
+		}
+	})
 }

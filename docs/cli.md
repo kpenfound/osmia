@@ -479,7 +479,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   `conflict` (exit 5). The chief of staff moves a workstream to `building` or
   `assembled` on its own judgment. It moves it to any other state only when
   you ask it to with `send`. After three final reviews with blocking findings,
-  reopening is yours to decide.
+  the default is that reopening is yours to decide: a proposal to reopen leaves
+  the workstream where it is and tells you, unless Jev departs from that default
+  at the strict bar and records why.
 - `move <workstream-id> <unit> <implementing|checking|reviewing|approved|contested> <note>`
   moves a unit the state machine left stuck or wrong. The unit must have
   started and not merged: it is implementing, checking, reviewing, approved,

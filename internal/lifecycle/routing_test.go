@@ -370,7 +370,7 @@ func TestAHeldDriftRebaseFollowsItsDefault(t *testing.T) {
 		t.Fatalf("the drift rebase at max_bounces %+v %v", result, err)
 	}
 	held := lastOn(t, d.repository, stream, driftSubject)
-	if held.To != driftHeld+"-1" || held.DefaultTo != driftHeld+"-1" || held.DecidedBy != trace.DecidedByCode || held.Departed() || held.Judgment == "" {
+	if held.To != driftHeld+"-1" || held.DefaultTo != driftHeld+"-1" || held.DecidedBy != trace.DecidedByCode || held.Departed() {
 		t.Fatalf("the hold %+v", held)
 	}
 	records := routeFor(t, d.repository, stream, "drift.review_rejected")
@@ -379,68 +379,29 @@ func TestAHeldDriftRebaseFollowsItsDefault(t *testing.T) {
 	}
 }
 
-// A scripted departure asks for the drift rebase again instead of holding it:
-// the drift subject enters the request of the next drift rebase through the
-// shared effect, the operation of the held one ends, the transition names Jev
-// and the default it left, and the new operation is published.
-func TestAScriptedDepartureAsksForTheDriftRebaseAgain(t *testing.T) {
+// The review rounds of a drift rebase's conflict resolution stay a hard limit:
+// once review sent the resolution back shed.max_bounces times the drift rebase
+// is held for the owner and asking for it again is not offered, so the router
+// keeps the hold itself and asks Jev nothing, however Jev would answer.
+func TestADriftHoldAtTheBounceLimitOffersNoRetry(t *testing.T) {
 	t.Parallel()
-	f, d, stream, op := heldDrift(t, "drift-route-retried")
-	routeJev(f.s, departTo("retried", 0.9))
+	f, d, stream, op := heldDrift(t, "drift-route-hard")
+	p := departTo("retried", 0.99)
+	routeJev(f.s, p)
 
 	result, err := attemptOperation(t, f.s, d.repository, stream, op, d)
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the drift rebase at max_bounces %+v %v", result, err)
 	}
-	moved := lastOn(t, d.repository, stream, driftSubject)
-	if moved.To != "requested-2" || moved.DefaultTo != driftHeld+"-1" || moved.DecidedBy != trace.DecidedByJev || moved.Judgment == "" || !moved.Departed() || moved.ID != "drift-1-retried" {
-		t.Fatalf("the departure %+v", moved)
+	held := lastOn(t, d.repository, stream, driftSubject)
+	if held.To != driftHeld+"-1" || held.DecidedBy != trace.DecidedByCode || held.Departed() {
+		t.Fatalf("the hold %+v", held)
 	}
-	if !strings.Contains(moved.Reason, "decide-transition table") || !strings.Contains(moved.Reason, "drift rebase 2 fetches") {
-		t.Fatalf("the departure reads as the retried request: %q", moved.Reason)
+	records := routeFor(t, d.repository, stream, "drift.review_rejected")
+	if len(records) != 1 || !slices.Equal(records[0].Offered, []string{"held"}) || records[0].Outcome != router.OutcomeFollowed || records[0].JevRequested {
+		t.Fatalf("route %+v", records)
 	}
-	ops, err := d.repository.Operations(stream)
-	must(t, err)
-	next := slices.IndexFunc(ops, func(o trace.OperationRecord) bool {
-		_, event := lifecycle.DriftIDs(2)
-		return o.Operation.ID == trace.OperationID(d.repository.Project(), stream, event) && o.Result == nil
-	})
-	if next < 0 {
-		t.Fatalf("the drift rebase asked for again is not an operation: %+v", ops)
-	}
-	if again, err := d.Apply(context.Background(), op); err != nil || again.Outcome != "succeeded" {
-		t.Fatalf("a retry of the ended operation %+v %v", again, err)
-	}
-	if n := len(routeFor(t, d.repository, stream, "drift.review_rejected")); n != 1 {
-		t.Fatalf("%d routes for one hold", n)
-	}
-	if n := departuresInFeed(t, f.s, d.repository, stream); n != 1 {
-		t.Fatalf("%d departures in the feed, want one", n)
-	}
-}
-
-// The drift hold's departure is legal only at its bar: a pick below the modest
-// bar leaves the drift rebase's operation pending, nothing moves and the chief of
-// staff gets one notice.
-func TestADriftHoldBelowItsBarMovesNothing(t *testing.T) {
-	t.Parallel()
-	f, d, stream, op := heldDrift(t, "drift-route-below-bar")
-	routeJev(f.s, departTo("retried", 0.55))
-
-	result, err := attemptOperation(t, f.s, d.repository, stream, op, d)
-	if err == nil || !strings.Contains(err.Error(), "held by the router") {
-		t.Fatalf("the operation ended or failed another way: %+v %v", result, err)
-	}
-	if state, err := d.repository.Workflow(stream, driftSubject); err != nil || strings.HasPrefix(state.Value, driftHeld) || strings.HasPrefix(state.Value, "requested-2") {
-		t.Fatalf("a held exit moved the drift rebase: %+v %v", state, err)
-	}
-	if n := routeNotices(t, d.repository, stream); n != 1 {
-		t.Fatalf("%d notices for the held exit, want one", n)
-	}
-	if _, err := attemptOperation(t, f.s, d.repository, stream, op, d); err == nil {
-		t.Fatal("a retry committed what the router held")
-	}
-	if n := routeNotices(t, d.repository, stream); n != 1 {
-		t.Fatalf("a retry sent another notice: %d", n)
+	if n := len(p.TransitionRequests()); n != 0 {
+		t.Fatalf("Jev was asked %d times about a hard limit with one legal target", n)
 	}
 }

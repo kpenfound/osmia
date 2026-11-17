@@ -449,7 +449,9 @@ func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string,
 }
 
 // contestIncomplete contests a checking unit whose latest n check runs of
-// its candidate did not complete, with a notice for the chief of staff. A
+// its candidate did not complete, with a notice for the chief of staff.
+// maxIncompleteChecks stays a hard limit: the checks are not offered again, so
+// the exit has the one target. A
 // ruling of review runs its checks again before review, and revise returns it
 // to its mason.
 func (c *checkers) contestIncomplete(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, latest UnitCheckRun, n int) error {
@@ -461,7 +463,7 @@ func (c *checkers) contestIncomplete(ctx context.Context, stream config.Workstre
 	reason += "; the unit is contested instead of its checks running again"
 	_, err := c.s.raise(ctx, true, UnitExitInput{
 		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksIncomplete, Cause: checkDocumentID(unit, latest.Run),
-		Default: UnitContested, Targets: []string{UnitContested, UnitChecking}, Actor: checksActor,
+		Default: UnitContested, Targets: []string{UnitContested}, Actor: checksActor,
 		ID: id, HeaderCause: checkDocumentID(unit, latest.Run), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
 		Note:     reason,
 		Evidence: router.Evidence{Facts: map[string]any{"incomplete_runs": n, "max_incomplete_runs": maxIncompleteChecks}, Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, latest.Run), Text: reason}}},

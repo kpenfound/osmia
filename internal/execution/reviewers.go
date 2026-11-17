@@ -884,7 +884,10 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 	}
 	to, id, why, cause := UnitReviewing, fmt.Sprintf("%s-review-refresh-%d", subject, state.Version), reason, reviewDocument(unit)
 	var notice trace.Event
+	targets := []string{UnitReviewing, UnitChecking, UnitContested}
 	if refreshes+1 >= maxReviewRefreshes {
+		// maxReviewRefreshes stays a hard limit: the review is not offered again.
+		targets = []string{UnitChecking, UnitContested}
 		to, id, cause = UnitContested, fmt.Sprintf("%s-contested-refresh-%d", subject, state.Version), latest
 		why = fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
 		notice = trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))
@@ -893,7 +896,7 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 	}
 	_, err = r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewRefused, Cause: id,
-		Default: to, Targets: []string{UnitReviewing, UnitChecking, UnitContested}, Actor: reviewerActor,
+		Default: to, Targets: targets, Actor: reviewerActor,
 		ID: id, HeaderCause: cause, Reason: why, Events: []trace.Event{notice},
 		Note:     why,
 		Evidence: router.Evidence{Facts: map[string]any{"refused_in_a_row": refreshes + 1, "max_refused_in_a_row": maxReviewRefreshes}, Records: []router.Entry{{Kind: "refusal", Text: reason}}},

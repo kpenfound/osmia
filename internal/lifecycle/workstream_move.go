@@ -184,6 +184,8 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	switch {
 	case err != nil:
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed && res.Target == NoMoveTarget:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not moved to %s: final reviews have found blocking problems %d times, so reopening it for further revisions is the owner's decision, and the proposal waits for the owner", stream, req.To, maxFinalRounds)}
 	case res.Committed:
 		move := records.move
 		if res.Target != req.To {
@@ -365,15 +367,6 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 		}
 		if !slices.Contains(ChiefMoveTargets, input.To) {
 			return priorityRefusal(fmt.Sprintf("a move to %s is the owner's decision; present it to the owner, and record it with owner_decided once the owner asks for it", input.To))
-		}
-		if input.To == BuildingState {
-			rounds, err := finalRoundsWithBlocking(target, stream)
-			if err != nil {
-				return nil, err
-			}
-			if rounds >= maxFinalRounds {
-				return priorityRefusal(fmt.Sprintf("final reviews have found blocking problems %d times; reopening the workstream for further revisions is the owner's decision", rounds))
-			}
 		}
 		return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, chiefActor, scope.Turn))
 	}

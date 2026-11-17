@@ -25,6 +25,7 @@ func (s *Service) newRouter() *router.Router {
 	rebuild.Register(execution.UnitMachine, execution.RebuildUnitExit(s.execution))
 	return &router.Router{
 		Judge:   s.jev,
+		Stops:   s.routeStops,
 		Effects: effects,
 		Rebuild: rebuild,
 		Spans: func(r router.SpanRoute) {

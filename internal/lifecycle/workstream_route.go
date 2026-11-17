@@ -140,10 +140,16 @@ func latestWorkstreamMove(repo *trace.Repository, stream config.WorkstreamID) (W
 
 // The targets of a workstream move, as Jev reads them.
 var workstreamMoveTargets = map[string]router.Target{
-	BuildingState:  {Name: BuildingState, Description: "Reopen the workstream on its feature branch for repair units; its final review runs again afterwards.", Bar: router.BarStrict},
-	AssembledState: {Name: AssembledState, Description: "Run a fresh final review of the branch as it is.", Bar: router.BarModest},
+	BuildingState:  {Name: BuildingState, Description: "Reopen the workstream on its feature branch for repair units; its final review runs again afterwards.", Bar: router.BarStrict, Works: true},
+	AssembledState: {Name: AssembledState, Description: "Run a fresh final review of the branch as it is.", Bar: router.BarModest, Works: true},
 	DeliveredState: {Name: DeliveredState, Description: "Return the reopened workstream to delivered: its branch is still what its open pull request carries.", Bar: router.BarStrict},
 }
+
+// NoMoveTarget is the target of a proposal the router leaves unmoved: the
+// workstream stays where it is, and the proposal waits for the owner. It is the
+// default of a proposal to reopen a workstream whose final reviews have found
+// blocking problems maxFinalRounds times, the limit as a policy.
+const NoMoveTarget = "no_move"
 
 // routeWorkstreamMove routes a move to building, assembled or delivered. The
 // owner's move is a pinned move: the router enters exactly the target the owner
@@ -170,18 +176,37 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 		t.NoMove = name == feature.Value
 		targets = append(targets, t)
 	}
+	facts := map[string]any{"state": feature.Value, "target": to}
+	def := to
+	if trigger == intake.TriggerMoveProposal && to == BuildingState {
+		rounds, err := finalRoundsWithBlocking(repo, stream)
+		if err != nil {
+			return router.Result{}, err
+		}
+		facts["rounds_with_blocking"], facts["max_final_rounds"] = rounds, maxFinalRounds
+		if rounds >= maxFinalRounds {
+			// maxFinalRounds sets the default: the workstream stays, and
+			// reopening it past the limit is a departure at the strict bar.
+			def = NoMoveTarget
+			targets = append([]router.Target{{Name: NoMoveTarget, Stay: true, NoMove: true,
+				Description: fmt.Sprintf("Leave the workstream where it is: final reviews have found blocking problems %d times, so reopening it for further revisions is the owner's decision.", rounds)}}, targets...)
+		}
+	}
 	x := router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: intake.WorkstreamMachine,
 		Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version,
 		Trigger: trigger, Cause: fmt.Sprintf("%s-%d-%d", WorkstreamMovePrefix, feature.Version, now.UnixNano()), Actor: actor, Note: note, Turn: turn, At: now,
-		Default: to, Targets: targets, Authority: authority,
+		Default: def, Targets: targets, Authority: authority,
 		Questions: []router.Question{{Name: "proposal_fits", Instructions: "The proposed move fits the evidence."}, {Name: "evidence_supports", Instructions: "The history and the findings of the final reviews support the move."}},
 		TransitionID: func(t router.Target) string {
 			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
 		},
-		Evidence: router.Evidence{Intent: "The workstream's sealed spec and plan are what the owner approved.", Facts: map[string]any{"state": feature.Value, "target": to}},
+		Evidence: router.Evidence{Intent: "The workstream's sealed spec and plan are what the owner approved.", Facts: facts},
 		Prereq: router.Prerequisites{
 			Other: func(ctx context.Context, t router.Target) (string, error) {
+				if t.Name == NoMoveTarget {
+					return "", nil
+				}
 				_, api := s.workstreamMoveRecords(ctx, repo, stream, feature, t.Name, note, actor, turn, now)
 				switch {
 				case api == nil:
@@ -344,6 +369,11 @@ func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 	for _, to := range []string{BuildingState, AssembledState, DeliveredState} {
 		reg.Register(intake.WorkstreamMachine, to, effect(to))
 	}
+	reg.Register(intake.WorkstreamMachine, NoMoveTarget, func(_ context.Context, p router.Plan) (router.Effect, error) {
+		x := p.Exit
+		reason := fmt.Sprintf("workstream %s stays %s: the proposal to move it to %s waits for the owner, since final reviews have found blocking problems %d times: %s", x.Workstream, x.From, BuildingState, maxFinalRounds, x.Note)
+		return router.Effect{Events: []trace.Event{trace.Notice(p.TransitionID, "owner", reason)}, Reason: reason}, nil
+	})
 	reg.Register(intake.FinalMachine, intake.TargetReopenBuilding, effect(BuildingState))
 	reg.Register(intake.FinalMachine, intake.TargetFreshReview, effect(AssembledState))
 }

@@ -357,14 +357,20 @@ without an accepted report: the clarify turn after a clean ending without a
 tool call, the turn after a refused `done`, which states the refusal reason, and
 the turn after a failure, which says what ended the turn. A card problem
 never refuses a report, so a refusal comes only from the report itself. Past the
-bound the unit is contested, with a notice that names the reason. It also
-bounds the reminders a mason, or a drift mason,
-gets when it reports done with conflict markers left; past it the unit is
-contested or the drift rebase is held. `loop.max_sessions` is how many agent
+bound the default is to contest the unit, with a notice that names the reason;
+the bound sets the router's default and does not stop it, so Jev may instead
+give the mason another turn with a fresh allowance, and a departure records its
+reason. It also bounds the reminders a mason, or a drift mason,
+gets when it reports done with conflict markers left; past it the default is to
+contest the unit or hold the drift rebase, with the same departures.
+`loop.max_sessions` is how many agent
 sessions a workstream may run without progress before the loop guard pauses
-it: a change of state of the feature, a unit, the shed, an amendment, the
-final review or the publication, a drift rebase that moved the branch, or
-anything you do counts as progress. The pause is soft, attributed to the loop
+it, and it stays a hard limit for the moves Jev routes: every request to Jev is
+one of those sessions, and a paused workstream is offered no target that starts
+agent work. A change of state of the feature, a unit, the shed, an amendment,
+the final review or the publication, a drift rebase that moved the branch, or
+anything you do counts as progress; a routed exit that moves nothing, a hold or
+a followed default that stays where it is, does not. The pause is soft, attributed to the loop
 guard, and listed in the inbox; resuming the workstream starts the count over.
 It must not be negative, and `0` turns the guard off.
 
@@ -726,7 +732,9 @@ A check that fails is rerun once by its own link. One that passes is
 Passing checks send the unit to review, and its reviewer receives the
 result instead of running checks. Failing checks, which Dagger's report names,
 send it back to its mason with the failures and output; the send-back counts
-toward `shed.max_bounces`. At that limit, the unit stays contested until the
+toward `shed.max_bounces`. At that limit the default is to contest the unit,
+and Jev may instead send it back to its mason, run the checks again or have it
+reviewed again, recording its reason; a contested unit stays contested until the
 owner or chief of staff rules review or revise. Recording the ruling also moves
 the unit: review sends the same candidate to reviewing with the ruling’s note;
 revise sends it to implementing with one mason turn carrying the failures and

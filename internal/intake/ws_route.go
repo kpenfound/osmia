@@ -47,7 +47,6 @@ const (
 	TargetWait               = "wait"
 	TargetDebateRound        = "debate_round"
 	TargetRedraft            = "redraft"
-	TargetNewDraft           = "new_draft"
 	TargetFailed             = "failed"
 	TargetExhausted          = "exhausted"
 	TargetConcluded          = "concluded"
@@ -200,10 +199,7 @@ var triggerSpecs = map[string]wsTrigger{
 	TriggerDraftExhausted: {
 		describe: map[string]string{
 			TargetExhausted: "Stop drafting: none of the architect's drafts was accepted, so the workstream stays handed in and the chief of staff is told.",
-			TargetNewDraft:  "Ask the architect for one more draft of the spec and plan.",
 		},
-		questions:   []router.Question{ask("draft_fixable", "The failures of the last drafts point to a gap one more draft can close."), ask("failures_repeat", "The same failure repeats across the drafts shown.")},
-		corroborate: map[string][]router.Condition{TargetNewDraft: {{Question: "draft_fixable", AtLeast: router.LevelStrict}, {Question: "failures_repeat", AtMost: router.LevelHalf}}},
 	},
 	TriggerShedConcluded: {
 		describe: map[string]string{
@@ -275,25 +271,20 @@ func ExitQuestions(trigger string) []router.Question { return triggerSpecs[trigg
 // ---------------------------------------------------------------------------
 // Draft exhausted
 
-// draftExhaustedExit is the exit of a handed-in workstream none of whose drafts
-// was accepted. Today's default stops drafting with a notice to the chief of
-// staff; one more draft is a departure at the strict bar.
+// exhaustedExit is the exit of a handed-in workstream none of whose drafts
+// was accepted. MaxDrafts stays a hard limit: one more draft is not offered, so
+// the exit has the one target, which stops drafting with a notice to the chief
+// of staff.
 func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.WorkflowState, n int, last trace.Transition, reason, body string) router.Exit {
 	targets := []router.Target{
 		ExitTarget(TriggerDraftExhausted, router.Target{Name: TargetExhausted, State: "exhausted", Description: "Stop drafting."}),
-		ExitTarget(TriggerDraftExhausted, router.Target{Name: TargetNewDraft, State: fmt.Sprintf("drafting-%d", n+1), Description: "Ask for one more draft.", Bar: router.BarStrict}),
 	}
 	return router.Exit{
 		Repo: d.Repository, Project: d.Repository.Project(), Workstream: stream, Machine: WorkstreamMachine,
 		Subject: DraftSubject, From: state.Value, Version: state.Version,
 		Trigger: TriggerDraftExhausted, Cause: last.ID, HeaderCause: last.ID, Actor: DraftingActor,
 		Default: TargetExhausted, Targets: targets, Questions: ExitQuestions(TriggerDraftExhausted),
-		TransitionID: func(t router.Target) string {
-			if t.Name == TargetExhausted {
-				return "draft-exhausted"
-			}
-			return fmt.Sprintf("draft-%d-%s", n, TargetNewDraft)
-		},
+		TransitionID: func(router.Target) string { return "draft-exhausted" },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {
 			return router.Effect{Events: []trace.Event{trace.Notice("draft-exhausted", "chief", body)}, Reason: reason}, nil
 		},
@@ -315,10 +306,10 @@ func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.Workflow
 func (d *Debate) concludedExit(stream config.WorkstreamID, owner trace.WorkflowState, n int, open []shed.Entry, canRound, canRedraft bool) router.Exit {
 	targets := []router.Target{ExitTarget(TriggerShedConcluded, router.Target{Name: TargetWait, Description: "Wait for the owner.", Stay: true, NoMove: true})}
 	if canRound {
-		targets = append(targets, ExitTarget(TriggerShedConcluded, router.Target{Name: TargetDebateRound, State: fmt.Sprintf("more-%d", n), Description: "Run another round.", Bar: router.BarStrict}))
+		targets = append(targets, ExitTarget(TriggerShedConcluded, router.Target{Name: TargetDebateRound, State: fmt.Sprintf("more-%d", n), Description: "Run another round.", Bar: router.BarStrict, Works: true}))
 	}
 	if canRedraft {
-		targets = append(targets, ExitTarget(TriggerShedConcluded, router.Target{Name: TargetRedraft, State: fmt.Sprintf("redraft-%d", n), Description: "Ask for a redraft.", Bar: router.BarStrict}))
+		targets = append(targets, ExitTarget(TriggerShedConcluded, router.Target{Name: TargetRedraft, State: fmt.Sprintf("redraft-%d", n), Description: "Ask for a redraft.", Bar: router.BarStrict, Works: true}))
 	}
 	x := router.Exit{
 		Repo: d.Repository, Project: d.Repository.Project(), Workstream: stream, Machine: WorkstreamMachine,
@@ -365,8 +356,8 @@ func ownerShedDocument(repo *trace.Repository, project config.ProjectID, stream 
 
 // RegisterWorkstreamEffects defines, in the router's registry, the effect of
 // entering each target of the exits intake raises: another debate round or a
-// redraft, which record what the owner's command records, and another draft,
-// which queues the architect. load returns the intake controller.
+// redraft, which record what the owner's command records. load returns the
+// intake controller.
 func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 	reg.Register(WorkstreamMachine, TargetDebateRound, func(ctx context.Context, p router.Plan) (router.Effect, error) {
 		x := p.Exit
@@ -406,22 +397,6 @@ func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 			return router.Effect{}, err
 		}
 		return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(p.TransitionID, "owner", reason)}, Reason: reason}, nil
-	})
-	reg.Register(WorkstreamMachine, TargetNewDraft, func(ctx context.Context, p router.Plan) (router.Effect, error) {
-		x := p.Exit
-		kind, n, ok := DraftState(x.From)
-		if !ok {
-			return router.Effect{}, router.Refusal(fmt.Sprintf("the draft state %q has no draft number", x.From))
-		}
-		in := DraftInput{Draft: n + 1}
-		_, event := in.RunIDs()
-		input, err := marshalDraft(in)
-		if err != nil {
-			return router.Effect{}, err
-		}
-		op := draftOperation(x.Repo.Project(), x.Workstream, event, input)
-		reason := fmt.Sprintf("draft %d was %s and Jev asked the architect for draft %d", n, kind, n+1)
-		return router.Effect{Events: []trace.Event{{ID: event, Kind: "draft", Body: fmt.Sprintf("Draft %d of the spec and plan", in.Draft), Operation: &op}}, Reason: reason}, nil
 	})
 }
 
