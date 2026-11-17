@@ -2278,6 +2278,13 @@ func showFeed(w io.Writer, entries []wire.FeedEntry) {
 			}
 		} else if e.Kind == "brief" && e.Brief != nil {
 			showBriefEntry(w, e.Brief)
+		} else if e.Kind == "transition" && e.Transition != nil {
+			t := e.Transition
+			from := t.From
+			if from == "" {
+				from = "none"
+			}
+			fmt.Fprintf(w, "  %s: %s -> %s%s\n", t.Subject, from, t.To, departedByJev(t.Departed))
 		} else if e.Text != "" {
 			fmt.Fprintf(w, "  %s\n", e.Text)
 		}

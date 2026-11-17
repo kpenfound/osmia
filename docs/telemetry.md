@@ -9,6 +9,8 @@ by queries over the spans alone:
 2. How much time each role spends, in total and per workstream.
 3. How often work bounces back to the mason, and why.
 4. How a workstream's time divides across its stages.
+5. How often Jev departs from the default next state, and how the units and
+   workstreams that departed fared against those that followed it.
 
 [Configuration](configuration.md#optional-telemetry) turns telemetry on and
 points it at a collector. [`deploy/telemetry`](../deploy/telemetry/README.md)
@@ -34,7 +36,9 @@ Two measures are kept apart on purpose:
   runner worked.
 
 Capacity questions (query 1) read pool limit and slot spans. Time questions
-(queries 2 to 4) read turn, unit state and workstream state spans.
+(queries 2 to 4) read turn, unit state and workstream state spans. The routing
+question (query 5) reads the routing attributes of unit state and workstream
+state spans.
 
 ### Traces and parents
 
@@ -60,6 +64,7 @@ Capacity questions (query 1) read pool limit and slot spans. Time questions
 | `osmia.service.start` | `osmia.service.uptime` | an instant | service start |
 | `osmia.service.uptime` | none | service start to shutdown | service run |
 | `osmia.loop_guard.trip` | `osmia.service.uptime` | an instant | loop-guard pause |
+| `osmia.transition.route` | root | the recorded time the exit was raised to the time it was decided | exit the transition router decided: one for each exit, a held exit included |
 
 State spans abut: each one ends where the next begins, so a workstream's state
 spans cover its life without a gap, from its recorded creation to the end of
@@ -79,9 +84,15 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.project.id`, `osmia.workstream.id` | IDs | everything about a workstream |
 | `osmia.unit.id` | unit ID | unit state, turns of a unit, unit check runs, slot spans of a unit's work |
 | `osmia.record.id` | the trace record the span came from | turns, check runs, `osmia.loop_guard.trip` |
-| `osmia.state`, `osmia.next_state` | state names | `osmia.workstream.state`, `osmia.unit.state` |
+| `osmia.state`, `osmia.next_state` | state names; on a route span `osmia.next_state` is the state the subject is in once the exit is decided (a held subject stays where it is) | `osmia.workstream.state`, `osmia.unit.state`, `osmia.transition.route` |
+| `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
+| `osmia.default_state` | the state the default would have entered | the same spans, and `osmia.transition.route` |
+| `osmia.deviated` | `true` when the transition entered a state other than its default, `false` when it entered the default | `osmia.workstream.state`, `osmia.unit.state`, only when the transition recorded its default |
+| `osmia.trigger` | see [triggers](#triggers) | `osmia.transition.route` |
+| `osmia.confidence` | `none`, `low`, `modest`, `high`, `binding` | `osmia.transition.route` |
+| `osmia.judgment` | the ID of the Jev judgment record behind the decision | `osmia.transition.route`, only when a judgment record is behind it |
 | `osmia.cause` | see [causes](#cause-values) | state spans, the root, stopped or failed turns |
-| `osmia.outcome` | see [outcomes](#outcome-values) | the root, turns, check runs, slot spans, pool limit spans, pauses, uptime |
+| `osmia.outcome` | see [outcomes](#outcome-values) | the root, turns, check runs, slot spans, pool limit spans, pauses, uptime, `osmia.transition.route` |
 | `osmia.role` | `mason`, `reviewer`, `committee`, `architect`, `checks`, `chief_of_staff` | turns, slot spans, role pauses |
 | `osmia.backend`, `osmia.model`, `osmia.profile` | names | turns |
 | `osmia.slot_wait_ms` | milliseconds from the turn's request to its runner's claim | turns |
@@ -165,6 +176,79 @@ A turn that was stopped or failed carries `osmia.cause`: the stop cause
 (`hard_pause`, `owner`), `timeout`, or the failure class (`infrastructure`,
 `behavioural`).
 
+### Routing values
+
+Every unit and workstream state change that goes through the transition router
+records how it was chosen on its transition: who decided it (`decided_by`),
+the Jev judgment record behind the decision (`judgment`), and the state the
+default would have entered (`default_to`). The state span of the interval the
+transition ended carries them as `osmia.decided_by`, `osmia.default_state` and
+`osmia.deviated`. A transition no router chose, and every transition recorded
+before the router existed, carries none of the three attributes.
+
+`osmia.decided_by` is one of these fixed words:
+
+| `osmia.decided_by` | The transition was chosen by | Judgment record |
+| --- | --- | --- |
+| `code` | the router committing the default: it was the only legal target, or Jev's answers kept it | optional |
+| `jev` | Jev departing from the default to another legal target; the only value that reads as a departure | always |
+| `fallback` | the router committing the default because Jev could not answer (timeout, cool-down, outage or a request too large) | never |
+| `owner` | an owner decision, applied as given | never |
+| `jev_gate` | one of Jev's existing gate decisions, applied as given | always |
+| `reviewer` | a satisfactory reviewer verdict for the current candidate, which authorised the move | optional |
+
+`osmia.deviated` is `true` when the transition entered a state other than the
+default (`osmia.default_state`) and `false` when it entered the default. It is
+`true` on every `jev` transition and on an `owner` or `jev_gate` transition
+whose authorised target was not the default. The feed and `osmia trace` show
+"decided by Jev" on a transition decided by `jev` and on no other.
+
+#### Route spans
+
+An `osmia.transition.route` span is sent once for each exit the router
+decides, and carries these attributes besides the project, workstream and, for
+a unit, unit IDs:
+
+| Attribute | Value |
+| --- | --- |
+| `osmia.trigger` | what raised the exit, one of the [triggers](#triggers) |
+| `osmia.default_state` | the state today's code would have entered |
+| `osmia.next_state` | the state the subject is in once the exit is decided |
+| `osmia.outcome` | `followed`, `departed`, `held` or `fallback` |
+| `osmia.confidence` | the band of Jev's confidence in the chosen state |
+| `osmia.judgment` | the ID of the Jev judgment record, when one is behind the decision |
+
+The outcome says what the router did:
+
+| `osmia.outcome` | The exit |
+| --- | --- |
+| `followed` | committed the default, or committed exactly the target an owner decision or one of Jev's gate decisions authorised |
+| `departed` | committed another legal target because Jev's answers cleared its risk bar |
+| `held` | committed nothing and held the subject, because Jev's two orderings disagreed, the best target was below its bar while the default did not fit, or a target had become illegal when it was to be applied |
+| `fallback` | committed the default because Jev could not answer |
+
+The confidence band is the probability Jev gave the chosen state, as a word
+and never as a number: `none` when no answer of Jev's chose the state (a pinned
+move or a fallback), `low` below 0.5,
+`modest` from 0.5 to below 0.7, `high` from 0.7 to below `[jev]
+decision_threshold`, and `binding` at or above it.
+
+#### Triggers
+
+`osmia.trigger` is one of these fixed words, `machine.event`, the cause of the
+exit:
+
+| Machine | Triggers |
+| --- | --- |
+| Unit | `unit.created`, `unit.deps_merged`, `unit.mason_start`, `unit.question_follow`, `unit.question_wait_broken`, `unit.mason_done`, `unit.mason_ended_clean`, `unit.markers_left`, `unit.turn_failed`, `unit.checks_passed`, `unit.checks_failed`, `unit.checks_incomplete`, `unit.review_approved`, `unit.review_rejected`, `unit.review_no_verdict`, `unit.review_refused`, `unit.review_needs_checks`, `unit.rebased`, `unit.rebase_conflicted`, `unit.landed`, `unit.landing_refused`, `unit.move_owner`, `unit.move_proposal`, `unit.stalled` |
+| Workstream | `ws.handed`, `ws.draft_accepted`, `ws.shed_entered`, `ws.build_started`, `ws.units_merged`, `ws.draft_exhausted`, `ws.shed_concluded`, `ws.ratified`, `ws.seal_failed`, `ws.delivery_approved`, `ws.ready_on_host`, `ws.merge_recorded`, `ws.abandon`, `ws.move_owner`, `ws.move_proposal`, `ws.stalled` |
+| Final review | `final.requested`, `final.reviewed_clean`, `final.reviewed_blocking`, `final.failed`, `final.checks_missing` |
+| Contests and objections | `contest.owner_ruling`, `contest.jev_ruling`, `contest.chief_ruling`, `objection.chief_decision` |
+| Dependency waits | `dep.edge_wait`, `dep.edge_resolved`, `dep.upstream_terminal`, `dep.upstream_integrated`, `dep.base_unavailable`, `dep.base_integrated` |
+| Drift | `drift.requested`, `drift.clean`, `drift.review_approved`, `drift.review_rejected`, `drift.turn_failed`, `drift.held` |
+
+A span for a trigger, outcome or band outside these lists is not sent.
+
 ### Outcome values
 
 | Span | `osmia.outcome` |
@@ -176,6 +260,7 @@ A turn that was stopped or failed carries `osmia.cause`: the stop cause
 | `osmia.slot.wait` | `granted`, `canceled`, `removed`, `blocked`, `completed`, `abandoned`, `interrupted` |
 | `osmia.pool.limit` | `reloaded` (a reload changed the limit), `shutdown`, `interrupted` |
 | `osmia.pause` | `released`, `replaced` (the same target was paused again) |
+| `osmia.transition.route` | `followed`, `departed`, `held`, `fallback` (see [route spans](#route-spans)) |
 | `osmia.service.uptime` | `shutdown`, `interrupted` |
 
 A **wait** span starts at the first refusal by capacity (or by the
@@ -207,6 +292,7 @@ big-endian bytes.
 | Workstream state span | `osmia.span.workstream` | workstream ID, `workstream-state`, ID of the transition that entered the state |
 | Unit state span | `osmia.span.workstream` | workstream ID, `unit-state`, unit, ID of the transition that entered the state |
 | Turn and check spans | `osmia.span.workstream` | workstream ID, `record`, record ID, record revision |
+| Route span | `osmia.span.workstream` | workstream ID, `route`, the exit's occurrence key |
 | Slot span of a workstream | `osmia.span.workstream` | workstream ID, `slot`, `held` or `wait`, source, pool, work, start in nanoseconds |
 | Factory trace | `osmia.trace.factory` | run: `service`, or `slots` for slot spans without a workstream |
 | Pool limit span | `osmia.span.factory` | `service`, `pool-limit`, pool, start in nanoseconds |
@@ -479,3 +565,69 @@ ORDER BY workstream, min(Timestamp);
 A stage a workstream entered more than once has `visits` above one. For the
 same breakdown of a unit's time, replace `osmia.workstream.state` with
 `osmia.unit.state` and group by `osmia.unit.id` as well.
+
+### 5. Departure rate, and how departed and followed subjects fared
+
+A unit state span carries, when the transition router chose the transition
+that ended the state, who decided it and whether it entered the default. A move
+is a **departure** when `osmia.decided_by` is `jev`: Jev left the default for
+another legal target. Every other routed move **followed** the default, or the
+exact target an owner or a gate decision authorised.
+
+The query splits the units that were routed in the window into two cohorts: those
+with at least one departure and those with none. For each cohort it counts the
+units, the share of routed units, the moves, the departure rate over moves, and
+how the units fared: the share that landed (`osmia.cause` is `landed`), the
+bounces back to the mason per unit (the causes of query 3), and the hours from
+the first routed move to landing. Outcomes are read without an upper time
+bound, so a unit routed in the window and landed later counts as landed. The
+`Totals` row gives the departure rate over all routed moves.
+
+```sql
+WITH
+    toDateTime64('2026-11-14 00:00:00', 9, 'UTC') AS win_start,
+    toDateTime64('2026-11-15 00:00:00', 9, 'UTC') AS win_end
+SELECT
+    cohort,
+    count() AS units,
+    round(100 * units / sum(units) OVER (), 1) AS percent_of_routed_units,
+    sum(moves) AS moves,
+    sum(departures) AS departures,
+    round(100 * sum(departures) / sum(moves), 1) AS departure_rate_percent,
+    round(100 * sum(landed) / count(), 1) AS landed_percent,
+    round(sum(bounces) / count(), 2) AS bounces_per_unit,
+    round(avgIf(hours_to_land, landed = 1), 1) AS hours_to_land
+FROM
+(
+    SELECT
+        SpanAttributes['osmia.unit.id'] AS unit,
+        countIf(SpanAttributes['osmia.deviated'] IN ('true', 'false')) AS moves,
+        countIf(SpanAttributes['osmia.decided_by'] = 'jev') AS departures,
+        if(departures > 0, 'departed', 'followed') AS cohort,
+        minIf(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration), SpanAttributes['osmia.deviated'] IN ('true', 'false')) AS first_routed_ns,
+        countIf(SpanAttributes['osmia.cause'] = 'landed') > 0 AS landed,
+        countIf(SpanAttributes['osmia.next_state'] = 'implementing'
+            AND SpanAttributes['osmia.cause'] IN ('review-rejected', 'checks-failed', 'rebase-conflict', 'contest-ruled')) AS bounces,
+        (maxIf(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration), SpanAttributes['osmia.cause'] = 'landed') - first_routed_ns) / 3.6e12 AS hours_to_land
+    FROM otel.otel_traces
+    WHERE SpanName = 'osmia.unit.state'
+      AND toUnixTimestamp64Nano(Timestamp) + toInt64(Duration) >= toUnixTimestamp64Nano(win_start)
+    GROUP BY TraceId, unit
+    HAVING moves > 0
+       AND first_routed_ns >= toUnixTimestamp64Nano(win_start)
+       AND first_routed_ns < toUnixTimestamp64Nano(win_end)
+)
+GROUP BY cohort WITH TOTALS
+ORDER BY cohort;
+```
+
+Read the `departed` row against the `followed` row. If departed units land as
+often as followed ones with no more bounces, the departures were safe; a lower
+`landed_percent` or more `bounces_per_unit` for `departed` says Jev's
+departures cost something. The departure rate itself is
+`departure_rate_percent` on the `Totals` row. A `fallback` move counts as
+followed, not as a departure.
+
+For workstreams, read `osmia.workstream.state` spans, group by
+`osmia.workstream.id` in place of the unit, and take `delivered` as the
+`osmia.next_state` that ends a workstream well.

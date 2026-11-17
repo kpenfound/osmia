@@ -1310,13 +1310,20 @@ type FeedSession struct {
 
 // FeedTransition identifies the workflow subject that changed, with who
 // made it and why. Unit identifies the affected unit when recorded.
+// DecidedBy, Judgment and DefaultTo are how the transition router chose the
+// transition, present only when it recorded them. Departed is true when Jev
+// departed from the default to make the transition, and only then.
 type FeedTransition struct {
-	Subject string `json:"subject" description:"Recorded workflow subject, such as feature, unit-upload, unit-upload-checks, final-review or question_1."`
-	Unit    string `json:"unit,omitempty"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Actor   string `json:"actor"`
-	Reason  string `json:"reason"`
+	Subject   string `json:"subject" description:"Recorded workflow subject, such as feature, unit-upload, unit-upload-checks, final-review or question_1."`
+	Unit      string `json:"unit,omitempty"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Actor     string `json:"actor"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty" enum:"code,jev,fallback,owner,jev_gate,reviewer" description:"Who decided the transition when the transition router chose it: code (the default), jev (a departure from the default), fallback (Jev could not answer and the default was committed), owner, jev_gate (one of Jev's gate decisions) or reviewer (a reviewer's verdict authorised it)."`
+	Judgment  string `json:"judgment,omitempty" description:"The Jev judgment record behind the decision, when there is one."`
+	DefaultTo string `json:"default_to,omitempty" description:"The state the default would have entered."`
+	Departed  bool   `json:"departed,omitempty" description:"True when Jev departed from the default to make the transition."`
 }
 
 // FeedCheckSelection summarizes the durable selection without check output.

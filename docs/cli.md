@@ -314,7 +314,12 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   remain readable. A missing selector returns `not_found` (exit 4); malformed
   input returns `validation` (exit 4). A ratification, ruling or other decision
   Jev made carries `jev` as its `decided_by` and names its judgment; the
-  command prints it as `(decided by Jev)` after the decision.
+  command prints it as `(decided by Jev)` after the decision. A transition in a
+  unit's history carries `decided_by`, `judgment` and `default_to` when the
+  transition router chose it; the command prints `(decided by Jev)` after a
+  transition on which Jev departed from the default state, and after no other:
+  a followed default, a fallback, a move an owner or one of Jev's gate decisions
+  authorised and a reviewer's verdict print nothing extra.
 - `send <workstream-id> <message>` sends a message to the workstream's shared workgroup chief
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
@@ -1215,6 +1220,9 @@ configuration mismatch until an idle `osmia engine restart` applies the new
 version.
 
 `osmia feed <workstream-id|workgroup-id> [--json]` reads the feed for a
-workstream, exploratory session or shared workgroup conversation. Image entries
+workstream, exploratory session or shared workgroup conversation. A transition
+prints as `subject: from -> to`, followed by `(decided by Jev)` only when Jev
+departed from the default state; `--json` carries its `decided_by`, `judgment`,
+`default_to` and `departed` fields. Image entries
 print an `[image: URL]` placeholder. An archived member's image reference prints
 `image removed when <member> was archived`; its image is no longer available.

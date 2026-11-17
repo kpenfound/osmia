@@ -21,12 +21,15 @@ type ActivityContest struct {
 }
 
 type ActivityTransition struct {
-	At      string `json:"at"`
-	Subject string `json:"subject"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Actor   string `json:"actor"`
-	Reason  string `json:"reason"`
+	At        string `json:"at"`
+	Subject   string `json:"subject"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Actor     string `json:"actor"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
+	DefaultTo string `json:"default_to,omitempty"`
 }
 
 // ActivityTurn is one of a role's latest turns on the unit.

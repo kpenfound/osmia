@@ -6353,7 +6353,31 @@
           "actor": {
             "type": "string"
           },
+          "decided_by": {
+            "description": "Who decided the transition when the transition router chose it: code (the default), jev (a departure from the default), fallback (Jev could not answer and the default was committed), owner, jev_gate (one of Jev's gate decisions) or reviewer (a reviewer's verdict authorised it).",
+            "enum": [
+              "code",
+              "jev",
+              "fallback",
+              "owner",
+              "jev_gate",
+              "reviewer"
+            ],
+            "type": "string"
+          },
+          "default_to": {
+            "description": "The state the default would have entered.",
+            "type": "string"
+          },
+          "departed": {
+            "description": "True when Jev departed from the default to make the transition.",
+            "type": "boolean"
+          },
           "from": {
+            "type": "string"
+          },
+          "judgment": {
+            "description": "The Jev judgment record behind the decision, when there is one.",
             "type": "string"
           },
           "reason": {
@@ -8637,6 +8661,18 @@
         "properties": {
           "at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "default_to": {
+            "type": "string"
+          },
+          "departed": {
+            "type": "boolean"
+          },
+          "judgment": {
             "type": "string"
           },
           "ref": {

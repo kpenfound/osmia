@@ -1,6 +1,7 @@
 // Package recordspans derives the spans a trace commit closes and sends them
 // through the telemetry sink: one span per workstream state, unit state, turn
-// and check run, and the workstream's root span.
+// and check run, and the workstream's root span. It also sends the span of an
+// exit the transition router decided.
 //
 // Every start and end is a time stored in the trace, and every ID is derived
 // from the workstream and record IDs, so an interval that is open when the
@@ -87,7 +88,7 @@ func (r Recorder) state(d trace.CommitDetail, closed trace.ClosedState) {
 			Name: telemetry.SpanName("workstream", "state"), Trace: telemetry.WorkstreamTrace(w),
 			ID:     telemetry.WorkstreamSpan(w, "workstream-state", entered),
 			Parent: telemetry.WorkstreamRoot(w), Start: start, End: t.At,
-			Attrs: append(attrs, telemetry.Cause(FeatureCause(t))),
+			Attrs: append(append(attrs, telemetry.Cause(FeatureCause(t))), routing(t)...),
 		})
 		return
 	}
@@ -95,7 +96,7 @@ func (r Recorder) state(d trace.CommitDetail, closed trace.ClosedState) {
 		Name: telemetry.SpanName("unit", "state"), Trace: telemetry.WorkstreamTrace(w),
 		ID:     telemetry.WorkstreamSpan(w, "unit-state", t.Unit, entered),
 		Parent: telemetry.WorkstreamRoot(w), Start: start, End: t.At,
-		Attrs: append(attrs, telemetry.Unit(t.Unit), telemetry.Cause(UnitCause(t))),
+		Attrs: append(append(attrs, telemetry.Unit(t.Unit), telemetry.Cause(UnitCause(t))), routing(t)...),
 	})
 }
 

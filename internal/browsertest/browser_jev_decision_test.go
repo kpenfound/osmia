@@ -18,8 +18,9 @@ import (
 
 // A confident Jev ratifies a packet with no owner command and nobody reading
 // the inbox: the workstream builds, no ratification card is ever left, and the
-// workstream's feed on the page labels the ratification "decided by Jev".
-func TestBrowserLabelsAJevRatificationDecidedByJev(t *testing.T) {
+// workstream's feed on the page shows the ratification without the "decided by
+// Jev" label, which marks only a departure from the default.
+func TestBrowserDoesNotLabelAJevGateDecisionAsADeparture(t *testing.T) {
 	p := openBrowser(t)
 	provider := &jevfixture.Provider{Confidence: 0.97}
 	key := jevfixture.Key(t, true)
@@ -70,7 +71,8 @@ func TestBrowserLabelsAJevRatificationDecidedByJev(t *testing.T) {
 	p.SelectWorkstream(ws)
 	p.OpenActivity()
 	feed := `#workstream-activity `
-	p.Await("the ratification labelled as Jev's", `[...document.querySelectorAll(`+quote(feed+"[data-kind=transition]")+`)].some(n => n.dataset.to === 'ratified-1' && n.querySelector('[data-field=decided-by]') !== null && n.querySelector('[data-field=decided-by]').textContent === 'decided by Jev')`)
+	p.Await("the ratification without a departure label", `[...document.querySelectorAll(`+quote(feed+"[data-kind=transition]")+`)].some(n => n.dataset.to === 'ratified-1' && n.querySelector('[data-field=decided-by]') === null)`)
+	p.Await("no transition labelled as a departure", `document.querySelector(`+quote(feed+"[data-field=decided-by]")+`) === null`)
 	if entries := entriesOf(t, c, intake.InboxRatification); len(entries) != 0 {
 		t.Fatalf("ratification gate remains: %+v", entries)
 	}

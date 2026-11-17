@@ -56,12 +56,19 @@ type Document struct {
 
 func (Document) traceRecord() {}
 
+// Transition is one change of a workflow subject's state. DecidedBy,
+// Judgment and DefaultTo record how the transition router chose it (see
+// Routing); a transition no router chose, and every transition written before
+// they existed, has none of them.
 type Transition struct {
 	Header
-	Subject string `json:"subject"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Reason  string `json:"reason"`
+	Subject   string `json:"subject"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
+	DefaultTo string `json:"default_to,omitempty"`
 }
 
 func (Transition) traceRecord() {}
@@ -319,7 +326,7 @@ func validate(r Record) error {
 	case Document:
 		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n")) && ValidDecisionActor(v)
 	case Transition:
-		valid = key(v.Subject) && present(v.To) && present(v.Reason)
+		valid = key(v.Subject) && present(v.To) && present(v.Reason) && ValidRouting(v.To, v.Routing())
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Amendment:

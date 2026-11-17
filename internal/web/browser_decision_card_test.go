@@ -99,7 +99,7 @@ func TestBrowserDecisionFootnotesAreCollapsedMonoAndMatchDecidedBy(t *testing.T)
 	t.Parallel()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) {
 		api.setInbox(amendmentEntry)
-		api.setFeed("w_000", actorTransitionEntry("2026-01-01T00:00:01Z", "ratified", "service:jev"))
+		api.setFeed("w_000", routedTransitionEntry("2026-01-01T00:00:01Z", "ratified", "service:jev", "jev", "building", true))
 	})
 	p := f.p
 	card := `[data-decision][data-kind="amendment"] `

@@ -142,7 +142,7 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 			a = UnitActivity{Unit: unit, State: state.Value, Transitions: []ActivityTransition{}, Turns: []ActivityTurn{}}
 			for _, t := range transitions {
 				if t.Unit == unit {
-					a.Transitions = append(a.Transitions, ActivityTransition{At: t.At.UTC().Format(time.RFC3339), Subject: t.Subject, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason})
+					a.Transitions = append(a.Transitions, ActivityTransition{At: t.At.UTC().Format(time.RFC3339), Subject: t.Subject, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo})
 				}
 			}
 			a.Transitions = a.Transitions[max(len(a.Transitions)-activityTransitions, 0):]
