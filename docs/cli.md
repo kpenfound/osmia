@@ -544,6 +544,18 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   names only: when a later push supersedes it the entry closes, and the
   command fails with `conflict` (exit 5) instead of applying to the new push.
   Only you can give the answer; the chief of staff cannot.
+- `recover <workstream-id> [unit-id] [--json]` approves the move of the
+  `Approve this recovery move` inbox entry of that workstream (of that unit,
+  when the workstream has several): a stall that neither Jev nor the chief of
+  staff cleared, or a move that belongs to you. The entry shows the exact
+  move (the subject, the state and version it was read at, the target and
+  why), and the command submits that move and nothing else. The router
+  applies it as a pinned owner decision with its usual effects, records you
+  as the decider and asks Jev nothing. The move applies only while its
+  subject is still in the state the entry shows: when it has moved on, the
+  command fails with `conflict` (exit 5) and the entry closes. With no entry
+  open the command fails; with several open and no unit named it lists them
+  and approves none.
 - `upstream <workstream-id> <base-workstream-id>` continues a workstream
   parked on its abandoned base from upstream instead. The base is the
   abandoned workstream the inbox entry names. The service fetches the

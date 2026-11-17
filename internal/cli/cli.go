@@ -46,6 +46,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   abandon <workstream-id> <reason> [--json]
   upstream <workstream-id> <base-workstream-id> [--json]
   checks <workstream-id> <keep-waiting|continue> [--json]
+  recover <workstream-id> [unit-id] [--json]  approve the recovery move its card pins
   archive <workstream-id> [--json]  permanently delete trace; retain title
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
@@ -273,6 +274,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2
 	case "checks":
 		valid = len(a) == 2 && (a[1] == "keep-waiting" || a[1] == "continue")
+	case "recover":
+		valid = len(a) == 1 || len(a) == 2
 	case "packet", "ratify", "archive", "unarchive", "merged", "rebase":
 		valid = len(a) == 1
 	case "amendment":
@@ -369,7 +372,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -711,6 +714,53 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s, push %d (pull request #%d, commit %s): %s\n%s\n", result.Workstream, result.Push, result.PullRequest, result.PushedCommit, result.Decision, result.Detail)
+		return 0
+	}
+	if cmd == "recover" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		list, err := c.Inbox(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		// The approval pins the move the card shows, so it can only apply the
+		// move the owner read.
+		var entries []wire.InboxEntry
+		for _, e := range list.Entries {
+			if e.Kind == wire.InboxRecovery && e.Workstream == id && (len(a) == 1 || e.Unit == a[1]) {
+				entries = append(entries, e)
+			}
+		}
+		switch len(entries) {
+		case 0:
+			fmt.Fprintf(stderr, "no recovery move of workstream %s waits for you\n", id)
+			return 1
+		case 1:
+		default:
+			fmt.Fprintf(stderr, "%d recovery moves of workstream %s wait for you; name the unit of the one to approve:\n", len(entries), id)
+			for _, e := range entries {
+				fmt.Fprintf(stderr, "  %s\n", recoveryLine(e))
+			}
+			return 1
+		}
+		raw, err := json.Marshal(entries[0].Answer.Body)
+		if err != nil {
+			return fail(err)
+		}
+		var req wire.RecoveryRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fail(err)
+		}
+		result, err := c.Recovery(ctx, id, req)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Approved the recovery move of %s: %s from %s to %s\n%s\n", result.Workstream, result.Subject, result.From, result.Target, result.Detail)
 		return 0
 	}
 	if cmd == "upstream" {
@@ -2059,6 +2109,11 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 		case wire.InboxChecksChoice:
 			block("Decided on", fmt.Sprintf("push %v (pull request #%v, commit %v)", e.Answer.Body["push"], e.Answer.Body["pull_request"], e.Answer.Body["pushed_commit"]))
 			block("Answer", fmt.Sprintf("osmia checks %s keep-waiting, or osmia checks %s continue to continue the final review without check results for this push only", stream, stream))
+		case wire.InboxRecovery:
+			if m := e.Recovery; m != nil {
+				block("Move", fmt.Sprintf("%s from %s (version %d) to %s, because %s", m.Subject, m.From, m.Version, m.Target, m.Reason))
+			}
+			block("Answer", recoveryAnswer(stream, e))
 		case wire.InboxPublication:
 			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")
@@ -2081,6 +2136,22 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the chief of staff records it", stream))
 		}
 	}
+}
+
+// recoveryLine describes the move of a recovery entry on one line.
+func recoveryLine(e wire.InboxEntry) string {
+	if m := e.Recovery; m != nil {
+		return fmt.Sprintf("%s from %s to %s (%s)", m.Subject, m.From, m.Target, m.Origin)
+	}
+	return e.Question
+}
+
+// recoveryAnswer is how the owner approves the move of a recovery entry.
+func recoveryAnswer(stream string, e wire.InboxEntry) string {
+	if e.Unit != "" {
+		return fmt.Sprintf("osmia recover %s %s approves exactly this move; it applies only while the subject is still in the state shown", stream, e.Unit)
+	}
+	return fmt.Sprintf("osmia recover %s approves exactly this move; it applies only while the subject is still in the state shown", stream)
 }
 
 func showCharterProposals(w io.Writer, list wire.CharterProposalsResponse) {

@@ -892,6 +892,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/recovery/"); ok && r.Method == http.MethodPost {
+		var v RecoveryRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.approveRecovery(r.Context(), id, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/archive/"); ok && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 		out, api := s.archive(id)
 		if r.Method == http.MethodDelete {

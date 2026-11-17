@@ -185,6 +185,15 @@
   }
 
   // el builds an element; strings among the children become text nodes.
+  // edgeLine is the line the workstream graph shows for an edge. The shared
+  // graph keeps naming an edge its dependent dropped, so the line says it was
+  // dropped, and never that the upstream merged.
+  function edgeLine(group, e, text) {
+    const dropped = !!group.dropped?.some((d) => d.from === e.from && d.to === e.to && d.type === e.type);
+    const attrs = dropped ? { 'data-edge': e.type, 'data-dropped': 'true' } : { 'data-edge': e.type };
+    return el('p', attrs, dropped ? text + ', dropped (not merged)' : text);
+  }
+
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs || {})) {
@@ -1385,7 +1394,7 @@
     }
     const feed = views[groupFeed(id)];
     const outcomes = ownerOutcomes.get('workgroup:' + id) || [];
-    const key = JSON.stringify([feed, group.edges, views.config, outcomes]);
+    const key = JSON.stringify([feed, group.edges, group.dropped, views.config, outcomes]);
     if (c.shown !== key) {
       c.shown = key;
       const entries = (feed?.entries || []).filter(groupEntry);
@@ -1410,7 +1419,7 @@
           m.pr_link ? el('a', { href: m.pr_link, 'data-field': 'pr' }, 'Pull request') : null);
       }));
       const graph = group.edges?.length ? el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
-        el('figcaption', {}, 'Dependencies'), ...group.edges.map(e => el('p', { 'data-edge': e.type },
+        el('figcaption', {}, 'Dependencies'), ...group.edges.map(e => edgeLine(group, e,
           repoLabel(groupMembers(id).find(w => w.workstream === e.from)?.project || e.from) + ' → ' +
           repoLabel(groupMembers(id).find(w => w.workstream === e.to)?.project || e.to) + ', ' + e.type.replaceAll('_', ' ')))) : null;
       if (!c.summary) {
@@ -1862,14 +1871,14 @@
         if (waitingCount) row.inbox.dataset.groupInbox = g.id;
         else delete row.inbox.dataset.groupInbox;
         place(row.members, members.map(entry));
-        const graphKey = JSON.stringify([g.members, g.edges, p.repos]);
+        const graphKey = JSON.stringify([g.members, g.edges, g.dropped, p.repos]);
         if (row.graphKey !== graphKey) {
           row.graphKey = graphKey;
           row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
             el('figcaption', {}, 'Workstream graph'),
             el('ul', {}, ...g.members.map(id => el('li', {},
               metaRow(repoLabel(streams().find(w => w.workstream === id)?.project || id), el('code', { class: 'id' }, id))))),
-            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ', ' + e.type.replaceAll('_', ' '))))] : []));
+            ...g.edges.map(e => edgeLine(g, e, e.from + ' → ' + e.to + ', ' + e.type.replaceAll('_', ' '))))] : []));
         }
         return row.node;
       });
@@ -2540,6 +2549,25 @@
         el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 
+  // recoveryStates say where a recovery card stands in Activity.
+  const recoveryStates = { open: 'waiting for you', approved: 'approved', stale: 'stale, the subject moved on' };
+
+  // renderRecoveryEntry is the quiet line a recovery card leaves in Activity:
+  // the move it pins and where the card stands. The card itself, with its
+  // button, is in the decisions above the composer while it is open.
+  function renderRecoveryEntry(e) {
+    const r = e.recovery;
+    return el('li', { class: 'entry event', 'data-kind': 'recovery', 'data-state': r.state, 'data-unit': r.unit || '', 'data-from': r.from, 'data-to': r.target },
+      el('div', { class: 'event-line', title: r.reason },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('span', { 'data-field': 'recovery' },
+          el('span', { 'data-field': 'subject', 'data-ann': 'role' }, r.unit ? 'Unit ' + r.unit : 'Workstream'), ': recovery move ',
+          el('span', { 'data-field': 'from' }, r.from), ' → ', el('strong', { 'data-field': 'to', 'data-ann': 'action' }, r.target)),
+        el('span', { class: 'reason', 'data-field': 'reason' }, r.reason),
+        el('span', { class: 'meta', 'data-field': 'state' }, recoveryStates[r.state] || r.state),
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
+  }
+
   function transitionSubject(t) {
     const subject = t.subject || '';
     if (subject === 'feature' || (!subject && !t.unit)) return 'Workstream';
@@ -2627,7 +2655,7 @@
   // activityKinds are the feed entries Activity shows: the machine events
   // and every status of the chief of staff. The rest of the feed is the
   // conversation.
-  const activityKinds = new Set(['status', 'session', 'transition', 'unit_checks', 'final_checks', 'session_checks', 'final_review']);
+  const activityKinds = new Set(['status', 'session', 'transition', 'unit_checks', 'final_checks', 'session_checks', 'final_review', 'recovery']);
 
   // milestoneStates are the workstream states Conversation notes in a line.
   const milestoneStates = new Set(['ratified', 'building', 'assembled', 'delivered']);
@@ -2669,7 +2697,7 @@
 
   // entryUnit is the plan unit an entry is about, or the empty string.
   function entryUnit(e) {
-    return e.session?.unit || e.transition?.unit || e.unit_checks?.unit || '';
+    return e.session?.unit || e.transition?.unit || e.unit_checks?.unit || e.recovery?.unit || '';
   }
 
   function activityHref(id, entry) {
@@ -2771,6 +2799,9 @@
       case 'final_review':
         node = renderFinalReview(e);
         break;
+      case 'recovery':
+        node = renderRecoveryEntry(e);
+        break;
       default:
         node = renderChecks(e);
     }
@@ -2785,11 +2816,13 @@
     const count = (match) => run.filter(match).length;
     const sessions = count((e) => e.kind === 'session');
     const changes = count((e) => e.kind === 'transition');
-    const checks = run.length - sessions - changes;
+    const recoveries = count((e) => e.kind === 'recovery');
+    const checks = run.length - sessions - changes - recoveries;
     return [
       sessions > 0 ? sessions + (sessions === 1 ? ' session' : ' sessions') : '',
       changes > 0 ? changes + (changes === 1 ? ' state change' : ' state changes') : '',
       checks > 0 ? checks + (checks === 1 ? ' check run' : ' check runs') : '',
+      recoveries > 0 ? recoveries + (recoveries === 1 ? ' recovery card' : ' recovery cards') : '',
     ].filter(Boolean).join(', ');
   }
 
@@ -2926,7 +2959,8 @@
       e.session_checks ? [e.session_checks.run, e.session_checks.kind] : '',
       e.final_checks ? [e.final_checks.review, e.final_checks.attempt] : '',
       e.final_review ? e.final_review.review : '',
-      e.brief ? e.brief.review : '']);
+      e.brief ? e.brief.review : '',
+      e.recovery ? e.recovery.occurrence : '']);
   }
 
   // shownEntries lists the feed entries the instance's feed shows now, or
@@ -4011,6 +4045,7 @@
     loop: 'Loop guard',
     base: 'Base parked',
     'project-creation': 'Project creation stuck',
+    recovery: 'Approve this recovery move',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -4030,6 +4065,12 @@
     pushed_commit: 'commit',
     operation: 'push record',
     offer: 'offer',
+    occurrence: 'move',
+    subject: 'subject',
+    from: 'from state',
+    version: 'version',
+    target: 'target',
+    unit: 'unit',
   };
 
   const decisionNames = {
@@ -4071,7 +4112,9 @@
   }
 
   function decisionKey(entry) {
-    return [entry.kind, entry.project, entry.workstream, entry.number, entry.unit, entry.amendment].join(':');
+    const key = [entry.kind, entry.project, entry.workstream, entry.number, entry.unit, entry.amendment].join(':');
+    // A recovery card is told apart by the occurrence it was opened for.
+    return entry.recovery ? key + ':' + entry.recovery.occurrence : key;
   }
 
   // decisions keeps each inbox entry's card between renders, so an answer
@@ -4251,6 +4294,12 @@
         send(entry.answer.method, endpoint(entry), { ...body, decision },
           (out) => out.decision === 'continue' ? 'The final review of push ' + out.push + ' continues without check results.' : 'Still waiting for the check results of push ' + out.push + '.', decisionKey(entry));
         return;
+      case 'recovery':
+        // The body is the pinned move alone: the service applies exactly that
+        // move, or refuses it as stale.
+        send(entry.answer.method, endpoint(entry), body,
+          (out) => 'Approved: ' + out.detail, decisionKey(entry));
+        return;
       case 'base':
         send(entry.answer.method, endpoint(entry), body,
           (out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.', decisionKey(entry));
@@ -4332,6 +4381,18 @@
     d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, ['publication', 'checks', 'drift', 'notices', 'loop'].includes(entry.kind) ? null : form);
     decisions.set(key, d);
     return d;
+  }
+
+  // renderRecoveryMove lays out the move a recovery card pins, which the
+  // button applies exactly: what changes, from which state and version, to
+  // which target, and why the owner is asked.
+  function renderRecoveryMove(m) {
+    const row = (name, value) => [el('dt', {}, name), el('dd', { 'data-field': name.toLowerCase() }, value)];
+    return el('dl', { class: 'move', 'data-field': 'move' },
+      ...row('Subject', m.unit ? 'Unit ' + m.unit : 'Workstream'),
+      ...row('From', m.from + ', version ' + m.version),
+      ...row('Target', m.target),
+      ...row('Reason', m.reason));
   }
 
   function renderDissent(d, name) {
@@ -4576,13 +4637,16 @@
       }
       default:
         d.actions.setAttribute('data-field', 'options');
-        decisionButtons(d, entry.options.map((o) => [o, decisionNames[o] || o, variant(o)]));
+        decisionButtons(d, entry.options.map((o) => [o, entry.kind === 'recovery' ? 'Approve this move' : decisionNames[o] || o, variant(o)]));
+        if (entry.kind === 'recovery') {
+          d.detail.replaceChildren(renderRecoveryMove(entry.recovery));
+        }
         // A parked base takes no note, and no decision here unless its own
         // base was abandoned.
         if (entry.kind === 'base') {
           d.form.hidden = entry.options.length === 0;
           d.note.parentElement.hidden = true;
-        } else if (entry.kind === 'project-creation' || entry.kind === 'checks-choice') {
+        } else if (entry.kind === 'project-creation' || entry.kind === 'checks-choice' || entry.kind === 'recovery') {
           d.note.parentElement.hidden = true;
         }
     }

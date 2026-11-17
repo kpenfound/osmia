@@ -70,6 +70,23 @@ func StalledTargets(state string) []string {
 	return []string{TargetWait}
 }
 
+// RecoveryTarget returns the state the recovery card moves a stalled unit in the
+// given state to: the stage it is in, started again; a unit that has not
+// started is kicked. A unit that has merged has none.
+func RecoveryTarget(state string) string {
+	switch state {
+	case UnitChecking:
+		return UnitChecking
+	case UnitReviewing, UnitApproved:
+		return UnitReviewing
+	case UnitImplementing, UnitWaiting, UnitContested:
+		return UnitImplementing
+	case UnitPlanned, UnitReady:
+		return UnitReady
+	}
+	return ""
+}
+
 // unitTarget describes the states a unit moves to, for the router. Checking,
 // reviewing and approved work on the unit's candidate. Approved is entered only
 // on a reviewer's verdict or the owner's decision, and merged only after a

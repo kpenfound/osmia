@@ -60,6 +60,9 @@ type Record struct {
 	HeaderCause string      `json:"header_cause,omitempty"`
 	// Proposed is the target a proposal of the chief of staff asked for.
 	Proposed string `json:"proposed,omitempty"`
+	// OwnerCard says where the owner decides a move the exit left pending: empty
+	// or RecoveryCard for the recovery card, else the card the exit named.
+	OwnerCard string `json:"owner_card,omitempty"`
 	// Offered are the legal targets Jev was offered, or the one target the
 	// default was committed for when it was the only one.
 	Offered []string `json:"offered,omitempty"`
@@ -173,10 +176,9 @@ func Lookup(repo *trace.Repository, stream config.WorkstreamID, x Exit) (*Record
 	return rec, err
 }
 
-// Unfinished returns the route records of the workstream whose subject is held:
-// held, sent to the owner or refused, in the order they were first written.
-// They are the holds the stall watchdog and the recovery card pick up.
-func Unfinished(repo *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
+// Records returns the latest route record of every occurrence of the
+// workstream, in the order they were first written.
+func Records(repo *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		return nil, err
@@ -200,11 +202,37 @@ func Unfinished(repo *trace.Repository, stream config.WorkstreamID) ([]Record, e
 		if json.Unmarshal([]byte(latest[id].Content), &rec) != nil {
 			continue
 		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// Name returns the digest an occurrence's journal is named by, which identifies
+// the occurrence in the records that cite it.
+func Name(occurrence string) string { return journalName(occurrence) }
+
+// Unfinished returns the route records of the workstream whose subject is held:
+// held, sent to the owner or refused, in the order they were first written.
+// They are the holds the stall watchdog and the recovery card pick up.
+func Unfinished(repo *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
+	all, err := Records(repo, stream)
+	if err != nil {
+		return nil, err
+	}
+	var out []Record
+	for _, rec := range all {
 		if rec.State == StateHeld || rec.State == StateOwner || rec.State == StateRefused {
 			out = append(out, rec)
 		}
 	}
 	return out, nil
+}
+
+// LookupOccurrence returns the route record of the occurrence with the key,
+// nil when it was never routed.
+func LookupOccurrence(repo *trace.Repository, stream config.WorkstreamID, key string) (*Record, error) {
+	rec, _, _, err := readRecord(repo, stream, journalName(key))
+	return rec, err
 }
 
 // journalWrite is one commit of the journal: the next revision of the record,

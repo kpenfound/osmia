@@ -528,6 +528,13 @@ func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req a
 	return v, err
 }
 
+// Recovery approves the recovery move a recovery card pins.
+func (c *Client) Recovery(ctx context.Context, id config.WorkstreamID, req api.RecoveryRequest) (api.RecoveryResponse, error) {
+	var v api.RecoveryResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/recovery/"+url.PathEscape(string(id)), req, &v)
+	return v, err
+}
+
 // RecordMerge records an assembled workstream delivered by the owner's own
 // merge of its feature branch into upstream.
 func (c *Client) RecordMerge(ctx context.Context, id config.WorkstreamID) (api.MergeResponse, error) {

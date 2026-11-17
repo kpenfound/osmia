@@ -2376,6 +2376,55 @@
         }
       }
     },
+    "/v1/recovery/{workstream}": {
+      "post": {
+        "summary": "Approve a recovery move: the exact move a recovery card pins is applied through the transition router as a pinned owner decision, with the owner recorded as its decider; refused as a conflict when the move's subject has since changed state",
+        "operationId": "postRecoveryByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/reload": {
       "post": {
         "summary": "Reload the configuration files",
@@ -6073,6 +6122,9 @@
           "queued_reason": {
             "type": "string"
           },
+          "recovery": {
+            "$ref": "#/components/schemas/FeedRecovery"
+          },
           "repo": {
             "type": "string"
           },
@@ -6238,6 +6290,58 @@
           },
           "url": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedRecovery": {
+        "properties": {
+          "from": {
+            "description": "The state the subject was in when the card was opened.",
+            "type": "string"
+          },
+          "machine": {
+            "description": "The state machine of the subject: unit, ws, final or dep.",
+            "type": "string"
+          },
+          "occurrence": {
+            "description": "The router occurrence the card was opened for: subject, version, trigger and cause.",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "stall",
+              "owner",
+              "intent"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "approved",
+              "stale"
+            ],
+            "type": "string"
+          },
+          "subject": {
+            "description": "The workflow subject the move changes.",
+            "type": "string"
+          },
+          "target": {
+            "description": "The state the move enters.",
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "version": {
+            "description": "The version of that state; the move applies only while the subject is still at it.",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "type": "object"
@@ -6750,6 +6854,9 @@
           },
           "recommendation": {
             "type": "string"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/RecoveryMove"
           },
           "revision": {
             "type": "integer"
@@ -7557,6 +7664,107 @@
           },
           "spec": {
             "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RecoveryMove": {
+        "properties": {
+          "from": {
+            "description": "The state the subject was in when the card was opened.",
+            "type": "string"
+          },
+          "machine": {
+            "description": "The state machine of the subject: unit, ws, final or dep.",
+            "type": "string"
+          },
+          "occurrence": {
+            "description": "The router occurrence the card was opened for: subject, version, trigger and cause.",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "stall",
+              "owner",
+              "intent"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "subject": {
+            "description": "The workflow subject the move changes.",
+            "type": "string"
+          },
+          "target": {
+            "description": "The state the move enters.",
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "version": {
+            "description": "The version of that state; the move applies only while the subject is still at it.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RecoveryRequest": {
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "occurrence": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RecoveryResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "occurrence": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
           },
           "workstream": {
             "type": "string"
@@ -9546,6 +9754,12 @@
         "properties": {
           "conversation": {
             "$ref": "#/components/schemas/TraceConversationOrigin"
+          },
+          "dropped": {
+            "items": {
+              "$ref": "#/components/schemas/TraceEdge"
+            },
+            "type": "array"
           },
           "edges": {
             "items": {

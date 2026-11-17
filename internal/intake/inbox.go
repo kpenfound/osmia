@@ -261,7 +261,8 @@ func Decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 // openDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
 // amendments, held drift rebase, delivery approval, failing publication,
-// final checks that do not complete, parked base, notices held from the chief of staff and a loop guard pause.
+// final checks that do not complete, parked base, recovery moves that wait for
+// the owner, notices held from the chief of staff and a loop guard pause.
 func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -329,6 +330,13 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 	}
 	if s.DiscoveryEntries != nil {
 		entries, err := s.DiscoveryEntries(repository, w.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+	}
+	if s.RecoveryEntries != nil {
+		entries, err := s.RecoveryEntries(repository, w)
 		if err != nil {
 			return nil, err
 		}

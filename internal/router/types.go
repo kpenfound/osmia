@@ -269,6 +269,10 @@ type Exit struct {
 	OwnerCard string
 }
 
+// RecoveryCard names the card the owner decides a move on when it has no card of
+// its own.
+const RecoveryCard = "the recovery card"
+
 // Pending reports whether routing the exit left the move as a pending owner
 // decision: it belongs to the owner, and the owner decides it on a card.
 func (r Result) Pending() bool { return r.Journal == StateOwner }

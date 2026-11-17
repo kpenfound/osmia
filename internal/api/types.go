@@ -886,6 +886,10 @@ type WorkgroupView struct {
 	ID      config.WorkgroupID    `json:"id"`
 	Members []config.WorkstreamID `json:"members"`
 	Edges   []trace.Edge          `json:"edges"`
+	// Dropped is the part of Edges whose dependent dropped the dependency with a
+	// waiver in its own trace. The shared graph still names those edges, and a
+	// dropped edge is never one whose upstream merged.
+	Dropped []trace.Edge `json:"dropped,omitempty"`
 	// Conversation names the original design address when that conversation
 	// was adopted by this workgroup. Member feed endpoints use that authority.
 	Conversation *trace.ConversationOrigin `json:"conversation,omitempty"`
@@ -1058,6 +1062,10 @@ const (
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
 	InboxBase         = "base"
+	// InboxRecovery asks the owner to approve one recovery move: a stall that
+	// neither Jev nor the chief of staff cleared, or a move that belongs to the
+	// owner. The card pins the exact move.
+	InboxRecovery = "recovery"
 	// InboxDiscovery is a discovered piece of work whose disposition Jev
 	// decided but the service could not carry out, so it is the owner's.
 	InboxDiscovery = "discovery"
@@ -1109,6 +1117,9 @@ type InboxEntry struct {
 	// owner after all: an answer below the threshold, a deferral, or a pick
 	// the service refused. Recommendation then says it in words.
 	Jev *InboxJev `json:"jev,omitempty"`
+	// Recovery is the exact move a recovery card pins; the answer body carries
+	// the same pin.
+	Recovery *RecoveryMove `json:"recovery,omitempty"`
 }
 
 // InboxJev is Jev's recorded result for an inbox entry. Pick is the option it
@@ -1250,7 +1261,8 @@ type FeedImage struct {
 // unit check run, "final_checks" a final check attempt, and "final_review"
 // a final review outcome. Kind "image" carries attachment metadata in Image,
 // with a URL or an archived-member placeholder. Kind "brief" is the delivery
-// brief the chief of staff recorded for a final review, with Brief. At is when
+// brief the chief of staff recorded for a final review, with Brief. Kind
+// "recovery" is a recovery card opened for the owner, with Recovery. At is when
 // the entry first became observable; sessions and final check attempts use
 // their recorded start time.
 type FeedEntry struct {
@@ -1271,6 +1283,7 @@ type FeedEntry struct {
 	FinalChecks   *FeedFinalChecks    `json:"final_checks,omitempty"`
 	FinalReview   *FeedFinalReview    `json:"final_review,omitempty"`
 	Brief         *FeedBrief          `json:"brief,omitempty"`
+	Recovery      *FeedRecovery       `json:"recovery,omitempty"`
 }
 
 // ImagePath is the path of the stored image id of workstream stream.

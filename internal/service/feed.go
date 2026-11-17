@@ -26,7 +26,21 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
 	defer closeChief()
-	entries, err := readview.Consistent(func() ([]FeedEntry, error) { return feedEntries(repository, chief, stream) }, repository.Generation, chief.Generation)
+	entries, err := readview.Consistent(func() ([]FeedEntry, error) {
+		out, err := feedEntries(repository, chief, stream)
+		if err != nil {
+			return nil, err
+		}
+		// The recovery cards open for the owner are part of the feed, placed
+		// where each was opened.
+		recoveries, err := s.feedRecoveries(repository, stream)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recoveries...)
+		slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
+		return out, nil
+	}, repository.Generation, chief.Generation)
 	if err != nil {
 		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
 	}

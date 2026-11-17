@@ -2,10 +2,8 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -52,29 +50,12 @@ func (b *Rebuilders) get(machine string) Rebuilder {
 // Pending returns the route records of the workstream whose pick is recorded
 // but not applied, in the order they were first written.
 func Pending(repo *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
-	docs, err := trace.Read[trace.Document](repo, stream)
+	all, err := Records(repo, stream)
 	if err != nil {
 		return nil, err
 	}
-	latest := map[string]trace.Document{}
-	var order []string
-	for _, d := range docs {
-		if !strings.HasPrefix(d.Path, "routes/") {
-			continue
-		}
-		if prior, ok := latest[d.ID]; !ok {
-			order = append(order, d.ID)
-			latest[d.ID] = d
-		} else if d.Revision > prior.Revision {
-			latest[d.ID] = d
-		}
-	}
 	var out []Record
-	for _, id := range order {
-		var rec Record
-		if json.Unmarshal([]byte(latest[id].Content), &rec) != nil {
-			continue
-		}
+	for _, rec := range all {
 		if rec.State == StateDecided {
 			out = append(out, rec)
 		}

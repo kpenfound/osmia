@@ -224,7 +224,7 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 
 // recoveryCard names where the owner decides a move that belongs to the owner
 // and has no card of its own.
-const recoveryCard = "the recovery card"
+const recoveryCard = router.RecoveryCard
 
 // pendingOwnerMove says what became of a proposal that belongs to the owner: it
 // is a pending owner decision, and where the owner decides it.

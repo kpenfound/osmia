@@ -2,8 +2,10 @@ package service
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -60,6 +62,9 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 		return err
 	}
 	w.Workgroup = group
+	if err := s.markDroppedEdges(repo, w.Workstream, group); err != nil {
+		return err
+	}
 	evidence, err := readMemberEvidence(repo, w.Workstream)
 	if err != nil {
 		return err
@@ -68,6 +73,42 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 	open := evidence.Published && !(evidence.Outcome.PullRequest == evidence.Publication.PullRequest && evidence.Outcome.Outcome != "")
 	_, paused := s.pausing(w.Project, w.Workstream)
 	w.DisplayState = paneState(w.State, w.Wait, paused, open, merged)
+	return nil
+}
+
+// markDroppedEdges names the edges of the workgroup that their dependent
+// dropped. Each waiver lives in the dependent's own trace, which is stream's
+// repository for stream's own edges and another project's for the rest.
+func (s *Service) markDroppedEdges(repo *trace.Repository, stream config.WorkstreamID, group *WorkgroupView) error {
+	if group == nil {
+		return nil
+	}
+	_, projects := s.runtimes()
+	for _, e := range group.Edges {
+		home := repo
+		if e.To != stream {
+			home = nil
+			for _, p := range projects {
+				if p.repository == nil {
+					continue
+				}
+				if streams, err := p.repository.Workstreams(); err == nil && slices.Contains(streams, e.To) {
+					home = p.repository
+					break
+				}
+			}
+		}
+		if home == nil {
+			continue
+		}
+		dropped, err := lifecycle.EdgeWaived(home, e.To, e.From, e.Type)
+		if err != nil {
+			return err
+		}
+		if dropped {
+			group.Dropped = append(group.Dropped, e)
+		}
+	}
 	return nil
 }
 

@@ -11,7 +11,7 @@ import (
 
 // recoveryCard names where the owner decides a move that belongs to the owner
 // and has no card of its own.
-const recoveryCard = "the recovery card"
+const recoveryCard = router.RecoveryCard
 
 // proposalHistory is how many earlier moves and rulings of a unit Jev reads
 // with a proposal.

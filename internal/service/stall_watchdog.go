@@ -229,7 +229,7 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 	if err != nil {
 		return err
 	}
-	if err := w.assess(stream, "", raw, q, since, r, now, after, limit); err != nil {
+	if err := w.assess(ctx, stream, "", raw, q, since, r, now, after, limit); err != nil {
 		return err
 	}
 
@@ -273,7 +273,7 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 			turn = turn || len(r.live) > 0
 		}
 		q := scheduler.Quiet{Since: since, Card: r.card || r.unitCards[unit], Paused: r.paused, Turn: turn, Waiting: waiting, Operations: r.operations[unit]}
-		if err := w.assess(stream, unit, state, q, since, r, now, after, limit); err != nil {
+		if err := w.assess(ctx, stream, unit, state, q, since, r, now, after, limit); err != nil {
 			return err
 		}
 	}
@@ -283,7 +283,7 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 // assess judges one subject and raises its stalled exit. A subject that is
 // explained notes the time; a subject that is stalled is raised once for the
 // stall, which is identified by the progress it has been quiet since.
-func (w stallWatch) assess(stream config.WorkstreamID, unit string, state trace.WorkflowState, q scheduler.Quiet, identity time.Time, r stallReading, now time.Time, after time.Duration, limit int) error {
+func (w stallWatch) assess(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, q scheduler.Quiet, identity time.Time, r stallReading, now time.Time, after time.Duration, limit int) error {
 	key := fmt.Sprintf("%s/%s/%s", w.repository.Project(), stream, unit)
 	// The quiet is counted from the last time something explained it too, so a
 	// lifted pause or an answered card starts the window over.
@@ -303,7 +303,9 @@ func (w stallWatch) assess(stream config.WorkstreamID, unit string, state trace.
 	if rec, err := router.Lookup(w.repository, stream, *x); err != nil {
 		return err
 	} else if rec != nil && rec.Finished() {
-		return nil
+		// The router decided this stall and the chief of staff was told. A stall
+		// still standing a further window later has the owner's recovery card.
+		return w.openRecovery(ctx, stream, unit, state, *rec, now, after)
 	}
 	submit := w.submit
 	if submit == nil {
