@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -82,25 +83,18 @@ func moveNote(repo *trace.Repository, stream config.WorkstreamID, unit string, t
 // unitOperation returns the action of a landing or rebase of the unit that
 // has no result yet, or "" when none is in flight.
 func unitOperation(repo *trace.Repository, stream config.WorkstreamID, unit string) (string, error) {
-	records, err := repo.Operations(stream)
-	if err != nil {
+	return unitOperationExcept(repo, stream, unit, "")
+}
+
+// operationUnit returns the unit a landing or rebase operation is about.
+func operationUnit(op coreadapter.Operation) (string, error) {
+	var in struct {
+		Unit string `json:"unit"`
+	}
+	if err := json.Unmarshal(op.Input, &in); err != nil {
 		return "", err
 	}
-	for _, r := range records {
-		if r.Result != nil || r.Operation.Action != LandAction && r.Operation.Action != RebaseAction {
-			continue
-		}
-		var in struct {
-			Unit string `json:"unit"`
-		}
-		if err := json.Unmarshal(r.Operation.Input, &in); err != nil {
-			return "", err
-		}
-		if in.Unit == unit {
-			return r.Operation.Action, nil
-		}
-	}
-	return "", nil
+	return in.Unit, nil
 }
 
 // moveUnit moves a started unit that has not merged to another state, as
@@ -112,6 +106,11 @@ func unitOperation(repo *trace.Repository, stream config.WorkstreamID, unit stri
 // and to contested, raises the unit to the owner. A move re-entering the
 // unit's state restarts that stage.
 func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn string) (UnitMoveResponse, *APIError) {
+	return s.moveUnit(ctx, repo, stream, unit, req, actor, turn, "")
+}
+
+// moveUnit is MoveUnit with the Jev judgment a Jev gate decision comes from.
+func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn, judgment string) (UnitMoveResponse, *APIError) {
 	note := strings.TrimSpace(req.Note)
 	if !slices.Contains(moveTargets, req.To) || note == "" {
 		return UnitMoveResponse{}, &APIError{Code: Validation, Message: "a move requires a note and a state: " + strings.Join(moveTargets, ", ")}
@@ -143,33 +142,42 @@ func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, strea
 	} else if action == RebaseAction {
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the foreman is rebasing unit %s; it moves once the rebase ends", unit)}
 	}
-	// A move is caused by the chief-of-staff turn that made it, or else by
-	// the transition into the state it leaves.
-	cause := turn
-	if cause == "" {
-		transitions, err := trace.Read[trace.Transition](repo, stream)
-		if err != nil {
-			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's transitions"}
-		}
-		for _, t := range transitions {
-			if t.Subject == trace.UnitSubject(unit) {
-				cause = t.ID
-			}
-		}
-	}
 	at := s.Now()
-	records, api := s.unitMoveRecords(ctx, repo, stream, unit, state, req.To, note, actor, turn, cause, "", at)
+	// The records are built once here, so a move that cannot be recorded is
+	// refused before anything is asked of the router, which builds them again
+	// when it enters the target.
+	records, api := s.unitMoveRecords(ctx, repo, stream, unit, state, req.To, note, actor, turn, "", "", at)
 	if api != nil {
 		return UnitMoveResponse{}, api
 	}
-	move, docs, tx := records.move, records.docs, records.tx
-	if _, err := repo.RecordDocumentsWith(ctx, docs, tx); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
+	// An owner's decision, and one of Jev's gate decisions, is a pinned move:
+	// the router enters exactly the target it authorises. A move of the chief
+	// of staff's own is a proposal the router judges.
+	in := UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Default: req.To, Note: note, Turn: turn, Actor: actor, Active: true,
+		Trigger: TriggerMoveProposal, Cause: fmt.Sprintf("%s-%d", moveDocument(unit, state.Version), at.UnixNano())}
+	switch {
+	case actor == trace.JevActor:
+		if judgment == "" {
+			return UnitMoveResponse{}, &APIError{Code: Validation, Message: "a Jev move names its judgment"}
 		}
-		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+		in.Trigger, in.Authority = TriggerJevRuling, &router.Authority{Kind: router.AuthorityJevGate, Target: req.To, Judgment: judgment}
+	case actor.Kind == ownerActor.Kind:
+		in.Trigger, in.Authority = TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: req.To}
 	}
-	return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
+	res, err := s.raise(ctx, false, in)
+	switch {
+	case err != nil:
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed:
+		move := records.move
+		if res.Target != req.To {
+			move = UnitMove{From: state.Value, To: res.Target, Note: note, By: trace.DecidedByJev, Turn: turn}
+		}
+		return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
+	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
+	}
+	return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s was not moved to %s: the move is held (%s). %s", unit, req.To, res.Hold, res.Reason)}
 }
 
 // unitMoveRecord is what entering a target by a move records: the move, its

@@ -163,6 +163,7 @@ decision it is. These are the kinds the publisher posts for Jev:
 | An answer the chief of staff gave from the record, bound by Jev's pick | `decision` | `<workstream id>-jev-answer-<question>` |
 | An amendment, approved or declined | `decision` | `<workstream id>-jev-amendment-<amendment>` |
 | A discovery disposition that is a scope call (declined or kept as a suggestion), or that revisits one | `decision`, one per revision | `<workstream id>-jev-discovery-<discovery hash>-<revision>` |
+| A departure from the state machine's default: a transition Jev entered instead of the default | `decision`, one per departure | `<workstream id>-jev-route-<transition id>` |
 | A ratification, or an amendment, that sealed a spec | `document`, one revision per seal | `<workstream id>-jev-spec` |
 
 Every one of them:
@@ -185,6 +186,10 @@ Every one of them:
 - **Is posted once.** The chief of staff's relay of a Jev ruling to the askers
   is a later revision of the ruling and is never posted, as it is not for an
   owner ruling.
+
+Only a departure is a decision. A default the router followed, one it committed because Jev could not answer, a move
+an owner or one of Jev's gate decisions pinned, and an exit it held are not posted. A departure's text names the state
+the subject left, the state it entered and the default it departed from.
 
 A seal belongs to whoever decided what produced it. A seal an amendment
 produced belongs to whoever decided that amendment; a plan-only amendment the

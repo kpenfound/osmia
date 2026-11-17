@@ -5,6 +5,21 @@ import (
 	"sync"
 )
 
+type schedulingPathKey struct{}
+
+// OnSchedulingPath marks ctx as the context of a scheduling pass. A pass hands
+// the exits it raises to a Worker, and Route refuses a context so marked, so Jev
+// is never asked on the scheduling path.
+func OnSchedulingPath(ctx context.Context) context.Context {
+	return context.WithValue(ctx, schedulingPathKey{}, true)
+}
+
+// IsSchedulingPath reports whether ctx is the context of a scheduling pass.
+func IsSchedulingPath(ctx context.Context) bool {
+	on, _ := ctx.Value(schedulingPathKey{}).(bool)
+	return on
+}
+
 // maxRouting bounds the exits a worker routes at once, so a burst of exits does
 // not send Jev unbounded concurrent requests. One exit that waits on Jev holds
 // only its own slot.

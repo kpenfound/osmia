@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -40,6 +41,19 @@ type landInput struct {
 	Review    int    `json:"review"`
 	Candidate string `json:"candidate"`
 	Base      string `json:"base"`
+	// Attempt numbers the landings of one approval: the first is attempt one,
+	// and a landing that was refused is asked for again, as the next attempt,
+	// when the router decides to land it again. Zero is the first.
+	Attempt int `json:"attempt,omitempty"`
+}
+
+// attempt is the number of the landing, from one.
+func (in landInput) attempt() int { return max(in.Attempt, 1) }
+
+// ids returns the IDs of the landing's transition and its run event. The first
+// attempt keeps the IDs of the approval, and each later one has its own.
+func (in landInput) ids() (transition, event string) {
+	return landAttemptIDs(in.Unit, in.Review, in.attempt())
 }
 
 // landingSubject is the workflow subject that tracks the landings of one
@@ -52,8 +66,23 @@ func landingSubject(unit string) string {
 func landingDocument(unit string) string { return trace.UnitSubject(unit) + "-landing" }
 
 func landIDs(unit string, review int) (transition, event string) {
+	return landAttemptIDs(unit, review, 1)
+}
+
+// landAttemptIDs returns the IDs of the transition and the run event of the
+// attempt-th landing of the approval review records.
+func landAttemptIDs(unit string, review, attempt int) (transition, event string) {
 	transition = fmt.Sprintf("%s-%d", landingSubject(unit), review)
+	if attempt > 1 {
+		transition = fmt.Sprintf("%s-attempt-%d", transition, attempt)
+	}
 	return transition, trace.EventID(transition, "run")
+}
+
+// landAgainID is the ID of the transition by which a refused landing of an
+// approval that still holds is asked for again as the given attempt.
+func landAgainID(unit string, review, attempt int) string {
+	return fmt.Sprintf("%s-%s-again-%d-%d", trace.UnitSubject(unit), UnitApproved, review, attempt)
 }
 
 // foreman is the landing controller. Its pass asks to land one approved unit
@@ -159,16 +188,102 @@ func (f *foreman) Pass(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if !ok || slices.ContainsFunc(requested[b.stream], func(in landInput) bool { return in.Unit == u.ID && in.Review == review.Revision }) {
+			if !ok {
 				continue
 			}
-			if err := f.request(ctx, b.stream, u.ID, review, result); err != nil {
+			var latest *landInput
+			for i, in := range requested[b.stream] {
+				if in.Unit == u.ID && in.Review == review.Revision && (latest == nil || in.attempt() > latest.attempt()) {
+					latest = &requested[b.stream][i]
+				}
+			}
+			attempt := 1
+			if latest != nil {
+				// A landing that was asked for is followed by its refusal's
+				// exit; only a decision to land again asks for another.
+				again, err := f.afterRefusal(ctx, b, u.ID, review, result, *latest)
+				if err != nil {
+					return fmt.Errorf("workstream %s unit %s landing: %w", b.stream, u.ID, err)
+				}
+				if again == 0 {
+					continue
+				}
+				attempt = again
+			}
+			if err := f.request(ctx, b.stream, u.ID, review, result, attempt); err != nil {
 				return fmt.Errorf("workstream %s unit %s landing: %w", b.stream, u.ID, err)
 			}
 			break
 		}
 	}
 	return nil
+}
+
+// The words of a refusal that was not about the approval: a landing an
+// operation gave up on after repeated failures, and one whose outcome could not
+// be read. Any other refusal says the approval no longer holds.
+const (
+	RefusedAfterRetries   = "gave up after repeated failures"
+	RefusedUnknownOutcome = "its outcome could not be determined"
+)
+
+// staleRefusal reports whether a landing was refused because the approval no
+// longer holds, as opposed to a failure of the landing itself.
+func staleRefusal(reason string) bool {
+	return !strings.Contains(reason, RefusedAfterRetries) && !strings.Contains(reason, RefusedUnknownOutcome)
+}
+
+// afterRefusal follows a landing that was asked for, for an approval that still
+// stands. A landing whose refusal is recorded raises the unit's landing_refused
+// exit, whose default is to check and review the unit again when the approval
+// no longer holds and to land again when the refusal was not about it. It
+// returns the number of the attempt to ask for when the router decided to land
+// again, and zero otherwise.
+func (f *foreman) afterRefusal(ctx context.Context, b building, unit string, review trace.Document, result UnitReviewResult, last landInput) (int, error) {
+	outcome, err := f.outcome(b.stream, last)
+	if err != nil || outcome == nil || outcome.Outcome != "failed" {
+		return 0, err
+	}
+	next := last.attempt() + 1
+	transitions, err := trace.Read[trace.Transition](f.repository, b.stream)
+	if err != nil {
+		return 0, err
+	}
+	if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == landAgainID(unit, review.Revision, next) }) {
+		return next, nil
+	}
+	subject := trace.UnitSubject(unit)
+	transition, event := last.ids()
+	refused := transition + "-refused"
+	reviews := &reviewers{masons: f.masons}
+	holds, err := reviews.verdictHolds(b.stream, unit, result)(ctx)
+	if err != nil {
+		return 0, err
+	}
+	stale := staleRefusal(outcome.Evidence) || holds != ""
+	in := UnitExitInput{
+		Repo: f.repository, Stream: b.stream, Unit: unit, State: b.states[subject], Trigger: TriggerLandingRefused, Cause: refused, Actor: foremanActor,
+		Note: outcome.Evidence,
+		Evidence: router.Evidence{Facts: map[string]any{"attempt": last.attempt(), "approval_holds": holds == "", "refusal_about_the_approval": staleRefusal(outcome.Evidence)},
+			Records: []router.Entry{{Kind: "landing refusal", ID: refused, Text: outcome.Evidence}}},
+		HeaderCause: refused,
+		// The refused landing recorded its outcome, so it no longer holds the unit.
+		Operation: trace.OperationID(f.repository.Project(), b.stream, event),
+	}
+	if stale {
+		id := fmt.Sprintf("%s-%s-landing-%d-%d", subject, UnitChecking, last.Review, last.attempt())
+		in.Default, in.Targets = UnitChecking, []string{UnitChecking, UnitReviewing, UnitImplementing, UnitContested}
+		in.ID, in.Reason = id, outcome.Evidence+"; the unit returns to checking and review so that a current approval is recorded"
+		in.Events = []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to checking: its landing was refused. %s", unit, outcome.Evidence))}
+	} else {
+		id := landAgainID(unit, review.Revision, next)
+		in.Default, in.Targets = UnitApproved, []string{UnitApproved, UnitChecking, UnitReviewing, UnitContested}
+		in.ID, in.Reason = id, fmt.Sprintf("%s; the approval still holds, so the foreman lands unit %s again as attempt %d", outcome.Evidence, unit, next)
+		in.Events = []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is landed again as attempt %d: its approval still holds.", unit, next))}
+		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", review.Path, review.Revision), Valid: reviews.verdictHolds(b.stream, unit, result)}
+	}
+	_, err = f.s.raise(ctx, true, in)
+	return 0, err
 }
 
 // approval returns the given revision of the unit's review.json, its latest
@@ -198,15 +313,19 @@ func (f *foreman) header(id string, stream config.WorkstreamID, unit, cause stri
 
 // request publishes the landing of the approval that review records as a
 // durable operation.
-func (f *foreman) request(ctx context.Context, stream config.WorkstreamID, unit string, review trace.Document, result UnitReviewResult) error {
+func (f *foreman) request(ctx context.Context, stream config.WorkstreamID, unit string, review trace.Document, result UnitReviewResult, attempt int) error {
 	subject := landingSubject(unit)
 	state, err := f.repository.Workflow(stream, subject)
 	if err != nil {
 		return err
 	}
-	transition, event := landIDs(unit, review.Revision)
+	transition, event := landAttemptIDs(unit, review.Revision, attempt)
 	candidate := result.Identity.Candidate
-	input, err := json.Marshal(landInput{Unit: unit, Review: review.Revision, Candidate: candidate.Revision, Base: candidate.BaseRevision})
+	in := landInput{Unit: unit, Review: review.Revision, Candidate: candidate.Revision, Base: candidate.BaseRevision}
+	if attempt > 1 {
+		in.Attempt = attempt
+	}
+	input, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
@@ -244,7 +363,7 @@ func (f *foreman) stream(op coreadapter.Operation, in landInput) (config.Workstr
 	if err != nil {
 		return "", err
 	}
-	_, event := landIDs(in.Unit, in.Review)
+	_, event := in.ids()
 	for _, stream := range streams {
 		if trace.OperationID(f.repository.Project(), stream, event) == op.ID {
 			return stream, nil
@@ -261,7 +380,7 @@ func (f *foreman) outcome(stream config.WorkstreamID, in landInput) (*coreadapte
 	if err != nil {
 		return nil, err
 	}
-	transition, _ := landIDs(in.Unit, in.Review)
+	transition, _ := in.ids()
 	for _, t := range transitions {
 		switch t.ID {
 		case transition + "-landed":
@@ -613,26 +732,35 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 	merged := subject + "-" + UnitMerged
 	reason := fmt.Sprintf("unit %s landed as %s on %s: %s approved candidate %s from %s, spec %s, plan %s, seal %d; criteria %s",
 		in.Unit, commit, branch, approval, in.Candidate, in.Base, identity.Candidate.SpecRevision, identity.Candidate.PlanRevision, identity.Seal, strings.Join(criteria, ", "))
-	txs := []trace.Transaction{{ExpectedVersion: b.states[subject].Version,
-		Transition: trace.Transition{Header: f.header(merged, stream, in.Unit, operation, at), Subject: subject, From: UnitApproved, To: UnitMerged, Reason: reason},
-		Events:     []trace.Event{trace.Progress(merged, "unit", fmt.Sprintf("Unit %s merged: it landed as %s on %s.", in.Unit, commit, branch))}}}
-	transition, _ := landIDs(in.Unit, in.Review)
+	transition, _ := in.ids()
 	landingState := b.states[landingSubject(in.Unit)]
-	txs = append(txs, trace.Transaction{ExpectedVersion: landingState.Version,
-		Transition: trace.Transition{Header: f.header(transition+"-landed", stream, in.Unit, operation, at), Subject: landingSubject(in.Unit), From: landingState.Value, To: fmt.Sprintf("landed-%d", in.Review), Reason: reason}})
+	txs := []trace.Transaction{{ExpectedVersion: landingState.Version,
+		Transition: trace.Transition{Header: f.header(transition+"-landed", stream, in.Unit, operation, at), Subject: landingSubject(in.Unit), From: landingState.Value, To: fmt.Sprintf("landed-%d", in.Review), Reason: reason}}}
 	for _, u := range newlyReady(b.plan, b.states, in.Unit) {
 		state := b.states[trace.UnitSubject(u.ID)]
 		txs = append(txs, trace.Transaction{ExpectedVersion: state.Version,
 			Transition: trace.Transition{Header: f.header(trace.UnitSubject(u.ID)+"-"+UnitReady, stream, u.ID, operation, at), Subject: trace.UnitSubject(u.ID), From: UnitPlanned, To: UnitReady,
-				Reason: fmt.Sprintf("unit %s is ready: every unit it depends on has merged: %s", u.ID, strings.Join(u.DependsOn, ", "))}})
+				Reason: fmt.Sprintf("unit %s is ready: every unit it depends on has merged: %s", u.ID, strings.Join(u.DependsOn, ", ")),
+				DecidedBy: trace.DecidedByCode, DefaultTo: UnitReady}})
 	}
-	if _, err := f.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			if recorded, outcomeErr := f.outcome(stream, in); outcomeErr == nil && recorded != nil {
-				return *recorded, nil
-			}
-		}
+	// The unit's move to merged is routed: the landing is the commit it
+	// records, with the landing's own records and the units it makes ready.
+	res, err := f.s.raise(ctx, false, UnitExitInput{
+		Repo: f.repository, Stream: stream, Unit: in.Unit, State: b.states[subject], Trigger: TriggerLanded, Cause: operation,
+		Default: UnitMerged, Targets: []string{UnitMerged}, Actor: foremanActor, Operation: operation,
+		ID: merged, HeaderCause: operation, Reason: reason,
+		Events:    []trace.Event{trace.Progress(merged, "unit", fmt.Sprintf("Unit %s merged: it landed as %s on %s.", in.Unit, commit, branch))},
+		Documents: []trace.Document{doc}, With: txs,
+		Candidate: func(context.Context) (string, error) { return "", nil },
+	})
+	switch {
+	case err != nil:
 		return coreadapter.OperationResult{}, err
+	case !res.Committed:
+		if recorded, outcomeErr := f.outcome(stream, in); outcomeErr == nil && recorded != nil {
+			return *recorded, nil
+		}
+		return coreadapter.OperationResult{}, fmt.Errorf("the landing of unit %s is not recorded: the router held its move to merged (%s)", in.Unit, res.Hold)
 	}
 	if err := f.s.Step("land-recorded"); err != nil {
 		return coreadapter.OperationResult{}, err
@@ -658,7 +786,7 @@ func newlyReady(p plan.Plan, states map[string]trace.WorkflowState, merging stri
 // returns the refusal as the operation's result. The unit stays approved and
 // the feature branch is unchanged.
 func (f *foreman) refuse(ctx context.Context, stream config.WorkstreamID, in landInput, reason string) (coreadapter.OperationResult, error) {
-	transition, _ := landIDs(in.Unit, in.Review)
+	transition, _ := in.ids()
 	id := transition + "-refused"
 	subject := landingSubject(in.Unit)
 	state, err := f.repository.Workflow(stream, subject)

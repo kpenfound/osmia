@@ -4,6 +4,8 @@ import (
 	context "context"
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
+	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
+	service "github.com/kpenfound/osmia/internal/service"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,6 +47,9 @@ func (f *architectFixture) start(t *testing.T) {
 			c.Client.SetTimeoutForTest(c.defaultTimeout)
 		}
 	})
+	// The router of a running fixture asks a Jev that finds every default fits and
+	// whose answers cost nothing, so that the spend a test reads is its own.
+	service.InspectForTest(f.s.core()).SetRouterJudge(jevfixture.TransitionJudge(f.s.now, &jevfixture.Transitions{Free: true}))
 }
 
 func (f *architectFixture) stop(t *testing.T) {

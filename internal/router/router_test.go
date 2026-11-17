@@ -51,8 +51,10 @@ func TestTheDefaultIsCommittedWhenJevAgrees(t *testing.T) {
 	if m.To != "implementing" || m.From != "checking" || m.DecidedBy != trace.DecidedByCode || m.DefaultTo != "implementing" || m.Judgment == "" || m.Departed() {
 		t.Fatalf("transition = %+v", m)
 	}
-	if !strings.Contains(m.Reason, "table v1") || !strings.Contains(m.Reason, "3:default_picked") {
-		t.Fatalf("the table version and rule are not in the reason: %q", m.Reason)
+	// A default that was followed keeps the reason its caller wrote; the table
+	// and the rule are in the route record.
+	if strings.Contains(m.Reason, "decide-transition") {
+		t.Fatalf("a followed default carries the routing in its reason: %q", m.Reason)
 	}
 	rec, err := router.Lookup(f.repo, streamID, x)
 	if err != nil || rec == nil {

@@ -46,6 +46,10 @@ type Dependencies struct {
 	Checks              ReviewChecks
 	CloudChecks         ReviewChecks
 	Jev                 *jev.Judge
+	// Router routes every exit of a unit: the controllers raise the trigger,
+	// the default, the legal targets and the evidence, and the router chooses
+	// the state.
+	Router Router
 }
 type Controller struct{ Dependencies }
 

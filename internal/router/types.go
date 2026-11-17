@@ -117,6 +117,10 @@ type Authority struct {
 	Target string
 	// Judgment is the judgment record of a Jev gate decision.
 	Judgment string
+	// Ref names the record the authority rests on (a reviewer's verdict
+	// document and revision, an owner decision), so the route journal records
+	// what authorised the move.
+	Ref string
 	// Valid returns why the authority no longer holds when the target is
 	// applied, or "" while it does: a verdict is still the latest and still
 	// for the current candidate. A nil Valid always holds.
@@ -201,6 +205,16 @@ type Exit struct {
 	// TransitionID, when set, names the transition into a target, for readers
 	// that recognise a transition by its ID. It is stable for the exit.
 	TransitionID func(Target) string
+	// Enter, when set, builds how the trigger enters its default target: the
+	// records that target has always had when the trigger raised it. A target
+	// other than the default, however it was chosen, is entered through the
+	// shared effect of its machine.
+	Enter EffectFunc
+	// Records, when set, builds the records of the trigger itself (the report
+	// an exit cites, the failed check run it counts): they are written in the
+	// commit of whichever target is entered, and in none when the exit is
+	// held.
+	Records EffectFunc
 	// At is when the exit was raised; the zero value is the time it is routed.
 	At time.Time
 	// Default is the state today's code would enter. It is one of Targets.

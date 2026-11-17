@@ -52,11 +52,18 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	if effect.Reason != "" {
 		reason = effect.Reason
 	}
-	reason = fmt.Sprintf("%s [decide-transition table %s, rule %s, %s]", reason, TableVersion, d.rule, d.decidedBy)
+	// A default the router kept reads as the caller always wrote it; the table
+	// rule behind a departure, a fallback or a pinned move is part of its reason.
+	if d.outcome != OutcomeFollowed {
+		reason = fmt.Sprintf("%s [decide-transition table %s, rule %s, %s]", reason, TableVersion, d.rule, d.decidedBy)
+	}
 
 	cause := x.Cause
 	if x.HeaderCause != "" {
 		cause = x.HeaderCause
+	}
+	if effect.Cause != "" {
+		cause = effect.Cause
 	}
 	if cause == "" {
 		cause = x.Trigger

@@ -62,7 +62,9 @@ type Record struct {
 	// default was committed for when it was the only one.
 	Offered []string `json:"offered,omitempty"`
 	// Authority is the authority the exit carried: reviewer, owner or jev_gate.
-	Authority string `json:"authority,omitempty"`
+	// AuthorityRef names the record it rests on.
+	Authority    string `json:"authority,omitempty"`
+	AuthorityRef string `json:"authority_ref,omitempty"`
 	// Table and Rule say which version of the code table and which row chose
 	// the state.
 	Table string `json:"table,omitempty"`
@@ -120,6 +122,11 @@ func journalName(key string) string {
 }
 
 func journalSubject(name string) string { return "route-" + name }
+
+// IsJournal reports whether subject is the workflow subject of a route journal,
+// whose transitions are the router's own bookkeeping and not a state change of
+// the work.
+func IsJournal(subject string) bool { return strings.HasPrefix(subject, "route-") }
 func journalPath(name string) string    { return "routes/" + name + ".json" }
 
 // readRecord returns the latest route record named name, its revision and the

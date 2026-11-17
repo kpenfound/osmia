@@ -23,7 +23,7 @@ func (s *Service) executionWithChecks(checks, cloud ReviewChecks) *execution.Con
 			return s.checkSlots.acquire(ctx, CheckSlotRun{Project: p, Workstream: w, Unit: u})
 		},
 		Now: s.now, Effective: s.effective, RoleExecution: s.roleExecution, ContextFor: s.contextFor,
-		Step: s.step, About: s.about, ConversationTrace: s.conversationTrace, Checks: checks, CloudChecks: cloud, Jev: s.jev,
+		Step: s.step, About: s.about, ConversationTrace: s.conversationTrace, Checks: checks, CloudChecks: cloud, Jev: s.jev, Router: routerPort{s},
 		Runtimes: func() (*config.Config, []*execution.Project) {
 			cfg, projects := s.runtimes()
 			out := make([]*execution.Project, 0, len(projects))

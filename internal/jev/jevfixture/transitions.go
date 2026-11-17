@@ -73,6 +73,9 @@ type Transitions struct {
 	Wait func(context.Context) error
 	// Decisions answers the requests that ask for a decision.
 	Decisions *Provider
+	// Free makes the answers cost nothing, for a fixture whose spend a test
+	// reads and Jev's own requests must not change.
+	Free bool
 
 	mu       sync.Mutex
 	requests []systemone.Request
@@ -100,7 +103,11 @@ func (p *Transitions) Evaluate(ctx context.Context, r systemone.Request) (system
 			return systemone.Response{}, err
 		}
 	}
-	return answerTransition(r, call, p.Script), nil
+	resp := answerTransition(r, call, p.Script)
+	if p.Free {
+		resp.Usage = systemone.Usage{}
+	}
+	return resp, nil
 }
 
 // answerTransition answers a transition request with the script's reply, or

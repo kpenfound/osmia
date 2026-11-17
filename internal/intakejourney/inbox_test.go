@@ -569,6 +569,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 
 	_, err = repository.SetFeatureState(ctx, header(contesting, "osmia.trace.transition", "building", tick(3), ownerActor), BuildingState, "sealed")
 	must(t, err)
+	plantReport(t, repository, contesting, "resume", tick(3))
 	move(contesting, trace.UnitSubject("resume"), "resume-reviewing", UnitReviewing, tick(3), foremanActor)
 	move(contesting, trace.UnitSubject("resume"), "resume-contested", UnitContested, tick(3), reviewerActor)
 	raiseFixtureContest(t, repository, contesting, "resume")

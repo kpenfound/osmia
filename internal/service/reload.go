@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/redact"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -44,6 +45,9 @@ type pipeline struct {
 }
 
 func (p *pipeline) schedule(ctx context.Context) error {
+	// Jev is never asked on the scheduling path: the hooks hand their exits to
+	// the router's worker.
+	ctx = router.OnSchedulingPath(ctx)
 	if next := p.next.Swap(nil); next != nil {
 		p.current.Store(next)
 	}

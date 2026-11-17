@@ -51,6 +51,19 @@ func (s *Service) SubmitExit(x router.Exit, done func(router.Result, error)) boo
 	return s.routing.Submit(x, done)
 }
 
+// routerPort is the service's router as the unit controllers use it: an exit
+// that waits on a request is routed in place, and an exit a scheduling pass
+// raises goes to the worker.
+type routerPort struct{ s *Service }
+
+func (p routerPort) Route(ctx context.Context, x router.Exit) (router.Result, error) {
+	return p.s.RouteExit(ctx, x)
+}
+
+func (p routerPort) Submit(x router.Exit, done func(router.Result, error)) bool {
+	return p.s.SubmitExit(x, done)
+}
+
 // recoverRoutes finishes, for every workstream of the project, the transition
 // picks that were recorded but not applied when the service stopped. The picks
 // are applied with no request to Jev.

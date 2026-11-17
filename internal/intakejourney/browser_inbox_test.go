@@ -69,6 +69,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		Blocked: "The upload unit.", Recommendation: "Force-push the cleaned branch."}, at)
 	must(t, err)
 	// A reviewer's turn fails on the index unit.
+	plantReport(t, live, stream, "index", at)
 	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
 	move(trace.UnitSubject("index"), "index-contested", UnitContested, reviewerActor)
 	raiseFixtureContest(t, live, stream, "index")

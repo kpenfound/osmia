@@ -51,8 +51,7 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 		t.Fatalf("move %+v", out.Move)
 	}
 	state := workflowOf(t, repo, stream, "resume")
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	must(t, err)
+	transitions := workTransitions(t, repo, stream)
 	moved := transitions[len(transitions)-1]
 	if state.Value != UnitImplementing || !isMove(moved, "resume") || moved.Actor != ownerActor || !strings.Contains(moved.Reason, note) {
 		t.Fatalf("unit %s after %+v", state.Value, moved)
@@ -280,8 +279,7 @@ func TestChiefOfStaffRecordsTheOwnersMove(t *testing.T) {
 	if !strings.Contains(string(out), `"by":"owner"`) {
 		t.Fatalf("move_unit: %s", out)
 	}
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	must(t, err)
+	transitions := workTransitions(t, repo, stream)
 	if moved := transitions[len(transitions)-1]; moved.Actor != ownerActor || moved.To != UnitImplementing {
 		t.Fatalf("move %+v", moved)
 	}

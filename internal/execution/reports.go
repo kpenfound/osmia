@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -469,9 +470,7 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument(unit), Revision: k, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: at, Actor: masonActor, Cause: turn.Response.ID, Depth: turn.Request.Depth}
 	doc := trace.Document{Header: h, Path: fmt.Sprintf(reportPath, unit), Content: string(content) + "\n"}
 	subject := trace.UnitSubject(unit)
-	h.Schema, h.ID, h.Revision = "osmia.trace.transition", checkingTransitionID(unit, k), 1
-	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitChecking,
-		Reason: fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)}
+	reason := fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)
 	// A mason that names something the owner must act on is news, whatever
 	// survived of its card; otherwise the unit's move to checking is routine
 	// progress.
@@ -481,14 +480,31 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	if ownerAction != "" {
 		event = trace.Notice(checkingTransitionID(unit, k), "unit", body)
 	}
-	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{event}}
-	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
-		return false, false, nil, nil
-	} else if err != nil {
-		return false, false, nil, err
+	// The report is the candidate the checks run on, so the exit carries it
+	// whichever state is entered.
+	res, err := m.s.raise(ctx, true, UnitExitInput{
+		Repo: m.repository, Stream: b.stream, Unit: unit, State: b.states[subject], Trigger: TriggerMasonDone, Cause: turn.Response.ID,
+		Default: UnitChecking, Targets: []string{UnitChecking, UnitContested}, Actor: masonActor,
+		ID: checkingTransitionID(unit, k), HeaderCause: turn.Response.ID, Reason: reason, Events: []trace.Event{event}, Documents: []trace.Document{doc},
+		Candidate: func(context.Context) (string, error) { return "", nil },
+		Evidence: router.Evidence{Facts: map[string]any{"report_revision": k},
+			Records: []router.Entry{{Kind: "report", ID: doc.ID, Text: reportText(report.Outcome, card, ownerAction)}}},
+	})
+	// A report the unit's state moved past, a stale read, moves nothing.
+	return err == nil && (res.Committed || res.Handed), false, nil, err
+}
+
+// reportText is the mason's report as the router's evidence: its outcome, its
+// card and what it flagged for the owner.
+func reportText(outcome string, card *coreadapter.Card, ownerAction string) string {
+	text := "Outcome: " + outcome
+	if card != nil {
+		text += "\nHeadline: " + card.Headline
 	}
-	return true, false, nil, nil
+	if ownerAction != "" {
+		text += "\nNeeds the owner: " + ownerAction
+	}
+	return text
 }
 
 // ownerActionOf returns the text of the owner action the mason flagged, or

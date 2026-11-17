@@ -14,6 +14,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// ErrSchedulingPath is the error of routing an exit on the scheduling path,
+// where Jev is never asked: a pass hands its exits to a Worker.
+var ErrSchedulingPath = errors.New("an exit raised on the scheduling path is handed to the router's worker")
+
 // Router routes exits. Its zero value is not usable: Judge is required, because
 // Jev is always part of routing.
 type Router struct {
@@ -65,6 +69,9 @@ type Result struct {
 	// Reused says the exit's occurrence was already decided and the recorded
 	// result was returned without a request or a commit.
 	Reused bool
+	// Handed says the exit was handed to the worker, which decides it beside the
+	// scheduling pass that raised it; nothing else in the result is known.
+	Handed bool
 }
 
 func resultOf(rec Record, reused bool) Result {
@@ -170,6 +177,9 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 	if r == nil || r.Judge == nil {
 		return Result{}, errors.New("the router needs Jev")
 	}
+	if IsSchedulingPath(ctx) {
+		return Result{}, ErrSchedulingPath
+	}
 	if err := x.validate(); err != nil {
 		return Result{}, err
 	}
@@ -194,7 +204,7 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 			Trigger: x.Trigger, Cause: x.Cause, From: x.From, Version: x.Version, Default: x.Default, Raised: raised,
 			Actor: x.Actor, Note: x.Note, Turn: x.Turn, HeaderCause: x.HeaderCause}
 		if x.Authority != nil {
-			rec.Authority = x.Authority.Kind
+			rec.Authority, rec.AuthorityRef = x.Authority.Kind, x.Authority.Ref
 		}
 	}
 	state, err := x.Repo.Workflow(x.Workstream, x.Subject)

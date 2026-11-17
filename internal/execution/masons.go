@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -173,6 +174,9 @@ func (m *masons) Pass(ctx context.Context) error {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			if moved {
+				if err := m.holdsItsSlot(&b, slots, u.ID); err != nil {
+					return err
+				}
 				continue
 			}
 			classified, contested, err := m.classify(ctx, stream, u.ID, state)
@@ -180,11 +184,17 @@ func (m *masons) Pass(ctx context.Context) error {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			if contested {
+				if err := m.holdsItsSlot(&b, slots, u.ID); err != nil {
+					return err
+				}
 				continue
 			}
 			if contested, err := m.contestFailure(ctx, stream, u.ID, state); err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			} else if contested {
+				if err := m.holdsItsSlot(&b, slots, u.ID); err != nil {
+					return err
+				}
 				continue
 			}
 			continued, contested, err := m.continueEnding(ctx, stream, u.ID, state, uncollected)
@@ -192,6 +202,9 @@ func (m *masons) Pass(ctx context.Context) error {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			if contested {
+				if err := m.holdsItsSlot(&b, slots, u.ID); err != nil {
+					return err
+				}
 				continue
 			}
 			b.inFlight = append(b.inFlight, u.ID)
@@ -285,6 +298,22 @@ func (m *masons) Pass(ctx context.Context) error {
 	return m.recordDeferrals(ctx, decisions, append(read, candidates...))
 }
 
+// holdsItsSlot keeps the mason slot of a unit whose exit the pass handed to the
+// router's worker: the unit is implementing until the worker moves it, so the
+// slot is not free for another start in the meantime.
+func (m *masons) holdsItsSlot(b *building, slots map[config.WorkstreamID]int, unit string) error {
+	state, err := m.repository.Workflow(b.stream, trace.UnitSubject(unit))
+	if err != nil {
+		return err
+	}
+	if state.Value == UnitImplementing {
+		b.inFlight = append(b.inFlight, unit)
+		b.implementing++
+		slots[b.stream]++
+	}
+	return nil
+}
+
 // classify records one chief event per clean mason response, then either
 // queues a bounded continuation or contests the unit. Stable IDs make a pass
 // after a crash finish the same decision without duplicating its side effects.
@@ -346,11 +375,7 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 			reason = fmt.Sprintf("mason clean-turn bound exhausted (%d/%d) after %s", attempts, m.cfg.Mason.MaxCleanTurns, c.Class)
 		}
 		id := trace.EventID(last.Response.ID, "contested")
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: last.Response.ID}
-		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
-		if errors.Is(err, trace.ErrConflict) {
-			return false, false, nil
-		}
+		err := m.contestEnding(ctx, stream, unit, state, last, id, reason, attempts, c.Evidence)
 		return false, err == nil, err
 	}
 	profile, _, err := m.s.RoleExecution(m.cfg, masonRole)
@@ -370,6 +395,23 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
 	err = m.enqueueTurn(ctx, req)
 	return err == nil, false, err
+}
+
+// contestEnding routes the exit of an implementing unit whose mason's turn ended
+// without a report the service takes and whose clean-turn allowance is used up
+// or whose mason gave up. The default is to contest the unit; the router may
+// instead give the mason another turn with a fresh allowance. The exit is handed
+// to the router's worker.
+func (m *masons) contestEnding(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn, id, reason string, attempts int, evidence string) error {
+	_, err := m.s.raise(ctx, true, UnitExitInput{
+		Repo: m.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerMasonEndedClean, Cause: last.Response.ID,
+		Default: UnitContested, Targets: []string{UnitContested, UnitImplementing}, Actor: masonActor,
+		ID: id, HeaderCause: last.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+		Note: reason,
+		Evidence: router.Evidence{Facts: map[string]any{"clean_turns": attempts, "max_clean_turns": m.cfg.Mason.MaxCleanTurns},
+			Records: []router.Entry{{Kind: "mason turn", ID: last.Request.TurnID, Text: reason + "\n" + evidence}}},
+	})
+	return err
 }
 
 // resumeMasonRuling queues the owner's direction on the existing mason
@@ -614,14 +656,19 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 	default:
 		return state.Value, nil
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: cause}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: to, Reason: reason}}
-	if _, err := m.repository.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
-		return state.Value, nil
-	} else if err != nil {
+	res, err := m.s.raise(ctx, true, UnitExitInput{
+		Repo: m.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerQuestionFollow, Cause: id,
+		Default: to, Targets: []string{to}, Actor: masonActor, ID: id, HeaderCause: cause, Reason: reason,
+	})
+	switch {
+	case err != nil:
 		return "", err
+	case res.Committed:
+		return to, nil
 	}
-	return to, nil
+	// A pass the scheduler runs hands the move to the router's worker; the unit
+	// is where it was until a later pass finds it moved.
+	return state.Value, nil
 }
 
 // read returns the workstream's unit states and effective plan while it is
@@ -801,8 +848,12 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 		docs = append(docs, change)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
+	// Starting is a unit's only way out of ready, so it has no other legal
+	// target for the router to choose among: it is entered as the default, on
+	// the scheduling pass, and records that.
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
-		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
+		Reason:    fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base),
+		DecidedBy: trace.DecidedByCode, DefaultTo: UnitImplementing}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
 		Events: []trace.Event{trace.Progress(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}
 	if len(docs) != 0 {

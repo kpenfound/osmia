@@ -168,14 +168,8 @@ func (m *masons) continueEnding(ctx context.Context, stream config.WorkstreamID,
 			return false, false, err
 		}
 		reason := fmt.Sprintf("mason turn %s of unit %s: %s; the mason had %d/%d turns that ended without a report the service took (mason.max_clean_turns), so the unit is contested instead of its work continuing again", last.Request.TurnID, unit, reason, attempts, m.cfg.Mason.MaxCleanTurns)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: last.Response.ID}
-		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}}
-		if _, err := m.repository.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
-			return false, false, nil
-		} else if err != nil {
-			return false, false, err
-		}
-		return false, true, nil
+		err = m.contestEnding(ctx, stream, unit, state, last, id, reason, attempts, "")
+		return false, err == nil, err
 	}
 	profile, _, err := m.s.RoleExecution(m.cfg, masonRole)
 	if err != nil {

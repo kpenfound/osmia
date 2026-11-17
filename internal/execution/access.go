@@ -357,7 +357,7 @@ func (r *reviewers) ResumeContested(ctx context.Context, stream config.Workstrea
 	return r.resumeContested(ctx, stream, unit, state, contests...)
 }
 func (r *reviewers) ApplyBounceRuling(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult, ruling ContestedRuling, docs []trace.Document) error {
-	return r.applyBounceRuling(ctx, stream, unit, state, result, ruling, docs)
+	return r.applyBounceRuling(ctx, false, stream, unit, state, result, ruling, docs)
 }
 
 var BounceRevisionTransition = bounceRevisionTransition
@@ -383,7 +383,7 @@ func (f *foreman) Header(id string, stream config.WorkstreamID, unit, cause stri
 	return f.header(id, stream, unit, cause, at)
 }
 func (f *foreman) Request(ctx context.Context, stream config.WorkstreamID, unit string, review trace.Document, result UnitReviewResult) error {
-	return f.request(ctx, stream, unit, review, result)
+	return f.request(ctx, stream, unit, review, result, 1)
 }
 
 var DecodeLand = decodeLand

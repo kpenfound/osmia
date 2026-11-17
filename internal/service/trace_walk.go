@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -576,6 +577,9 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 		case trace.ImageReference:
 			summary = "image reference: " + imageURL(v.Member, v.ImageID)
 		case trace.Transition:
+			if router.IsJournal(v.Subject) {
+				continue
+			}
 			summary = fmt.Sprintf("%s: %s -> %s: %s", v.Subject, orNone(v.From), v.To, v.Reason)
 			event.DecidedBy, event.Judgment, event.DefaultTo, event.Departed = v.DecidedBy, v.Judgment, v.DefaultTo, v.Departed()
 		case trace.Document:

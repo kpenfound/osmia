@@ -10,6 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/readview"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -56,6 +57,11 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	for _, t := range transitions {
+		// The router's journal is its own bookkeeping, not a state change of the
+		// work.
+		if router.IsJournal(t.Subject) {
+			continue
+		}
 		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
 	}
 	threads, err := repository.Threads(stream)

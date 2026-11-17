@@ -335,6 +335,15 @@ const parallelPlan = `{"version": 1, "units": [
 
 var providerOf = intakefixture.ProviderOf
 
+// plantReport records the report of a unit that is under review, whose candidate
+// a ruling to review the unit again works on.
+func plantReport(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string, at time.Time) {
+	t.Helper()
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.UnitSubject(unit) + "-report", Revision: 1, Project: r.Project(), Workstream: stream, Unit: unit, At: at, Actor: masonActor, Cause: "planted"}
+	must(t, r.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "units/" + unit + "/report.json",
+		Content: `{"unit":"` + unit + `","turn":"mason-` + unit + `-implement","seal":1,"outcome":"done","branch":"unit/` + unit + `","base":"base","candidate":"candidate"}` + "\n"}}))
+}
+
 // raiseFixtureContest records explicit escalation for owner-inbox fixtures.
 func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()

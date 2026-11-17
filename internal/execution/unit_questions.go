@@ -100,11 +100,11 @@ func waitedQuestion(repository *trace.Repository, stream config.WorkstreamID, un
 
 func (m *masons) contestQuestionWait(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, actor trace.Actor, reason string) error {
 	id := fmt.Sprintf("%s-contested-question-%d", trace.UnitSubject(unit), state.Version)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: actor, Cause: questionWaitContestCause}
 	reason = "cannot reconcile answered question wait: " + reason
-	_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" is contested: "+reason)}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err := m.s.raise(ctx, true, UnitExitInput{
+		Repo: m.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerQuestionWait, Cause: id,
+		Default: UnitContested, Targets: []string{UnitContested}, Actor: actor,
+		ID: id, HeaderCause: questionWaitContestCause, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" is contested: "+reason)},
+	})
 	return err
 }

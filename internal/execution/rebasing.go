@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -233,16 +234,26 @@ func (f *foreman) resolve(ctx context.Context, stream config.WorkstreamID, unit 
 	if state.Value != UnitImplementing {
 		subject := trace.UnitSubject(unit)
 		id := fmt.Sprintf("%s-%s-rebase-%d", subject, UnitImplementing, latest.Rebase)
-		transition, _ := rebaseIDs(unit, latest.Rebase)
+		transition, event := rebaseIDs(unit, latest.Rebase)
 		reason := fmt.Sprintf("unit %s returns to implementing from %s: rebasing its workspace onto %s left %s conflicted; its mason resolves the conflict markers against the sealed spec before the unit is reviewed again", unit, state.Value, latest.Onto, strings.Join(paths, ", "))
-		tx := trace.Transaction{ExpectedVersion: state.Version,
-			Transition: trace.Transition{Header: f.header(id, stream, unit, transition+"-conflicted", f.s.Now()), Subject: subject, From: state.Value, To: UnitImplementing, Reason: reason},
-			Events:     []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to implementing: rebasing it onto %s left %s conflicted.", unit, latest.Onto, strings.Join(paths, ", ")))}}
-		if _, err := f.repository.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
-			return true, nil
-		} else if err != nil {
-			return false, err
+		res, err := f.s.raise(ctx, true, UnitExitInput{
+			Repo: f.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerRebaseConflicted, Cause: transition + "-conflicted",
+			Default: UnitImplementing, Targets: []string{UnitImplementing}, Actor: foremanActor,
+			// The rebase whose conflicts these are has recorded its outcome, so it
+			// no longer holds the unit, whether or not its result is written yet.
+			Operation: trace.OperationID(f.repository.Project(), stream, event),
+			ID:        id, HeaderCause: transition + "-conflicted", Reason: reason,
+			Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to implementing: rebasing it onto %s left %s conflicted.", unit, latest.Onto, strings.Join(paths, ", ")))},
+		})
+		if err != nil {
+			return true, err
 		}
+		// An exit decided in place queues the mason's turn at once; one handed to
+		// the worker queues it on the pass that finds the unit implementing.
+		if res.Committed && res.Target == UnitImplementing {
+			return true, f.enqueueResolve(ctx, stream, unit, paths, latest)
+		}
+		return true, nil
 	}
 	return state.Value != UnitImplementing, f.enqueueResolve(ctx, stream, unit, paths, latest)
 }
@@ -341,12 +352,15 @@ func (m *masons) remind(ctx context.Context, stream config.WorkstreamID, unit st
 	if reminded >= m.cfg.Mason.MaxCleanTurns {
 		id := trace.EventID(done.Response.ID, "contested")
 		reason := fmt.Sprintf("the mason reported done %d times with conflict markers left in %s, exhausting mason.max_clean_turns (%d)", reminded+1, strings.Join(marked, ", "), m.cfg.Mason.MaxCleanTurns)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: done.Response.ID}
-		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
-		if errors.Is(err, trace.ErrConflict) {
-			return false, nil
-		}
-		return err == nil, err
+		res, err := m.s.raise(ctx, true, UnitExitInput{
+			Repo: m.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerMarkersLeft, Cause: done.Response.ID,
+			Default: UnitContested, Targets: []string{UnitContested, UnitImplementing}, Actor: masonActor,
+			ID: id, HeaderCause: done.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+			Note: reason,
+			Evidence: router.Evidence{Facts: map[string]any{"reminders": reminded, "max_clean_turns": m.cfg.Mason.MaxCleanTurns},
+				Records: []router.Entry{{Kind: "mason turn", ID: done.Request.TurnID, Text: reason}}},
+		})
+		return err == nil && (res.Committed || res.Handed), err
 	}
 	req.ID = "request_" + req.TurnID
 	req.At = m.s.Now()
@@ -684,6 +698,7 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 	}
 	var records []trace.Document
 	var txs []trace.Transaction
+	var exit *UnitExitInput
 	transition, _ := rebaseIDs(in.Unit, in.Rebase)
 	var recorded UnitReport
 	if len(rebase.Conflicts) == 0 && report.Revision > 0 && json.Unmarshal([]byte(report.Content), &recorded) == nil && recorded.Candidate == rebase.Snapshot {
@@ -708,8 +723,13 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 					events = append(events, trace.UpstreamMoved(id, stream, move, fmt.Sprintf("unit %s's approval no longer holds: its candidate was rebased onto the feature branch at %s and returns to checking and review", in.Unit, rebase.Onto)))
 				}
 			}
-			txs = append(txs, trace.Transaction{ExpectedVersion: state.Version,
-				Transition: trace.Transition{Header: r.header(id, stream, in.Unit, operation, at), Subject: subject, From: state.Value, To: UnitChecking, Reason: reason}, Events: events})
+			exit = &UnitExitInput{
+				Repo: r.repository, Stream: stream, Unit: in.Unit, State: state, Trigger: TriggerRebased, Cause: operation,
+				Default: UnitChecking, Targets: []string{UnitChecking}, Actor: foremanActor,
+				ID: id, HeaderCause: operation, Reason: reason, Events: events, Operation: operation,
+				// The rebased candidate is the report this commit records.
+				Candidate: func(context.Context) (string, error) { return "", nil },
+			}
 		}
 	}
 	content, err := json.MarshalIndent(rebase, "", "  ")
@@ -735,7 +755,21 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 	}
 	txs = append(txs, trace.Transaction{ExpectedVersion: rebaseState.Version,
 		Transition: trace.Transition{Header: r.header(transition+outcome, stream, in.Unit, operation, at), Subject: rebaseSubject(in.Unit), From: rebaseState.Value, To: to, Reason: reason}, Events: events})
-	if _, err := r.repository.RecordDocumentsWith(ctx, records, txs...); err != nil {
+	if exit != nil {
+		// The rebased unit's move to checking is routed, with the rebase's own
+		// records in the same commit.
+		exit.Documents, exit.With = records, txs
+		res, err := r.s.raise(ctx, false, *exit)
+		switch {
+		case err != nil:
+			return coreadapter.OperationResult{}, err
+		case !res.Committed:
+			if done, outcomeErr := r.outcome(stream, in); outcomeErr == nil && done != nil {
+				return *done, nil
+			}
+			return coreadapter.OperationResult{}, fmt.Errorf("the rebase of unit %s is not recorded: the router held its move to checking (%s)", in.Unit, res.Hold)
+		}
+	} else if _, err := r.repository.RecordDocumentsWith(ctx, records, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if done, outcomeErr := r.outcome(stream, in); outcomeErr == nil && done != nil {
 				return *done, nil

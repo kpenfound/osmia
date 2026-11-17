@@ -242,10 +242,38 @@ func (st *publishStream) decisions(in *publishInputs) []publishedDecision {
 	out = append(out, st.acceptedFindings()...)
 	out = append(out, st.followupDecisions()...)
 	out = append(out, st.charterDecisions()...)
+	out = append(out, st.departureDecisions()...)
 	for i := range out {
 		if out[i].workstream != "" {
 			out[i].specDocument, out[i].pullRequest = spec, pr
 		}
+	}
+	return out
+}
+
+// departureDecisions are the departures Jev made from a default: a transition
+// Jev entered instead of the state the default would have entered. A default
+// that was followed, one committed when Jev could not answer, a move an owner
+// or a gate decision pinned, and a held exit are not decisions and are not
+// posted. The decision names the state the subject left, the one it entered and
+// the default, and Jev's judgment.
+func (st *publishStream) departureDecisions() []publishedDecision {
+	var out []publishedDecision
+	for _, t := range st.transitions {
+		if !t.Departed() || !jevDecider(t.DecidedBy, t.Judgment) {
+			continue
+		}
+		what := "workstream"
+		if t.Unit != "" {
+			what = "unit " + t.Unit
+		}
+		out = append(out, publishedDecision{
+			id: jevID(st.id(), "route", t.ID), by: byJev, judgment: t.Judgment, workstream: st.id(),
+			context:   fmt.Sprintf("The %s of workstream %s was %s. The state machine's default was %s.", what, st.id(), t.From, t.DefaultTo),
+			outcome:   fmt.Sprintf("Moved the %s from %s to %s instead of %s.", what, t.From, t.To, t.DefaultTo),
+			rationale: jevNote(t.Judgment, strings.TrimSpace(t.Reason)),
+			rejected:  []string{"Take the default: " + t.DefaultTo},
+			created:   t.At, updated: t.At})
 	}
 	return out
 }

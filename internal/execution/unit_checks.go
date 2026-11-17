@@ -19,6 +19,7 @@ import (
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -328,13 +329,13 @@ func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit st
 	if open := c.openFlakeFixes(run); open != "" {
 		reason += "; " + open
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(unit, run.Run)}
-	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitReviewing, Reason: reason},
-		Events:     []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err := c.s.raise(ctx, true, UnitExitInput{
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksPassed, Cause: checkDocumentID(unit, run.Run),
+		Default: UnitReviewing, Targets: []string{UnitReviewing, UnitChecking}, Actor: checksActor,
+		ID: id, HeaderCause: checkDocumentID(unit, run.Run), Reason: reason, Events: []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))},
+		Note:     reason,
+		Evidence: router.Evidence{Facts: map[string]any{"run": run.Run, "flaky": len(run.Flaky) > 0}, Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, run.Run), Text: reason}}},
+	})
 	return err
 }
 
@@ -388,18 +389,24 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: at, Actor: checksActor, Cause: reviewDocument(unit)}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: to, Reason: reason},
-		Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s checks failed: %s.", unit, reason))}}
-	if _, err := c.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if to == UnitImplementing {
+	// The failed run is counted as a send-back whichever state is entered. A
+	// unit sent back to its mason has the failures queued by the mason pass,
+	// which finds the send-back in the trace.
+	res, err := c.s.raise(ctx, true, UnitExitInput{
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksFailed, Cause: checkDocumentID(unit, run.Run),
+		Default: to, Targets: []string{UnitImplementing, UnitChecking, UnitContested}, Actor: checksActor,
+		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s checks failed: %s.", unit, reason))},
+		Note: reason, Documents: []trace.Document{doc},
+		Evidence: router.Evidence{Facts: map[string]any{"run": run.Run, "send_backs": result.Bounces, "max_send_backs": c.cfg.Shed.MaxBounces, "flaky": len(run.Flaky) > 0},
+			Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, run.Run), Text: reason}}},
+	})
+	if err == nil && sentBack(res) {
+		// A pass run directly waits for the router, so the failures are queued
+		// here; a scheduler's pass hands the exit off and the mason pass finds
+		// the send-back.
 		return (&reviewers{masons: c.masons}).enqueueFindings(ctx, stream, unit, result)
 	}
-	return nil
+	return err
 }
 
 // checkVerdict is the send-back a failed check run records: one finding for
@@ -452,13 +459,13 @@ func (c *checkers) contestIncomplete(ctx context.Context, stream config.Workstre
 		reason += "; " + strings.TrimSuffix(cloud, ".")
 	}
 	reason += "; the unit is contested instead of its checks running again"
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(unit, latest.Run)}
-	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitContested, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err := c.s.raise(ctx, true, UnitExitInput{
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksIncomplete, Cause: checkDocumentID(unit, latest.Run),
+		Default: UnitContested, Targets: []string{UnitContested, UnitChecking}, Actor: checksActor,
+		ID: id, HeaderCause: checkDocumentID(unit, latest.Run), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+		Note:     reason,
+		Evidence: router.Evidence{Facts: map[string]any{"incomplete_runs": n, "max_incomplete_runs": maxIncompleteChecks}, Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, latest.Run), Text: reason}}},
+	})
 	return err
 }
 
