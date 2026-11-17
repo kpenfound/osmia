@@ -227,6 +227,19 @@ The outcome says what the router did:
 | `held` | committed nothing and held the subject, because Jev's two orderings disagreed, the best target was below its bar while the default did not fit, a target had become illegal when it was to be applied, acting would change approved intent so the move is the owner's, or the subject had moved on since the exit was raised |
 | `fallback` | committed the default because Jev could not answer |
 
+On the exits of a workstream and of a final review's rounds, the route span
+names a target by a fixed word where the subject's own state carries a number or
+is not entered at all. The words are `reviewed`, `failed`, `requested`,
+`reopen_building` and `fresh_review` for a final review's round,
+`exhausted`, `new_draft` and `wait` for the draft and the concluded debate,
+`debate_round` and `redraft` for the owner's choices after a debate,
+`ratified`, `abandoned` and `delivered` for an owner's gate decision, and
+`building`, `assembled` and `delivered` for a workstream's move. The
+transition behind the span names the subject's state (`reviewed-2`,
+`more-1`) and the default it departed from, as every routed transition does. An
+exit whose default leaves the subject waiting (`wait`) enters no state, so it has
+no transition and records its default and decider on its route record only.
+
 The confidence band is the probability Jev gave the chosen state, as a word
 and never as a number: `none` when no answer of Jev's chose the state (a pinned
 move or a fallback), `low` below 0.5,

@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -24,27 +25,31 @@ import (
 // Dependencies supplies the capabilities used from assembly through publication.
 // The service owns the repository handles, execution settings and credentials.
 type Dependencies struct {
-	Now                         func() time.Time
-	About                       func(*trace.Repository) *config.Config
-	Current                     func() *config.Config
-	Effective                   func() (runtime.State, []runtime.Diagnostic)
-	ConversationTrace           func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *api.APIError)
-	Execution                   func() *execution.Controller
-	ResolveBase                 func(context.Context, *config.Config, *trace.Repository, config.WorkstreamID, workspace.Provider) (seal.Base, error)
-	EnsureCommittee             func(context.Context, *trace.Repository, config.WorkstreamID, int) error
-	TrackTurn                   func(config.WorkstreamID, context.CancelFunc) func()
-	AgentProfile                func(*config.Config, string, string) (coreadapter.Profile, error)
-	RoleExecution               func(*config.Config, string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
-	ContextFor                  func(*trace.Repository) bundle.Provider
-	Stoppable                   func(context.Context, config.ProjectID, config.WorkstreamID) (context.Context, func())
-	ThreadRunner                func(*config.Config, *trace.Repository, coreadapter.Turns, func() time.Time) thread.Runner
-	Held                        func(*trace.Repository, config.WorkstreamID) error
-	ContinueStopped             func(context.Context, *trace.Repository, *config.Config, string, trace.QueuedTurn) (string, error)
-	MemoryTurns                 func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
-	Step                        func(string) error
-	Committee                   *intake.Committee
-	Jev                         *jev.Judge
-	PullRequests                pulls.Client
+	Now               func() time.Time
+	About             func(*trace.Repository) *config.Config
+	Current           func() *config.Config
+	Effective         func() (runtime.State, []runtime.Diagnostic)
+	ConversationTrace func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *api.APIError)
+	Execution         func() *execution.Controller
+	ResolveBase       func(context.Context, *config.Config, *trace.Repository, config.WorkstreamID, workspace.Provider) (seal.Base, error)
+	EnsureCommittee   func(context.Context, *trace.Repository, config.WorkstreamID, int) error
+	TrackTurn         func(config.WorkstreamID, context.CancelFunc) func()
+	AgentProfile      func(*config.Config, string, string) (coreadapter.Profile, error)
+	RoleExecution     func(*config.Config, string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
+	ContextFor        func(*trace.Repository) bundle.Provider
+	Stoppable         func(context.Context, config.ProjectID, config.WorkstreamID) (context.Context, func())
+	ThreadRunner      func(*config.Config, *trace.Repository, coreadapter.Turns, func() time.Time) thread.Runner
+	Held              func(*trace.Repository, config.WorkstreamID) error
+	ContinueStopped   func(context.Context, *trace.Repository, *config.Config, string, trace.QueuedTurn) (string, error)
+	MemoryTurns       func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
+	Step              func(string) error
+	Committee         *intake.Committee
+	Jev               *jev.Judge
+	// Router applies the delivery decisions the owner gives and routes the exits
+	// of the final review's rounds. A reconcile pass that raises an exit hands
+	// it to the router's worker.
+	Router       router.Port
+	PullRequests pulls.Client
 	// CloudStatuses reads the combined statuses of the pushed commit. When nil,
 	// PullRequests is used if it reads statuses.
 	CloudStatuses pulls.StatusReader
@@ -55,7 +60,7 @@ type Dependencies struct {
 	PostPushWait *time.Duration
 	// CloudRerun requests the one rerun of a push's failed checks. It is nil
 	// when none can be requested.
-	CloudRerun checks.CloudRerunner
+	CloudRerun                  checks.CloudRerunner
 	ChangeHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld        func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
 	UpstreamDeliveryPending     func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)

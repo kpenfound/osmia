@@ -19,6 +19,8 @@ func (s *Service) newRouter() *router.Router {
 	execution.RegisterUnitEffects(effects, s.execution)
 	lifecycle.RegisterRoutingEffects(effects, s.lifecycle)
 	intake.RegisterObjectionEffects(effects, s.intake)
+	intake.RegisterWorkstreamEffects(effects, s.intake)
+	lifecycle.RegisterWorkstreamEffects(effects, s.lifecycle)
 	rebuild := &router.Rebuilders{}
 	rebuild.Register(execution.UnitMachine, execution.RebuildUnitExit(s.execution))
 	return &router.Router{

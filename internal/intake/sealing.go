@@ -520,11 +520,18 @@ func (z *Sealer) Fail(ctx context.Context, stream config.WorkstreamID, in SealIn
 	}
 	recorded := fmt.Sprintf("sealing %d of %s failed: %s", in.Seal, in.Pin(), reason)
 	body := fmt.Sprintf("The sealing of %s failed and the workstream is not ratified: %s. Once that is put right, ratifying the same revisions again asks for the sealing again.", in.Pin(), reason)
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: z.Header(id, stream, transition, z.S.Now()), Subject: SealSubject, From: state.Value, To: to, Reason: recorded},
-		Events:     []trace.Event{trace.Notice(id, "failed", body)}}
-	if _, err := z.Repository.Transact(ctx, tx); err != nil {
+	// A failed sealing has one way out, which the owner takes by ratifying
+	// again; the router records it as the exit's default.
+	x := z.failedExit(stream, state, to, id, transition, recorded, body)
+	if z.S.Router == nil {
+		return coreadapter.OperationResult{}, errors.New("routing a workstream's exits is unavailable")
+	}
+	res, err := z.S.Router.Route(ctx, x)
+	switch {
+	case err != nil:
 		return coreadapter.OperationResult{}, err
+	case !res.Committed:
+		return coreadapter.OperationResult{}, fmt.Errorf("the failure of sealing %d could not be recorded: %s", in.Seal, res.Reason)
 	}
 	return coreadapter.OperationResult{Outcome: "failed", Evidence: recorded}, nil
 }

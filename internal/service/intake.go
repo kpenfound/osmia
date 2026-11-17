@@ -450,9 +450,9 @@ type streamWorkspaces = intake.StreamWorkspaces
 
 func (s *Service) intake() *intake.Controller {
 	return intake.New(intake.Dependencies{
-		Router:     routerPort{s},
 		BuildState: s.intakeBuildState, MasonBundle: s.intakeMasonBundle, BlockMason: s.intakeBlockMason, About: s.about,
 		ApprovalTrace:            s.approvalTrace,
+		Router:                   routerPort{s},
 		ArchivedWorkstream:       s.archivedWorkstream,
 		BaseEntry:                baseEntry,
 		DiscoveryEntries:         discoveryEntries,

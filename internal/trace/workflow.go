@@ -541,6 +541,30 @@ func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (Workf
 	return states[subject], nil
 }
 
+// RawWorkflow returns the recorded state of a subject: the value and version a
+// transition of the subject must start from. It differs from Workflow only for
+// the feature of a cross-repo workgroup member, whose sequential seal
+// preparation reads as ratified or in the shed until the group is approved.
+func (r *Repository) RawWorkflow(stream config.WorkstreamID, subject string) (WorkflowState, error) {
+	target, err := r.scoped(stream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if err := r.memberReadError(stream); err != nil {
+		return WorkflowState{}, err
+	}
+	if !key(subject) {
+		return WorkflowState{}, fmt.Errorf("invalid workflow subject")
+	}
+	_, v, err := target.loadWorkflow(stream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	return v.states[subject], nil
+}
+
 // WorkflowStates returns effective workflow state. Raw sequential seal
 // preparations remain historical evidence until group completion is durable.
 func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]WorkflowState, error) {

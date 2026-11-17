@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -378,7 +379,15 @@ func (d *Debate) Step(ctx context.Context, stream config.WorkstreamID) error {
 		}
 		// Debate otherwise resumes only where the owner asked for further
 		// rounds after this conclusion; the cap bounds how many of them run.
-		if n >= limit || !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
+		more := slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n })
+		if !more {
+			// Nobody has acted on the conclusion: the router decides whether
+			// it waits for the owner, as it always has, or goes on.
+			if err := d.routeConcluded(ctx, stream, n, limit); err != nil {
+				return err
+			}
+		}
+		if n >= limit || !more {
 			return nil
 		}
 		if d.S.Options.Committee == nil {
@@ -1525,4 +1534,37 @@ An objection that is refused comes back with the reason; correct it and call aga
 	}
 	b.WriteString(Answered("round", answers))
 	return b.String()
+}
+
+// routeConcluded raises the exit of a debate that concluded after round n and
+// that the owner has not acted on. Today's default leaves the decision to the
+// owner; another round or a redraft is a departure the router takes only at the
+// strict bar, and only while the debate can run one. The exit is raised once: a
+// pass finds it decided and raises nothing.
+func (d *Debate) routeConcluded(ctx context.Context, stream config.WorkstreamID, n, limit int) error {
+	owner, err := d.Repository.Workflow(stream, OwnerSubject)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(owner.Value, "ratified-") {
+		return nil
+	}
+	if skipped, err := SkippedDebate(d.Repository, stream); err != nil || skipped {
+		return err
+	}
+	open, err := Dissent(d.Repository, stream)
+	if err != nil {
+		return err
+	}
+	redrafts, err := shed.Redrafts(d.Repository, stream)
+	if err != nil {
+		return err
+	}
+	canRound := n < limit && d.S.Options.Committee != nil
+	canRedraft := d.S.Options.Architect != nil && !slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n })
+	x := d.concludedExit(stream, owner, n, open, canRound, canRedraft)
+	if rec, err := router.Lookup(d.Repository, stream, x); err != nil || rec != nil && rec.Finished() {
+		return err
+	}
+	return raise(ctx, d.S.Router, x)
 }

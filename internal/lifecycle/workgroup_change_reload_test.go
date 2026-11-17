@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -99,9 +100,16 @@ func TestApprovedChangeSurvivesProjectRemovalGateAndReaddition(t *testing.T) {
 	for _, tr := range transitions {
 		if tr.ID == "cancel-"+requested.ID {
 			count++
+			// The member's abandonment is the owner's gate, applied as a pinned move.
+			if tr.To != AbandonedState || tr.DecidedBy != trace.DecidedByOwner || tr.DefaultTo != AbandonedState || tr.Judgment != "" || tr.Departed() {
+				t.Fatalf("the cancellation's abandonment %+v", tr)
+			}
 		}
 	}
 	if count != 1 {
 		t.Fatalf("approved cancellation landed %d times", count)
+	}
+	if rec, ok := routeOf(t, repo, stream, "ws.abandon"); !ok || rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested || rec.State != router.StateCommitted {
+		t.Fatalf("route %+v (found %v)", rec, ok)
 	}
 }

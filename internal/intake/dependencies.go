@@ -95,9 +95,10 @@ type Dependencies struct {
 	Jev                   *jev.Judge
 	TrackTurn             func(config.WorkstreamID, context.CancelFunc) func()
 	Options               Execution
-	// Router routes the exit of a committee objection: the chief of staff's
-	// decision on it.
-	Router ExitRouter
+	// Router applies the workstream's gate decisions as pinned moves, routes
+	// the exits Jev judges and routes the chief of staff's decision on a
+	// committee objection. A pass hands its exits to the router's worker.
+	Router router.Port
 }
 
 // ProjectCreation is the service's project creation as a design start uses
@@ -122,13 +123,6 @@ type Execution struct {
 	Committee *Committee
 	Issues    issues.Client
 	Controls  *Controls
-}
-
-// ExitRouter is the transition router as the objection decisions use it. A
-// decision waits on a request of the chief of staff's tool, so its exit is
-// routed in place.
-type ExitRouter interface {
-	Route(ctx context.Context, x router.Exit) (router.Result, error)
 }
 
 type Controller struct{ Dependencies }

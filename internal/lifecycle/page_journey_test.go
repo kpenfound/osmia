@@ -232,8 +232,8 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 })()`)
 	var filtered struct {
 		Checks, Selects int
-		Folds, Open      int
-		Text             string
+		Folds, Open     int
+		Text            string
 	}
 	p.Eval(`(() => {
   const log = document.querySelector('#workstream-activity');
@@ -421,7 +421,9 @@ func previewPicture(t *testing.T) []byte {
 	t.Helper()
 	const width, height = 640, 400
 	picture := image.NewRGBA(image.Rect(0, 0, width, height))
-	fill := func(r image.Rectangle, c color.RGBA) { draw.Draw(picture, r, &image.Uniform{c}, image.Point{}, draw.Src) }
+	fill := func(r image.Rectangle, c color.RGBA) {
+		draw.Draw(picture, r, &image.Uniform{c}, image.Point{}, draw.Src)
+	}
 	fill(picture.Bounds(), color.RGBA{0x16, 0x1b, 0x26, 0xff})
 	fill(image.Rect(0, 0, width, 44), color.RGBA{0x1e, 0x25, 0x34, 0xff})
 	fill(image.Rect(24, 12, 120, 32), color.RGBA{0x5b, 0xa4, 0xe8, 0xff})

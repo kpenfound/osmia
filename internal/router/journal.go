@@ -88,8 +88,11 @@ type Record struct {
 	Hold    string `json:"hold,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	Refusal string `json:"refusal,omitempty"`
-	// Transition is the ID of the move's transition once committed.
+	// Transition is the ID of the move's transition once committed, and Entered
+	// the state the subject was in once it was: the state of the target, or the
+	// state it was left in when the target moves nothing.
 	Transition string    `json:"transition,omitempty"`
+	Entered    string    `json:"entered,omitempty"`
 	Raised     time.Time `json:"raised"`
 	Decided    time.Time `json:"decided,omitempty"`
 }
@@ -102,6 +105,11 @@ func (r Record) final() bool {
 	}
 	return false
 }
+
+// Finished reports whether the occurrence was decided: committed, held, sent to
+// the owner, refused or found stale. A pass that raised an exit does not raise
+// it again.
+func (r Record) Finished() bool { return r.final() }
 
 // OccurrenceKey is the key of an exit's occurrence: its subject, the version of
 // the subject's state, the trigger and the record that raised it. The cause
@@ -126,8 +134,8 @@ func journalSubject(name string) string { return "route-" + name }
 // IsJournal reports whether subject is the workflow subject of a route journal,
 // whose transitions are the router's own bookkeeping and not a state change of
 // the work.
-func IsJournal(subject string) bool { return strings.HasPrefix(subject, "route-") }
-func journalPath(name string) string    { return "routes/" + name + ".json" }
+func IsJournal(subject string) bool  { return strings.HasPrefix(subject, "route-") }
+func journalPath(name string) string { return "routes/" + name + ".json" }
 
 // readRecord returns the latest route record named name, its revision and the
 // journal subject's workflow state. A missing record is nil.

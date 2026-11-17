@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -125,6 +126,16 @@ func TestApprovingMarkReadyUpdatesTheDraftMarksItReadyAndDeliversTheWorkstream(t
 	}
 	if n := len(judge.Requests()); n != 0 {
 		t.Fatalf("Jev was asked %d times", n)
+	}
+	// The owner's approval is applied through the router as a pinned move: the
+	// workstream's transition to delivered names the owner as its decider and the
+	// route records the owner as its authority.
+	delivered := latestOf(t, d.repository, d.stream, trace.FeatureSubject)
+	if delivered.To != DeliveredState || delivered.DecidedBy != trace.DecidedByOwner || delivered.Judgment != "" || delivered.DefaultTo != DeliveredState || delivered.Departed() {
+		t.Fatalf("the delivered transition %+v", delivered)
+	}
+	if rec := routeOf(t, d.repository, d.stream, intake.TriggerDeliveryApproved); rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested || rec.State != router.StateCommitted || rec.Target != intake.TargetDelivered {
+		t.Fatalf("route %+v", rec)
 	}
 	// A later pass asks for nothing more and writes nothing to the pull request.
 	operations := len(fixturekit.PublicationOperations(t, d.repository, d.stream, PublishAction))

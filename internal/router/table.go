@@ -40,6 +40,9 @@ const (
 	// HoldIntent: acting would change approved intent, so the move is the
 	// owner's.
 	HoldIntent = "intent"
+	// HoldGate: the move is an owner gate and the exit carries no authority for
+	// it, as a chief proposal never does; the owner decides it.
+	HoldGate = "owner_gate"
 	// HoldStale: the subject moved on since the exit was raised.
 	HoldStale = "stale"
 )

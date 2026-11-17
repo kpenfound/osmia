@@ -111,6 +111,7 @@ var currentOwnPublication = delivery.CurrentOwnPublication
 var currentPush = delivery.CurrentPush
 
 const publicationSubject = delivery.PublicationSubject
+
 var markedReadyOnHost = delivery.MarkedReadyOnHost
 
 const BuildingState = intake.BuildingState

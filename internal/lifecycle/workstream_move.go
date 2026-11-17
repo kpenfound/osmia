@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -175,104 +176,28 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 		}
 		return respond("the owner abandoned the workstream: " + note)
 	}
-	if action, err := PublicationInFlight(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's operations"}
-	} else if action != "" {
-		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "the workstream's publication is in flight; it moves once the publication has an outcome"}
+	records, api := s.workstreamMoveRecords(ctx, repo, stream, feature, req.To, note, actor, turn, s.Now())
+	if api != nil {
+		return WorkstreamMoveResponse{}, api
 	}
-	by := "the " + rulerName(actor)
-	var reason string
-	switch req.To {
-	case BuildingState:
-		switch feature.Value {
-		case AssembledState:
-			reason = fmt.Sprintf("%s moved the workstream from assembled to building on %s", by, featureBranch(stream))
-		case DeliveredState:
-			pr, api := OpenPullRequest(repo, stream)
-			if api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s reopened the delivered workstream on %s, where pull request #%d stays open; it is updated only after a fresh final review and the owner's delivery approval", by, featureBranch(stream), pr.PullRequest)
-		case BuildingState:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is already building", stream)}
-		default:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to building once it is assembled or delivered with an open pull request", featureState(feature.Value))}
-		}
-		reason += "; it stays building until a revision filed after this move is decided and its units land, or until it is moved to assembled, and its final review then runs again"
-	case AssembledState:
-		switch feature.Value {
-		case AssembledState:
-			reason = fmt.Sprintf("%s asked for a fresh final review of the assembled branch", by)
-		case DeliveredState:
-			pr, api := OpenPullRequest(repo, stream)
-			if api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s returned the delivered workstream to assembled for a fresh final review; pull request #%d stays open and is updated only after the owner's delivery approval", by, pr.PullRequest)
-		case BuildingState:
-			if api := s.Assemblable(repo, stream); api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s moved the workstream from building to assembled for a fresh final review", by)
-		default:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to assembled once it is building, assembled or delivered with an open pull request", featureState(feature.Value))}
-		}
-	case DeliveredState:
-		if feature.Value != BuildingState && feature.Value != AssembledState {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; only a reopened workstream moves back to delivered", featureState(feature.Value))}
-		}
-		pr, api := OpenPullRequest(repo, stream)
-		if api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		if api := s.Assemblable(repo, stream); api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		tip, api := s.FeatureTip(ctx, repo, stream)
-		if api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		if tip != pr.Reviewed && tip != pr.Commit {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("feature branch %s moved to %s since pull request #%d was published; it is delivered through a fresh final review and the owner's delivery approval", featureBranch(stream), tip, pr.PullRequest)}
-		}
-		reason = fmt.Sprintf("%s returned the reopened workstream to delivered; feature branch %s is still what pull request #%d carries", by, featureBranch(stream), pr.PullRequest)
-	}
-	reason += ": " + note
-	moves, err := WorkstreamMoves(repo, stream)
-	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
-	}
-	subject, err := repo.Workflow(stream, WorkstreamMoveSubject)
-	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
-	}
-	n := len(moves) + 1
-	move := WorkstreamMove{Move: n, From: feature.Value, To: req.To, Note: note, By: rulerName(actor), Turn: turn}
-	data, err := json.MarshalIndent(move, "", "  ")
-	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	cause := turn
-	if cause == "" {
-		cause = trace.FeatureSubject + "-" + feature.Value
-	}
-	id := WorkstreamMoveDocument(n)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: actor, Cause: cause}
-	doc := trace.Document{Header: h, Path: WorkstreamMovePath(n), Content: string(data) + "\n"}
-	h.Schema, h.ID, h.Cause = "osmia.trace.transition", id+"-recorded", id
-	txs := []trace.Transaction{{ExpectedVersion: subject.Version, Transition: trace.Transition{Header: h, Subject: WorkstreamMoveSubject, From: subject.Value, To: fmt.Sprintf("moved-%d", n), Reason: reason}, Events: []trace.Event{trace.Notice(h.ID, "workstream", fmt.Sprintf("Workstream %s: %s.", stream, strings.TrimSuffix(reason, ".")))}}}
-	if feature.Value != req.To {
-		fh := h
-		fh.ID = id + "-" + req.To
-		txs = append(txs, trace.Transaction{ExpectedVersion: feature.Version, Transition: trace.Transition{Header: fh, Subject: trace.FeatureSubject, From: feature.Value, To: req.To, Reason: reason}})
-	}
-	if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
-		}
+	res, err := s.routeWorkstreamMove(ctx, repo, stream, feature, req.To, note, actor, turn)
+	switch {
+	case err != nil:
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed:
+		move := records.move
+		if res.Target != req.To {
+			// Jev departed from the chief of staff's proposal: the move
+			// recorded is the one it entered.
+			if entered, ok, err := latestWorkstreamMove(repo, stream); err == nil && ok {
+				move = entered
+			}
+		}
+		return WorkstreamMoveResponse{Workstream: stream, State: res.State, Detail: records.reason, Move: &move}, nil
+	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
 	}
-	return WorkstreamMoveResponse{Workstream: stream, State: req.To, Detail: reason, Move: &move}, nil
+	return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not moved to %s: the move is held (%s). %s", stream, req.To, res.Hold, res.Reason)}
 }
 
 // PublicationInFlight returns the action of a publication of the workstream
@@ -423,6 +348,20 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 				return priorityRefusal("owner_decided is only for a move the owner asked for in the message this turn answers")
 			}
 			return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, turn.Actor, scope.Turn))
+		}
+		if input.To == RatifiedState || input.To == AbandonedState {
+			// Ratification and abandonment are owner gates: a proposal carries no
+			// authority for them, so the router commits nothing and leaves the
+			// move as a pending owner decision.
+			res, err := s.proposeToOwner(ctx, target, stream, input.To, input.Note, chiefActor, scope.Turn)
+			if err != nil {
+				return nil, err
+			}
+			where := "the recovery card"
+			if input.To == RatifiedState {
+				where = "the ratification card"
+			}
+			return priorityRefusal(fmt.Sprintf("a move to %s is the owner's decision, so nothing moved. It is held for the owner (%s, %s)", input.To, res.Journal, where))
 		}
 		if !slices.Contains(ChiefMoveTargets, input.To) {
 			return priorityRefusal(fmt.Sprintf("a move to %s is the owner's decision; present it to the owner, and record it with owner_decided once the owner asks for it", input.To))

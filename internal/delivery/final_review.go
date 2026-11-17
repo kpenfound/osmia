@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
@@ -257,12 +258,18 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 			break
 		}
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: foremanActor, Cause: cause}
-	_, err = a.Repository.MoveFeatureState(ctx, h, BuildingState, AssembledState, reason)
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
+	feature, err := a.Repository.RawWorkflow(stream, trace.FeatureSubject)
+	if err != nil || feature.Value != BuildingState {
+		return err
 	}
-	return err
+	// Assembling is the one way out of building once every unit has merged; the
+	// router keeps it as the exit's default.
+	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
+		Repo: a.Repository, Stream: stream, Subject: trace.FeatureSubject, State: feature,
+		Trigger: intake.TriggerUnitsMerged, Cause: id, ID: id, HeaderCause: cause, Reason: reason, Actor: foremanActor,
+		Target: intake.TargetAssembled, Description: "Assemble the workstream: every unit of the sealed plan has merged.",
+		Events: []trace.Event{intake.FeatureProgress(id, BuildingState, AssembledState, reason)},
+	}.Exit())
 }
 
 // AllMerged reports whether the building workstream's plan has units and
@@ -439,10 +446,14 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: FinalReviewSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", now.Review), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Run final review %d", now.Review), Operation: &op}}}
-	if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
-		return err
-	}
-	return nil
+	// Asking for the review is the one way out of the previous round; the router
+	// keeps it as the exit's default.
+	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
+		Repo: a.Repository, Stream: stream, Subject: FinalReviewSubject, State: subject, Machine: FinalMachine,
+		Trigger: intake.TriggerFinalRequested, Cause: transition, ID: transition, HeaderCause: AssembledState, Reason: reason, Actor: FinalReviewActor,
+		Target: TargetRequested, Enters: fmt.Sprintf("requested-%d", now.Review), Description: "Ask for the final review of the assembled branch.",
+		Events: tx.Events,
+	}.Exit())
 }
 
 func DecodeFinalReview(op coreadapter.Operation) (FinalReviewInput, error) {
@@ -1208,12 +1219,12 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation}
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+	plain := trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation},
+			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
+		Events: []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
-	txs := []trace.Transaction{tx}
+	var followups []trace.Transaction
 	if report.Outcome == FinalReviewed && report.Maintenance && edgePending {
 		added, found, err := a.Followup(stream, report, revision)
 		if err != nil {
@@ -1235,19 +1246,17 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 			makeHeader := func(key, cause string) trace.Header {
 				return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: key, Revision: 1, Project: a.Repository.Project(), Workstream: stream, Unit: added.Unit.ID, At: at, Actor: FinalReviewActor, Cause: cause}
 			}
-			txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d of the post-merge dependency update found blocking problems: %s; report %s revision %d", report.Review, added.Gap, FinalReportPath, revision)}})
-			txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to repair the post-merge dependency update from final review %d", added.Unit.ID, report.Review)}})
+			followups = append(followups, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d of the post-merge dependency update found blocking problems: %s; report %s revision %d", report.Review, added.Gap, FinalReportPath, revision)}})
+			followups = append(followups, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to repair the post-merge dependency update from final review %d", added.Unit.ID, report.Review)}})
 		}
 	}
-	if _, err := a.Repository.RecordDocumentsWith(ctx, documents, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			if recorded, outcomeErr := a.Outcome(stream, report.Review); outcomeErr == nil && recorded != nil {
-				return *recorded, nil
-			}
-		}
+	blocking := ReportBlocking(report)
+	rounds, err := FinalRoundsWithBlocking(a.Repository, stream)
+	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return outcome, nil
+	return a.routeFinal(ctx, finalExitInput{Stream: stream, State: state, Report: report, ID: id, Reason: reason, Body: body, Blocking: blocking, Rounds: rounds,
+		Documents: documents, Followups: followups, Plain: plain, At: at}, outcome)
 }
 
 func CountSeverity(findings []FinalFinding, severity string) int {

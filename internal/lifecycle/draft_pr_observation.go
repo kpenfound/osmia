@@ -99,7 +99,7 @@ func (b *BaseRefresher) observeDraftPullRequest(ctx context.Context, client pull
 		if err := b.S.Step("draft-ready-observed"); err != nil {
 			return err
 		}
-		_, err := markedReadyOnHost(scope, b.Repository, stream, pr, b.S.Now())
+		_, err := markedReadyOnHost(scope, b.S.Router, b.Repository, stream, pr, b.S.Now())
 		return err
 	}
 	return nil

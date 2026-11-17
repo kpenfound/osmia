@@ -32,7 +32,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	if x.TransitionID != nil {
 		moveID = x.TransitionID(target)
 	}
-	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.stateOf(x.Default)}
+	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.defaultState()}
 	// A decider that has no judgment, such as a fallback, cites none.
 	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner {
 		routing.Judgment = d.judgment
@@ -70,19 +70,31 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	}
 	h := r.headerFor(x, "osmia.trace.transition", moveID, 1, at, cause)
 	h.Actor = x.Actor
-	move := trace.Transaction{ExpectedVersion: x.Version, Events: effect.Events, Transition: trace.Transition{
-		Header: h, Subject: x.Subject, From: x.From, To: target.stateName(), Reason: reason,
-		DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
-	if !trace.ValidRouting(target.stateName(), routing) {
-		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, target.Name))
+	entered := target.entered()
+	if !trace.ValidRouting(entered, routing) {
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, entered))
 	}
-	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided, rec.Transition = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at, moveID
+	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at
+	rec.Entered, rec.Transition = x.From, ""
+	txs := append([]trace.Transaction{}, effect.With...)
+	if !target.NoMove {
+		move := trace.Transaction{ExpectedVersion: x.Version, Events: effect.Events, Transition: trace.Transition{
+			Header: h, Subject: x.Subject, From: x.From, To: entered, Reason: reason,
+			DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
+		txs = append([]trace.Transaction{move}, txs...)
+		rec.Entered, rec.Transition = entered, moveID
+	}
 	if rec.Table == "" {
 		rec.Table = TableVersion
 	}
 	write := journalWrite{rec: *rec, rev: rev, from: journal, to: StateCommitted,
 		reason: fmt.Sprintf("Route of %s committed %s (table %s rule %s)", rec.Occurrence, target.Name, rec.Table, d.rule),
-		docs:   effect.Documents, txs: append([]trace.Transaction{move}, effect.With...)}
+		docs:   effect.Documents, txs: txs}
+	if target.NoMove {
+		// Nothing moves, so the effect's events ride with the journal's own
+		// transition.
+		write.events = effect.Events
+	}
 	if err := r.writeJournal(ctx, x, name, write); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			// Another writer got there: the occurrence was finished, or the subject
@@ -90,7 +102,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {
 				return resultOf(*again, true), nil
 			}
-			state, serr := x.Repo.Workflow(x.Workstream, x.Subject)
+			state, serr := x.Repo.RawWorkflow(x.Workstream, x.Subject)
 			if serr == nil && (state.Version != x.Version || state.Value != x.From) {
 				rec.State, rec.Transition = StateDecided, ""
 				return r.stale(ctx, x, name, rec, rev, journal, state)
@@ -132,6 +144,12 @@ func (r *Router) hold(ctx context.Context, x Exit, name string, rec *Record, rev
 	switch why {
 	case HoldIntent:
 		body = fmt.Sprintf("Jev would not move %s from %s to %s on its own (trigger %s): acting would change what the owner approved. The move is the owner's to approve. Jev's view: %s.", x.Subject, x.From, rec.Target, x.Trigger, view)
+	case HoldGate:
+		where := "the recovery card"
+		if x.OwnerCard != "" {
+			where = x.OwnerCard
+		}
+		body = fmt.Sprintf("The move of %s from %s to %s (trigger %s) is an owner decision, and a proposal cannot make it. Nothing was committed. The owner decides it on %s.", x.Subject, x.From, rec.Target, x.Trigger, where)
 	case HoldOrdersDisagree:
 		body = fmt.Sprintf("Jev held %s at %s without moving it (trigger %s): its two orderings of the targets disagreed. Jev's view: %s. Nothing was committed.", x.Subject, x.From, x.Trigger, view)
 	case HoldBelowBar:

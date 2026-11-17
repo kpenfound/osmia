@@ -320,4 +320,3 @@ func ProjectSpecCached(id config.WorkgroupID) bool {
 	defer c.mu.Unlock()
 	return c.valid
 }
-

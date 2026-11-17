@@ -22,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -198,11 +199,15 @@ func (d *Drafter) Reconcile(ctx context.Context, stream config.WorkstreamID) err
 	}
 	reason := fmt.Sprintf("none of the architect's %d drafts of the spec and plan was accepted; drafting stops and the workstream stays %s", n, HandedState)
 	body := fmt.Sprintf("None of the architect's %d drafts of the spec and plan was accepted and drafting has stopped; the workstream stays %s. Last draft: %s", n, HandedState, last.Reason)
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.Header("draft-exhausted", stream, last.ID, d.S.Now()), Subject: DraftSubject, From: state.Value, To: "exhausted", Reason: reason},
-		Events:     []trace.Event{trace.Notice("draft-exhausted", "chief", body)}}
-	_, err = d.Repository.Transact(ctx, tx)
-	return err
+	// Stopping is today's default; one more draft is a departure the router
+	// takes only at the strict bar.
+	x := d.exhaustedExit(stream, state, n, last, reason, body)
+	if rec, err := router.Lookup(d.Repository, stream, x); err != nil || rec != nil && rec.Finished() {
+		// The exit was decided and held: it stays with the chief of staff, the
+		// stall watchdog and the recovery card.
+		return err
+	}
+	return raise(ctx, d.S.Router, x)
 }
 
 func (d *Drafter) Header(id string, stream config.WorkstreamID, cause string, at time.Time) trace.Header {
@@ -240,7 +245,7 @@ func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state
 		return nil
 	}
 	transition, event := in.RunIDs()
-	input, err := json.Marshal(in)
+	input, err := marshalDraft(in)
 	if err != nil {
 		return err
 	}
@@ -248,7 +253,7 @@ func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state
 	if in.Resume > 0 {
 		body += ", resumed"
 	}
-	op := coreadapter.Operation{ID: trace.OperationID(d.Repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: DraftAction, Input: input}
+	op := draftOperation(d.Repository.Project(), stream, event, input)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.Header(transition, stream, cause, d.S.Now()), Subject: DraftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", in.Draft), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: "draft", Body: body, Operation: &op}}}

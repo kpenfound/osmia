@@ -56,7 +56,6 @@ func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 
 type FinalCheckRun = delivery.FinalCheckRun
 
-
 func (s *Service) deliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return s.delivery().DeliveryPresentation(ctx, raw)
 }

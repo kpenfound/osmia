@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -49,24 +50,25 @@ type Dependencies struct {
 	Polls             *PullRequestAttempts
 	ProjectFor        func(id config.ProjectID) (config.ProjectID, *APIError)
 	Ratify            func(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError)
-	RecoverThread     func(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, th trace.Thread) error
-	RefreshRuntime    func() error
-	Repository        func(id config.ProjectID) (*trace.Repository, error)
-	RoleExecution     func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
-	RuntimeOf         func(config.ProjectID) (*config.Config, *Project)
-	ShedMore          func(ctx context.Context, raw string, req ShedMoreRequest) (ShedResponse, *APIError)
-	ShedRedraft       func(ctx context.Context, raw string, req ShedRedraftRequest) (ShedResponse, *APIError)
-	Step              func(name string) error
+	// Router applies the owner's moves of a workstream as pinned moves, routes
+	// the proposals of the chief of staff, and decides the exits of dependency
+	// waits and drift rebases: the passes raise the trigger, the default, the
+	// legal targets and the evidence, and the router chooses the state.
+	Router         router.Port
+	RecoverThread  func(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, th trace.Thread) error
+	RefreshRuntime func() error
+	Repository     func(id config.ProjectID) (*trace.Repository, error)
+	RoleExecution  func(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error)
+	RuntimeOf      func(config.ProjectID) (*config.Config, *Project)
+	ShedMore       func(ctx context.Context, raw string, req ShedMoreRequest) (ShedResponse, *APIError)
+	ShedRedraft    func(ctx context.Context, raw string, req ShedRedraftRequest) (ShedResponse, *APIError)
+	Step           func(name string) error
 	// WorkstreamEnded, when set, is told that an archived workstream left the
 	// factory at the recorded time, while its trace still exists.
 	WorkstreamEnded func(repository *trace.Repository, stream config.WorkstreamID, end time.Time)
 	Stoppable       func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
 	Store           func() *runtime.Store
 	ThreadRunner    func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
-	// Router routes the exits of dependency waits and drift rebases: the
-	// passes raise the trigger, the default, the legal targets and the
-	// evidence, and the router chooses the state.
-	Router execution.Router
 }
 type Controller struct{ Dependencies }
 

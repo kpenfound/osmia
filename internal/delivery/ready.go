@@ -3,7 +3,6 @@ package delivery
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -86,7 +86,7 @@ func deliveredTransitionID(repository *trace.Repository, stream config.Workstrea
 // the chief of staff; nothing is written to the host. It records nothing when
 // the workstream is no longer assembled, when its pull request is still a
 // draft, or when pr is not the pull request of a recorded push at its head.
-func MarkedReadyOnHost(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, pr pulls.PullRequest, at time.Time) (bool, error) {
+func MarkedReadyOnHost(ctx context.Context, rt router.Port, repository *trace.Repository, stream config.WorkstreamID, pr pulls.PullRequest, at time.Time) (bool, error) {
 	if pr.Draft || pr.State != "open" || pr.Merged {
 		return false, nil
 	}
@@ -112,13 +112,12 @@ func MarkedReadyOnHost(ctx context.Context, repository *trace.Repository, stream
 	tx := trace.Transaction{ExpectedVersion: feature.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: feature.Value, To: DeliveredState, Reason: reason},
 		Events:     []trace.Event{trace.Notice(deliveredID, "state", fmt.Sprintf("Workstream delivered: the owner marked pull request #%d ready for review at %s.", pr.Number, pr.URL))}}
-	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return false, nil
-		}
+	res, err := routeDelivered(ctx, rt, repository, stream, TriggerReadyOnHost, []trace.Document{doc}, tx)
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	// A workstream that moved since it was read is left to the next observation.
+	return res.Committed, nil
 }
 
 // PresentChecks is the check result recorded for final review k's commit, for

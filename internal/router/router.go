@@ -78,7 +78,10 @@ func resultOf(rec Record, reused bool) Result {
 	out := Result{Outcome: rec.Outcome, Journal: rec.State, Target: rec.Target, Hold: rec.Hold, Reason: rec.Reason, Judgment: rec.Judgment, Rule: rec.Rule, Reused: reused}
 	out.Committed = rec.State == StateCommitted
 	out.State = rec.From
-	if out.Committed {
+	switch {
+	case out.Committed && rec.Entered != "":
+		out.State = rec.Entered
+	case out.Committed:
 		out.State = rec.Target
 	}
 	return out
@@ -207,7 +210,7 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 			rec.Authority, rec.AuthorityRef = x.Authority.Kind, x.Authority.Ref
 		}
 	}
-	state, err := x.Repo.Workflow(x.Workstream, x.Subject)
+	state, err := x.Repo.RawWorkflow(x.Workstream, x.Subject)
 	if err != nil {
 		return Result{}, err
 	}
@@ -262,6 +265,12 @@ func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, r
 		}
 	}
 	if def == nil {
+		if t, ok := x.target(x.Default); ok && (t.Gate || t.Approval) && (x.Authority == nil || x.Authority.Target != t.Name) {
+			// A proposal cannot make an owner gate: the move is the owner's.
+			rec.Rule, rec.Target = "0:owner_gate", t.Name
+			res, err := r.hold(ctx, x, name, rec, rev, journal, StateOwner, HoldGate, fmt.Sprintf("%s is an owner decision", t.Name), nil)
+			return decision{}, &res, err
+		}
 		rec.Rule = "0:default_illegal"
 		res, err := r.hold(ctx, x, name, rec, rev, journal, StateHeld, HoldDefaultIllegal, fmt.Sprintf("the default %s fails a hard prerequisite: %s", x.Default, why[x.Default]), nil)
 		return decision{}, &res, err

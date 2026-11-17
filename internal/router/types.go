@@ -59,9 +59,6 @@ type Condition struct {
 // Target is one state an exit can enter.
 type Target struct {
 	Name string
-	// State is the value of the subject's state the target enters, for a
-	// machine whose states carry a number (held-3); empty means the name.
-	State string
 	// Description is what the target does, one line, as Jev reads it.
 	Description string
 	// Reason is the transition's reason when the target is entered.
@@ -85,9 +82,28 @@ type Target struct {
 	// Stay marks a target that leaves the subject waiting where it is. When
 	// such a default is judged to be stuck, it is judged not to fit.
 	Stay bool
+	// State is the state of the subject the target enters when that is not
+	// Name: Name is a fixed word the route span and Jev read ("redraft"), State
+	// the value of the subject ("redraft-3"; "held-3" for a machine whose
+	// states carry a number). A transition records the state it entered, so a
+	// departure from the default shows in the trace.
+	State string
+	// NoMove marks a target whose entering moves nothing: the subject stays
+	// where it is while the exit's records and effects are committed and the
+	// occurrence is recorded. It is how a default of "wait" or "hold" is
+	// followed.
+	NoMove bool
 	// Corroborate lists what the trigger's own answers must show for the
 	// router to depart to the target.
 	Corroborate []Condition
+}
+
+// entered returns the state of the subject once the target is entered.
+func (t Target) entered() string {
+	if t.State != "" {
+		return t.State
+	}
+	return t.Name
 }
 
 // Question is a question specific to the trigger, answered as a probability.
@@ -235,6 +251,18 @@ type Exit struct {
 	// Authority is the authority the exit carries, if any.
 	Authority *Authority
 	Prereq    Prerequisites
+	// OwnerCard says, in a few words, where the owner decides a gate target the
+	// exit proposes without the authority to enter it (the ratification card,
+	// the delivery card); empty means the recovery card.
+	OwnerCard string
+}
+
+// Port is the router as a controller uses it: an exit that waits on a request
+// is routed in place, and an exit a scheduling pass raises is handed to the
+// router's worker, so Jev is never asked on the scheduling path.
+type Port interface {
+	Route(ctx context.Context, x Exit) (Result, error)
+	Submit(x Exit, done func(Result, error)) bool
 }
 
 var triggerName = regexp.MustCompile(`^[a-z]+\.[a-z_]+$`)
@@ -294,20 +322,12 @@ func (x Exit) validate() error {
 	return nil
 }
 
-// stateName is the state value the target enters.
-func (t Target) stateName() string {
-	if t.State != "" {
-		return t.State
+// defaultState returns the state of the subject the default target enters.
+func (x Exit) defaultState() string {
+	if t, ok := x.target(x.Default); ok {
+		return t.entered()
 	}
-	return t.Name
-}
-
-// stateOf is the state value the named target enters.
-func (x Exit) stateOf(name string) string {
-	if t, ok := x.target(name); ok {
-		return t.stateName()
-	}
-	return name
+	return x.Default
 }
 
 func (x Exit) target(name string) (Target, bool) {

@@ -759,13 +759,17 @@ func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreada
 // approval k's operation; a conflict with an outcome already recorded returns
 // that outcome.
 func (p *Publisher) recordApplied(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string, docs []trace.Document, txs ...trace.Transaction) (coreadapter.OperationResult, error) {
-	if _, err := p.Repository.RecordDocumentsWith(ctx, docs, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			if recorded, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && recorded != nil {
-				return *recorded, nil
-			}
-		}
+	// The first transaction is the workstream's move to delivered, which the
+	// owner's approval authorised; the router applies it as a pinned move.
+	res, err := routeDelivered(ctx, p.S.Router, p.Repository, stream, TriggerDeliveryApproved, docs, txs[0], txs[1:]...)
+	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if !res.Committed {
+		if recorded, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && recorded != nil {
+			return *recorded, nil
+		}
+		return coreadapter.OperationResult{}, fmt.Errorf("the delivery of workstream %s could not be recorded: %s", stream, res.Reason)
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
@@ -919,6 +923,9 @@ func (p *Publisher) deliver(ctx context.Context, stream config.WorkstreamID, in 
 	}
 	if note != "" {
 		txs[0].Events = append(txs[0].Events, trace.Notice(transition, "gave-up", note))
+	}
+	if !in.Maintenance {
+		return p.recordApplied(ctx, stream, in, reason, []trace.Document{doc}, txs...)
 	}
 	if _, err := p.Repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {

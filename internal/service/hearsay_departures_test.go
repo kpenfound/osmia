@@ -71,4 +71,3 @@ func TestOnlyADepartureIsPostedToHearsay(t *testing.T) {
 		}
 	}
 }
-

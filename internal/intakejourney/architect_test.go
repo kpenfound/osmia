@@ -559,7 +559,9 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 			last = tr
 		}
 	}
-	if last.From != "invalid-3" || last.To != "exhausted" || last.Actor != draftingActor || last.Cause != "draft-3-invalid" || last.Reason != "none of the architect's 3 drafts of the spec and plan was accepted; drafting stops and the workstream stays handed" {
+	// The router commits the default, and the transition records it.
+	if last.From != "invalid-3" || last.To != "exhausted" || last.DefaultTo != "exhausted" || last.Departed() || last.Actor != draftingActor || last.Cause != "draft-3-invalid" ||
+		!strings.HasPrefix(last.Reason, "none of the architect's 3 drafts of the spec and plan was accepted; drafting stops and the workstream stays handed") {
 		t.Fatalf("exhausted transition: %+v", last)
 	}
 

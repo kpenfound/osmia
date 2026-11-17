@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -39,6 +40,11 @@ type gateJev struct {
 }
 
 func (g *gateJev) Evaluate(ctx context.Context, r systemone.Request) (systemone.Response, error) {
+	// A decide-transition request, which the router sends for the exits it
+	// routes, is answered "the default fits" and is not one of the gate requests.
+	if resp, ok := jevfixture.AnswerTransition(r, 1, nil); ok {
+		return resp, nil
+	}
 	g.mu.Lock()
 	g.requests = append(g.requests, r)
 	g.mu.Unlock()

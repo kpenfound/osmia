@@ -110,6 +110,17 @@ func (p *Transitions) Evaluate(ctx context.Context, r systemone.Request) (system
 	return resp, nil
 }
 
+// AnswerTransition answers a decide-transition request the way a fixture Jev
+// does, with the script's reply or, when script is nil, with "the default
+// fits". call numbers the request, from 1. It reports false for a request that
+// does not ask the narrow questions of a transition, which the caller answers.
+func AnswerTransition(r systemone.Request, call int, script func(Ask) Reply) (systemone.Response, bool) {
+	if _, ok := r.Questions[jev.QuestionFit]; !ok {
+		return systemone.Response{}, false
+	}
+	return answerTransition(r, call, script), true
+}
+
 // answerTransition answers a transition request with the script's reply, or
 // DefaultFits.
 func answerTransition(r systemone.Request, call int, script func(Ask) Reply) systemone.Response {

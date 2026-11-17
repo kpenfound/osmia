@@ -325,7 +325,8 @@ func TestAnOwnerApprovalIsAPinnedMove(t *testing.T) {
 }
 
 // A move of the chief of staff's own is no owner decision: approved is never
-// offered on it, so the router holds it and the unit does not move.
+// offered on it, so the router commits nothing, leaves the move as a pending
+// owner decision and the unit does not move.
 func TestAChiefMoveToApprovedIsNeverLegal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -337,7 +338,7 @@ func TestAChiefMoveToApprovedIsNeverLegal(t *testing.T) {
 	must(t, err)
 	res, err := f.s.core().RouteExit(ctx, x)
 	must(t, err)
-	if res.Committed || res.Outcome != router.OutcomeHeld || res.Hold != router.HoldDefaultIllegal {
+	if res.Committed || res.Outcome != router.OutcomeHeld || res.Hold != router.HoldGate || res.Journal != router.StateOwner {
 		t.Fatalf("the router entered approved on a chief proposal: %+v", res)
 	}
 	if got := workflowOf(t, repo, stream, "resume"); got != before {

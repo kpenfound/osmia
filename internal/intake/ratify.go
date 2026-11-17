@@ -266,10 +266,33 @@ func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.
 	if dismissed := len(entries) - len(shed.ForOwner(entries)); dismissed > 0 {
 		reason += fmt.Sprintf(", with %s the chief of staff dismissed", shed.Objections(dismissed))
 	}
-	if api := o.Record(ctx, shed.RatificationDocumentID(o.Round), shed.RatificationPath(o.Round), string(content), fmt.Sprintf("ratified-%d", o.Round), reason); api != nil {
+	if api := s.recordRatification(ctx, o, d, string(content), reason); api != nil {
 		return RatifyResponse{}, api
 	}
 	return RatifyResponse{Project: o.Project, Workstream: o.Stream, Round: record.Round, Spec: asked.Spec, Plan: asked.Plan, Sealing: "requested", Detail: reason + "; the sealing is asked for"}, nil
+}
+
+// recordRatification applies the ratification as a pinned move: the owner's
+// decision, or one of Jev's gate decisions, enters ratified-<round> on the
+// owner subject with the ratification file and its notice, through the router's
+// commit and hard-prerequisite check. Nothing is asked of Jev.
+func (s *Controller) recordRatification(ctx context.Context, o *ShedOwner, d Deciding, content, reason string) *APIError {
+	at := o.Now()
+	id := shed.RatificationDocumentID(o.Round)
+	doc, err := ownerShedDocument(o.Repository, o.Project, o.Stream, id, shed.RatificationPath(o.Round), content, at, d.Actor())
+	if err != nil {
+		return &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the owner's shed action on workstream %s; check the trace repository", o.Stream)}
+	}
+	transition := fmt.Sprintf("%s-%d", id, doc.Revision)
+	value := fmt.Sprintf("ratified-%d", o.Round)
+	res, err := s.route(ctx, PinnedMove{
+		Repo: o.Repository, Stream: o.Stream, Subject: OwnerSubject, State: o.Owner,
+		Trigger: TriggerRatified, Cause: fmt.Sprintf("%s@%d", transition, at.UnixNano()),
+		Target: TargetRatified, Enters: value, Description: routeRatifiedDescription, Gate: true,
+		Jev: d.Judgment, Ref: transition, ID: transition, HeaderCause: "owner-shed", Reason: reason, Actor: d.Actor(), At: at,
+		Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(transition, "owner", reason)},
+	})
+	return RouteError(res, err, fmt.Sprintf("the ratification of workstream %s", o.Stream))
 }
 
 const ProjectSpecCatchingUp = "the project spec is catching up with the latest member revisions; read the packet again"

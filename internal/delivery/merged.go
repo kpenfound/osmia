@@ -3,7 +3,6 @@ package delivery
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -117,10 +117,14 @@ func (s *Controller) MergedOutside(ctx context.Context, repository *trace.Reposi
 		txs = append(txs, trace.Transaction{ExpectedVersion: publication.Version,
 			Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: publication.Value, To: fmt.Sprintf("refused-%d", waiting), Reason: fmt.Sprintf("owner approval %d was not published: the owner merged the branch into upstream outside the factory", waiting)}})
 	}
-	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); errors.Is(err, trace.ErrConflict) {
-		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while recording its merge; check osmia status and retry", stream)}
-	} else if err != nil {
+	res, err := routeDelivered(ctx, s.Router, repository, stream, TriggerMergeRecorded, []trace.Document{doc}, txs[0], txs[1:]...)
+	switch {
+	case err != nil:
 		return MergeResponse{}, failed
+	case res.Hold == router.HoldStale:
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while recording its merge; check osmia status and retry", stream)}
+	case !res.Committed:
+		return MergeResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the merge of workstream %s was not recorded: the router held it (%s). %s", stream, res.Hold, res.Reason)}
 	}
 	return MergeResponse{Project: project, Workstream: stream, State: DeliveredState, Merge: record, Refused: waiting}, nil
 }

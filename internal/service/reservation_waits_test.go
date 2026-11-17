@@ -32,7 +32,7 @@ type reservationRig struct {
 	ledger   string
 	op       coreadapter.Operation
 	// holder gives back the slot another reader holds.
-	holder   func()
+	holder func()
 }
 
 func newReservationRig(t *testing.T) *reservationRig {
@@ -226,8 +226,8 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 		outcome string
 		// refuse opens the wait before the restart and returns its start; change
 		// is what happens to the operation while the service is down.
-		refuse  func(*reservationRig) time.Time
-		change  func(*reservationRig)
+		refuse func(*reservationRig) time.Time
+		change func(*reservationRig)
 	}{
 		{"workstream removed", "removed", func(r *reservationRig) time.Time {
 			gone, err := config.NewWorkstreamID()
