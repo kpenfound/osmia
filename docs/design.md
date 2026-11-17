@@ -542,6 +542,22 @@ step of another operation is always older than the interrupted step's checkpoint
 and remains intact. Retries inspect durable progress and branch effects before
 repeating local work.
 
+Workspace steps honour the context that runs them. Waiting for a clone lock ends
+with the context: the step returns a contention error naming the clone and the
+wait before any recovery or checkpoint runs, so the clone's files and
+checkpoints are untouched. Commands a step starts stop with its context, with
+their process group, and are waited on until they exit. Restoration and
+settlement run under their own cleanup deadline, a code constant, and the lock is
+released only after every command started under it has exited. A command that
+does not exit after it is stopped does not hold the step: the step returns and
+the lock stays held until that command exits, so later steps on the clone give
+up through the same contention error. A restoration or settlement that fails or
+times out keeps its checkpoint, marks the clone as needing recovery and returns
+a recovery error. The next step on that clone recovers first and is refused when
+that fails, so no work runs on a dirty checkout. `workspace.CloneQuiescence` and
+`Jujutsu.Quiescence` report a clone as not quiesced while a started command
+runs or the clone needs recovery; a deadline clears neither.
+
 ### 7.4 Landing a unit
 
 On approval the foreman squashes the unit's workspace to one commit on the feature branch with a message generated from the unit's title and the criteria it serves, then rebases every unit still in flight. A conflict goes to a mason session in the conflicting unit's workspace with the sealed spec and the instruction that the tree carries conflict markers to resolve against it. A session never discovers conflict markers by accident. Reviewers never see them.

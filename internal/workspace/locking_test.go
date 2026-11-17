@@ -280,7 +280,10 @@ func TestJujutsuLocalStepOwnsAndSettlesCheckpoint(t *testing.T) {
 		t.Fatal("expired ownership accepted")
 	}
 	if err := func() error {
-		local, unlock := lockClone(escaped, j.Clone)
+		local, unlock, err := lockClone(escaped, j.Clone)
+		if err != nil {
+			return err
+		}
 		defer unlock()
 		if err := j.Checkpoint(local, "operation-a", time.Now()); err == nil {
 			return errors.New("expired checkpoint scope accepted after reacquiring lock")
@@ -490,7 +493,10 @@ func TestGitOtherRefsAndFetchDoNotWaitForWorktreeLock(t *testing.T) {
 	f := newFixture(t)
 	// A separate operation may fetch or work on another ref while a worktree
 	// mutation owns the clone lock. Its context carries no borrowed ownership.
-	_, unlock := lockClone(context.Background(), f.clone)
+	_, unlock, err := lockClone(context.Background(), f.clone)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

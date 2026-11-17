@@ -228,7 +228,10 @@ func TestGitCheckpointsRecordNothing(t *testing.T) {
 // crashCheckpoint leaves the checkpoint a process killed inside LocalStep
 // would leave, so these fixtures can exercise Recover's clone-wide semantics.
 func crashCheckpoint(ctx context.Context, j *Jujutsu, operation string, at time.Time) error {
-	ctx, unlock := lockClone(ctx, j.Clone)
+	ctx, unlock, err := lockClone(ctx, j.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	scope := &stepScope{operation: operation}
 	scope.active.Store(true)
