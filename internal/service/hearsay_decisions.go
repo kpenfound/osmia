@@ -243,6 +243,7 @@ func (st *publishStream) decisions(in *publishInputs) []publishedDecision {
 	out = append(out, st.followupDecisions()...)
 	out = append(out, st.charterDecisions()...)
 	out = append(out, st.departureDecisions()...)
+	out = append(out, st.waiverDecisions()...)
 	for i := range out {
 		if out[i].workstream != "" {
 			out[i].specDocument, out[i].pullRequest = spec, pr
@@ -263,6 +264,10 @@ func (st *publishStream) departureDecisions() []publishedDecision {
 		if !t.Departed() || !jevDecider(t.DecidedBy, t.Judgment) {
 			continue
 		}
+		// A dropped dependency is posted as the waiver it recorded.
+		if t.To == lifecycle.DependencyWaived && strings.HasPrefix(t.Subject, "dependency-") {
+			continue
+		}
 		what := "workstream"
 		switch {
 		case t.Unit != "":
@@ -277,6 +282,49 @@ func (st *publishStream) departureDecisions() []publishedDecision {
 			rationale: jevNote(t.Judgment, strings.TrimSpace(t.Reason)),
 			rejected:  []string{"Take the default: " + t.DefaultTo},
 			created:   t.At, updated: t.At})
+	}
+	return out
+}
+
+// waiverDecisions are the dependencies the workstream dropped: one decision
+// for each waiver in its own trace. A drop Jev decided is Jev's, with its
+// judgment; one the owner decided is the owner's. Neither says the upstream
+// merged: a waiver is no merge, and the decision says the dependent goes on
+// without the dependency.
+func (st *publishStream) waiverDecisions() []publishedDecision {
+	var waivers lifecycle.EdgeWaivers
+	for i := len(st.documents) - 1; i >= 0; i-- {
+		if st.documents[i].ID != lifecycle.EdgeWaiverDocument {
+			continue
+		}
+		if json.Unmarshal([]byte(st.documents[i].Content), &waivers) != nil {
+			return nil
+		}
+		break
+	}
+	var out []publishedDecision
+	for _, w := range waivers.Waivers {
+		what := fmt.Sprintf("the %s dependency on workstream %s", w.Type, w.Upstream)
+		if w.Type == lifecycle.BaseEdgeType {
+			what = fmt.Sprintf("the dependency on its base workstream %s", w.Upstream)
+		}
+		d := publishedDecision{
+			workstream: st.id(),
+			context:    fmt.Sprintf("Workstream %s depended on workstream %s (%s), which ended without the dependent being able to rely on it.", st.id(), w.Upstream, w.Type),
+			outcome:    fmt.Sprintf("Dropped %s: workstream %s goes on without it. The shared project spec is unchanged, and the upstream is not recorded as merged.", what, st.id()),
+			rationale:  strings.TrimSpace(w.Reason),
+			rejected:   []string{"Keep waiting on the dependency"},
+			created:    w.At, updated: w.At}
+		switch {
+		case jevDecider(w.DecidedBy, w.Judgment):
+			d.id, d.by, d.judgment = jevID(st.id(), "waiver", string(w.Upstream), w.Type), byJev, w.Judgment
+			d.rationale = jevNote(w.Judgment, d.rationale)
+		case w.DecidedBy == trace.DecidedByOwner:
+			d.id, d.by = decisionID(string(st.id()), "waiver", string(w.Upstream), w.Type), byOwner
+		default:
+			continue
+		}
+		out = append(out, d)
 	}
 	return out
 }

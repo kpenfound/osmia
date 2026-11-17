@@ -75,14 +75,16 @@ func (e *Effects) Registered(machine, target string) bool {
 
 // build returns the effect of the plan's target. The exit's default target is
 // entered as the trigger enters it when the exit says how; any other target is
-// entered through the registered effect, or has none. The records of the
-// trigger itself come with every target.
+// entered through the exit's own effect for it, or the registered effect, or has
+// none. The records of the trigger itself come with every target.
 func (e *Effects) build(ctx context.Context, p Plan) (Effect, error) {
 	var out Effect
 	var err error
 	switch x := p.Exit; {
 	case x.Enter != nil && p.Target.Name == x.Default:
 		out, err = x.Enter(ctx, p)
+	case x.Entering[p.Target.Name] != nil:
+		out, err = x.Entering[p.Target.Name](ctx, p)
 	case e != nil:
 		e.mu.RLock()
 		f := e.funcs[effectKey(x.Machine, p.Target.Name)]

@@ -262,6 +262,8 @@ var unresolvedMergeOrderEdge = lifecycle.UnresolvedMergeOrderEdge
 
 var workgroupMergeOrderResolved = lifecycle.WorkgroupMergeOrderResolved
 
+var workgroupMergeOrderWaived = lifecycle.WorkgroupMergeOrderWaived
+
 var workgroupEdgePending = lifecycle.WorkgroupEdgePending
 
 func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) error {

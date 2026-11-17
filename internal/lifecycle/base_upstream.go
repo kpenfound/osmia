@@ -73,16 +73,12 @@ func (s *Controller) MoveOntoUpstream(ctx context.Context, cfg *config.Config, r
 		return BaseUpstreamResponse{}, api
 	}
 	unreadable := &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes", cfg.Project.BaseBranch, cfg.Project.Upstream)}
-	remote, err := g.Remote(ctx, cfg.Project.Upstream)
+	upstream, err := FetchUpstreamBase(ctx, cfg, g)
 	if err != nil {
 		return BaseUpstreamResponse{}, unreadable
 	}
-	commit, err := g.Fetch(ctx, remote, cfg.Project.BaseBranch)
-	if err != nil {
-		return BaseUpstreamResponse{}, unreadable
-	}
-	upstream := seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: commit}
-	onto := fmt.Sprintf("%s/%s at %s", remote, upstream.Branch, commit)
+	commit := upstream.Commit
+	onto := fmt.Sprintf("%s/%s at %s", upstream.Remote, upstream.Branch, commit)
 	reason := fmt.Sprintf("the owner moved the workstream onto %s: its base workstream %s was abandoned", onto, base)
 	if held != "" {
 		integrated, err := g.Integrated(ctx, held, commit)

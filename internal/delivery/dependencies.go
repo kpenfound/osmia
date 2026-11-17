@@ -63,6 +63,7 @@ type Dependencies struct {
 	ReopenHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
 	BaseObservationAt           func(*trace.Repository, config.WorkstreamID) (bool, int, error)
 	WorkgroupMergeOrderResolved func(*trace.Repository, config.WorkstreamID) (string, error)
+	WorkgroupMergeOrderWaived   func(*trace.Repository, config.WorkstreamID) (string, error)
 	ReviewMoves                 func(*trace.Repository, config.WorkstreamID) ([]api.WorkstreamMove, error)
 	DependentBaseChanged        func(context.Context, *config.Config, *trace.Repository, config.WorkstreamID) (bool, error)
 	BranchBase                  func(context.Context, *trace.Repository, config.WorkstreamID, workspace.Provider, string) (seal.Base, error)

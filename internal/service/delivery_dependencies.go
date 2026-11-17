@@ -34,7 +34,7 @@ func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 			observed, revision, err := baseObservationAt(r, w)
 			return observed.Unavailable, revision, err
 		},
-		WorkgroupMergeOrderResolved: workgroupMergeOrderResolved, ReviewMoves: reviewMoves,
+		WorkgroupMergeOrderResolved: workgroupMergeOrderResolved, WorkgroupMergeOrderWaived: workgroupMergeOrderWaived, ReviewMoves: reviewMoves,
 		DependentBaseChanged: dependentBaseChanged, BranchBase: branchBase, DriftRebaseNotes: driftRebaseNotes,
 		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: pendingMergeOrderReferences,
 		EdgePublicationWait: edgePublicationWait, UnresolvedMergeOrderEdge: unresolvedMergeOrderEdge,

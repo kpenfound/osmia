@@ -164,6 +164,7 @@ decision it is. These are the kinds the publisher posts for Jev:
 | An amendment, approved or declined | `decision` | `<workstream id>-jev-amendment-<amendment>` |
 | A discovery disposition that is a scope call (declined or kept as a suggestion), or that revisits one | `decision`, one per revision | `<workstream id>-jev-discovery-<discovery hash>-<revision>` |
 | A departure from the state machine's default: a transition Jev entered instead of the default | `decision`, one per departure | `<workstream id>-jev-route-<transition id>` |
+| A dependency dropped: a waiver in the dependent's own trace | `decision`, one per waiver | `<workstream id>-jev-waiver-<upstream id>-<type>` |
 | A ratification, or an amendment, that sealed a spec | `document`, one revision per seal | `<workstream id>-jev-spec` |
 
 Every one of them:
@@ -190,6 +191,13 @@ Every one of them:
 Only a departure is a decision. A default the router followed, one it committed because Jev could not answer, a move
 an owner or one of Jev's gate decisions pinned, and an exit it held are not posted. A departure's text names the state
 the subject left, the state it entered and the default it departed from.
+
+A dropped dependency is posted from the waiver it recorded, not as a departure,
+so it is one decision. It says the dependent goes on without the dependency, that
+the shared project spec is unchanged and that the upstream is not recorded as
+merged. A waiver the owner decided is the owner's decision on the owner source
+(`<workstream id>-waiver-<upstream id>-<type>`), with the owner as author, not
+Jev's.
 
 A seal belongs to whoever decided what produced it. A seal an amendment
 produced belongs to whoever decided that amendment; a plan-only amendment the

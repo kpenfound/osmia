@@ -68,6 +68,13 @@ type FinalReviewInput struct {
 	// from the current summary is stale: a workgroup dependency merged
 	// since, and a fresh review and owner approval are required (spec#13).
 	EdgeResolved string `json:"edge_resolved,omitempty"`
+	// EdgeWaived is workgroupMergeOrderWaived's summary of the incoming
+	// merge_order edges the workstream dropped, read when the review was asked
+	// for. A waiver is no merge, so it never appears in EdgeResolved; a review
+	// whose EdgeWaived differs from the current summary is stale, because what
+	// the pull request waits on changed, and a fresh review and owner approval
+	// are required.
+	EdgeWaived string `json:"edge_waived,omitempty"`
 	// Move counts the workstream's moves to building or assembled when the
 	// review was asked for. Each such move asks for a fresh review of the
 	// branch, even when nothing else it reads changed.
@@ -303,11 +310,17 @@ func (a *FinalReviewer) Governing(ctx context.Context, stream config.WorkstreamI
 	if err != nil {
 		return FinalReviewInput{}, seal.Seal{}, err
 	}
+	edgeWaived := ""
+	if a.S.WorkgroupMergeOrderWaived != nil {
+		if edgeWaived, err = a.S.WorkgroupMergeOrderWaived(a.Repository, stream); err != nil {
+			return FinalReviewInput{}, seal.Seal{}, err
+		}
+	}
 	moves, err := a.S.ReviewMoves(a.Repository, stream)
 	if err != nil {
 		return FinalReviewInput{}, seal.Seal{}, err
 	}
-	return FinalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
+	return FinalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, EdgeWaived: edgeWaived, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
 }
 
 // reads reports whether a review asked for with in, or recorded as report,
@@ -318,7 +331,7 @@ func (in FinalReviewInput) Reads(now FinalReviewInput) bool {
 }
 
 func ReportInput(r FinalReport) FinalReviewInput {
-	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
+	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, EdgeWaived: r.EdgeWaived, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
 // request asks for the next final review of an assembled workstream unless
@@ -589,7 +602,7 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if !found {
 		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, Move: in.Move, Review: in.Review, Operation: op.ID, Outcome: FinalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
+	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, EdgeWaived: in.EdgeWaived, Move: in.Move, Review: in.Review, Operation: op.ID, Outcome: FinalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
 	fail := func(reason string) (coreadapter.OperationResult, error) {
 		report.Failure = reason
 		return a.Record(ctx, stream, report)
@@ -626,7 +639,7 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if now.Move != in.Move {
 		return fail(fmt.Sprintf("the workstream was moved since the review was asked for; move %d asks for a fresh review", now.Move))
 	}
-	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
+	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.EdgeWaived != in.EdgeWaived || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
 	}
 	g, err := featureWorkspaces(cfg, a.Repository).Of(stream)
@@ -1563,6 +1576,7 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 		{"dependency observation", report.BaseCheck, now.BaseCheck},
 		{"delivery maintenance", report.Maintenance, now.Maintenance},
 		{"workgroup edge resolution", report.EdgeResolved, now.EdgeResolved},
+		{"workgroup edge waiver", report.EdgeWaived, now.EdgeWaived},
 		{"workstream move", report.Move, now.Move},
 		{"seal", report.Seal, now.Seal},
 		{"spec hash", report.SpecHash, latest.SpecHash},

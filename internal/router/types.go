@@ -213,6 +213,11 @@ type Exit struct {
 	// other than the default, however it was chosen, is entered through the
 	// shared effect of its machine.
 	Enter EffectFunc
+	// Entering, when set, builds how this exit enters a target other than its
+	// default, by the target's name, ahead of the machine's registered effect.
+	// It serves a target whose effect depends on what the exit read when it was
+	// raised, such as the evidence a dropped dependency rests on.
+	Entering map[string]EffectFunc
 	// Records, when set, builds the records of the trigger itself (the report
 	// an exit cites, the failed check run it counts): they are written in the
 	// commit of whichever target is entered, and in none when the exit is

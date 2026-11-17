@@ -6524,6 +6524,9 @@
           "edge_resolved": {
             "type": "string"
           },
+          "edge_waived": {
+            "type": "string"
+          },
           "failure": {
             "type": "string"
           },
