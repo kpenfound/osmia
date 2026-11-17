@@ -57,7 +57,10 @@ type checkInput struct {
 // and the path of its captured output. Failed lists the check links Dagger's
 // report shows failed, and Flaky those that failed and then passed on their
 // rerun. Engines says which engine ran each invocation and why a cloud run
-// did; a record without it ran locally.
+// did; a record without it ran locally. Evidence is what the run shows about
+// how it ran: the checks that ran together, their parallelism, the engine, the
+// captured output and the failure reports of the flaky checks; FlakeEvidence
+// returns it for any record, including one written without it.
 type UnitCheckRun struct {
 	Unit               string                `json:"unit"`
 	Run                int                   `json:"run"`
@@ -79,9 +82,25 @@ type UnitCheckRun struct {
 	TraceURL           string                `json:"trace_url,omitempty"`
 	CIIdentityFallback string                `json:"ci_identity_fallback,omitempty"`
 	Engines            *api.CheckAttribution `json:"engines,omitempty"`
+	Evidence           *api.CheckEvidence    `json:"evidence,omitempty"`
 	Error              string                `json:"error,omitempty"`
 	StartedAt          time.Time             `json:"started_at"`
 	FinishedAt         time.Time             `json:"finished_at"`
+}
+
+// FlakeEvidence converts the record to the neutral evidence of its run, with
+// the run's flaky checks. A record written without evidence yields what its
+// other fields hold, and marks the parallelism and any failure report it did
+// not keep as unavailable, to be read in the record.
+func (r UnitCheckRun) FlakeEvidence() api.CheckEvidence {
+	var evidence api.CheckEvidence
+	if r.Evidence != nil {
+		evidence = *r.Evidence
+	} else {
+		evidence = checkrun.RecordedEvidence(checkrun.RecordedLocalRun{Selection: r.Selection, Engines: r.Engines, Output: r.Output, OutputPath: r.OutputPath, OutputRevision: r.OutputRevision, TraceURL: r.TraceURL, Record: checkPath(r.Unit, r.Run)}, r.Flaky)
+	}
+	evidence.Engines, evidence.Flaky = r.Engines, slices.Clone(r.Flaky)
+	return evidence
 }
 
 // matches reports whether the run checked the identity's candidate, base and
@@ -626,6 +645,10 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Truncated = run.Truncated || result.Truncated
 	run.OutputPath = checkrun.CheckOutputPath(checkPath(in.Unit, in.Run))
 	run.OutputRevision = 1
+	evidence := checkrun.LocalEvidence(ran, engines, result.Output, run.OutputPath, run.OutputRevision, result.TraceURL)
+	// The record's own Engines says which engine ran each invocation.
+	evidence.Engines = nil
+	run.Evidence = &evidence
 	if run.Status, run.Failed, err = checkrun.ClassifyChecks(result, err); run.Status == ChecksIncomplete {
 		return incomplete(err)
 	}
