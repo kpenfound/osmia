@@ -90,6 +90,7 @@ See
 | Target workspaces | Service-owned Git and Jujutsu operations | [workspace](../internal/workspace) |
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
 | Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its retries and cool-down | [jev](../internal/jev) |
+| Transition routing | Exits, hard prerequisites, the `decide-transition` table, the route journal, per-target effects and the worker that keeps Jev off the scheduling path | [router](../internal/router) |
 
 The service uses a pinned `agentcore` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions

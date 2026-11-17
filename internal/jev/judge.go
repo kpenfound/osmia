@@ -177,6 +177,9 @@ type Judge struct {
 
 	once  sync.Once
 	asker *corejev.Judge
+
+	failMu  sync.Mutex
+	failure *transitionFailure
 }
 
 // core returns the agentcore Judge that sends j's requests, built from j's
@@ -418,7 +421,13 @@ const (
 // failure since the last success.
 type Status = corejev.Status
 
-// Status reports Jev under the current settings.
+// Status reports Jev under the current settings. Jev is also degraded while
+// its latest transition request failed, however it failed (a request too
+// large to send included), until a request is answered.
 func (j *Judge) Status() Status {
-	return j.core().Status()
+	s := j.core().Status()
+	if f := j.transitionDegraded(); f != nil && s.Mode == ModeReady {
+		s.Mode, s.Reason, s.Detail = ModeDegraded, f.reason, f.detail
+	}
+	return s
 }

@@ -1,0 +1,86 @@
+package router
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+// Plan is what an effect is built for: the exit, the target it enters, and the
+// identity and routing of the transition that will enter it.
+type Plan struct {
+	Exit   Exit
+	Target Target
+	// TransitionID is the ID of the transition into the target; an effect
+	// derives the IDs of its events and documents from it, so a retry of the
+	// same move records the same ones.
+	TransitionID string
+	// Reason is the transition's reason.
+	Reason  string
+	At      time.Time
+	Routing trace.Routing
+}
+
+// Effect is what entering a target records beyond the transition itself, in the
+// same commit: documents (a move record, an approval record, a fresh review
+// request), events for the outbox (notices to the chief of staff, the
+// mason's fresh allowance) and transactions of other subjects of the
+// workstream.
+type Effect struct {
+	Documents []trace.Document
+	Events    []trace.Event
+	With      []trace.Transaction
+	// Reason, when set, replaces the transition's reason.
+	Reason string
+}
+
+// EffectFunc builds the effect of entering a target. An error wrapping
+// ErrCannotCarryOut says the target cannot be carried out; any other error is
+// a failure to read and is retried.
+type EffectFunc func(ctx context.Context, p Plan) (Effect, error)
+
+// Effects is the registry of per-target side effects. Each target of each
+// machine has its effect defined once, here, whoever raises the exit: a
+// default, a Jev pick, a chief proposal, an owner decision and an owner card
+// all enter the target through it.
+type Effects struct {
+	mu    sync.RWMutex
+	funcs map[string]EffectFunc
+}
+
+func effectKey(machine, target string) string { return machine + "/" + target }
+
+// Register defines the effect of entering target in machine. A second
+// registration of the same pair replaces the first.
+func (e *Effects) Register(machine, target string, f EffectFunc) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.funcs == nil {
+		e.funcs = map[string]EffectFunc{}
+	}
+	e.funcs[effectKey(machine, target)] = f
+}
+
+// Registered reports whether an effect is defined for the pair.
+func (e *Effects) Registered(machine, target string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	_, ok := e.funcs[effectKey(machine, target)]
+	return ok
+}
+
+// build returns the effect of the plan's target: the registered one, or none
+// when the target has no side effects.
+func (e *Effects) build(ctx context.Context, p Plan) (Effect, error) {
+	if e != nil {
+		e.mu.RLock()
+		f := e.funcs[effectKey(p.Exit.Machine, p.Target.Name)]
+		e.mu.RUnlock()
+		if f != nil {
+			return f(ctx, p)
+		}
+	}
+	return Effect{}, nil
+}

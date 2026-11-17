@@ -11,16 +11,24 @@ import (
 	corejev "github.com/kpenfound/agentcore/jev"
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/jev"
 )
 
 // Provider is the fake Jev provider of a running service. It answers each
-// decision request with the option Pick chooses, at Confidence, and records
-// the requests it received. A request that is not a decision gets an answer
-// with nothing in it, which the judge treats as unusable.
+// decision request with the option Pick chooses, at Confidence, and each
+// decide-transition request with the default fits unless Transition scripts
+// it, and records the requests it received. A request that is neither gets an
+// answer with nothing in it, which the judge treats as unusable.
 type Provider struct {
 	Confidence float64
 	// Pick chooses among the option names; it defaults to the first.
 	Pick func(options []string) string
+	// Transition scripts the answers to a decide-transition request; nil
+	// answers every one that the default fits.
+	Transition func(Ask) Reply
+	// Fail returns the error a request fails with, or nil to answer it. It is
+	// given the number of the request, from 1.
+	Fail func(call int) error
 
 	mu       sync.Mutex
 	requests []systemone.Request
@@ -30,7 +38,16 @@ type Provider struct {
 func (p *Provider) Evaluate(_ context.Context, r systemone.Request) (systemone.Response, error) {
 	p.mu.Lock()
 	p.requests = append(p.requests, r)
+	call := len(p.requests)
 	p.mu.Unlock()
+	if p.Fail != nil {
+		if err := p.Fail(call); err != nil {
+			return systemone.Response{}, err
+		}
+	}
+	if _, ok := r.Questions[jev.QuestionFit]; ok {
+		return answerTransition(r, call, p.Transition), nil
+	}
 	question, ok := r.Questions["decision"]
 	if !ok || len(question.Options) == 0 {
 		return systemone.Response{Model: "jev-test"}, nil

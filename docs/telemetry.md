@@ -224,7 +224,7 @@ The outcome says what the router did:
 | --- | --- |
 | `followed` | committed the default, or committed exactly the target an owner decision or one of Jev's gate decisions authorised |
 | `departed` | committed another legal target because Jev's answers cleared its risk bar |
-| `held` | committed nothing and held the subject, because Jev's two orderings disagreed, the best target was below its bar while the default did not fit, or a target had become illegal when it was to be applied |
+| `held` | committed nothing and held the subject, because Jev's two orderings disagreed, the best target was below its bar while the default did not fit, a target had become illegal when it was to be applied, acting would change approved intent so the move is the owner's, or the subject had moved on since the exit was raised |
 | `fallback` | committed the default because Jev could not answer |
 
 The confidence band is the probability Jev gave the chosen state, as a word

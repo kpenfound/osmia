@@ -1,0 +1,188 @@
+package router
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+// apply enters the decided target, after checking every hard prerequisite
+// against current state once more. It serves every way a target is chosen: a
+// Jev pick, a degraded-mode default, a pick recovered after a restart, a
+// proposal, a pinned owner or gate decision and an owner card. A target that
+// has become illegal, or whose effects cannot be carried out, commits nothing,
+// runs no effect, records Refuse and holds the subject with one notice.
+func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, d decision) (Result, error) {
+	rec.Target = d.target
+	target, ok := x.target(d.target)
+	if !ok {
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("the target %s is not among the exit's targets", d.target))
+	}
+	why, err := r.legality(ctx, x, target)
+	if err != nil {
+		return Result{}, err
+	}
+	if why != "" {
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("%s is no longer legal: %s", target.Name, why))
+	}
+	at := r.now()
+	moveID := journalSubject(name) + "-move"
+	if x.TransitionID != nil {
+		moveID = x.TransitionID(target)
+	}
+	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.Default}
+	// A decider that has no judgment, such as a fallback, cites none.
+	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner {
+		routing.Judgment = d.judgment
+	}
+	reason := target.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("%s: %s", x.Trigger, target.Description)
+	}
+	plan := Plan{Exit: x, Target: target, TransitionID: moveID, Reason: reason, At: at, Routing: routing}
+	effect, err := r.Effects.build(ctx, plan)
+	switch {
+	case errors.Is(err, ErrCannotCarryOut):
+		return r.refuse(ctx, x, name, rec, rev, journal, err.Error())
+	case err != nil:
+		return Result{}, err
+	}
+	if effect.Reason != "" {
+		reason = effect.Reason
+	}
+	reason = fmt.Sprintf("%s [decide-transition table %s, rule %s, %s]", reason, TableVersion, d.rule, d.decidedBy)
+
+	cause := x.Cause
+	if x.HeaderCause != "" {
+		cause = x.HeaderCause
+	}
+	if cause == "" {
+		cause = x.Trigger
+	}
+	h := r.headerFor(x, "osmia.trace.transition", moveID, 1, at, cause)
+	h.Actor = x.Actor
+	move := trace.Transaction{ExpectedVersion: x.Version, Events: effect.Events, Transition: trace.Transition{
+		Header: h, Subject: x.Subject, From: x.From, To: target.Name, Reason: reason,
+		DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
+	if !trace.ValidRouting(target.Name, routing) {
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, target.Name))
+	}
+	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided, rec.Transition = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at, moveID
+	if rec.Table == "" {
+		rec.Table = TableVersion
+	}
+	write := journalWrite{rec: *rec, rev: rev, from: journal, to: StateCommitted,
+		reason: fmt.Sprintf("Route of %s committed %s (table %s rule %s)", rec.Occurrence, target.Name, rec.Table, d.rule),
+		docs:   effect.Documents, txs: append([]trace.Transaction{move}, effect.With...)}
+	if err := r.writeJournal(ctx, x, name, write); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			// Another writer got there: the occurrence was finished, or the subject
+			// moved, since this exit read it.
+			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {
+				return resultOf(*again, true), nil
+			}
+			state, serr := x.Repo.Workflow(x.Workstream, x.Subject)
+			if serr == nil && (state.Version != x.Version || state.Value != x.From) {
+				rec.State, rec.Transition = StateDecided, ""
+				return r.stale(ctx, x, name, rec, rev, journal, state)
+			}
+		}
+		return Result{}, err
+	}
+	r.span(x, *rec, target.Name)
+	return resultOf(*rec, false), nil
+}
+
+// refuse records that the decided target cannot be carried out: Refuse on the
+// judgment, a refused journal, and one notice to the chief of staff. The
+// subject stays where it is and is held; the stall watchdog and the recovery
+// card take it from there.
+func (r *Router) refuse(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, why string) (Result, error) {
+	if rec.JevRequested && rec.Judgment != "" && rec.Fallback == "" {
+		if err := r.Judge.Refuse(ctx, x.Repo, x.Workstream, rec.Judgment, why); err != nil {
+			r.logger().Warn("cannot record the refusal of a transition pick", "workstream", string(x.Workstream), "judgment", rec.Judgment, "error", err.Error())
+		}
+	}
+	rec.State, rec.Outcome, rec.Refusal, rec.Hold, rec.Decided = StateRefused, OutcomeHeld, why, HoldRefused, r.now()
+	body := fmt.Sprintf("The move of %s from %s to %s (trigger %s) could not be applied: %s. Nothing was committed and none of its effects ran. The subject is held at %s.", x.Subject, x.From, rec.Target, x.Trigger, why, x.From)
+	return r.finishHeld(ctx, x, name, rec, rev, journal, body)
+}
+
+// hold finishes the exit without moving the subject: held, with one notice that
+// carries Jev's view, or sent to the owner when acting would change approved
+// intent.
+func (r *Router) hold(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, state, why, view string, v *Verdict) (Result, error) {
+	rec.State, rec.Outcome, rec.Hold, rec.Decided = state, OutcomeHeld, why, r.now()
+	if v != nil {
+		rec.Target = v.Target
+		rec.Confidence = confidenceBand(*v, true, r.Judge.DecisionThreshold())
+	}
+	rec.Reason = view
+	rec.Table = TableVersion
+	var body string
+	switch why {
+	case HoldIntent:
+		body = fmt.Sprintf("Jev would not move %s from %s to %s on its own (trigger %s): acting would change what the owner approved. The move is the owner's to approve. Jev's view: %s.", x.Subject, x.From, rec.Target, x.Trigger, view)
+	case HoldOrdersDisagree:
+		body = fmt.Sprintf("Jev held %s at %s without moving it (trigger %s): its two orderings of the targets disagreed. Jev's view: %s. Nothing was committed.", x.Subject, x.From, x.Trigger, view)
+	case HoldBelowBar:
+		body = fmt.Sprintf("Jev held %s at %s without moving it (trigger %s): the best target %s is below its bar while the default %s does not fit. Jev's view: %s. Nothing was committed.", x.Subject, x.From, x.Trigger, rec.Target, x.Default, view)
+	default:
+		body = fmt.Sprintf("%s was held at %s without moving it (trigger %s): %s. Nothing was committed.", x.Subject, x.From, x.Trigger, view)
+	}
+	return r.finishHeld(ctx, x, name, rec, rev, journal, body)
+}
+
+func (r *Router) finishHeld(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, body string) (Result, error) {
+	id := journalSubject(name) + "-" + rec.State
+	w := journalWrite{rec: *rec, rev: rev, from: journal, to: rec.State, reason: fmt.Sprintf("Route of %s %s: %s", rec.Occurrence, rec.State, rec.Hold),
+		events: []trace.Event{trace.Notice(id, "chief", body)}}
+	if err := r.writeJournal(ctx, x, name, w); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {
+				return resultOf(*again, true), nil
+			}
+		}
+		return Result{}, err
+	}
+	r.span(x, *rec, x.From)
+	return resultOf(*rec, false), nil
+}
+
+// stale finishes an exit whose subject moved on since it was raised: nothing is
+// committed and the chief of staff is not woken, since the subject is no longer
+// where the exit left it.
+func (r *Router) stale(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, now trace.WorkflowState) (Result, error) {
+	rec.State, rec.Outcome, rec.Hold, rec.Decided = StateStale, OutcomeHeld, HoldStale, r.now()
+	rec.Reason = fmt.Sprintf("the subject is %s at version %d; the exit was raised at %s, version %d", now.Value, now.Version, x.From, x.Version)
+	w := journalWrite{rec: *rec, rev: rev, from: journal, to: StateStale, reason: fmt.Sprintf("Route of %s is stale: %s", rec.Occurrence, rec.Reason)}
+	if err := r.writeJournal(ctx, x, name, w); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {
+				return resultOf(*again, true), nil
+			}
+		}
+		return Result{}, err
+	}
+	r.span(x, *rec, now.Value)
+	return resultOf(*rec, false), nil
+}
+
+// span sends the route span of a decided exit, once: only the call that wrote
+// the occurrence's final record sends it.
+func (r *Router) span(x Exit, rec Record, chosen string) {
+	if r.Spans == nil {
+		return
+	}
+	band := rec.Confidence
+	if band == "" {
+		band = ConfidenceNone
+	}
+	r.Spans(SpanRoute{
+		Project: x.Project, Workstream: x.Workstream, Unit: x.Unit, Occurrence: rec.Occurrence, Trigger: x.Trigger,
+		Default: x.Default, Chosen: chosen, Outcome: rec.Outcome, Confidence: band, Judgment: rec.Judgment,
+		Start: rec.Raised, End: rec.Decided,
+	})
+}

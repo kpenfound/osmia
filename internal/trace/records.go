@@ -379,7 +379,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || hearsayPostedPath(parts) || hearsayKeptPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || flakePath(parts) || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
+	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || routePath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -607,6 +607,11 @@ func toolPath(parts []string) bool {
 
 func judgmentPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "judgments" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+// routePath reports whether parts name a route journal record: routes/<id>.json.
+func routePath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "routes" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
 func memoryPath(parts []string) bool {

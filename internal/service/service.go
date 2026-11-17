@@ -35,6 +35,7 @@ import (
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/skills"
@@ -209,6 +210,10 @@ type Service struct {
 	// jev answers the Jev judgments of every project's turns under the
 	// current configuration.
 	jev *jev.Judge
+	// router decides every exit of the routed state machines with Jev's answers,
+	// and routing hands it the exits a scheduling pass raises.
+	router  *router.Router
+	routing *router.Worker
 	// gateWorkers maps each active project's trace to its gate worker, so a
 	// scheduling pass can wake it.
 	gateWorkers sync.Map
@@ -390,6 +395,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		redact.Register(value)
 		return value
 	}}
+	s.router = s.newRouter()
 	if opts.skills != nil {
 		opts.skills.Refresh = func() string { return s.current().Skills.Refresh }
 	}
@@ -551,6 +557,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("recover an interrupted session open: %w", err)
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
+	s.routing = router.NewWorker(s.lifetime, s.router)
 	if opts.boundary != nil {
 		s.setBoundary(func(step string) error { return opts.boundary(s.lifetime, step) })
 	}
@@ -629,6 +636,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		stop()
 		s.cancel()
+		s.routing.Wait()
 		<-s.notifier.done
 		<-s.removedDone
 		if s.tailnet != nil {
@@ -1167,6 +1175,11 @@ func (s *Service) launch(active *activeProject) {
 			active.gates.run(ctx)
 			close(gatesDone)
 		}()
+		routesDone := make(chan struct{})
+		go func() {
+			s.recoverRoutes(ctx, active.repository)
+			close(routesDone)
+		}()
 		err := active.controller.Run(ctx)
 		stopPolls()
 		<-pollDone
@@ -1180,6 +1193,7 @@ func (s *Service) launch(active *activeProject) {
 		cancel()
 		<-publishDone
 		<-gatesDone
+		<-routesDone
 		s.gateWorkers.Delete(active.repository)
 		s.reseeders.Delete(active.id)
 		if watchErr := <-watchDone; watchErr != nil {

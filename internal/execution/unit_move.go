@@ -157,30 +157,63 @@ func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, strea
 			}
 		}
 	}
-	by := rulerName(actor)
-	move := UnitMove{From: state.Value, To: req.To, Note: note, By: by, Turn: turn}
-	id := moveDocument(unit, state.Version)
 	at := s.Now()
+	records, api := s.unitMoveRecords(ctx, repo, stream, unit, state, req.To, note, actor, turn, cause, "", at)
+	if api != nil {
+		return UnitMoveResponse{}, api
+	}
+	move, docs, tx := records.move, records.docs, records.tx
+	if _, err := repo.RecordDocumentsWith(ctx, docs, tx); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
+		}
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	}
+	return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
+}
+
+// unitMoveRecord is what entering a target by a move records: the move, its
+// documents (the move's own, and for approved the approval of the candidate)
+// and the transition that carries them with its notice.
+type unitMoveRecord struct {
+	move UnitMove
+	docs []trace.Document
+	tx   trace.Transaction
+}
+
+// unitMoveRecords defines, once, what moving a started unit to a state records,
+// for every way the move is made: an owner's command, the chief of staff's
+// tool and the transition router. A move to implementing gives the unit's
+// mason a turn with the note and a fresh clean-turn allowance; to checking, a
+// fresh check run of the recorded candidate; to reviewing, a fresh review of
+// it; to approved, an approval of it that the foreman lands; and to contested,
+// raises the unit to the owner. cause is the record the move follows, and
+// transition the ID of the transition, derived from the move's document when
+// empty.
+func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, to, note string, actor trace.Actor, turn, cause, transition string, at time.Time) (unitMoveRecord, *APIError) {
+	by := rulerName(actor)
+	move := UnitMove{From: state.Value, To: to, Note: note, By: by, Turn: turn}
+	id := moveDocument(unit, state.Version)
 	var docs []trace.Document
-	reason := fmt.Sprintf("%s moved unit %s from %s to %s", by, unit, state.Value, req.To)
-	switch req.To {
+	reason := fmt.Sprintf("%s moved unit %s from %s to %s", by, unit, state.Value, to)
+	switch to {
 	case UnitImplementing:
 		th, err := repo.Thread(stream, masonAgent(unit))
 		if err != nil || len(th.Turns) == 0 {
-			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no mason thread to resume", unit)}
+			return unitMoveRecord{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no mason thread to resume", unit)}
 		}
 		move.ResetTurn = th.Turns[len(th.Turns)-1].Sequence
 		reason += "; its mason revises it with a fresh clean-turn allowance"
 	case UnitChecking, UnitReviewing:
 		report, revision, err := unitReport(repo, stream, unit)
 		if err != nil {
-			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit report"}
+			return unitMoveRecord{}, &APIError{Code: Internal, Message: "cannot read the unit report"}
 		}
 		if revision == 0 || report.Candidate == "" {
-			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no recorded candidate; move it to implementing", unit)}
+			return unitMoveRecord{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no recorded candidate; move it to implementing", unit)}
 		}
 		move.Candidate = report.Candidate
-		if req.To == UnitChecking {
+		if to == UnitChecking {
 			reason += fmt.Sprintf("; checks run again on candidate %s", report.Candidate)
 		} else {
 			reason += fmt.Sprintf("; its reviewer reviews candidate %s again", report.Candidate)
@@ -190,14 +223,14 @@ func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, strea
 		_, identity, err := m.candidateEvidence(ctx, stream, unit)
 		if err != nil {
 			if ctx.Err() != nil {
-				return UnitMoveResponse{}, &APIError{Code: Internal, Message: "the move was cancelled"}
+				return unitMoveRecord{}, &APIError{Code: Internal, Message: "the move was cancelled"}
 			}
-			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no candidate to approve: %v", unit, err)}
+			return unitMoveRecord{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s has no candidate to approve: %v", unit, err)}
 		}
 		move.Candidate = identity.Candidate.Revision
 		review, err := approvalRecord(repo, stream, unit, identity, id, by, note, actor, at)
 		if err != nil {
-			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit review"}
+			return unitMoveRecord{}, &APIError{Code: Internal, Message: "cannot read the unit review"}
 		}
 		docs = append(docs, review)
 		reason += fmt.Sprintf("; the foreman lands candidate %s", identity.Candidate.Revision)
@@ -208,16 +241,13 @@ func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, strea
 	data, _ := json.MarshalIndent(move, "", "  ")
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: cause}
 	docs = append([]trace.Document{{Header: h, Path: movePath(unit, state.Version), Content: string(data) + "\n"}}, docs...)
-	h.Schema, h.ID, h.Cause = "osmia.trace.transition", id+"-"+req.To, id
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: req.To, Reason: reason},
-		Events: []trace.Event{trace.Notice(h.ID, "unit", fmt.Sprintf("Unit %s: %s.", unit, reason))}}
-	if _, err := repo.RecordDocumentsWith(ctx, docs, tx); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
-		}
-		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	h.Schema, h.ID, h.Cause = "osmia.trace.transition", id+"-"+to, id
+	if transition != "" {
+		h.ID = transition
 	}
-	return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: to, Reason: reason},
+		Events: []trace.Event{trace.Notice(h.ID, "unit", fmt.Sprintf("Unit %s: %s.", unit, reason))}}
+	return unitMoveRecord{move: move, docs: docs, tx: tx}, nil
 }
 
 // approvalRecord returns the next revision of the unit's review.json: a
