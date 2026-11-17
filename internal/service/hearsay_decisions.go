@@ -264,8 +264,11 @@ func (st *publishStream) departureDecisions() []publishedDecision {
 			continue
 		}
 		what := "workstream"
-		if t.Unit != "" {
+		switch {
+		case t.Unit != "":
 			what = "unit " + t.Unit
+		case t.Subject != trace.FeatureSubject:
+			what = t.Subject
 		}
 		out = append(out, publishedDecision{
 			id: jevID(st.id(), "route", t.ID), by: byJev, judgment: t.Judgment, workstream: st.id(),

@@ -244,7 +244,7 @@ exit:
 | Workstream | `ws.handed`, `ws.draft_accepted`, `ws.shed_entered`, `ws.build_started`, `ws.units_merged`, `ws.draft_exhausted`, `ws.shed_concluded`, `ws.ratified`, `ws.seal_failed`, `ws.delivery_approved`, `ws.ready_on_host`, `ws.merge_recorded`, `ws.abandon`, `ws.move_owner`, `ws.move_proposal`, `ws.stalled` |
 | Final review | `final.requested`, `final.reviewed_clean`, `final.reviewed_blocking`, `final.failed`, `final.checks_missing` |
 | Contests and objections | `contest.owner_ruling`, `contest.jev_ruling`, `contest.chief_ruling`, `objection.chief_decision` |
-| Dependency waits | `dep.edge_wait`, `dep.edge_resolved`, `dep.upstream_terminal`, `dep.upstream_integrated`, `dep.base_unavailable`, `dep.base_integrated` |
+| Dependency waits | `dep.edge_wait`, `dep.edge_resolved`, `dep.upstream_terminal`, `dep.upstream_integrated`, `dep.base_unavailable`, `dep.base_available`, `dep.base_integrated` |
 | Drift | `drift.requested`, `drift.clean`, `drift.review_approved`, `drift.review_rejected`, `drift.turn_failed`, `drift.held` |
 
 A span for a trigger, outcome or band outside these lists is not sent.

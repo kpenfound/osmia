@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -104,11 +105,26 @@ func (s *Controller) MoveOntoUpstream(ctx context.Context, cfg *config.Config, r
 	id := fmt.Sprintf("%s-%d", BaseWaitSubject, wait.Version+1)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BaseObservationDocument, Revision: revision + 1, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ownerActor, Cause: id}
 	doc := trace.Document{Header: h, Path: "base-observation.json", Content: string(data)}
-	h.Schema, h.ID, h.Revision, h.Cause = "osmia.trace.transition", id, 1, "owner-base-upstream"
-	tx := trace.Transaction{ExpectedVersion: wait.Version, Transition: trace.Transition{Header: h, Subject: BaseWaitSubject, From: wait.Value, To: "available", Reason: reason}, Events: []trace.Event{trace.Notice(id, "base", reason)}}
-	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
+	// The owner's decision releases the park as it was given: a pinned move
+	// the router applies with the base observation it records.
+	x := router.Exit{
+		Repo: repository, Project: repository.Project(), Workstream: stream, Machine: DependencyMachine,
+		Subject: BaseWaitSubject, From: wait.Value, Version: wait.Version, Trigger: TriggerBaseIntegrated, Cause: "owner-base-upstream", HeaderCause: "owner-base-upstream", Actor: ownerActor,
+		At:           s.Now(),
+		Default:      DependencyAvailable,
+		Targets:      []router.Target{{Name: DependencyAvailable, Description: "Release the park: the workstream continues from upstream.", Reason: reason}},
+		Authority:    &router.Authority{Kind: router.AuthorityOwner, Target: DependencyAvailable, Ref: "owner request to move onto upstream"},
+		Evidence:     router.Evidence{Intent: "The owner chose to continue the workstream from upstream instead of its abandoned base."},
+		TransitionID: func(router.Target) string { return id },
+		Enter: func(context.Context, router.Plan) (router.Effect, error) {
+			return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(id, "base", reason)}, Reason: reason}, nil
+		},
+	}
+	res, err := s.routeExit(ctx, x)
+	switch {
+	case err != nil && errors.Is(err, trace.ErrConflict), err == nil && !res.Committed:
 		return BaseUpstreamResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed while moving it onto upstream; read the inbox again", stream)}
-	} else if err != nil {
+	case err != nil:
 		return BaseUpstreamResponse{}, failed
 	}
 	s.DriftAsked.Store(true)

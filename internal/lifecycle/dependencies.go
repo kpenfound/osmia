@@ -63,6 +63,10 @@ type Dependencies struct {
 	Stoppable       func(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func())
 	Store           func() *runtime.Store
 	ThreadRunner    func(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner
+	// Router routes the exits of dependency waits and drift rebases: the
+	// passes raise the trigger, the default, the legal targets and the
+	// evidence, and the router chooses the state.
+	Router execution.Router
 }
 type Controller struct{ Dependencies }
 

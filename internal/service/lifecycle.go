@@ -56,6 +56,7 @@ func (s *Service) lifecycle() *lifecycle.Controller {
 		UnresolvedWork:     unresolvedWork,
 		KeepForPublication: s.keepForCleanup,
 		ThreadRunner:       s.threadRunner,
+		Router:             routerPort{s},
 	})
 }
 

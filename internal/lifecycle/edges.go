@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -556,12 +557,24 @@ func AllEdgesResolved(observed EdgeObservation, edges []trace.Edge) bool {
 // wait message as its reason, and a feed notice, exactly as baseWaitPass
 // Records a same-repo base's availability; neither creates an inbox entry,
 // because waiting on a merge is status, never an escalation (spec#15).
+// Entering the wait is the one thing an unresolved edge can mean, so the pass
+// records it as the code default. The wait ending is an exit the router
+// decides: it ends the wait by default, and Jev may keep the dependent waiting
+// for the observation that resolved it.
 func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) error {
 	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
+	type clears struct {
+		stream   config.WorkstreamID
+		state    trace.WorkflowState
+		revision int
+		blocking []trace.Edge
+		observed EdgeObservation
+	}
 	var transactions []trace.Transaction
+	var cleared []clears
 	err = repo.WithWorkstreamSnapshot(func() error {
 		for _, stream := range streams {
 			edges, err := IncomingMergeEdges(repo, stream)
@@ -570,8 +583,9 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 			}
 			blocking := EdgesOfType(edges, trace.EdgeHardBlock)
 			var observed EdgeObservation
+			revision := 0
 			if len(blocking) > 0 {
-				if observed, _, _, err = EdgeObservationAt(repo, stream); err != nil {
+				if observed, revision, _, err = EdgeObservationAt(repo, stream); err != nil {
 					return err
 				}
 			}
@@ -590,12 +604,13 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 			if state.Value == next || state.Value == "" && next == "available" {
 				continue
 			}
-			id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
-			if reason == "" {
-				reason = "the workstream's blocking edges resolved"
+			if next == "available" {
+				cleared = append(cleared, clears{stream: stream, state: state, revision: revision, blocking: blocking, observed: observed})
+				continue
 			}
+			id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
 			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: foremanActor, Cause: "edge-availability"}
-			transactions = append(transactions, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "edge", reason)}})
+			transactions = append(transactions, trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}), Events: []trace.Event{trace.Notice(id, "edge", reason)}})
 		}
 		return nil
 	})
@@ -604,6 +619,49 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 	}
 	for _, tx := range transactions {
 		if _, err := repo.Transact(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, c := range cleared {
+		cause := fmt.Sprintf("edge-resolved-%d", c.revision)
+		if kept, err := keptWaiting(repo, c.stream, EdgeWaitSubject, cause); err != nil {
+			return err
+		} else if kept {
+			continue
+		}
+		var records []router.Entry
+		for _, e := range c.blocking {
+			text := fmt.Sprintf("hard_block edge from %s: observed merged", e.From)
+			if i := slices.IndexFunc(c.observed.Edges, func(m EdgeMergeStatus) bool { return m.Upstream == e.From && m.Type == e.Type }); i >= 0 && c.observed.Edges[i].Reference != "" {
+				text += " as " + c.observed.Edges[i].Reference
+			}
+			records = append(records, router.Entry{Kind: "edge", ID: string(e.From), Text: text})
+		}
+		x := s.clearingExit(repo, c.stream, c.state, clearing{
+			Subject: EdgeWaitSubject, Trigger: TriggerEdgeResolved, Notice: "edge", Cause: cause, HeaderCause: "edge-availability",
+			Reason:  "the workstream's blocking edges resolved",
+			Doubt:   question("merge_in_doubt", "The records show that an upstream's merge is not final: it was reverted, or observed on another branch than the one the dependent builds on."),
+			Facts:   map[string]any{"blocking_edges": len(c.blocking), "observation_revision": c.revision},
+			Records: records, Intent: "A dependent workstream starts its work only after the workstreams it hard-depends on have merged.",
+			Unresolved: func(ctx context.Context) (string, error) {
+				edges, err := IncomingMergeEdges(repo, c.stream)
+				if err != nil {
+					return "", err
+				}
+				blocking := EdgesOfType(edges, trace.EdgeHardBlock)
+				var observed EdgeObservation
+				if len(blocking) > 0 {
+					if observed, _, _, err = EdgeObservationAt(repo, c.stream); err != nil {
+						return "", err
+					}
+				}
+				if reference, found := FirstUnresolvedEdge(blocking, observed); found {
+					return fmt.Sprintf("an incoming edge is unresolved again: %s", reference), nil
+				}
+				return "", nil
+			},
+		})
+		if _, err := s.routeExit(ctx, x); err != nil {
 			return err
 		}
 	}

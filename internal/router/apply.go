@@ -32,7 +32,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	if x.TransitionID != nil {
 		moveID = x.TransitionID(target)
 	}
-	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.Default}
+	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.stateOf(x.Default)}
 	// A decider that has no judgment, such as a fallback, cites none.
 	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner {
 		routing.Judgment = d.judgment
@@ -71,9 +71,9 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	h := r.headerFor(x, "osmia.trace.transition", moveID, 1, at, cause)
 	h.Actor = x.Actor
 	move := trace.Transaction{ExpectedVersion: x.Version, Events: effect.Events, Transition: trace.Transition{
-		Header: h, Subject: x.Subject, From: x.From, To: target.Name, Reason: reason,
+		Header: h, Subject: x.Subject, From: x.From, To: target.stateName(), Reason: reason,
 		DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
-	if !trace.ValidRouting(target.Name, routing) {
+	if !trace.ValidRouting(target.stateName(), routing) {
 		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, target.Name))
 	}
 	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided, rec.Transition = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at, moveID

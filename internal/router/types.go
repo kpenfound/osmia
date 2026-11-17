@@ -59,6 +59,9 @@ type Condition struct {
 // Target is one state an exit can enter.
 type Target struct {
 	Name string
+	// State is the value of the subject's state the target enters, for a
+	// machine whose states carry a number (held-3); empty means the name.
+	State string
 	// Description is what the target does, one line, as Jev reads it.
 	Description string
 	// Reason is the transition's reason when the target is entered.
@@ -284,6 +287,22 @@ func (x Exit) validate() error {
 		}
 	}
 	return nil
+}
+
+// stateName is the state value the target enters.
+func (t Target) stateName() string {
+	if t.State != "" {
+		return t.State
+	}
+	return t.Name
+}
+
+// stateOf is the state value the named target enters.
+func (x Exit) stateOf(name string) string {
+	if t, ok := x.target(name); ok {
+		return t.stateName()
+	}
+	return name
 }
 
 func (x Exit) target(name string) (Target, bool) {

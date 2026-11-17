@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -169,6 +170,68 @@ func BaseWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, erro
 	state, err := repo.Workflow(stream, BaseWaitSubject)
 	return state.Value == "waiting", err
 }
+
+// baseWaitReason returns why the workstream of dependency is parked on its
+// base, or "" when the base is available, with the revision of the base
+// observation it read. An unavailable ancestor parks the whole dependent
+// chain.
+func (s *Controller) baseWaitReason(ctx context.Context, repo *trace.Repository, dependency trace.WorkstreamBase) (string, int, error) {
+	stream := dependency.Workstream
+	own, _, sealed, err := seal.Latest(repo, stream)
+	if err != nil {
+		return "", 0, err
+	}
+	parent := dependency.Base
+	observed, revision, err := BaseObservationAt(repo, stream)
+	if err != nil {
+		return "", 0, err
+	}
+	if sealed && own.Base.Workstream == "" || revision > 0 && observed.Base.Commit != "" && observed.Base.Workstream == "" {
+		parent = ""
+	}
+	reason := ""
+	// An unavailable ancestor parks the whole dependent chain.
+	for parent != "" {
+		state, err := repo.Workflow(parent, trace.FeatureSubject)
+		if err != nil {
+			return "", 0, err
+		}
+		if state.Value == AbandonedState {
+			reason = fmt.Sprintf("base workstream %s was abandoned; the owner must choose how to continue", parent)
+			break
+		}
+		sealed, _, found, err := seal.Latest(repo, parent)
+		if err != nil {
+			return "", 0, err
+		}
+		if !found {
+			reason = fmt.Sprintf("base workstream %s has no sealed branch yet", parent)
+			break
+		}
+		g, err := featureWorkspaces(s.About(repo), repo).Of(parent)
+		if err != nil {
+			return "", 0, err
+		}
+		_, exists, err := g.Branch(ctx, sealed.Branch)
+		if err != nil {
+			return "", 0, err
+		}
+		if !exists {
+			reason = fmt.Sprintf("base branch %s is unavailable; the owner must restore it or abandon this workstream", sealed.Branch)
+			break
+		}
+		if sealed.Base.Workstream == "" {
+			break
+		}
+		next, err := snapshotWorkstreamBase(repo, parent)
+		if err != nil {
+			return "", 0, err
+		}
+		parent = next.Base
+	}
+	return reason, revision, nil
+}
+
 func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) error {
 	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
@@ -193,57 +256,9 @@ func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) e
 		if feature.Value == AbandonedState || feature.Value == DeliveredState {
 			continue
 		}
-		own, _, sealed, err := seal.Latest(repo, stream)
+		reason, revision, err := s.baseWaitReason(ctx, repo, dependency)
 		if err != nil {
 			return err
-		}
-		parent := dependency.Base
-		observed, revision, err := BaseObservationAt(repo, stream)
-		if err != nil {
-			return err
-		}
-		if sealed && own.Base.Workstream == "" || revision > 0 && observed.Base.Commit != "" && observed.Base.Workstream == "" {
-			parent = ""
-		}
-		reason := ""
-		// An unavailable ancestor parks the whole dependent chain.
-		for parent != "" {
-			state, err := repo.Workflow(parent, trace.FeatureSubject)
-			if err != nil {
-				return err
-			}
-			if state.Value == AbandonedState {
-				reason = fmt.Sprintf("base workstream %s was abandoned; the owner must choose how to continue", parent)
-				break
-			}
-			sealed, _, found, err := seal.Latest(repo, parent)
-			if err != nil {
-				return err
-			}
-			if !found {
-				reason = fmt.Sprintf("base workstream %s has no sealed branch yet", parent)
-				break
-			}
-			g, err := featureWorkspaces(s.About(repo), repo).Of(parent)
-			if err != nil {
-				return err
-			}
-			_, exists, err := g.Branch(ctx, sealed.Branch)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				reason = fmt.Sprintf("base branch %s is unavailable; the owner must restore it or abandon this workstream", sealed.Branch)
-				break
-			}
-			if sealed.Base.Workstream == "" {
-				break
-			}
-			next, err := snapshotWorkstreamBase(repo, parent)
-			if err != nil {
-				return err
-			}
-			parent = next.Base
 		}
 		state, err := repo.Workflow(stream, BaseWaitSubject)
 		if err != nil {
@@ -257,11 +272,35 @@ func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) e
 			continue
 		}
 		id := fmt.Sprintf("%s-%d", BaseWaitSubject, state.Version+1)
-		if reason == "" {
+		if next == "available" {
 			reason = "the workstream base is available again"
+			cause := fmt.Sprintf("base-available-%d", revision)
+			if kept, err := keptWaiting(repo, stream, BaseWaitSubject, cause); err != nil {
+				return err
+			} else if kept {
+				continue
+			}
+			x := s.clearingExit(repo, stream, state, clearing{
+				Subject: BaseWaitSubject, Trigger: TriggerBaseAvailable, Notice: "base", Cause: cause, HeaderCause: "base-availability", Reason: reason,
+				Doubt:   question("base_unusable", "The records show the base still cannot be built on: its branch is missing, unsealed or about to be abandoned."),
+				Facts:   map[string]any{"observation_revision": revision},
+				Records: []router.Entry{{Kind: "base", ID: string(dependency.Base), Text: fmt.Sprintf("the base of workstream %s, workstream %s, is available", stream, dependency.Base)}},
+				Intent:  "A workstream that builds on another workstream's branch waits while that base is abandoned, unsealed or missing.",
+				Unresolved: func(ctx context.Context) (string, error) {
+					why, _, err := s.baseWaitReason(ctx, repo, dependency)
+					if why != "" {
+						why = "the base is unavailable again: " + why
+					}
+					return why, err
+				},
+			})
+			if _, err := s.routeExit(ctx, x); err != nil {
+				return err
+			}
+			continue
 		}
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: foremanActor, Cause: "base-availability"}
-		_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: BaseWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "base", reason)}})
+		_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: h, Subject: BaseWaitSubject, From: state.Value, To: next, Reason: reason}), Events: []trace.Event{trace.Notice(id, "base", reason)}})
 		if err != nil {
 			return err
 		}

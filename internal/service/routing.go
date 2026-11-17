@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/recordspans"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -15,6 +17,8 @@ import (
 func (s *Service) newRouter() *router.Router {
 	effects := &router.Effects{}
 	execution.RegisterUnitEffects(effects, s.execution)
+	lifecycle.RegisterRoutingEffects(effects, s.lifecycle)
+	intake.RegisterObjectionEffects(effects, s.intake)
 	rebuild := &router.Rebuilders{}
 	rebuild.Register(execution.UnitMachine, execution.RebuildUnitExit(s.execution))
 	return &router.Router{

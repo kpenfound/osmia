@@ -83,7 +83,7 @@ var RouteTriggers = []string{
 	"ws.move_owner", "ws.move_proposal", "ws.stalled",
 	"final.requested", "final.reviewed_clean", "final.reviewed_blocking", "final.failed", "final.checks_missing",
 	"contest.owner_ruling", "contest.jev_ruling", "contest.chief_ruling", "objection.chief_decision",
-	"dep.edge_wait", "dep.edge_resolved", "dep.upstream_terminal", "dep.upstream_integrated", "dep.base_unavailable", "dep.base_integrated",
+	"dep.edge_wait", "dep.edge_resolved", "dep.upstream_terminal", "dep.upstream_integrated", "dep.base_unavailable", "dep.base_available", "dep.base_integrated",
 	"drift.requested", "drift.clean", "drift.review_approved", "drift.review_rejected", "drift.turn_failed", "drift.held",
 }
 

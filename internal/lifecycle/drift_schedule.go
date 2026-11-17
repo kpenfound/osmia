@@ -180,7 +180,7 @@ func (f *Foreman) AskDrift(ctx context.Context, stream config.WorkstreamID, at t
 	id := fmt.Sprintf("%s-%d", DriftRequestSubject, k)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repository.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: DriftRequestSubject}
 	reason := fmt.Sprintf("the owner asked for a drift rebase of %s onto %s of %s; drift rebase %d answers it on the project's lander", featureBranch(stream), f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, k)
-	tx := trace.Transaction{ExpectedVersion: current.Version, Transition: trace.Transition{Header: h, Subject: DriftRequestSubject, From: current.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason}}
+	tx := trace.Transaction{ExpectedVersion: current.Version, Transition: trace.Transition{Header: h, Subject: DriftRequestSubject, From: current.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason, DecidedBy: trace.DecidedByOwner, DefaultTo: fmt.Sprintf("requested-%d", k)}}
 	if _, err := f.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if state, readErr := f.repository.Workflow(stream, DriftRequestSubject); readErr == nil {

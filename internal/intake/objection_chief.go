@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -89,25 +90,54 @@ func (s *Controller) ObjectionSubject(repository *trace.Repository, stream confi
 	return entries[i], round, nil
 }
 
-// decideObjection records the chief of staff's decision on one committee
-// objection that stands at the workstream's ratification gate: dismissed on
-// the owner's behalf, or escalated to the owner. It is refused as
-// ObjectionSubject describes. A non-empty Judgment is the Jev judgment record
-// whose binding pick the decision carries out; the decision then names Jev as
-// its decider and the judgment as its source.
-func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, req ObjectionDecisionRequest) (shed.Entry, *APIError) {
+// The machine and trigger of a committee objection's exit, and the states its
+// subject enters: dismissed on the owner's behalf, or escalated to the owner.
+const (
+	ObjectionMachine         = "objection"
+	TriggerObjectionDecision = "objection.chief_decision"
+	ObjectionDismissed       = "dismissed"
+	ObjectionEscalated       = "escalated"
+)
+
+// objectionSubject is the workflow subject of one committee objection: it has
+// no state while the objection stands, and its first transition records how it
+// was decided.
+func objectionSubject(objection string) string { return "objection-" + objection }
+
+// objectionTarget is the state a decision enters.
+func objectionTarget(d shed.Decide) string {
+	if d == shed.Dismiss {
+		return ObjectionDismissed
+	}
+	return ObjectionEscalated
+}
+
+// objectionDecision is the chief decision of a target.
+func objectionDecision(target string) shed.Decide {
+	if target == ObjectionDismissed {
+		return shed.Dismiss
+	}
+	return shed.Escalate
+}
+
+// objectionDocument returns the record of the chief of staff's decision on one
+// committee objection that stands at the workstream's ratification gate. It is
+// refused as ObjectionSubject describes. A non-empty judgment is the Jev
+// judgment record the decision comes from; the decision then names Jev as its
+// decider.
+func (s *Controller) objectionDocument(repository *trace.Repository, stream config.WorkstreamID, objection string, decision shed.Decide, note, turn, judgment string) (trace.Document, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
-	_, round, api := s.ObjectionSubject(repository, stream, req.Objection)
+	_, round, api := s.ObjectionSubject(repository, stream, objection)
 	if api != nil {
-		return shed.Entry{}, api
+		return trace.Document{}, api
 	}
 	pin, err := LatestPin(repository, stream)
 	if err != nil {
-		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
+		return trace.Document{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
 	rounds, err := shed.AllChiefDecisions(repository, stream)
 	if err != nil {
-		return shed.Entry{}, failed
+		return trace.Document{}, failed
 	}
 	decisions := shed.ChiefDecisions{Version: shed.Version, Round: round, Revision: pin}
 	for _, r := range rounds {
@@ -115,18 +145,18 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 			decisions = r
 		}
 	}
-	chosen := shed.ChiefDecision{Objection: req.Objection, Decision: req.Decision, Note: req.Note, Turn: req.Turn}
-	if req.Judgment != "" {
-		chosen.DecidedBy, chosen.Judgment = trace.DecidedByJev, req.Judgment
+	chosen := shed.ChiefDecision{Objection: objection, Decision: decision, Note: note, Turn: turn}
+	if judgment != "" {
+		chosen.DecidedBy, chosen.Judgment = trace.DecidedByJev, judgment
 	}
 	decisions.Decisions = append(slices.Clone(decisions.Decisions), chosen)
 	content, err := shed.EncodeChiefDecisions(decisions)
 	if err != nil {
-		return shed.Entry{}, &APIError{Code: Validation, Message: "the decision cannot be recorded: " + err.Error()}
+		return trace.Document{}, &APIError{Code: Validation, Message: "the decision cannot be recorded: " + err.Error()}
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return shed.Entry{}, failed
+		return trace.Document{}, failed
 	}
 	revision := 1
 	for _, d := range docs {
@@ -134,9 +164,122 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 			revision = d.Revision + 1
 		}
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ChiefDocumentID(round), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ChiefActor, Cause: req.Objection}
-	if err := repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: shed.ChiefPath(round), Content: string(content)}}); err != nil {
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ChiefDocumentID(round), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ChiefActor, Cause: objection}
+	return trace.Document{Header: h, Path: shed.ChiefPath(round), Content: string(content)}, nil
+}
+
+// RegisterObjectionEffects defines, in the router's registry, the effect of
+// entering each state a committee objection's decision leads to: the record of
+// the chief of staff's decision. A decision Jev made, whether it departed from
+// the chief's or a binding pick the chief carries out, names Jev and its
+// judgment. load returns the intake controller.
+func RegisterObjectionEffects(reg *router.Effects, load func() *Controller) {
+	for _, target := range []string{ObjectionDismissed, ObjectionEscalated} {
+		reg.Register(ObjectionMachine, target, func(_ context.Context, p router.Plan) (router.Effect, error) {
+			s := load()
+			if s == nil {
+				return router.Effect{}, errors.New("objection decisions are unavailable")
+			}
+			x := p.Exit
+			note, judgment := x.Note, ""
+			switch p.Routing.DecidedBy {
+			case trace.DecidedByJev:
+				judgment = p.Routing.Judgment
+				note = fmt.Sprintf("Jev decided %s instead of the chief of staff's %s (judgment %s). The chief of staff's note: %s", objectionDecision(p.Target.Name), x.Default, judgment, x.Note)
+			case trace.DecidedByJevGate:
+				judgment = p.Routing.Judgment
+			}
+			doc, api := s.objectionDocument(x.Repo, x.Workstream, x.HeaderCause, objectionDecision(p.Target.Name), note, x.Turn, judgment)
+			switch {
+			case api == nil:
+				return router.Effect{Documents: []trace.Document{doc}}, nil
+			case api.Code == Internal:
+				return router.Effect{}, errors.New(api.Message)
+			}
+			return router.Effect{}, router.Refusal(api.Message)
+		})
+	}
+}
+
+// objectionExit returns the exit of the chief of staff's decision on a
+// committee objection: the decision it made is the default, and the other
+// decision is the other target. A binding pick of Jev's own decision on the
+// objection is a pinned move that enters exactly the decision it picked.
+// Dismissing needs the strict bar, escalating to the owner the modest one.
+func (s *Controller) objectionExit(repository *trace.Repository, stream config.WorkstreamID, req ObjectionDecisionRequest) (router.Exit, error) {
+	state, err := repository.Workflow(stream, objectionSubject(req.Objection))
+	if err != nil {
+		return router.Exit{}, err
+	}
+	def := objectionTarget(req.Decision)
+	x := router.Exit{
+		Repo: repository, Project: repository.Project(), Workstream: stream, Machine: ObjectionMachine,
+		Subject: objectionSubject(req.Objection), From: state.Value, Version: state.Version, Trigger: TriggerObjectionDecision,
+		Cause: req.Objection + "-" + string(req.Decision), HeaderCause: req.Objection, Actor: ChiefActor, Note: req.Note, Turn: req.Turn,
+		At:      s.Now(),
+		Default: def,
+		Targets: []router.Target{
+			{Name: ObjectionDismissed, Bar: router.BarStrict, Description: "Dismiss the objection on the owner's behalf: the record answers it, so it blocks no longer and is not put to the owner.",
+				Corroborate: []router.Condition{{Question: "record_answers", AtLeast: router.LevelStrict}}},
+			{Name: ObjectionEscalated, Bar: router.BarModest, Description: "Escalate the objection: the owner rules on it at the ratification gate."},
+		},
+		Questions: []router.Question{
+			{Name: "record_answers", Instructions: "The architect's reply, the spec, the plan or the charter answers the objection, so it needs no change."},
+			{Name: "charter_veto", Instructions: "The objection cites a charter rule that the plan or its units break."},
+		},
+		TransitionID: func(t router.Target) string { return objectionSubject(req.Objection) + "-" + t.Name },
+		Evidence: router.Evidence{
+			Intent:  "The committee's objection stands at the ratification gate. The chief of staff dismisses it only when the record answers it, and escalates it when it needs the owner.",
+			Records: []router.Entry{{Kind: "chief-note", Text: req.Note}},
+		},
+		Prereq: router.Prerequisites{Other: func(_ context.Context, _ router.Target) (string, error) {
+			if _, _, api := s.ObjectionSubject(repository, stream, req.Objection); api != nil {
+				if api.Code == Internal {
+					return "", errors.New(api.Message)
+				}
+				return api.Message, nil
+			}
+			return "", nil
+		}},
+	}
+	if entry, _, api := s.ObjectionSubject(repository, stream, req.Objection); api == nil {
+		x.Evidence.Records = append([]router.Entry{{Kind: "objection", ID: entry.ID, Text: fmt.Sprintf("%s by %s against %s: %s", entry.Kind, entry.Member, entry.Part, entry.Argument)}}, x.Evidence.Records...)
+	}
+	if req.Judgment != "" {
+		x.Authority = &router.Authority{Kind: router.AuthorityJevGate, Target: def, Judgment: req.Judgment}
+	}
+	return x, nil
+}
+
+// DecideObjection records the chief of staff's decision on one committee
+// objection that stands at the workstream's ratification gate: dismissed on
+// the owner's behalf, or escalated to the owner. It is refused as
+// ObjectionSubject describes. A decision is an exit the router decides: Jev's
+// binding pick is entered as it was picked, and the chief of staff's own
+// decision is entered unless Jev's answers depart from it. A non-empty
+// Judgment is the Jev judgment record whose binding pick the decision carries
+// out; the decision then names Jev as its decider and the judgment as its
+// source. A decision the router holds records nothing.
+func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, req ObjectionDecisionRequest) (shed.Entry, *APIError) {
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
+	if _, _, api := s.ObjectionSubject(repository, stream, req.Objection); api != nil {
+		return shed.Entry{}, api
+	}
+	if s.Router == nil {
+		return shed.Entry{}, &APIError{Code: Internal, Message: "routing objection decisions is unavailable"}
+	}
+	x, err := s.objectionExit(repository, stream, req)
+	if err != nil {
+		return shed.Entry{}, failed
+	}
+	res, err := s.Router.Route(ctx, x)
+	switch {
+	case err != nil && errors.Is(err, trace.ErrConflict):
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s was decided already", req.Objection)}
+	case err != nil:
 		return shed.Entry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on objection %s of workstream %s; check the trace repository", req.Objection, stream)}
+	case !res.Committed:
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the decision on objection %s is not recorded: the router %s it (%s); the chief of staff's notice has what Jev saw", req.Objection, routeWord(res), res.Hold)}
 	}
 	entries, err := Dissent(repository, stream)
 	if err != nil {
@@ -147,6 +290,19 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 		return shed.Entry{}, failed
 	}
 	return entries[i], nil
+}
+
+// routeWord says what the router did with an exit it did not commit.
+func routeWord(res router.Result) string {
+	switch res.Journal {
+	case router.StateOwner:
+		return "sent to the owner"
+	case router.StateRefused:
+		return "refused"
+	case router.StateStale:
+		return "found stale"
+	}
+	return "held"
 }
 
 // resolveObjection returns the resolve_objection tool of one claimed
@@ -238,8 +394,11 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 			return PriorityRefusal(api.Message)
 		}
 		detail := "the objection is dismissed on the owner's behalf and is not put to the owner"
-		if decision == shed.Escalate {
+		if entry.Escalated {
 			detail = "the objection is in the owner's ratification packet with your note"
+		}
+		if entry.Escalated != (decision == shed.Escalate) {
+			detail += "; Jev's answers departed from your decision, so it is recorded as Jev's"
 		}
 		return json.Marshal(struct {
 			Recorded  bool   `json:"recorded"`

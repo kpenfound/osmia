@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -146,4 +147,93 @@ func exitFor(t *testing.T, f *buildFixture, cause string) router.Exit {
 		Default: UnitChecking, Targets: []string{UnitChecking, UnitReviewing}, Actor: checksActor})
 	must(t, err)
 	return x
+}
+
+// contestUnit moves the started unit resume, whatever state it is in, to
+// contested, as a contest raised on its candidate leaves it.
+func contestUnit(t *testing.T, f *buildFixture, repo *trace.Repository, id string) trace.WorkflowState {
+	t.Helper()
+	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "unit-resume-contested-" + id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: masonActor, Cause: "turn"}
+	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject("resume"), From: state.Value, To: UnitContested, Reason: "review sent the unit back too often"}})
+	must(t, err)
+	state, err = repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	return state
+}
+
+// A ruling of the chief of staff on a contested unit is an exit the router
+// judges. With Jev finding the default fits, the ruling is entered as it was
+// given and its transition records the default it took. When Jev's answers
+// depart from it, the unit is entered into the other legal target through the
+// shared effects of a move, the transition names Jev as its decider, and the
+// departure is displayed.
+func TestAChiefRulingIsJudgedAndAScriptedDepartureIsRecorded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	exit := func(f *buildFixture, repo *trace.Repository, state trace.WorkflowState) router.Exit {
+		x, err := f.s.UnitExit(UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", State: state, Trigger: TriggerChiefRuling, Cause: "ruling-1",
+			Default: UnitReviewing, Targets: []string{UnitReviewing, UnitImplementing}, Actor: chiefActor, Note: "Review the candidate again.",
+			ID: "unit-resume-reviewing-ruling-1", HeaderCause: "ruling-1", Reason: "the chief of staff ruled review"})
+		must(t, err)
+		return x
+	}
+	last := func(t *testing.T, repo *trace.Repository) trace.Transition {
+		t.Helper()
+		transitions, err := trace.Read[trace.Transition](repo, stream)
+		must(t, err)
+		var out trace.Transition
+		for _, tr := range transitions {
+			if tr.Subject == trace.UnitSubject("resume") {
+				out = tr
+			}
+		}
+		return out
+	}
+
+	t.Run("the default fits", func(t *testing.T) {
+		t.Parallel()
+		f, _, repo := newChecksFixture(t, "ruling-fits", &fakeChecks{Outcomes: passing()})
+		routeWith(f.s, f.clock.Now, f.jev)
+		x := exit(f, repo, contestUnit(t, f, repo, "fits"))
+		res, err := f.s.Router.Route(ctx, x)
+		must(t, err)
+		moved := last(t, repo)
+		if !res.Committed || moved.To != UnitReviewing || moved.DefaultTo != UnitReviewing || moved.DecidedBy != trace.DecidedByCode || moved.Departed() {
+			t.Fatalf("result %+v, transition %+v", res, moved)
+		}
+	})
+
+	t.Run("a departure", func(t *testing.T) {
+		t.Parallel()
+		f, _, repo := newChecksFixture(t, "ruling-departs", &fakeChecks{Outcomes: passing()})
+		f.jev.Script = func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, UnitImplementing, 0.9, 0.9) }
+		routeWith(f.s, f.clock.Now, f.jev)
+		x := exit(f, repo, contestUnit(t, f, repo, "departs"))
+		res, err := f.s.Router.Route(ctx, x)
+		must(t, err)
+		moved := last(t, repo)
+		if !res.Committed || res.Outcome != router.OutcomeDeparted || moved.To != UnitImplementing || moved.DefaultTo != UnitReviewing || moved.DecidedBy != trace.DecidedByJev || moved.Judgment == "" || !moved.Departed() {
+			t.Fatalf("result %+v, transition %+v", res, moved)
+		}
+		rec, err := router.Lookup(repo, stream, x)
+		must(t, err)
+		if rec == nil || rec.Outcome != router.OutcomeDeparted || rec.Default != UnitReviewing || rec.Target != UnitImplementing || rec.Judgment != moved.Judgment {
+			t.Fatalf("route %+v", rec)
+		}
+	})
+
+	t.Run("a pick below its bar holds the unit", func(t *testing.T) {
+		t.Parallel()
+		f, _, repo := newChecksFixture(t, "ruling-below-bar", &fakeChecks{Outcomes: passing()})
+		f.jev.Script = func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, UnitImplementing, 0.55, 0.9) }
+		routeWith(f.s, f.clock.Now, f.jev)
+		x := exit(f, repo, contestUnit(t, f, repo, "below"))
+		res, err := f.s.Router.Route(ctx, x)
+		must(t, err)
+		if res.Committed || res.Outcome != router.OutcomeHeld || res.Hold != router.HoldBelowBar || unitState(t, repo, stream, "resume") != UnitContested {
+			t.Fatalf("result %+v, the unit is %s", res, unitState(t, repo, stream, "resume"))
+		}
+	})
 }
