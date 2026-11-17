@@ -339,6 +339,8 @@ func (s *Controller) dependencyExit(repo *trace.Repository, stream config.Workst
 	adopt := router.Target{Name: DependencyAdopted,
 		Description: "Go on: the upstream's changes are already in the project's base branch, so the dependent no longer waits for a merge.",
 		Reason:      fmt.Sprintf("the %s is satisfied: the upstream's changes are already in the base branch", what)}
+	intent, entries, facts := s.dependencyIntent(repo, stream, c)
+	facts["dependency_type"], facts["ended"], facts["integrated"] = c.Type, c.Ended, c.Integrated
 	exit := router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: DependencyMachine,
 		Subject: subject, From: state.Value, Version: state.Version, Trigger: c.Trigger, Cause: c.Cause, HeaderCause: c.Cause, Actor: actor, Note: c.Note,
@@ -346,9 +348,9 @@ func (s *Controller) dependencyExit(repo *trace.Repository, stream config.Workst
 		TransitionID: func(router.Target) string { return id },
 		Authority:    c.Authority,
 		Evidence: router.Evidence{
-			Intent:  "A dependent workstream waits on the workstreams it depends on so that it builds on what they deliver; dropping a dependency must not change what the owner approved.",
-			Facts:   map[string]any{"dependency_type": c.Type, "ended": c.Ended, "integrated": c.Integrated},
-			Records: []router.Entry{{Kind: "dependency", ID: string(c.Upstream), Text: fmt.Sprintf("the %s: %s", what, c.evidence())}},
+			Intent:  intent,
+			Facts:   facts,
+			Records: append([]router.Entry{{Kind: "dependency", ID: string(c.Upstream), Text: fmt.Sprintf("the %s: %s", what, c.evidence())}}, entries...),
 		},
 		Prereq: router.Prerequisites{Other: func(ctx context.Context, t router.Target) (string, error) {
 			if t.Name == DependencyKept {

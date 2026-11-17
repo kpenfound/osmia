@@ -231,6 +231,13 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 			Description: "Leave the workstream where it is: " + policy.Why + ".",
 			Reason:      fmt.Sprintf("workstream %s stays %s: the proposal to move it to %s was not made: %s: %s", stream, feature.Value, to, policy.Why, note)}}, targets...)
 	}
+	intent, records, facts, err := workstreamIntent(repo, stream)
+	if err != nil {
+		return router.Exit{}, err
+	}
+	for k, v := range policy.Facts {
+		facts[k] = v
+	}
 	x := router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: intake.WorkstreamMachine,
 		Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version,
@@ -241,7 +248,7 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 		TransitionID: func(t router.Target) string {
 			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
 		},
-		Evidence: router.Evidence{Intent: "The workstream's sealed spec and plan are what the owner approved.", Facts: policy.Facts},
+		Evidence: router.Evidence{Intent: intent, Facts: facts, Records: records},
 		Prereq: router.Prerequisites{
 			Other: func(ctx context.Context, t router.Target) (string, error) {
 				if t.Name == NoMoveTarget {
@@ -257,13 +264,6 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 				return api.Message, nil
 			},
 		},
-	}
-	moves, err := WorkstreamMoves(repo, stream)
-	if err != nil {
-		return router.Exit{}, err
-	}
-	for _, m := range moves {
-		x.Evidence.Records = append(x.Evidence.Records, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: fmt.Sprintf("%s moved the workstream from %s to %s: %s", m.By, m.From, m.To, m.Note)})
 	}
 	return x, nil
 }
