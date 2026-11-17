@@ -98,7 +98,11 @@ func unitTarget(name string) router.Target {
 	case UnitImplementing:
 		return router.Target{Name: name, Description: "Give the unit's mason a turn with a fresh clean-turn allowance to revise the unit.", Bar: router.BarModest, Works: true}
 	case UnitChecking:
-		return router.Target{Name: name, Description: "Run the checks again on the unit's recorded candidate.", Bar: router.BarModest, NeedsCandidate: true, Works: true}
+		// Running the project's checks is no agent session: it spends neither the
+		// budget nor the loop guard's sessions, and the checks pass itself holds the
+		// run while a pause covers the workstream, so entering the state starts no
+		// agent work.
+		return router.Target{Name: name, Description: "Run the checks again on the unit's recorded candidate.", Bar: router.BarModest, NeedsCandidate: true}
 	case UnitReviewing:
 		return router.Target{Name: name, Description: "Have the unit's reviewer review the recorded candidate again.", Bar: router.BarModest, NeedsCandidate: true, Works: true}
 	case UnitApproved:
@@ -241,12 +245,9 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 				return "", nil
 			},
 			Operations: func(_ context.Context, t router.Target) (string, error) {
-				// The state a trigger enters as its default is entered whatever
-				// the unit's operations are doing, as it always has been; any
-				// other target waits for the landing or rebase to end.
-				if in.ID != "" && t.Name == in.Default {
-					return "", nil
-				}
+				// Every target waits for a landing or rebase of the unit to end,
+				// however it is reached; only the operation whose completion
+				// raised the exit does not hold it.
 				action, err := unitOperationExcept(in.Repo, in.Stream, in.Unit, in.Operation)
 				switch {
 				case err != nil:
@@ -257,6 +258,14 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 					return fmt.Sprintf("the foreman is rebasing unit %s", in.Unit), nil
 				}
 				return "", nil
+			},
+			Limits: func(ctx context.Context, t router.Target) (string, error) {
+				// A target that starts agent work stops at an exhausted budget or
+				// a tripped loop guard, however it is reached.
+				if !t.Works || s.Limits == nil {
+					return "", nil
+				}
+				return s.Limits(ctx, router.Exit{Repo: in.Repo, Project: in.Repo.Project(), Workstream: in.Stream, Unit: in.Unit})
 			},
 			Other: func(_ context.Context, t router.Target) (string, error) {
 				if in.Legal != nil {

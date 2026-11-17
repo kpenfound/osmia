@@ -957,11 +957,11 @@ func worksExit(f *fx) router.Exit {
 	return x
 }
 
-// A pause, a spent budget or the loop guard stops the targets that start work:
-// they are not offered to Jev, a pick whose limit is reached while Jev answers
-// is refused with one notice, a proposal whose default starts work is held, and
-// only an owner's pinned decision and a default entered through its trigger's
-// own records go on.
+// A spent budget or the loop guard stops the targets that start work, however
+// the target is reached: they are not offered to Jev, a pick whose limit is
+// reached while Jev answers is refused with one notice, and a default, a
+// default entered through its trigger's own records and an owner's pinned
+// decision are refused as well.
 func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 	const why = "work is paused (daily-budget): the budget is spent"
 	t.Run("the targets are not offered", func(t *testing.T) {
@@ -1005,7 +1005,7 @@ func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 		}
 	})
 
-	t.Run("a default that starts work and carries no records of its own is held", func(t *testing.T) {
+	t.Run("a default that starts work is held", func(t *testing.T) {
 		f := newFx(t, &jevfixture.Transitions{})
 		f.seed("checking")
 		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
@@ -1015,10 +1015,23 @@ func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 		}
 	})
 
-	t.Run("a default entered through its trigger's own records goes on", func(t *testing.T) {
+	t.Run("a default entered through its trigger's own records is held as well", func(t *testing.T) {
 		f := newFx(t, &jevfixture.Transitions{})
 		f.seed("checking")
 		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
+		x := worksExit(f)
+		entered := false
+		x.Enter = func(context.Context, router.Plan) (router.Effect, error) { entered = true; return router.Effect{}, nil }
+		res := route(t, f, x)
+		if res.Committed || res.Hold != router.HoldDefaultIllegal || entered || len(f.moves()) != 0 || f.state().Value != "checking" || len(f.notices()) != 1 {
+			t.Fatalf("result = %+v, entered %v", res, entered)
+		}
+	})
+
+	t.Run("a default entered through its trigger's own records goes on while nothing stops it", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return "", nil }
 		x := worksExit(f)
 		x.Enter = func(context.Context, router.Plan) (router.Effect, error) { return router.Effect{}, nil }
 		res := route(t, f, x)
@@ -1027,15 +1040,110 @@ func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 		}
 	})
 
-	t.Run("an owner's pinned decision goes on", func(t *testing.T) {
+	t.Run("an owner's pinned decision meets the same limit", func(t *testing.T) {
 		f := newFx(t, &jevfixture.Transitions{})
 		f.seed("checking")
+		f.track("implementing")
 		f.router.Stops = func(context.Context, router.Exit) (string, error) { return why, nil }
 		x := worksExit(f)
 		x.Trigger, x.Actor = "unit.move_owner", owner
 		x.Authority = &router.Authority{Kind: router.AuthorityOwner, Target: "implementing"}
 		res := route(t, f, x)
+		if res.Committed || res.Journal != router.StateRefused || f.ran("implementing") != 0 || len(f.moves()) != 0 || f.state().Value != "checking" || len(f.provider.Requests()) != 0 {
+			t.Fatalf("result = %+v", res)
+		}
+		if n := f.notices(); len(n) != 1 || !strings.Contains(n[0], "budget is spent") {
+			t.Fatalf("notices = %v", n)
+		}
+	})
+
+	t.Run("an owner's pinned decision goes on while nothing stops it", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.router.Stops = func(context.Context, router.Exit) (string, error) { return "", nil }
+		x := worksExit(f)
+		x.Trigger, x.Actor = "unit.move_owner", owner
+		x.Authority = &router.Authority{Kind: router.AuthorityOwner, Target: "implementing"}
+		res := route(t, f, x)
 		if !res.Committed || res.State != "implementing" || len(f.provider.Requests()) != 0 {
+			t.Fatalf("result = %+v", res)
+		}
+		if moves := f.moves(); len(moves) != 1 || moves[0].DecidedBy != trace.DecidedByOwner {
+			t.Fatalf("moves = %+v", moves)
+		}
+	})
+}
+
+// A pause of the owner holds the targets that start work without recording
+// anything or starting any, and the exit is offered again once the pause lifts.
+func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
+	const why = "work is paused (owner): resting"
+	t.Run("a default is held and then entered", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		paused := true
+		f.router.Paused = func(context.Context, router.Exit) (string, error) {
+			if paused {
+				return why, nil
+			}
+			return "", nil
+		}
+		entered := 0
+		x := worksExit(f)
+		x.Enter = func(context.Context, router.Plan) (router.Effect, error) { entered++; return router.Effect{}, nil }
+		res := route(t, f, x)
+		if res.Committed || res.Hold != router.HoldPaused || res.Outcome != router.OutcomeHeld || res.Journal != "" || entered != 0 {
+			t.Fatalf("result = %+v", res)
+		}
+		if f.state().Value != "checking" || len(f.moves()) != 0 || len(f.notices()) != 0 || len(f.provider.Requests()) != 0 {
+			t.Fatal("a held exit moved, was noticed or asked Jev")
+		}
+		if rec, err := router.Lookup(f.repo, streamID, x); err != nil || rec != nil {
+			t.Fatalf("a held exit left a record: %+v, %v", rec, err)
+		}
+		paused = false
+		res = route(t, f, x)
+		if !res.Committed || res.State != "implementing" || entered != 1 {
+			t.Fatalf("result after the pause = %+v", res)
+		}
+	})
+
+	t.Run("a pick recorded before the pause is applied once it lifts", func(t *testing.T) {
+		paused := false
+		provider := departing("checking", 0.9)
+		provider.Wait = func(context.Context) error { paused = true; return nil }
+		f := newFx(t, provider)
+		f.seed("checking")
+		f.track("checking", "implementing")
+		f.router.Paused = func(context.Context, router.Exit) (string, error) {
+			if paused {
+				return why, nil
+			}
+			return "", nil
+		}
+		x := worksExit(f)
+		res := route(t, f, x)
+		if res.Committed || res.Hold != router.HoldPaused || f.ran("checking") != 0 || len(f.notices()) != 0 {
+			t.Fatalf("result = %+v", res)
+		}
+		requests := len(f.provider.Requests())
+		paused = false
+		res = route(t, f, x)
+		if !res.Committed || res.State != "checking" || f.ran("checking") != 1 || len(f.provider.Requests()) != requests {
+			t.Fatalf("result after the pause = %+v", res)
+		}
+	})
+
+	t.Run("an owner's pinned decision waits for the pause", func(t *testing.T) {
+		f := newFx(t, &jevfixture.Transitions{})
+		f.seed("checking")
+		f.track("implementing")
+		f.router.Paused = func(context.Context, router.Exit) (string, error) { return why, nil }
+		x := worksExit(f)
+		x.Trigger, x.Actor = "unit.move_owner", owner
+		x.Authority = &router.Authority{Kind: router.AuthorityOwner, Target: "implementing"}
+		res := route(t, f, x)
+		if res.Committed || res.Hold != router.HoldPaused || f.ran("implementing") != 0 || len(f.moves()) != 0 {
 			t.Fatalf("result = %+v", res)
 		}
 	})

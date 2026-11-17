@@ -20,6 +20,13 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	if !ok {
 		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("the target %s is not among the exit's targets", d.target))
 	}
+	// An owner's pause holds the work the target starts: nothing is committed
+	// and the pick stays recorded, so the exit is applied once the pause lifts.
+	if held, err := r.paused(ctx, x, target); err != nil {
+		return Result{}, err
+	} else if held != "" {
+		return deferred(x, target.Name, held), nil
+	}
 	why, err := r.legality(ctx, x, target)
 	if err != nil {
 		return Result{}, err

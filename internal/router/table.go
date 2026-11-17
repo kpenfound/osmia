@@ -43,6 +43,10 @@ const (
 	// HoldGate: the move is an owner gate and the exit carries no authority for
 	// it, as a chief proposal never does; the owner decides it.
 	HoldGate = "owner_gate"
+	// HoldPaused: the owner paused work, so a target that starts work is not
+	// entered now. Nothing is recorded: the exit is offered again, as the
+	// subject still stands in its state, once the pause lifts.
+	HoldPaused = "paused"
 	// HoldStale: the subject moved on since the exit was raised.
 	HoldStale = "stale"
 )

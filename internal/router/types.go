@@ -79,12 +79,12 @@ type Target struct {
 	// independent review, an intent change): legal only on an exit carrying an
 	// owner decision or one of Jev's existing gate decisions.
 	Gate bool
-	// Works marks a target that starts agent work: a turn of a mason, a check
-	// run, a review, a redraft, a round of debate. It is legal only while no
-	// pause, spent budget or loop guard stops work on the subject's workstream.
-	// A pinned owner or gate decision, and a default entered through its
-	// trigger's own records, are not held by it: the pause already holds the
-	// work they queue.
+	// Works marks a target that starts agent work: a turn of a mason, a review,
+	// a redraft, a round of debate. It is legal only while no
+	// pause, spent budget or loop guard stops work on the subject's workstream,
+	// whichever way the target is reached: a pinned owner or gate decision and
+	// a default entered through its trigger's own records meet the same limits
+	// as a pick.
 	Works bool
 	// Stay marks a target that leaves the subject waiting where it is. When
 	// such a default is judged to be stuck, it is judged not to fit.

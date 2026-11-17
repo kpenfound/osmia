@@ -27,6 +27,7 @@ func (s *Service) newRouter() *router.Router {
 	return &router.Router{
 		Judge:   s.jev,
 		Stops:   s.routeStops,
+		Paused:  s.routePaused,
 		Effects: effects,
 		Rebuild: rebuild,
 		Spans: func(r router.SpanRoute) {

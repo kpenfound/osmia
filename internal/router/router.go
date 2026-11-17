@@ -28,12 +28,19 @@ type Router struct {
 	// Rebuild defines how each machine rebuilds an exit from its route record,
 	// so Recover can finish a pick that was recorded but not applied.
 	Rebuild *Rebuilders
-	// Stops reports why work cannot start on the exit's workstream now: a pause
-	// of the owner, the daily budget or a provider's usage limit, or the loop
-	// guard having counted its limit of sessions. It is the hard limit on the
-	// targets marked Works, offered to Jev and checked again at apply time; nil
-	// stops nothing.
+	// Stops reports why work cannot start on the exit's workstream now: the
+	// daily budget or a provider's usage limit, or the loop guard having counted
+	// its limit of sessions. It is a hard limit on the targets marked Works,
+	// whichever way the target was reached: a default, a pick, a proposal or a
+	// pinned decision is offered and applied only while it holds nothing back.
+	// A target that fails it at apply time is refused. Nil stops nothing.
 	Stops func(ctx context.Context, x Exit) (string, error)
+	// Paused reports why the owner's pause holds work on the exit's workstream
+	// now, or "". It covers the targets marked Works like Stops, but a pause
+	// lifts: a target that is held by it is not refused. The exit is held
+	// without recording anything and without starting work, and it is offered
+	// again once the pause lifts. Nil pauses nothing.
+	Paused func(ctx context.Context, x Exit) (string, error)
 	// Spans receives the route span of each decided exit; nil sends none.
 	Spans func(SpanRoute)
 	Now   func() time.Time
@@ -135,9 +142,17 @@ func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error)
 			return why, err
 		}
 	}
-	if t.Works && r.Stops != nil && !x.Authority.pinned() && !(x.Enter != nil && t.Name == x.Default) {
-		if why, err := r.Stops(ctx, x); err != nil || why != "" {
+	// The limits on work apply to a target by what it does, never by how it was
+	// reached: a pinned decision and a default entered with its trigger's own
+	// records meet them as a pick does.
+	if t.Works {
+		if why, err := r.paused(ctx, x, t); err != nil || why != "" {
 			return why, err
+		}
+		if r.Stops != nil {
+			if why, err := r.Stops(ctx, x); err != nil || why != "" {
+				return why, err
+			}
 		}
 	}
 	for _, check := range []func(context.Context, Target) (string, error){x.Prereq.Operations, x.Prereq.Limits, x.Prereq.Other} {
@@ -149,6 +164,21 @@ func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error)
 		}
 	}
 	return "", nil
+}
+
+// paused returns why the owner's pause holds the target, or "". Only a target
+// that starts work is held.
+func (r *Router) paused(ctx context.Context, x Exit, t Target) (string, error) {
+	if !t.Works || r.Paused == nil {
+		return "", nil
+	}
+	return r.Paused(ctx, x)
+}
+
+// deferred is the result of an exit the owner's pause holds: nothing is
+// committed or recorded, and the exit is offered again once the pause lifts.
+func deferred(x Exit, target, why string) Result {
+	return Result{Outcome: OutcomeHeld, State: x.From, Target: target, Hold: HoldPaused, Reason: why}
 }
 
 // legalTargets returns the targets of the exit that pass every hard
@@ -276,6 +306,14 @@ func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, r
 		}
 	}
 	if def == nil {
+		if t, ok := x.target(x.Default); ok {
+			if why, err := r.paused(ctx, x, t); err != nil {
+				return decision{}, nil, err
+			} else if why != "" {
+				res := deferred(x, t.Name, why)
+				return decision{}, &res, nil
+			}
+		}
 		if t, ok := x.target(x.Default); ok && (t.Gate || t.Approval) && (x.Authority == nil || x.Authority.Target != t.Name) {
 			// A proposal cannot make an owner gate: the move is the owner's.
 			rec.Rule, rec.Target = "0:owner_gate", t.Name

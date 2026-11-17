@@ -143,6 +143,13 @@ behaviour; this section locates it.
   decisions. A chief proposal and a `decide-transition` answer carry neither. A
   target that has become illegal records `Refuse`, commits nothing, runs no
   effect and leaves the subject held with one notice for the chief of staff.
+  The checks depend on the target and never on how it was reached: a pinned
+  decision and a default that carries its own entry effects meet the budget and
+  loop-guard limits like a Jev pick, and only the landing or rebase whose
+  completion raised a unit's exit is exempt from the operations check. The
+  owner's pause holds a target that starts work differently: nothing is
+  committed or recorded, no work is dispatched and the exit is offered again
+  once the pause lifts, since a pause is not a failure.
 - **Pinned moves.** An owner's card or command, the recovery card and a gate
   decision Jev already makes authorise a move; they do not choose it again. The
   router applies the exact target with its shared effects, records the authority

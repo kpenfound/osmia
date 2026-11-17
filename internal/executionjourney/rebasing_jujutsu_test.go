@@ -67,8 +67,8 @@ func newJujutsuRebaseFixture(t *testing.T, key string) (*shedFixture, config.Wor
 	t.Helper()
 	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, key)
 	for _, unit := range []string{"resume", "upload", "audit"} {
-		if result, err := (rebaser{lands}).Apply(context.Background(), ops[unit]); err != nil || result.Outcome != "succeeded" {
-			t.Fatalf("rebase of unit %s: %+v %v", unit, result, err)
+		if result := settleOperation(t, f.s, repository, stream, ops[unit], rebaser{lands}); result.Outcome != "succeeded" {
+			t.Fatalf("rebase of unit %s: %+v", unit, result)
 		}
 	}
 	return f, stream, repository, lands, landed
