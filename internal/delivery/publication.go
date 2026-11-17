@@ -670,6 +670,12 @@ func (p *Publisher) MarkReady(ctx context.Context, stream config.WorkstreamID, o
 // from assembled to delivered with a notice for the chief of staff, and the
 // outcome of the approval's operation.
 func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push) (coreadapter.OperationResult, error) {
+	return p.deliverReady(ctx, stream, op, in, push, "")
+}
+
+// deliverReady is DeliverReady with a notice for the chief of staff in the same
+// commit, when note is not empty.
+func (p *Publisher) deliverReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, note string) (coreadapter.OperationResult, error) {
 	at := p.S.Now()
 	ready := DeliveryReady{Source: api.ReadyByApproval, Approval: in.Approval, PullRequest: push.PullRequest, URL: push.URL, Upstream: push.Upstream, Commit: push.Commit, At: at}
 	doc, err := ReadyDocumentFor(p.Repository, stream, ready, op.ID)
@@ -678,7 +684,7 @@ func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID
 	}
 	reason := fmt.Sprintf("pull request #%d (%s) is ready for review at %s, with the description the owner approved as %s revision %d", push.PullRequest, push.URL, push.Commit, DeliveryPath, in.Approval)
 	notice := fmt.Sprintf("Workstream delivered: pull request #%d is ready for review at %s.", push.PullRequest, push.URL)
-	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice)
+	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice, note)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -691,6 +697,12 @@ func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID
 // because the merge-order dependency reference has not merged. Nothing is
 // written to the pull request.
 func (p *Publisher) DeliverDraft(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, reference string) (coreadapter.OperationResult, error) {
+	return p.deliverDraft(ctx, stream, op, in, push, reference, "")
+}
+
+// deliverDraft is DeliverDraft with a notice for the chief of staff in the same
+// commit, when note is not empty.
+func (p *Publisher) deliverDraft(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, reference, note string) (coreadapter.OperationResult, error) {
 	waiting := "a merge-order dependency"
 	if reference != "" {
 		waiting = reference
@@ -703,7 +715,7 @@ func (p *Publisher) DeliverDraft(ctx context.Context, stream config.WorkstreamID
 	}
 	reason := fmt.Sprintf("the owner approved marking pull request #%d (%s) ready as %s revision %d; it stays a draft until %s merges", push.PullRequest, push.URL, DeliveryPath, in.Approval, waiting)
 	notice := fmt.Sprintf("Workstream delivered: pull request #%d stays a draft at %s until %s merges; once it has and the dependency update has been reviewed, the owner approves again to mark it ready.", push.PullRequest, push.URL, waiting)
-	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice)
+	txs, err := p.deliveredTransactions(stream, op, in, at, reason, notice, note)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -713,7 +725,7 @@ func (p *Publisher) DeliverDraft(ctx context.Context, stream config.WorkstreamID
 // deliveredTransactions are the transitions of the workstream to delivered,
 // with a notice for the chief of staff, and of the publication to the
 // published outcome of the approval.
-func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, at time.Time, reason, notice string) ([]trace.Transaction, error) {
+func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, at time.Time, reason, notice, note string) ([]trace.Transaction, error) {
 	feature, err := p.Repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return nil, err
@@ -730,10 +742,14 @@ func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreada
 	header := func(id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: at, Actor: foremanActor, Cause: op.ID}
 	}
+	events := []trace.Event{trace.Notice(deliveredID, "state", notice)}
+	if note != "" {
+		events = append(events, trace.Notice(deliveredID, "gave-up", note))
+	}
 	return []trace.Transaction{
 		{ExpectedVersion: feature.Version,
 			Transition: trace.Transition{Header: header(deliveredID), Subject: trace.FeatureSubject, From: feature.Value, To: DeliveredState, Reason: reason},
-			Events:     []trace.Event{trace.Notice(deliveredID, "state", notice)}},
+			Events:     events},
 		{ExpectedVersion: subject.Version,
 			Transition: trace.Transition{Header: header(transition + "-published"), Subject: PublicationSubject, From: subject.Value, To: fmt.Sprintf("published-%d", in.Approval), Reason: reason}},
 	}, nil
@@ -858,6 +874,12 @@ func (p *Publisher) RecordPublication(ctx context.Context, stream config.Workstr
 // move from assembled to delivered with a notice for the chief of staff, and
 // the publication's outcome.
 func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in PublishInput, record DeliveryPublication) (coreadapter.OperationResult, error) {
+	return p.deliver(ctx, stream, in, record, "")
+}
+
+// deliver is Deliver with a notice for the chief of staff in the same commit,
+// when note is not empty.
+func (p *Publisher) deliver(ctx context.Context, stream config.WorkstreamID, in PublishInput, record DeliveryPublication, note string) (coreadapter.OperationResult, error) {
 	doc, err := p.PublicationDocument(stream, record)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -895,6 +917,9 @@ func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in 
 		txs = txs[1:]
 		txs[0].Events = []trace.Event{trace.Notice(transition, "delivery", fmt.Sprintf("Delivery maintenance published at %s. The feature remains delivered.", record.URL))}
 	}
+	if note != "" {
+		txs[0].Events = append(txs[0].Events, trace.Notice(transition, "gave-up", note))
+	}
 	if _, err := p.Repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if recorded, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && recorded != nil {
@@ -910,14 +935,20 @@ func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in 
 // returns the refusal as the operation's result. The workstream stays
 // assembled; approving again asks for another application.
 func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string) (coreadapter.OperationResult, error) {
+	recorded := fmt.Sprintf("owner approval %d was not applied: %s", in.Approval, reason)
+	body := fmt.Sprintf("The pull request was not marked ready for review: %s. The workstream stays assembled until the owner marks it ready again.", reason)
+	return p.refuse(ctx, stream, in, recorded, body)
+}
+
+// refuse records the refusal with the reason and the notice it sends the chief
+// of staff, and returns it as the operation's result.
+func (p *Publisher) refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, recorded, body string) (coreadapter.OperationResult, error) {
 	transition, _ := PublishIDs(in.Approval)
 	id := transition + "-refused"
 	state, err := p.Repository.Workflow(stream, PublicationSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	recorded := fmt.Sprintf("owner approval %d was not applied: %s", in.Approval, reason)
-	body := fmt.Sprintf("The pull request was not marked ready for review: %s. The workstream stays assembled until the owner marks it ready again.", reason)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: transition}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Approval), Reason: recorded},

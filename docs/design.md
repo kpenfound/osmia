@@ -186,7 +186,7 @@ Startup preserves each one-repo project's ID, paths and authoritative charter. E
 
 Startup also splits every repo of a multi-repo registration into its own project, retaining every `p_` ID. Each split-off project's first charter copies the group's current charter as a revision naming the source project and charter revision, preserving rule numbers. Afterwards each charter is edited independently. The migration removes the grouping key from configuration while preserving every other byte, including comments. It is crash-safe and idempotent, without duplicate charter revisions. In-flight workgroups retain their identity, membership, approvals, pins and shared chief; they are not ratified again. See [configuration migration](configuration.md#project-and-workgroup-migration).
 
-State updates and their outbox entries form one database transaction: after a restart both are visible or neither is. Every write is a transaction. Durable operation identifiers connect an intended side effect to its result, so recovery can inspect a workspace, branch or existing pull request before retrying. Each consecutive failed attempt of an operation doubles the wait before the next, up to five minutes, so a persistent failure does not become a retry storm. A change that must write both project knowledge and a workstream's trace, such as a charter revision and its notice, or a ruling promoted to a project decision, stays recoverable as a whole: after a restart neither store ever shows half of it. Writes to one workstream's trace do not serialize behind another workstream's, beyond the project's own brief bookkeeping of which workstreams exist. Revisions and records remain available after delivery or abandonment; removing a project from active configuration does not delete its trace or the owner's clone.
+State updates and their outbox entries form one database transaction: after a restart both are visible or neither is. Every write is a transaction. Durable operation identifiers connect an intended side effect to its result, so recovery can inspect a workspace, branch or existing pull request before retrying. Each consecutive failed attempt of an operation doubles the wait before the next, up to five minutes, so a persistent failure does not become a retry storm. A landing, rebase or publication that keeps failing is bounded and always ends in a result (section 7.3.1). A change that must write both project knowledge and a workstream's trace, such as a charter revision and its notice, or a ruling promoted to a project decision, stays recoverable as a whole: after a restart neither store ever shows half of it. Writes to one workstream's trace do not serialize behind another workstream's, beyond the project's own brief bookkeeping of which workstreams exist. Revisions and records remain available after delivery or abandonment; removing a project from active configuration does not delete its trace or the owner's clone.
 
 ---
 
@@ -236,7 +236,7 @@ The service observes every delivered member's own current PR, with or without a 
 
 Within the ordinary build loop feature states move forward. An approved workgroup amendment can reopen affected open-PR work on its existing branch (section 5.4), and a workstream move (below) can return work to building or to final review. An assembled feature whose final review finds something blocking remains assembled. Nothing is built from a finding on its own: the chief of staff groups the blocking findings that need code into one plan revision, whose units use the normal implementation, review and landing loop, and the final review runs again after they land. The chief leaves a finding that is mistaken or not worth building to you, and you can accept any blocking finding when you approve delivery. Once final reviews of a workstream have found something blocking three times, further revisions of its assembled plan are yours to decide. Changes to ratified intent require an owner amendment; changes to the execution plan use a factory-approved revision. Neither a failed final review nor the end of a debate cap authorises delivery.
 
-The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. A drift rebase still pending at abandonment ends as skipped, whatever gate held it, so it never defers archive cleanup. Abandoned workstreams are terminal, and so are delivered workstreams whose pull request is merged or closed, or whose merge the owner recorded.
+The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. A drift rebase still pending at abandonment ends as skipped, whatever gate held it, so it never defers archive cleanup. A landing, rebase or publication still pending is released from its dependency edge wait, so it reaches a result and does not defer the cleanup either. Abandoned workstreams are terminal, and so are delivered workstreams whose pull request is merged or closed, or whose merge the owner recorded.
 
 The state machine can also leave a workstream itself stuck or wrong: a final review that failed and will not run again on an unchanged branch, blocking findings on a delivered pull request that drift has broken, a stage that needs to run again. So the owner can move a workstream to any feature state, with a note. Each move goes through the path that state already has, so no move bypasses a gate. Before ratification, a move to sketched asks the architect for a redraft with the note, a move to in-shed asks for one more round of debate, and a move to ratified ratifies the latest packet. A move to abandoned abandons the workstream. A move to assembled asks for a fresh final review of the branch as it is, with the note for its reader. It moves a building workstream whose units have all merged, reruns the review of an assembled one, and returns a delivered workstream whose pull request is open to final review. A move to building reopens an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch. It stays building until a revision filed after the move is decided and its units land, or until it is moved to assembled, and its final review then runs again. A move to delivered returns a reopened workstream to delivered while its branch is still what its open pull request carries. An open pull request is updated only after a fresh final review and that workstream's own delivery approval (section 5.5). A move to building, assembled or delivered and its note are recorded together with the change of state; the other moves record themselves as the owner's own actions do. The chief of staff moves a workstream to building or assembled on its own judgment (section 6.6); every other move is the owner's, and the chief records it only when the owner asks for it.
 
@@ -556,7 +556,54 @@ times out keeps its checkpoint, marks the clone as needing recovery and returns
 a recovery error. The next step on that clone recovers first and is refused when
 that fails, so no work runs on a dirty checkout. `workspace.CloneQuiescence` and
 `Jujutsu.Quiescence` report a clone as not quiesced while a started command
-runs or the clone needs recovery; a deadline clears neither.
+runs or the clone needs recovery; a deadline clears neither. A read of a clone
+that must reflect what earlier attempts did goes through `workspace.Quiesced`: it
+takes the clone's lock, waiting only until the context ends, and recovers any
+interrupted step before it reads. A clone that another owner or a surviving
+command still holds, or whose recovery fails, is refused with the contention or
+recovery error, and nothing is read.
+
+### 7.3.1 Operations that always reach a result
+
+A landing, a rebase and a publication (including a delivery maintenance
+publication) never stay in flight without a result. The reconcile controller runs
+each Inspect and each Apply of these operations under an attempt deadline of
+fifteen minutes, a code constant and not a configuration key. An attempt that
+runs into it while the service is still running is recorded as an ordinary
+retry whose reason names the deadline; one that gives up on a clone lock, or
+whose recovery of the clone failed, is recorded the same way with a reason that
+names lock contention or the recovery failure. When an attempt returns it
+releases its workflow lane and its `git_operations` permit, even though a clone
+lock may stay held by a process that has not exited yet; the next step on that
+clone gives up at its own deadline instead of waiting.
+
+Inspection reads a clone's branches only once the clone is quiesced; otherwise
+the effect is not yet observable, and the attempt is a retry. A durable outcome
+the operation's own code recorded, including one recorded before a restart,
+always wins: it completes the operation and is never overwritten.
+
+An operation that has failed five times in a row, the first of them at least
+the give-up window ago (45 minutes, the default of `[loop] stall_after`), and
+whose inspection finds no durable outcome, is ended instead of attempted again.
+The adapter runs a bounded, read-only reconcile under a deadline of its own and
+records the result through the operation's own paths: a landing or a rebase
+whose commit is already on its target is recorded as done, a publication whose
+pull request already shows the approved effect (ready for review, or the draft a
+merge-order dependency keeps) is recorded through the same path that delivers it,
+and none of them repeats the effect. An effect that is confirmed absent is
+refused through the operation's refusal, with the last failure as its reason; a
+landing's reason says it gave up after repeated failures, so the router can tell
+it from a stale approval. When the clone or the remote cannot be read, the result
+says that the outcome could not be determined, never that the effect did not
+happen, and nothing more is pushed, committed, updated or marked ready. Each
+ending sends the chief of staff one notice. The reconcile asks Jev nothing. A
+landing or a rebase also tells the chief of staff once, at its third consecutive
+failure; a publication opens its inbox entry then.
+
+`reconcile.StatusOf` reads an operation's failure count, the time of its
+first failure and of its latest action, and its last failure reason, which
+includes a recovery failure; `reconcile.GiveUpLimit` is the one shared failure
+count and window, which the service reads through `Service.GiveUpLimit`.
 
 ### 7.4 Landing a unit
 

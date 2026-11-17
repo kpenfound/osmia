@@ -6,6 +6,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -36,6 +37,15 @@ func gitOperation(op coreadapter.Operation) bool {
 		return true
 	}
 	return false
+}
+
+// GiveUpLimit is the failure streak that ends a landing, rebase or
+// publication that keeps failing: the number of consecutive failures and how
+// long after the first of them the operation is given up. Code that explains
+// an operation as in flight reads it, so an explanation lasts only while the
+// operation can still be attempted.
+func (s *Service) GiveUpLimit() reconcile.GiveUpLimit {
+	return reconcile.NewGiveUpLimit(s.options.Reconciliation.GiveUpWindow)
 }
 
 func networkOperation(op coreadapter.Operation) bool {

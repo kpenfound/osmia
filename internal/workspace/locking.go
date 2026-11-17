@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -324,6 +325,56 @@ func LocalStep(ctx context.Context, operation string, at time.Time, providers []
 		}
 	}
 	return step(ctx)
+}
+
+// Quiesced runs read on the clones of the providers once each is quiesced: it
+// takes every clone's lock, waiting only until the context ends, and recovers
+// any interrupted step before read runs. A clone whose lock another owner, or a
+// command that outlived its step, still holds is not quiesced: Quiesced
+// returns a ContentionError and read never runs. A clone whose restoration
+// fails is marked as needing recovery and Quiesced returns a RecoveryError.
+// Neither answers whether an effect happened, so callers treat both as an
+// outcome that cannot be read. read must use its supplied context, which
+// lends the held locks to nested workspace calls, and must not mutate the
+// clone beyond what it records through checkpointed local steps.
+func Quiesced(ctx context.Context, providers []Provider, read func(context.Context) error) error {
+	type owned struct {
+		clone    string
+		provider Provider
+	}
+	var clones []owned
+	for _, p := range providers {
+		var clone string
+		switch v := p.(type) {
+		case *Jujutsu:
+			clone = cloneKey(v.Clone)
+		case *Git:
+			clone = cloneKey(v.Clone)
+		default:
+			continue
+		}
+		if !slices.ContainsFunc(clones, func(o owned) bool { return o.clone == clone }) {
+			clones = append(clones, owned{clone, p})
+		}
+	}
+	slices.SortFunc(clones, func(a, b owned) int { return strings.Compare(a.clone, b.clone) })
+	for _, c := range clones {
+		var unlock func()
+		var err error
+		if ctx, unlock, err = lockClone(ctx, c.clone); err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	for _, c := range clones {
+		recovery, cancel := context.WithTimeout(ctx, cleanupDeadline)
+		_, err := c.provider.Recover(recovery)
+		cancel()
+		if err != nil {
+			return quarantine(c.provider, err)
+		}
+	}
+	return read(ctx)
 }
 
 // quarantine marks the clone of p as needing recovery and wraps the failure

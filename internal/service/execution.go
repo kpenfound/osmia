@@ -9,6 +9,7 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	execution "github.com/kpenfound/osmia/internal/execution"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	reconcile "github.com/kpenfound/osmia/internal/reconcile"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	workspace "github.com/kpenfound/osmia/internal/workspace"
 )
@@ -294,6 +295,22 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return f.driver().Apply(ctx, op)
+}
+
+var _ reconcile.Bounded = (*foreman)(nil)
+
+// Bound reports whether the operation is a landing or a rebase, whose attempts
+// are bounded and always reach a result.
+func (f *foreman) Bound(op coreadapter.Operation) bool {
+	return op.Boundary == coreadapter.RepositoryBoundary && (op.Action == LandAction || op.Action == RebaseAction)
+}
+
+func (f *foreman) Failing(ctx context.Context, op coreadapter.Operation, failures int, reason string) error {
+	return f.driver().Failing(ctx, op, failures, reason)
+}
+
+func (f *foreman) GiveUp(ctx context.Context, op coreadapter.Operation, why reconcile.GiveUpReason) (coreadapter.OperationResult, error) {
+	return f.driver().GiveUp(ctx, op, why)
 }
 
 func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (time.Time, error) {

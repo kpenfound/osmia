@@ -67,6 +67,16 @@ type Options struct {
 	// SlowThreshold sets operation and bookkeeping lock-wait diagnostics.
 	// Zero uses trace.SlowThreshold.
 	SlowThreshold time.Duration
+	// AttemptDeadline bounds each Inspect and each Apply of an operation its
+	// adapter bounds (see Bounded). Zero uses DefaultAttemptDeadline.
+	AttemptDeadline time.Duration
+	// ReconcileDeadline bounds the read-only reconciliation that ends a failing
+	// bounded operation. Zero uses DefaultReconcileDeadline.
+	ReconcileDeadline time.Duration
+	// GiveUpWindow is how long after its first failure a bounded operation that
+	// has failed GiveUpFailures times in a row is ended. Zero uses
+	// DefaultGiveUpWindow.
+	GiveUpWindow time.Duration
 }
 
 // DefaultMaxRetryDelay is the longest wait between attempts of a failing
@@ -108,7 +118,7 @@ type Controller struct {
 }
 
 func New(repository *trace.Repository, options Options) (*Controller, error) {
-	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 || options.MaxRetryDelay < 0 || options.SlowThreshold < 0 {
+	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 || options.MaxRetryDelay < 0 || options.SlowThreshold < 0 || options.AttemptDeadline < 0 || options.ReconcileDeadline < 0 || options.GiveUpWindow < 0 {
 		return nil, fmt.Errorf("invalid reconciliation options")
 	}
 	if options.SlowThreshold == 0 {
@@ -424,6 +434,26 @@ func (c *Controller) Pass(ctx context.Context) error {
 	return nil
 }
 
+// attemptContext bounds one call of a bounded operation's adapter by the
+// attempt deadline; the call of an unbounded operation runs under ctx itself.
+func (c *Controller) attemptContext(ctx context.Context, bounded Bounded) (context.Context, context.CancelFunc) {
+	if bounded == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, c.attemptDeadline())
+}
+
+// giveUp asks the adapter to end the operation under the reconcile deadline.
+func (c *Controller) giveUp(ctx context.Context, bounded Bounded, op coreadapter.Operation, why GiveUpReason) (coreadapter.OperationResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.reconcileDeadline())
+	defer cancel()
+	result, err := bounded.GiveUp(ctx, op, why)
+	if err == nil && (result.Outcome == "" || result.Evidence == "") {
+		err = errors.New("the adapter ended the operation without an outcome and evidence")
+	}
+	return result, err
+}
+
 // reconcile inspects and completes one admitted operation under its class's
 // ordering, without holding a trace lock across an adapter call.
 func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, attempt *trace.OperationAttempt, record trace.OperationRecord) error {
@@ -437,7 +467,21 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 		return err
 	}
 	write := func(kind string) error { return attempt.Record(ctx, attempt.Action(kind, c.options.Now())) }
+	adapter := c.options.Adapters[record.Operation.Boundary]
+	var bounded Bounded
+	if adapter != nil {
+		if b, ok := boundedAdapter(adapter, record.Operation); ok {
+			bounded = b
+		}
+	}
 	retry := func(reason string) error {
+		if bounded != nil {
+			// The adapter hears of the failure before it is recorded, so a crash
+			// between the two repeats a notice it records only once.
+			if err := bounded.Failing(ctx, record.Operation, ConsecutiveFailures(record)+1, reason); err != nil {
+				return err
+			}
+		}
 		action := attempt.Action(RetryAction, c.options.Now())
 		action.Failure, action.RetryAt = reason, action.At.Add(c.retryDelay(ConsecutiveFailures(record)))
 		if err := attempt.Record(ctx, action); err != nil {
@@ -449,14 +493,33 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 		if err := c.step(ctx, "before-inspection"); err != nil {
 			return err
 		}
-		adapter := c.options.Adapters[record.Operation.Boundary]
 		observed := coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}
 		var err error
 		if adapter != nil {
-			observed, err = adapter.Inspect(ctx, record.Operation)
+			inspectCtx, cancel := c.attemptContext(ctx, bounded)
+			observed, err = adapter.Inspect(inspectCtx, record.Operation)
+			failure := ""
+			if err != nil && bounded != nil {
+				failure = attemptFailure(ctx, inspectCtx, c.attemptDeadline(), err)
+			}
+			cancel()
+			if failure != "" {
+				err = errors.New(failure)
+			}
 		}
 		if err != nil {
 			observed = coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: fmt.Sprintf("Inspection failed: %v; evidence: %s", err, observed.Evidence)}
+		}
+		// Inspection found no durable outcome. An operation that has failed past
+		// its limit is then ended instead of attempted again.
+		if bounded != nil && observed.State != coreadapter.EffectCompleted {
+			if status, limit := StatusOf(record), c.GiveUpLimit(); limit.Reached(status, c.options.Now()) {
+				ended, err := c.giveUp(ctx, bounded, record.Operation, GiveUpReason{Status: status, Limit: limit})
+				if err != nil {
+					return retry(fmt.Sprintf("Give-up reconciliation failed: %v", err))
+				}
+				observed = coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "Gave up after repeated failures: " + ended.Evidence, Result: &ended}
+			}
 		}
 		if err := c.step(ctx, "after-inspection"); err != nil {
 			return err
@@ -489,7 +552,13 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 				logger.Info("operation started", logAttrs...)
 			}
 			start := c.options.Now()
-			result, err = adapter.Apply(ctx, record.Operation)
+			applyCtx, cancel := c.attemptContext(ctx, bounded)
+			result, err = adapter.Apply(applyCtx, record.Operation)
+			failure := ""
+			if err != nil && bounded != nil {
+				failure = attemptFailure(ctx, applyCtx, c.attemptDeadline(), err)
+			}
+			cancel()
 			if e := c.step(ctx, "after-effect"); e != nil {
 				return e
 			}
@@ -507,6 +576,9 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 			}
 			if err != nil {
 				reason := fmt.Sprintf("Effect returned error: %v", err)
+				if failure != "" {
+					reason = failure
+				}
 				if result.Evidence != "" {
 					reason += "; evidence: " + result.Evidence
 				}

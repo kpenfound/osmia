@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/thread"
 )
 
@@ -58,6 +59,29 @@ func (a activityReconciler) Apply(ctx context.Context, op coreadapter.Operation)
 	result, err := a.Reconciler.Apply(ctx, op)
 	h.Finish(err)
 	return result, err
+}
+
+var _ reconcile.Bounded = activityReconciler{}
+
+// Bound, Failing and GiveUp pass the operation's bounds on from the wrapped
+// reconciler when it has them.
+func (a activityReconciler) Bound(op coreadapter.Operation) bool {
+	b, ok := a.Reconciler.(reconcile.Bounded)
+	return ok && b.Bound(op)
+}
+
+func (a activityReconciler) Failing(ctx context.Context, op coreadapter.Operation, failures int, reason string) error {
+	if b, ok := a.Reconciler.(reconcile.Bounded); ok {
+		return b.Failing(ctx, op, failures, reason)
+	}
+	return nil
+}
+
+func (a activityReconciler) GiveUp(ctx context.Context, op coreadapter.Operation, why reconcile.GiveUpReason) (coreadapter.OperationResult, error) {
+	if b, ok := a.Reconciler.(reconcile.Bounded); ok {
+		return b.GiveUp(ctx, op, why)
+	}
+	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }
 
 // activityOf classifies a reconciled operation for the activity record: its

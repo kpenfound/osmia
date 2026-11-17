@@ -436,3 +436,93 @@ func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 		t.Fatalf("clone after the recovery: %+v", q)
 	}
 }
+
+// Quiesced reads a clone only once nothing else owns it: a clone another owner
+// holds gives up at the context's end with a contention error and the read
+// never runs, for either backend.
+func TestQuiescedGivesUpOnAContendedClone(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	_, jujutsu := newJujutsuFixture(t)
+	for name, provider := range map[string]Provider{"git": fixture.provider, "jujutsu": jujutsu} {
+		t.Run(name, func(t *testing.T) {
+			var clone string
+			switch p := provider.(type) {
+			case *Git:
+				clone = p.Clone
+			case *Jujutsu:
+				clone = p.Clone
+			}
+			_, unlock, err := lockClone(context.Background(), clone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			ran := false
+			err = Quiesced(ctx, []Provider{provider}, func(context.Context) error { ran = true; return nil })
+			if !IsContention(err) || ran {
+				t.Fatalf("a held clone: ran=%t, %v", ran, err)
+			}
+			unlock()
+			if err := Quiesced(context.Background(), []Provider{provider}, func(context.Context) error { ran = true; return nil }); err != nil || !ran {
+				t.Fatalf("a free clone: ran=%t, %v", ran, err)
+			}
+		})
+	}
+}
+
+// Quiesced recovers an interrupted step before it reads, and a clone whose
+// recovery fails is refused with the recovery error instead of being read.
+func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T) {
+	f, j := newJujutsuFixture(t)
+	var ctl string
+	j.JJ, ctl = hangingJJ(t)
+	setDuration(t, &cleanupDeadline, 400*time.Millisecond)
+	setDuration(t, &killWait, 5*time.Second)
+	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	acquireJJ(t, j, vcs.Request{Name: "a", Branch: "a", Ref: base})
+	touch(t, filepath.Join(ctl, "hang-restore"))
+	// A step cut short whose restoration hangs leaves the clone needing recovery.
+	cut, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := LocalStep(cut, "interrupted", time.Now(), []Provider{j}, func(local context.Context) error {
+		if _, err := j.Acquire(local, vcs.Request{Name: "made", Branch: "made", Ref: base}); err != nil {
+			return err
+		}
+		cancel()
+		return local.Err()
+	})
+	if !IsRecoveryFailure(err) || len(checkpointFiles(t, j)) != 1 {
+		t.Fatalf("the interrupted step returned %v, checkpoints %v", err, checkpointFiles(t, j))
+	}
+
+	// Recovery hangs: the clone is refused and marked, and nothing is read.
+	ran := false
+	err = Quiesced(context.Background(), []Provider{j}, func(context.Context) error { ran = true; return nil })
+	if !IsRecoveryFailure(err) || ran {
+		t.Fatalf("a clone that cannot recover: ran=%t, %v", ran, err)
+	}
+	if q := j.Quiescence(); q.Running != 0 || !q.NeedsRecovery || len(checkpointFiles(t, j)) != 1 {
+		t.Fatalf("clone after the failed recovery: %+v, checkpoints %v", q, checkpointFiles(t, j))
+	}
+
+	// Once recovery can succeed it runs first, and the read sees a clone that
+	// needs none.
+	if err := os.Remove(filepath.Join(ctl, "hang-restore")); err != nil {
+		t.Fatal(err)
+	}
+	err = Quiesced(context.Background(), []Provider{j}, func(context.Context) error {
+		ran = true
+		if got := checkpointFiles(t, j); len(got) != 0 {
+			return fmt.Errorf("the read began before recovery: %v", got)
+		}
+		return nil
+	})
+	if err != nil || !ran {
+		t.Fatalf("a clone that can recover: ran=%t, %v", ran, err)
+	}
+	if q := j.Quiescence(); !q.Quiesced() {
+		t.Fatalf("clone after the recovery: %+v", q)
+	}
+}

@@ -447,11 +447,27 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	if result != nil {
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "rebase " + result.Outcome, Result: result}, nil
 	}
-	branch := unitBranch(stream, in.Unit)
 	g, err := newUnitWorkspaces(r.cfg, r.repository).Of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
+	// The branch is read once the clone is quiesced, as the landing's is: until
+	// then its tip says nothing about whether the rebase happened.
+	var observed coreadapter.Observation
+	err = workspace.Quiesced(ctx, []workspace.Provider{g}, func(ctx context.Context) error {
+		var err error
+		observed, err = r.observeRebase(ctx, g, unitBranch(stream, in.Unit), in, op.ID)
+		return err
+	})
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	return observed, nil
+}
+
+// observeRebase reads the unit branch of a quiesced clone: absent, with
+// evidence of whether its tip is this operation's rebased commit.
+func (r rebaser) observeRebase(ctx context.Context, g workspace.Provider, branch string, in rebaseInput, operation string) (coreadapter.Observation, error) {
 	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
@@ -459,7 +475,7 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no unit branch %s", branch)}, nil
 	}
-	if snapshot, err := rebasedSnapshot(ctx, g, tip, in, op.ID); err != nil {
+	if snapshot, err := rebasedSnapshot(ctx, g, tip, in, operation); err != nil {
 		return coreadapter.Observation{}, err
 	} else if snapshot != "" {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("unit branch %s is at %s, this operation's rebase of snapshot %s onto %s; the rebase records it without rebasing again", branch, tip, snapshot, in.Onto)}, nil
@@ -531,13 +547,13 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	return checkpointed(ctx, string(stream)+"/"+op.ID, requested, []workspace.Provider{g}, func(ctx context.Context) (coreadapter.OperationResult, error) {
-		return r.rebase(ctx, op.ID, stream, in, g, requested)
+		return r.rebase(ctx, op.ID, stream, in, g, requested, recording{})
 	})
 }
 
 // rebase is one attempt of the rebase Apply describes, on the unit
 // workspaces g.
-func (r rebaser) rebase(ctx context.Context, operation string, stream config.WorkstreamID, in rebaseInput, g workspace.Provider, requested time.Time) (coreadapter.OperationResult, error) {
+func (r rebaser) rebase(ctx context.Context, operation string, stream config.WorkstreamID, in rebaseInput, g workspace.Provider, requested time.Time, rec recording) (coreadapter.OperationResult, error) {
 	w, found, err := g.Workspace(ctx, unitName(stream, in.Unit))
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -556,6 +572,8 @@ func (r rebaser) rebase(ctx context.Context, operation string, stream config.Wor
 	rebased := ""
 	if snapshot != "" {
 		rebased = head
+	} else if rec.existing {
+		return coreadapter.OperationResult{}, errNothingToRecord
 	} else {
 		tip, _, err := g.Branch(ctx, featureBranch(stream))
 		if err != nil {
@@ -620,7 +638,7 @@ func (r rebaser) rebase(ctx context.Context, operation string, stream config.Wor
 	if err := r.s.Step("rebase-moved"); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return r.record(ctx, stream, in, operation, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: operation, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
+	return r.record(ctx, stream, in, operation, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: operation, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts}, rec.note)
 }
 
 // rebaseCarrying rebases snapshot as RebaseFrom does and returns the rebased
@@ -668,7 +686,7 @@ func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, sna
 // drift rebase moved the feature branch the unit is rebased onto, an approval
 // sent back and a conflict each also raise an upstream moved event. A rebase already
 // recorded returns its result and records nothing more.
-func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in rebaseInput, operation string, rebase UnitRebase) (coreadapter.OperationResult, error) {
+func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in rebaseInput, operation string, rebase UnitRebase, note string) (coreadapter.OperationResult, error) {
 	subject := trace.UnitSubject(in.Unit)
 	state, err := r.repository.Workflow(stream, subject)
 	if err != nil {
@@ -749,6 +767,9 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 			events = append(events, trace.UpstreamMoved(transition+outcome, stream, move, fmt.Sprintf("unit %s conflicts with the feature branch at %s in %s; its mason resolves the conflicts against the sealed spec, and the unit is reviewed again before it lands", in.Unit, rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
 		}
 	}
+	if note != "" {
+		events = append(events, trace.Notice(transition+outcome, "gave-up", note))
+	}
 	rebaseState, err := r.repository.Workflow(stream, rebaseSubject(in.Unit))
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -786,6 +807,12 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 // refuse records why the rebase was refused and returns the refusal as the
 // operation's result. The workspace is unchanged.
 func (r rebaser) refuse(ctx context.Context, stream config.WorkstreamID, in rebaseInput, reason string) (coreadapter.OperationResult, error) {
+	return r.refuseWith(ctx, stream, in, reason, "")
+}
+
+// refuseWith is refuse that also sends the chief of staff the notice, when it
+// has one.
+func (r rebaser) refuseWith(ctx context.Context, stream config.WorkstreamID, in rebaseInput, reason, notice string) (coreadapter.OperationResult, error) {
 	transition, _ := rebaseIDs(in.Unit, in.Rebase)
 	subject := rebaseSubject(in.Unit)
 	state, err := r.repository.Workflow(stream, subject)
@@ -795,6 +822,9 @@ func (r rebaser) refuse(ctx context.Context, stream config.WorkstreamID, in reba
 	recorded := fmt.Sprintf("unit %s was not rebased onto %s: %s", in.Unit, in.Onto, reason)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: r.header(transition+"-refused", stream, in.Unit, transition, r.s.Now()), Subject: subject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Rebase), Reason: recorded}}
+	if notice != "" {
+		tx.Events = []trace.Event{trace.Notice(transition+"-refused", "chief", notice)}
+	}
 	if _, err := r.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
