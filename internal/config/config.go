@@ -112,11 +112,38 @@ type Mason struct {
 	MaxCleanTurns int `toml:"max_clean_turns" json:"max_clean_turns"`
 }
 
-// Loop configures the loop guard. MaxSessions is how many agent sessions a
-// workstream may run without progress before the loop guard pauses it; zero
-// turns the guard off.
+// Loop configures the loop guard and the stall watchdog. MaxSessions is how
+// many agent sessions a workstream may run without progress before the loop
+// guard pauses it; zero turns the guard off. StallAfter is a Go duration: how
+// long a unit or workstream may go without progress, with nothing legitimate
+// explaining the quiet, before the stall watchdog raises a stalled exit to the
+// transition router; "0" turns the watchdog off. It is also how long a landing,
+// rebase or publication that keeps failing is retried before it is ended, so
+// "0" leaves that window at DefaultStallAfter.
 type Loop struct {
-	MaxSessions int `toml:"max_sessions" json:"max_sessions"`
+	MaxSessions int    `toml:"max_sessions" json:"max_sessions"`
+	StallAfter  string `toml:"stall_after" json:"stall_after"`
+}
+
+// DefaultStallAfter is the default of loop.stall_after ("45m"), and the window
+// a failing operation is retried for when the watchdog is off.
+const DefaultStallAfter = 45 * time.Minute
+
+// StallWindow is how long a unit or workstream may go without progress before
+// the stall watchdog raises a stalled exit; zero means the watchdog is off.
+func (c *Config) StallWindow() time.Duration {
+	d, _ := time.ParseDuration(c.Loop.StallAfter)
+	return d
+}
+
+// GiveUpWindow is how long after its first failure an operation that keeps
+// failing is retried before it is ended: loop.stall_after, or DefaultStallAfter
+// when the stall watchdog is off.
+func (c *Config) GiveUpWindow() time.Duration {
+	if d := c.StallWindow(); d > 0 {
+		return d
+	}
+	return DefaultStallAfter
 }
 
 // Notify configures owner notifications. Webhook is the absolute http or
@@ -365,7 +392,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry()}
+	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry()}
 	c.Dagger.Engine = string(DaggerEngineAuto)
 	md, err := decode(path, c, false)
 	if err != nil {
@@ -428,6 +455,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	if c.Loop.MaxSessions < 0 {
 		return nil, fieldError(path, "loop.max_sessions", "must not be negative")
+	}
+	if d, err := time.ParseDuration(c.Loop.StallAfter); err != nil || d < 0 {
+		return nil, fieldError(path, "loop.stall_after", `must be a Go duration that is not negative; "0" turns the stall watchdog off`)
 	}
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
@@ -885,7 +915,7 @@ func knownKey(key toml.Key, project bool) bool {
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "skills"}, key[2])
 	}
 	// jev.enabled is the removed Jev switch: accepted and ignored.
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

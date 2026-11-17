@@ -46,10 +46,28 @@ const (
 	TriggerLandingRefused    = "unit.landing_refused"
 	TriggerMoveOwner         = "unit.move_owner"
 	TriggerMoveProposal      = "unit.move_proposal"
+	TriggerStalled           = "unit.stalled"
 	TriggerOwnerRuling       = "contest.owner_ruling"
 	TriggerJevRuling         = "contest.jev_ruling"
 	TriggerChiefRuling       = "contest.chief_ruling"
 )
+
+// TargetWait is the target of an exit that leaves the unit where it is: nothing
+// moves while the exit's records and notices are committed. It is the default of
+// a stalled unit.
+const TargetWait = "wait"
+
+// StalledTargets returns the targets of a stalled unit in the given state: wait,
+// which is the default, and, for a unit that has started, a fresh turn of its
+// mason or a fresh run of the stage it waits in. A unit that has not started
+// has nothing to start again.
+func StalledTargets(state string) []string {
+	switch state {
+	case UnitImplementing, UnitWaiting, UnitChecking, UnitReviewing, UnitApproved, UnitContested:
+		return []string{TargetWait, UnitImplementing, UnitChecking, UnitReviewing}
+	}
+	return []string{TargetWait}
+}
 
 // unitTarget describes the states a unit moves to, for the router. Checking,
 // reviewing and approved work on the unit's candidate. Approved is entered only
@@ -57,6 +75,8 @@ const (
 // landing.
 func unitTarget(name string) router.Target {
 	switch name {
+	case TargetWait:
+		return router.Target{Name: name, Description: "Leave the unit where it is and keep waiting; nothing moves.", Stay: true, NoMove: true}
 	case UnitImplementing:
 		return router.Target{Name: name, Description: "Give the unit's mason a turn with a fresh clean-turn allowance to revise the unit.", Bar: router.BarModest}
 	case UnitChecking:
@@ -457,6 +477,20 @@ var triggerSpecs = map[string]triggerSpec{
 		describe:  map[string]string{UnitChecking: "Run the checks again: the approval no longer holds.", UnitReviewing: "Have the candidate reviewed again.", UnitImplementing: "Send the unit back to its mason.", UnitContested: "Hold the unit for the owner to rule on.", UnitApproved: "Land again: the approval still holds and the refusal was not about the candidate."},
 		questions: []router.Question{question("input_stale", "The landing was refused because an input of the approval is stale."), question("environmental", "The landing failed for a reason of infrastructure.")},
 		corroborate: map[string][]router.Condition{UnitApproved: {atLeast("environmental", router.LevelModest), atMost("input_stale", router.LevelHalf)}},
+	},
+	TriggerStalled: {
+		describe: map[string]string{
+			TargetWait:       "Keep waiting: the records show the work this state waits for is still going to happen.",
+			UnitImplementing: "Give the unit's mason a fresh turn: nothing shows its work is still going on.",
+			UnitChecking:     "Run the checks again on the recorded candidate: the run this state waits for never ended.",
+			UnitReviewing:    "Have the candidate reviewed again: the review this state waits for never ended.",
+		},
+		questions: []router.Question{question("work_lost", "Nothing in the records shows the work this state waits for is still going to happen."), question("stage_repeatable", "Starting the stage again repeats it without losing recorded work.")},
+		corroborate: map[string][]router.Condition{
+			UnitImplementing: {atLeast("work_lost", router.LevelModest), atLeast("stage_repeatable", router.LevelModest)},
+			UnitChecking:     {atLeast("work_lost", router.LevelModest), atLeast("stage_repeatable", router.LevelModest)},
+			UnitReviewing:    {atLeast("work_lost", router.LevelModest), atLeast("stage_repeatable", router.LevelModest)},
+		},
 	},
 	TriggerMoveProposal: {
 		questions: []router.Question{question("proposal_fits", "The proposed move fits the evidence."), question("evidence_supports", "The history and rulings support the move.")},

@@ -36,6 +36,7 @@ const (
 	TriggerMergeRecorded     = "ws.merge_recorded"
 	TriggerMoveOwner         = "ws.move_owner"
 	TriggerMoveProposal      = "ws.move_proposal"
+	TriggerStalled           = "ws.stalled"
 	TriggerUnitsMerged       = "ws.units_merged"
 	TriggerFinalRequested    = "final.requested"
 	TargetRequested          = "requested"
@@ -215,6 +216,14 @@ var triggerSpecs = map[string]wsTrigger{
 			TargetDebateRound: {{Question: "dissent_substantive", AtLeast: router.LevelStrict}, {Question: "converging", AtLeast: router.LevelHalf}},
 			TargetRedraft:     {{Question: "dissent_substantive", AtLeast: router.LevelStrict}, {Question: "converging", AtMost: router.LevelHalf}},
 		},
+	},
+	TriggerStalled: {
+		describe: map[string]string{
+			TargetWait:      "Keep waiting: the records show the work the workstream waits for is still going to happen.",
+			TargetAssembled: "Ask for a fresh final review of the branch as it is: the review the workstream waits for never ended.",
+		},
+		questions:   []router.Question{ask("work_lost", "Nothing in the records shows the work this state waits for is still going to happen."), ask("stage_repeatable", "Starting the stage again repeats it without losing recorded work.")},
+		corroborate: map[string][]router.Condition{TargetAssembled: {{Question: "work_lost", AtLeast: router.LevelModest}, {Question: "stage_repeatable", AtLeast: router.LevelModest}}},
 	},
 	TriggerSealFailed: {
 		describe:  map[string]string{TargetFailed: "Record the failed sealing and tell the chief of staff; the owner ratifies again once it is put right."},

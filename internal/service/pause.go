@@ -162,7 +162,18 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 // wait: it reaches a result instead of waiting on an upstream that
 // abandonment no longer lets it merge behind. Its other holds stay.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
+	cause := s.holdingCause(repository)
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		return cause(stream, op) != scheduler.NotHeld
+	}
+}
+
+// holdingCause is holding with the cause of the hold: a pause, a hold that waits
+// on an owner's decision or a live dependency wait, or any other. The stall
+// watchdog explains a held operation only by a cause that is a legitimate
+// explanation of a quiet.
+func (s *Service) holdingCause(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) scheduler.HoldCause {
+	return func(stream config.WorkstreamID, op coreadapter.Operation) scheduler.HoldCause {
 		gone := false
 		switch op.Action {
 		case DriftAction, LandAction, RebaseAction, PublishAction, publishUpstreamAction:
@@ -171,58 +182,84 @@ func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID
 			gone = gone && err == nil
 		}
 		if op.Action == DriftAction && gone {
-			return false
+			return scheduler.NotHeld
 		}
 		if role := modelOperationRole(op); role != "" && !s.admitRole(role) {
-			return true
+			// A role is only unavailable while a pause covers it.
+			return scheduler.HeldByPause
 		}
 		if gitOperation(op) {
 			switch op.Action {
 			case LandAction, RebaseAction, PublishAction, publishUpstreamAction:
 				if errors.Is(s.held(repository, stream), errPaused) {
-					return true
+					return scheduler.HeldByPause
 				}
 			}
 			if joining, err := s.gitWorkgroupJoining(repository, stream); err != nil || joining {
-				return true
+				return scheduler.HeldByOther
 			}
 			if op.Action != SealAction && op.Action != BuildAction && !gone {
 				if waiting, err := edgeWaiting(repository, stream); err != nil || waiting {
-					return true
+					return dependencyHold(repository, stream, err)
 				}
 			}
 		}
 		if op.Action == deltaTurnAction {
-			return errors.Is(s.held(repository, stream), errPaused)
+			if errors.Is(s.held(repository, stream), errPaused) {
+				return scheduler.HeldByPause
+			}
+			return scheduler.NotHeld
 		}
 		if op.Boundary == coreadapter.RepositoryBoundary {
 			if held, err := changeRepositoryHeld(repository, stream, op); err != nil || held {
-				return true
+				return scheduler.HeldByOther
 			}
 		}
 		if held, err := changeHeld(repository, stream); err != nil {
-			return true
+			return scheduler.HeldByOther
 		} else if held && op.Boundary == coreadapter.RunnerBoundary {
 			if input, err := thread.DecodeTurn(op); err == nil {
 				t, err := repository.Thread(stream, input.Agent)
 				if err == nil && t.Identity.Role == trace.ChiefOfStaff {
-					return false
+					return scheduler.NotHeld
 				}
 			}
-			return true
+			return scheduler.HeldByOther
 		}
 		if publicationAction(op) && !pulls.Credentialed(s.options.PullRequests) {
-			return true
+			return scheduler.HeldByOther
 		}
 		if waiting, err := baseWaiting(repository, stream); op.Action != baseRefreshAction && (err != nil || waiting) {
 			if input, err := thread.DecodeTurn(op); err == nil {
 				t, err := repository.Thread(stream, input.Agent)
-				return err != nil || t.Identity.Role != trace.ChiefOfStaff
+				if err == nil && t.Identity.Role == trace.ChiefOfStaff {
+					return scheduler.NotHeld
+				}
 			}
-			return true
+			return dependencyHold(repository, stream, err)
 		}
-		return pausedActions[op.Action] && op.Boundary == coreadapter.RunnerBoundary && errors.Is(s.held(repository, stream), errPaused)
+		if pausedActions[op.Action] && op.Boundary == coreadapter.RunnerBoundary && errors.Is(s.held(repository, stream), errPaused) {
+			return scheduler.HeldByPause
+		}
+		return scheduler.NotHeld
 	}
+}
+
+// dependencyHold is the cause of a hold by a dependency wait: a dependency wait
+// whose upstreams are alive, or any other hold when the wait cannot be read or
+// its upstream has ended, which the dependency exit then decides.
+func dependencyHold(repository *trace.Repository, stream config.WorkstreamID, readErr error) scheduler.HoldCause {
+	if readErr != nil {
+		return scheduler.HeldByOther
+	}
+	// A workgroup the owner has not approved is waiting on the owner's card.
+	if approved, err := repository.GroupApproved(stream); err == nil && !approved {
+		return scheduler.HeldByCard
+	}
+	if live, err := liveDependencyWait(repository, stream); err == nil && live {
+		return scheduler.HeldByDependency
+	}
+	return scheduler.HeldByOther
 }
 
 // stoppable returns ctx for one reconciler turn of the workstream, held

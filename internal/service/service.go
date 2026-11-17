@@ -214,6 +214,9 @@ type Service struct {
 	// and routing hands it the exits a scheduling pass raises.
 	router  *router.Router
 	routing *router.Worker
+	// stalls remembers when the stall watchdog last found each subject
+	// explained.
+	stalls stallClocks
 	// gateWorkers maps each active project's trace to its gate worker, so a
 	// scheduling pass can wake it.
 	gateWorkers sync.Map
@@ -1313,6 +1316,11 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
+	// The window a failing operation is retried for follows the loaded
+	// configuration's [loop] stall_after, also after a reload.
+	if options.GiveUpWindow == 0 && options.GiveUpWindowFor == nil {
+		options.GiveUpWindowFor = s.giveUpWindow
+	}
 	first, err := s.stages(cfg, repository)
 	if err != nil {
 		repository.Close()
@@ -1386,7 +1394,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
-	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}, {"flakes", (&flakeRecorder{s: s, cfg: cfg, repository: repository}).Pass}}
+	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"stall-watchdog", stallWatch{s: s, cfg: cfg, repository: repository}.Run}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}, {"flakes", (&flakeRecorder{s: s, cfg: cfg, repository: repository}).Pass}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})

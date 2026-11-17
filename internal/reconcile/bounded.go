@@ -129,7 +129,12 @@ func boundedAdapter(adapter coreadapter.Reconciler, op coreadapter.Operation) (B
 
 // GiveUpLimit returns the limit that ends this controller's bounded
 // operations.
-func (c *Controller) GiveUpLimit() GiveUpLimit { return NewGiveUpLimit(c.options.GiveUpWindow) }
+func (c *Controller) GiveUpLimit() GiveUpLimit {
+	if c.options.GiveUpWindowFor != nil {
+		return NewGiveUpLimit(c.options.GiveUpWindowFor())
+	}
+	return NewGiveUpLimit(c.options.GiveUpWindow)
+}
 
 func (c *Controller) attemptDeadline() time.Duration {
 	if c.options.AttemptDeadline > 0 {

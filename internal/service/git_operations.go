@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -41,11 +42,24 @@ func gitOperation(op coreadapter.Operation) bool {
 
 // GiveUpLimit is the failure streak that ends a landing, rebase or
 // publication that keeps failing: the number of consecutive failures and how
-// long after the first of them the operation is given up. Code that explains
-// an operation as in flight reads it, so an explanation lasts only while the
-// operation can still be attempted.
+// long after the first of them the operation is given up. The window is the
+// configured `[loop] stall_after`, and the default of 45m while the stall
+// watchdog is off. Code that explains an operation as in flight reads it, so an
+// explanation lasts only while the operation can still be attempted.
 func (s *Service) GiveUpLimit() reconcile.GiveUpLimit {
-	return reconcile.NewGiveUpLimit(s.options.Reconciliation.GiveUpWindow)
+	return reconcile.NewGiveUpLimit(s.giveUpWindow())
+}
+
+// giveUpWindow is the window of the give-up limit: the one a test's options set
+// explicitly, else the loaded configuration's.
+func (s *Service) giveUpWindow() time.Duration {
+	if w := s.options.Reconciliation.GiveUpWindow; w > 0 {
+		return w
+	}
+	if cfg := s.current(); cfg != nil {
+		return cfg.GiveUpWindow()
+	}
+	return 0
 }
 
 func networkOperation(op coreadapter.Operation) bool {

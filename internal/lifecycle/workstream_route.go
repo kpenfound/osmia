@@ -203,6 +203,64 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 	return s.Router.Route(ctx, x)
 }
 
+// StalledInput is what the stall watchdog knows of a stalled workstream.
+type StalledInput struct {
+	// Cause identifies the stall, so that a later stall of the same state is
+	// another occurrence.
+	Cause string
+	Actor trace.Actor
+	// Notice is the notice to the chief of staff the default commits.
+	Notice string
+	// Reason is the transition's reason when the exit is followed.
+	Reason   string
+	Evidence router.Evidence
+	At       time.Time
+}
+
+// StalledExit returns the exit of a workstream that has not progressed for the
+// stall window with nothing to explain it. The default leaves the workstream
+// where it is and tells the chief of staff; an assembled workstream can instead
+// be sent to a fresh final review of its branch at the modest bar.
+func (s *Controller) StalledExit(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, in StalledInput) router.Exit {
+	targets := []router.Target{intake.ExitTarget(intake.TriggerStalled, router.Target{Name: intake.TargetWait, Stay: true, NoMove: true})}
+	if feature.Value == AssembledState {
+		t := workstreamMoveTargets[AssembledState]
+		t.NoMove = true
+		targets = append(targets, intake.ExitTarget(intake.TriggerStalled, t))
+	}
+	id := fmt.Sprintf("ws-stalled-%d", feature.Version)
+	return router.Exit{
+		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: intake.WorkstreamMachine,
+		Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version,
+		Trigger: intake.TriggerStalled, Cause: in.Cause, HeaderCause: in.Cause, Actor: in.Actor, At: in.At,
+		Default: intake.TargetWait, Targets: targets, Questions: intake.ExitQuestions(intake.TriggerStalled), Evidence: in.Evidence,
+		TransitionID: func(t router.Target) string {
+			if t.Name == intake.TargetWait {
+				return id
+			}
+			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
+		},
+		Enter: func(context.Context, router.Plan) (router.Effect, error) {
+			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+in.Cause, "chief", in.Notice)}, Reason: in.Reason}, nil
+		},
+		Prereq: router.Prerequisites{
+			Other: func(ctx context.Context, t router.Target) (string, error) {
+				if t.Name == intake.TargetWait {
+					return "", nil
+				}
+				_, api := s.workstreamMoveRecords(ctx, repo, stream, feature, t.Name, in.Reason, in.Actor, "", s.Now())
+				switch {
+				case api == nil:
+					return "", nil
+				case api.Code == Internal:
+					return "", errors.New(api.Message)
+				}
+				return api.Message, nil
+			},
+		},
+	}
+}
+
 // nextMove returns the number the workstream's next move will take.
 func (s *Controller) nextMove(repo *trace.Repository, stream config.WorkstreamID) int {
 	moves, err := WorkstreamMoves(repo, stream)

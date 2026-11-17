@@ -77,6 +77,11 @@ type Options struct {
 	// has failed GiveUpFailures times in a row is ended. Zero uses
 	// DefaultGiveUpWindow.
 	GiveUpWindow time.Duration
+	// GiveUpWindowFor, when set, supplies the give-up window at each use, so a
+	// window that follows configuration changes with it. It takes precedence
+	// over GiveUpWindow; a window it returns that is not positive uses
+	// DefaultGiveUpWindow.
+	GiveUpWindowFor func() time.Duration
 }
 
 // DefaultMaxRetryDelay is the longest wait between attempts of a failing

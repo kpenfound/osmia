@@ -182,6 +182,39 @@ func TestJevDecisionThreshold(t *testing.T) {
 	}
 }
 
+// loop.stall_after loads with a default of 45m; zero turns the stall watchdog
+// off and leaves the window a failing operation is retried for at 45m; a
+// neighbouring key that does not exist is still refused.
+func TestLoopStallAfter(t *testing.T) {
+	cfg, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || cfg.Loop.StallAfter != "45m" || cfg.StallWindow() != 45*time.Minute || cfg.GiveUpWindow() != 45*time.Minute || cfg.Loop.MaxSessions != 30 {
+		t.Fatalf("default stall_after: %+v %v", cfg.Loop, err)
+	}
+	for _, c := range []struct {
+		value         string
+		stall, giveUp time.Duration
+	}{{"20m", 20 * time.Minute, 20 * time.Minute}, {"1h30m", 90 * time.Minute, 90 * time.Minute}, {"0", 0, 45 * time.Minute}, {"0s", 0, 45 * time.Minute}} {
+		cfg, err := Load(fixture(t, topConfig+"[loop]\nstall_after = '"+c.value+"'\n", projectConfig))
+		if err != nil || cfg.StallWindow() != c.stall || cfg.GiveUpWindow() != c.giveUp || cfg.Loop.MaxSessions != 30 {
+			t.Fatalf("stall_after = %q: %+v %v", c.value, cfg, err)
+		}
+	}
+	for _, c := range []struct{ name, loop, want string }{
+		{"negative", "stall_after = '-5m'", "loop.stall_after"},
+		{"not a duration", "stall_after = 'soon'", "loop.stall_after"},
+		{"not a string", "stall_after = true", "loop.stall_after"},
+		{"neighbouring key", "stall_afterr = '45m'", "loop.stall_afterr: unknown configuration key"},
+		{"another neighbouring key", "stall = '45m'", "loop.stall: unknown configuration key"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := Load(fixture(t, topConfig+"[loop]\n"+c.loop+"\n", projectConfig))
+			if cfg != nil || err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got config=%+v err=%v; want nil and %q", cfg, err, c.want)
+			}
+		})
+	}
+}
+
 func TestBudgetLimits(t *testing.T) {
 	c, err := Load(fixture(t, topConfig+"[budget]\nper_session = '5.00'\nper_unit = '40.00'\nper_day = '150.00'\n", projectConfig))
 	if err != nil || c.Budget.SessionLimitUSD() != 5 || c.Budget.PerUnit != "40.00" || c.Budget.PerDay != "150.00" {

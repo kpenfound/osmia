@@ -238,6 +238,7 @@ max_clean_turns = 3
 
 [loop]
 max_sessions = 30
+stall_after = "45m"
 
 [events]
 window = "5s"
@@ -366,6 +367,22 @@ final review or the publication, a drift rebase that moved the branch, or
 anything you do counts as progress. The pause is soft, attributed to the loop
 guard, and listed in the inbox; resuming the workstream starts the count over.
 It must not be negative, and `0` turns the guard off.
+
+`loop.stall_after` is a Go duration: how long a unit or a workstream may go
+without progress before the stall watchdog raises a `stalled` exit for it to
+the transition router, which asks Jev only what to do about it. The default is
+`45m`; `"0"` turns the watchdog off, and a negative value is refused. Progress
+is the same as the loop guard counts, except that nothing the chief of staff
+does counts. The watchdog raises nothing while something legitimate explains
+the quiet: an open owner card, a pause that covers the subject, a running or
+queued turn, an operation in flight, or a dependency wait on an upstream that is
+still alive. An operation in flight explains it only while its latest claim,
+observation or retry is younger than `stall_after` and its consecutive failures
+are below the limit at which it is given up. A hold explains it only when its
+own cause is one of those. A router hold whose window passes is a stall. The
+same window is how long after its first failure a landing, rebase or
+publication that keeps failing is retried before it is ended; with `"0"` that
+window stays `45m`, so operations still end.
 
 `workspaces` picks the backend of the workspaces the agents work in for each
 new workstream: its feature branch, units and drift resolution. The project's
