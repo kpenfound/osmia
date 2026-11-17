@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -90,7 +91,9 @@ func unitTarget(name string) router.Target {
 	case UnitMerged:
 		return router.Target{Name: name, Description: "Record the unit as merged: the foreman landed its approved candidate on the feature branch.", NeedsCandidate: true}
 	case UnitReady:
-		return router.Target{Name: name, Description: "Make the unit ready: every unit it depends on has merged."}
+		return router.Target{Name: name, Description: "Make the unit ready, or kick it: every unit it depends on has merged, and its mason starts it when its turn comes."}
+	case UnitPlanned:
+		return router.Target{Name: name, Description: "Hold the unit as planned until every unit it depends on has merged."}
 	case UnitWaiting:
 		return router.Target{Name: name, Description: "Park the unit until the question its worker asked is answered; its workspace is kept."}
 	}
@@ -145,6 +148,15 @@ type UnitExitInput struct {
 	// Active says the workstream must be building or assembled, as it must
 	// for a move.
 	Active bool
+	// Proposed is the state a proposal of the chief of staff asks for, when a
+	// policy sets the default to leave the unit where it is.
+	Proposed string
+	// Gate lists targets that are the owner's decision on this exit: a
+	// proposal cannot enter them, and the owner decides them on a card.
+	Gate []string
+	// Legal holds the unit's own conditions on a target, and is checked with the
+	// other hard prerequisites each time a target is applied.
+	Legal func(target string) (string, error)
 	// Operation is the landing or rebase operation raising the exit; its own
 	// in-flight state does not hold the exit.
 	Operation string
@@ -178,6 +190,7 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 			t.Description = d
 		}
 		t.Corroborate = spec.corroborate[name]
+		t.Gate = slices.Contains(in.Gate, name)
 		targets = append(targets, t)
 	}
 	questions := in.Questions
@@ -189,7 +202,7 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 		Repo: in.Repo, Project: in.Repo.Project(), Workstream: in.Stream, Unit: in.Unit, Machine: UnitMachine,
 		Subject: trace.UnitSubject(in.Unit), From: state.Value, Version: version,
 		Trigger: in.Trigger, Cause: in.Cause, HeaderCause: move, Actor: in.Actor, Note: in.Note, Turn: in.Turn,
-		Default: in.Default, Targets: targets, Questions: questions, Evidence: in.Evidence, Authority: in.Authority,
+		Default: in.Default, Targets: targets, Questions: questions, Evidence: in.Evidence, Authority: in.Authority, Proposed: in.Proposed,
 		TransitionID: func(t router.Target) string {
 			if in.ID != "" && t.Name == in.Default {
 				return in.ID
@@ -229,6 +242,11 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 				return "", nil
 			},
 			Other: func(_ context.Context, t router.Target) (string, error) {
+				if in.Legal != nil {
+					if why, err := in.Legal(t.Name); err != nil || why != "" {
+						return why, err
+					}
+				}
 				if !in.Active {
 					return "", nil
 				}
@@ -399,10 +417,19 @@ func RebuildUnitExit(load func() *Controller) router.Rebuilder {
 			return router.Exit{}, fmt.Errorf("unit moves are unavailable")
 		}
 		if rec.Authority != "" || rec.Trigger != TriggerMoveProposal {
-			return router.Exit{}, fmt.Errorf("the exit of %s carried more than its record holds", rec.Subject)
+			return router.Exit{}, router.ErrNotRebuilt
 		}
-		return s.UnitExit(UnitExitInput{Repo: repo, Stream: config.WorkstreamID(rec.Workstream), Unit: rec.Unit, Trigger: rec.Trigger, Cause: rec.Cause,
-			Default: rec.Default, Note: rec.Note, Turn: rec.Turn, Actor: rec.Actor, Active: true})
+		stream := config.WorkstreamID(rec.Workstream)
+		state := trace.WorkflowState{Version: rec.Version, Value: rec.From}
+		to := rec.Proposed
+		if to == "" {
+			to = rec.Default
+		}
+		in, err := s.proposalInput(repo, stream, rec.Unit, state, to, rec.Note, rec.Turn, rec.Actor, rec.Cause)
+		if err != nil {
+			return router.Exit{}, err
+		}
+		return s.UnitExit(in)
 	}
 }
 
@@ -493,6 +520,9 @@ var triggerSpecs = map[string]triggerSpec{
 		},
 	},
 	TriggerMoveProposal: {
+		describe: map[string]string{
+			TargetWait: "Leave the unit where it is: the chief of staff raised or ruled the contest it sits in, and by default does not move it out; it stays held for the owner.",
+		},
 		questions: []router.Question{question("proposal_fits", "The proposed move fits the evidence."), question("evidence_supports", "The history and rulings support the move.")},
 	},
 }

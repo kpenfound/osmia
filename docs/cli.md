@@ -476,24 +476,30 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   carries. A workstream whose pull request is merged or closed, or whose merge
   you recorded with `merged`, does not reopen. A move the workstream's state
   refuses, or one made while its publication is in flight, fails with
-  `conflict` (exit 5). The chief of staff moves a workstream to `building` or
-  `assembled` on its own judgment. It moves it to any other state only when
-  you ask it to with `send`. After three final reviews with blocking findings,
+  `conflict` (exit 5). The chief of staff proposes a move to `building` or
+  `assembled`, and the router commits it by default. A redraft (`sketched`),
+  another round (`in-shed`) and a return to `delivered` leave the workstream
+  where it is by default, and Jev may depart from that. A proposal for a
+  gate (`ratified`, `abandoned`) waits on a card for you; the chief tells you
+  what it did or points to the card. After three final reviews with blocking findings,
   the default is that reopening is yours to decide: a proposal to reopen leaves
   the workstream where it is and tells you, unless Jev departs from that default
   at the strict bar and records why.
-- `move <workstream-id> <unit> <implementing|checking|reviewing|approved|contested> <note>`
-  moves a unit the state machine left stuck or wrong. The unit must have
-  started and not merged: it is implementing, checking, reviewing, approved,
+- `move <workstream-id> <unit> <planned|ready|implementing|checking|reviewing|approved|contested> <note>`
+  moves a unit the state machine left stuck or wrong. The unit must
+  not have merged: it is planned, ready, implementing, checking, reviewing, approved,
   waiting or contested. Quote the required note. `implementing` gives the mason
   a turn with your note and a fresh clean-turn allowance in its existing
   workspace; `checking` runs the checks again on the recorded candidate;
   `reviewing` has the reviewer review the recorded candidate again with your
   note; `approved` records your approval of the recorded candidate, which the
   foreman lands; `contested` holds the unit in your inbox. Moving a unit to the
-  state it is in restarts that stage. A unit the foreman is landing or rebasing
-  fails with `conflict` (exit 5), as does a unit that has not started or has
-  merged; an unknown unit fails with `not_found` (exit 4). The chief of staff
+  state it is in restarts that stage. A unit that has not started moves only
+  to `ready` (once every unit it depends on has merged; moving a ready unit to
+  `ready` kicks it) or to `planned` (while one has not). A unit the foreman is
+  landing or rebasing fails with `conflict` (exit 5), as does a started unit
+  moved to `ready` or `planned`, an unstarted one moved to a state of started
+  work, or a merged unit; an unknown unit fails with `not_found` (exit 4). The chief of staff
   moves units on your behalf too, within the limit it shares with its
   contested rulings, and moves a unit when you ask it to with `send`.
 - `abandon <workstream-id> <reason>` abandons a workstream of the active

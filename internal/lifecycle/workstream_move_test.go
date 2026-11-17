@@ -139,9 +139,13 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	failFinalReview(t, f, repository, stream, a, 1, op)
 	tool := chiefMoveTool(t, f, repository, stream, "events_1", false)
 
-	for _, to := range []string{SketchedState, InShedState, RatifiedState, DeliveredState, AbandonedState} {
-		if out := callMove(t, tool, fmt.Sprintf(`{"to":%q,"note":"Do it."}`, to)); !strings.Contains(out, "is the owner's decision") {
+	for _, to := range []string{SketchedState, InShedState, DeliveredState, RatifiedState, AbandonedState} {
+		out := callMove(t, tool, fmt.Sprintf(`{"to":%q,"note":"Do it."}`, to))
+		if !strings.Contains(out, `"recorded":false`) || strings.Contains(out, "owner_decided") || strings.Contains(out, "present it to the owner") {
 			t.Fatalf("the chief of staff moved the workstream to %s on its own: %s", to, out)
+		}
+		if (to == RatifiedState || to == AbandonedState) && !strings.Contains(out, "pending as an owner decision") {
+			t.Fatalf("the proposal to %s does not point to its card: %s", to, out)
 		}
 	}
 	if out := callMove(t, tool, `{"to":"abandoned","note":"Stop.","owner_decided":true}`); !strings.Contains(out, "only for a move the owner asked for") {
@@ -191,7 +195,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 		must(t, err)
 		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
 	}
-	if out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`); !strings.Contains(out, "reopening it for further revisions is the owner's decision") {
+	if out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`); !strings.Contains(out, "by default the chief of staff does not reopen the workstream for further revisions") {
 		t.Fatalf("the chief of staff reopened after three blocking reviews: %s", out)
 	}
 	if out := callMove(t, tool, `{"to":"assembled","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
@@ -470,7 +474,7 @@ func TestTheFinalRoundLimitSetsTheDefaultOfAChiefReopening(t *testing.T) {
 		f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-default")
 		routeJev(f.s, &jevfixture.Transitions{})
 		out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
-		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "reopening it for further revisions is the owner's decision") {
+		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "by default the chief of staff does not reopen the workstream for further revisions") {
 			t.Fatalf("the chief of staff reopened after the limit: %s", out)
 		}
 		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {

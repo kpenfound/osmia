@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -146,21 +147,66 @@ var workstreamMoveTargets = map[string]router.Target{
 }
 
 // NoMoveTarget is the target of a proposal the router leaves unmoved: the
-// workstream stays where it is, and the proposal waits for the owner. It is the
-// default of a proposal to reopen a workstream whose final reviews have found
-// blocking problems maxFinalRounds times, the limit as a policy.
+// workstream stays where it is. It is the default of a proposal that a policy
+// of the chief of staff sets to stay: reopening a workstream whose final reviews
+// have found blocking problems maxFinalRounds times, and a return to delivered.
 const NoMoveTarget = "no_move"
+
+// moveDefault is how the policies of the chief of staff set the default of a
+// proposal to move a workstream.
+type moveDefault struct {
+	// Stay says the default leaves the workstream where it is.
+	Stay bool
+	// Why says which policy applies, in words for the target and the answer.
+	Why   string
+	Facts map[string]any
+}
+
+// workstreamMovePolicy reads what bears on a proposal to move the workstream to
+// a feature state. The chief of staff's proposal is the default when it moves
+// the workstream to building or assembled, except that after final reviews have
+// found blocking problems maxFinalRounds times reopening it for further
+// revisions is not the default; any other move is not made by default. The
+// owner's move is pinned and has no default to set.
+func (s *Controller) workstreamMovePolicy(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to string, actor trace.Actor) (moveDefault, error) {
+	p := moveDefault{Facts: map[string]any{"state": feature.Value, "target": to}}
+	if actor.Kind == ownerActor.Kind {
+		return p, nil
+	}
+	rounds, err := finalRoundsWithBlocking(repo, stream)
+	if err != nil {
+		return p, err
+	}
+	p.Facts["rounds_with_blocking"], p.Facts["max_final_rounds"] = rounds, maxFinalRounds
+	switch {
+	case to == BuildingState && rounds >= maxFinalRounds:
+		p.Stay, p.Why = true, fmt.Sprintf("final reviews have found blocking problems %d times, so by default the chief of staff does not reopen the workstream for further revisions", rounds)
+	case !slices.Contains(ChiefMoveTargets, to):
+		p.Stay, p.Why = true, fmt.Sprintf("by default the chief of staff moves a workstream only to %s", strings.Join(ChiefMoveTargets, " or "))
+	}
+	return p, nil
+}
 
 // routeWorkstreamMove routes a move to building, assembled or delivered. The
 // owner's move is a pinned move: the router enters exactly the target the owner
 // named, and asks Jev nothing. A move of the chief of staff's own is a
-// proposal: its target is the default, and the router judges it with the other
-// legal targets.
-func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string) (router.Result, error) {
+// proposal: its target is the default unless a policy of the chief of staff sets
+// the default to leave the workstream where it is, and the router judges it with
+// the other legal targets.
+func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string, policy moveDefault) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing a workstream's moves is unavailable")
 	}
-	now := s.Now()
+	x, err := s.workstreamMoveExit(repo, stream, feature, to, note, actor, turn, policy, s.Now())
+	if err != nil {
+		return router.Result{}, err
+	}
+	return s.Router.Route(ctx, x)
+}
+
+// workstreamMoveExit returns the exit of a move to building, assembled or
+// delivered, raised at the given time.
+func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string, policy moveDefault, now time.Time) (router.Exit, error) {
 	trigger := intake.TriggerMoveProposal
 	var authority *router.Authority
 	names := []string{AssembledState, BuildingState, DeliveredState}
@@ -168,7 +214,7 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 		trigger, authority = intake.TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: to}
 		names = []string{to}
 	}
-	targets := make([]router.Target, 0, len(names))
+	targets := make([]router.Target, 0, len(names)+1)
 	for _, name := range names {
 		t := workstreamMoveTargets[name]
 		// A move to the state the workstream is in asks for a fresh review or
@@ -176,32 +222,26 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 		t.NoMove = name == feature.Value
 		targets = append(targets, t)
 	}
-	facts := map[string]any{"state": feature.Value, "target": to}
 	def := to
-	if trigger == intake.TriggerMoveProposal && to == BuildingState {
-		rounds, err := finalRoundsWithBlocking(repo, stream)
-		if err != nil {
-			return router.Result{}, err
-		}
-		facts["rounds_with_blocking"], facts["max_final_rounds"] = rounds, maxFinalRounds
-		if rounds >= maxFinalRounds {
-			// maxFinalRounds sets the default: the workstream stays, and
-			// reopening it past the limit is a departure at the strict bar.
-			def = NoMoveTarget
-			targets = append([]router.Target{{Name: NoMoveTarget, Stay: true, NoMove: true,
-				Description: fmt.Sprintf("Leave the workstream where it is: final reviews have found blocking problems %d times, so reopening it for further revisions is the owner's decision.", rounds)}}, targets...)
-		}
+	if policy.Stay {
+		// The policy sets the default: the workstream stays, and making the
+		// move is a departure at the target's bar.
+		def = NoMoveTarget
+		targets = append([]router.Target{{Name: NoMoveTarget, Stay: true, NoMove: true,
+			Description: "Leave the workstream where it is: " + policy.Why + ".",
+			Reason:      fmt.Sprintf("workstream %s stays %s: the proposal to move it to %s was not made: %s: %s", stream, feature.Value, to, policy.Why, note)}}, targets...)
 	}
 	x := router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: intake.WorkstreamMachine,
 		Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version,
 		Trigger: trigger, Cause: fmt.Sprintf("%s-%d-%d", WorkstreamMovePrefix, feature.Version, now.UnixNano()), Actor: actor, Note: note, Turn: turn, At: now,
-		Default: def, Targets: targets, Authority: authority,
+		Proposed: to,
+		Default:  def, Targets: targets, Authority: authority,
 		Questions: []router.Question{{Name: "proposal_fits", Instructions: "The proposed move fits the evidence."}, {Name: "evidence_supports", Instructions: "The history and the findings of the final reviews support the move."}},
 		TransitionID: func(t router.Target) string {
 			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
 		},
-		Evidence: router.Evidence{Intent: "The workstream's sealed spec and plan are what the owner approved.", Facts: facts},
+		Evidence: router.Evidence{Intent: "The workstream's sealed spec and plan are what the owner approved.", Facts: policy.Facts},
 		Prereq: router.Prerequisites{
 			Other: func(ctx context.Context, t router.Target) (string, error) {
 				if t.Name == NoMoveTarget {
@@ -220,12 +260,47 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 	}
 	moves, err := WorkstreamMoves(repo, stream)
 	if err != nil {
-		return router.Result{}, err
+		return router.Exit{}, err
 	}
 	for _, m := range moves {
 		x.Evidence.Records = append(x.Evidence.Records, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: fmt.Sprintf("%s moved the workstream from %s to %s: %s", m.By, m.From, m.To, m.Note)})
 	}
-	return s.Router.Route(ctx, x)
+	return x, nil
+}
+
+// RebuildWorkstreamExit returns how the router rebuilds the exit of a chief of
+// staff's proposal to move a workstream from its route record, to finish a pick
+// that was recorded but not applied when the service stopped. An exit raised by
+// a pass, or that carried an authority, is raised again by its own pass. load
+// returns the lifecycle controller.
+func RebuildWorkstreamExit(load func() *Controller) router.Rebuilder {
+	return func(_ context.Context, repo *trace.Repository, rec router.Record) (router.Exit, error) {
+		if rec.Authority != "" || rec.Trigger != intake.TriggerMoveProposal {
+			return router.Exit{}, router.ErrNotRebuilt
+		}
+		s := load()
+		if s == nil {
+			return router.Exit{}, errors.New("workstream moves are unavailable")
+		}
+		stream := config.WorkstreamID(rec.Workstream)
+		if rec.Subject == intake.OwnerSubject {
+			x, api := s.Intake().ShedProposalExit(string(stream), intake.ShedProposal{Redraft: rec.Proposed == intake.TargetRedraft, Note: rec.Note, Turn: rec.Turn, Actor: rec.Actor, At: rec.Raised})
+			if api != nil {
+				return router.Exit{}, errors.New(api.Message)
+			}
+			return x, nil
+		}
+		feature := trace.WorkflowState{Version: rec.Version, Value: rec.From}
+		to := rec.Proposed
+		if to == "" {
+			to = rec.Default
+		}
+		policy, err := s.workstreamMovePolicy(repo, stream, feature, to, rec.Actor)
+		if err != nil {
+			return router.Exit{}, err
+		}
+		return s.workstreamMoveExit(repo, stream, feature, to, rec.Note, rec.Actor, rec.Turn, policy, rec.Raised)
+	}
 }
 
 // StalledInput is what the stall watchdog knows of a stalled workstream.
@@ -370,9 +445,7 @@ func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 		reg.Register(intake.WorkstreamMachine, to, effect(to))
 	}
 	reg.Register(intake.WorkstreamMachine, NoMoveTarget, func(_ context.Context, p router.Plan) (router.Effect, error) {
-		x := p.Exit
-		reason := fmt.Sprintf("workstream %s stays %s: the proposal to move it to %s waits for the owner, since final reviews have found blocking problems %d times: %s", x.Workstream, x.From, BuildingState, maxFinalRounds, x.Note)
-		return router.Effect{Events: []trace.Event{trace.Notice(p.TransitionID, "owner", reason)}, Reason: reason}, nil
+		return router.Effect{Events: []trace.Event{trace.Notice(p.TransitionID, "owner", p.Reason)}, Reason: p.Reason}, nil
 	})
 	reg.Register(intake.FinalMachine, intake.TargetReopenBuilding, effect(BuildingState))
 	reg.Register(intake.FinalMachine, intake.TargetFreshReview, effect(AssembledState))

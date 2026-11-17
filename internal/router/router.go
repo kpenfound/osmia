@@ -216,7 +216,7 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 		}
 		rec = &Record{Occurrence: key, Project: string(x.Project), Workstream: string(x.Workstream), Unit: x.Unit, Machine: x.Machine, Subject: x.Subject,
 			Trigger: x.Trigger, Cause: x.Cause, From: x.From, Version: x.Version, Default: x.Default, Raised: raised,
-			Actor: x.Actor, Note: x.Note, Turn: x.Turn, HeaderCause: x.HeaderCause}
+			Actor: x.Actor, Note: x.Note, Turn: x.Turn, HeaderCause: x.HeaderCause, Proposed: x.Proposed}
 		if x.Authority != nil {
 			rec.Authority, rec.AuthorityRef = x.Authority.Kind, x.Authority.Ref
 		}

@@ -58,6 +58,8 @@ type Record struct {
 	Note        string      `json:"note,omitempty"`
 	Turn        string      `json:"turn,omitempty"`
 	HeaderCause string      `json:"header_cause,omitempty"`
+	// Proposed is the target a proposal of the chief of staff asked for.
+	Proposed string `json:"proposed,omitempty"`
 	// Offered are the legal targets Jev was offered, or the one target the
 	// default was committed for when it was the only one.
 	Offered []string `json:"offered,omitempty"`

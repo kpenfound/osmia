@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,10 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
+
+// ErrNotRebuilt is what a Rebuilder returns for a record whose exit its pass
+// raises again, and not the machine's rebuild: Recover leaves it alone.
+var ErrNotRebuilt = errors.New("the exit is raised again by its own pass")
 
 // Rebuilder returns the exit a route record was raised for, with the current
 // targets, hard prerequisites and effects of its machine. Recover sets the
@@ -95,12 +100,15 @@ func (r *Router) Recover(ctx context.Context, repo *trace.Repository, stream con
 			continue
 		}
 		x, err := build(ctx, repo, rec)
+		if errors.Is(err, ErrNotRebuilt) {
+			continue
+		}
 		if err != nil {
 			r.logger().Warn("a recorded transition pick cannot be rebuilt; its next pass routes it again", "workstream", string(stream), "subject", rec.Subject, "trigger", rec.Trigger, "error", err.Error())
 			continue
 		}
 		x.Version, x.From, x.Trigger, x.Cause, x.Default = rec.Version, rec.From, rec.Trigger, rec.Cause, rec.Default
-		x.Actor, x.Note, x.Turn, x.HeaderCause = rec.Actor, rec.Note, rec.Turn, rec.HeaderCause
+		x.Actor, x.Note, x.Turn, x.HeaderCause, x.Proposed = rec.Actor, rec.Note, rec.Turn, rec.HeaderCause, rec.Proposed
 		if OccurrenceKey(x) != rec.Occurrence {
 			r.logger().Warn("a rebuilt exit is not the occurrence that was recorded", "workstream", string(stream), "occurrence", rec.Occurrence)
 			continue

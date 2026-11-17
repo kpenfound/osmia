@@ -19,11 +19,11 @@ import (
 
 const moveUnitTool = "move_unit"
 
-// moveSources are the states a unit moves from: started, and not merged.
-var moveSources = []string{UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested, UnitWaiting}
+// moveSources are the states a unit moves from: not merged.
+var moveSources = []string{UnitPlanned, UnitReady, UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested, UnitWaiting}
 
 // moveTargets are the states a unit moves to.
-var moveTargets = []string{UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
+var moveTargets = []string{UnitPlanned, UnitReady, UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
 
 func moveDocument(unit string, version uint64) string {
 	return fmt.Sprintf("%s-move-%d", trace.UnitSubject(unit), version)
@@ -97,14 +97,16 @@ func operationUnit(op coreadapter.Operation) (string, error) {
 	return in.Unit, nil
 }
 
-// moveUnit moves a started unit that has not merged to another state, as
-// actor: the owner, or the chief of staff on the owner's behalf in turn. The
-// move and its document are recorded together. A move to implementing gives
-// the unit's mason a turn with the note and a fresh clean-turn allowance; to
-// checking, a fresh check run of the recorded candidate; to reviewing, a
-// fresh review of it; to approved, an approval of it that the foreman lands;
-// and to contested, raises the unit to the owner. A move re-entering the
-// unit's state restarts that stage.
+// moveUnit moves a unit that has not merged to another state, as actor: the
+// owner, or the chief of staff in turn. The move and its document are recorded
+// together. A move to implementing gives the unit's mason a turn with the note
+// and a fresh clean-turn allowance; to checking, a fresh check run of the
+// recorded candidate; to reviewing, a fresh review of it; to approved, an
+// approval of it that the foreman lands; to contested, raises the unit to the
+// owner; and a unit that has not started moves to ready, which its mason starts
+// when its turn comes, or back to planned. A move re-entering the unit's state
+// restarts that stage. The owner's move is a pinned move; the chief of staff's
+// is a proposal that the router decides.
 func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn string) (UnitMoveResponse, *APIError) {
 	return s.moveUnit(ctx, repo, stream, unit, req, actor, turn, "")
 }
@@ -132,6 +134,11 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 	if !slices.Contains(moveSources, state.Value) {
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s is %s; only a started unit that has not merged moves", unit, state.Value)}
 	}
+	if why, err := s.moveLegality(repo, stream, unit, state.Value, req.To); err != nil {
+		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's plan"}
+	} else if why != "" {
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: why}
+	}
 	if state.Value == req.To && (req.To == UnitApproved || req.To == UnitContested) {
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s is already %s", unit, req.To)}
 	}
@@ -143,31 +150,44 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the foreman is rebasing unit %s; it moves once the rebase ends", unit)}
 	}
 	at := s.Now()
+	pinned := actor == trace.JevActor || actor.Kind == ownerActor.Kind
 	// The records are built once here, so a move that cannot be recorded is
 	// refused before anything is asked of the router, which builds them again
-	// when it enters the target.
-	records, api := s.unitMoveRecords(ctx, repo, stream, unit, state, req.To, note, actor, turn, "", "", at)
-	if api != nil {
-		return UnitMoveResponse{}, api
+	// when it enters the target. A proposal to approve is never entered, so it
+	// builds none.
+	var records unitMoveRecord
+	if pinned || req.To != UnitApproved {
+		var api *APIError
+		if records, api = s.unitMoveRecords(ctx, repo, stream, unit, state, req.To, note, actor, turn, "", "", at); api != nil {
+			return UnitMoveResponse{}, api
+		}
 	}
 	// An owner's decision, and one of Jev's gate decisions, is a pinned move:
 	// the router enters exactly the target it authorises. A move of the chief
 	// of staff's own is a proposal the router judges.
-	in := UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Default: req.To, Note: note, Turn: turn, Actor: actor, Active: true,
-		Trigger: TriggerMoveProposal, Cause: fmt.Sprintf("%s-%d", moveDocument(unit, state.Version), at.UnixNano())}
+	cause := fmt.Sprintf("%s-%d", moveDocument(unit, state.Version), at.UnixNano())
+	var in UnitExitInput
 	switch {
 	case actor == trace.JevActor:
 		if judgment == "" {
 			return UnitMoveResponse{}, &APIError{Code: Validation, Message: "a Jev move names its judgment"}
 		}
-		in.Trigger, in.Authority = TriggerJevRuling, &router.Authority{Kind: router.AuthorityJevGate, Target: req.To, Judgment: judgment}
+		in = UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Default: req.To, Note: note, Turn: turn, Actor: actor, Active: true, Trigger: TriggerJevRuling, Cause: cause,
+			Authority: &router.Authority{Kind: router.AuthorityJevGate, Target: req.To, Judgment: judgment}}
 	case actor.Kind == ownerActor.Kind:
-		in.Trigger, in.Authority = TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: req.To}
+		in = UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Default: req.To, Note: note, Turn: turn, Actor: actor, Active: true, Trigger: TriggerMoveOwner, Cause: cause,
+			Authority: &router.Authority{Kind: router.AuthorityOwner, Target: req.To}}
+	default:
+		if in, err = s.proposalInput(repo, stream, unit, state, req.To, note, turn, actor, cause); err != nil {
+			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's history"}
+		}
 	}
 	res, err := s.raise(ctx, false, in)
 	switch {
 	case err != nil:
 		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed && res.Target == TargetWait:
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s stays %s and was not moved to %s: by default the chief of staff does not move a unit out of a contest it raised or ruled on itself, and Jev judged that the evidence does not support leaving it. The proposal, the earlier moves and rulings, and Jev's judgment are in the trace", unit, state.Value, req.To)}
 	case res.Committed:
 		move := records.move
 		if res.Target != req.To {
@@ -176,8 +196,25 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 		return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
 	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}
+	case res.Pending():
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: pendingOwnerMove(unit, req.To, res)}
 	}
-	return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s was not moved to %s: the move is held (%s). %s", unit, req.To, res.Hold, res.Reason)}
+	return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s was not moved to %s: the move is held (%s). %s Nothing moved, and the unit keeps its state", unit, req.To, res.Hold, res.Reason)}
+}
+
+// pendingOwnerMove says what became of a proposal that belongs to the owner: it
+// is a pending owner decision, and where the owner decides it.
+func pendingOwnerMove(unit, to string, res router.Result) string {
+	why := "the owner decides it"
+	switch {
+	case to == UnitApproved:
+		why = "approving a candidate without an independent review is the owner's decision"
+	case res.Hold == router.HoldIntent:
+		why = "Jev judged that it would change what the owner approved"
+	case res.Hold == router.HoldGate:
+		why = "the owner holds this unit, and a proposal cannot move it"
+	}
+	return fmt.Sprintf("unit %s was not moved to %s: %s. The move is pending as an owner decision on %s; nothing moved", unit, to, why, recoveryCard)
 }
 
 // unitMoveRecord is what entering a target by a move records: the move, its
@@ -244,6 +281,10 @@ func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository
 		reason += fmt.Sprintf("; the foreman lands candidate %s", identity.Candidate.Revision)
 	case UnitContested:
 		reason += "; the owner rules on it"
+	case UnitReady:
+		reason += "; its mason starts it when its turn comes"
+	case UnitPlanned:
+		reason += "; it waits until every unit it depends on has merged"
 	}
 	reason += ": " + note
 	data, _ := json.MarshalIndent(move, "", "  ")
@@ -303,20 +344,24 @@ func (s *Controller) OwnerMove(ctx context.Context, raw, unit string, req UnitMo
 	return s.MoveUnit(ctx, repo, stream, unit, req, ownerActor, "")
 }
 
-// moveUnit returns the move_unit tool of one claimed chief-of-staff turn.
-// The chief of staff moves a unit of its workstream on the owner's behalf,
-// with a recorded recovery decision; a move to contested
-// raises the unit to the owner and is always open to it. A contest the owner
-// holds, or one it already decided, is the owner's to move. In a turn
-// answering the owner, it records the owner's own move. A move the service
-// refuses is an ordinary result, {"recorded":false,"reason":...}, and records
-// nothing. A shared chief of staff names the member whose unit moves.
+// MoveUnit returns the move_unit tool of one claimed chief-of-staff turn. The
+// chief of staff proposes a move of a unit of its workstream: the transition
+// router commits it, keeps the unit where it is, or leaves the move as a pending
+// owner decision, and the result says which. A contest the chief of staff raised
+// or ruled on itself keeps the unit there by default, and Jev may depart from
+// that; a proposal to approve a candidate, and a move out of a contest the
+// owner holds, are the owner's to decide and are left pending on the recovery
+// card. In a turn answering the owner, it records the owner's own move. A move
+// that is not made is an ordinary result, {"recorded":false,"reason":...},
+// which says what became of it. A shared chief of staff names the member whose
+// unit moves.
 func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: moveUnitTool, Effect: coreadapter.ToolMemory,
-		Description: "Move a unit of this workstream to another state when the state machine leaves it stuck or wrong. unit: its ID; to: implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (only to record an explicit owner approval of the candidate) or contested (hold the unit for the owner); " +
-			"note: for the mason or reviewer, what to do differently, which it receives; for approved, why the candidate holds; for contested, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they do. Moving a unit to the state it is in restarts that stage. " +
-			"Move only when you are confident the move resolves the problem; otherwise move it to contested. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. The unit's state and recent transitions are in units/<unit>/activity.json. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"to":{"type":"string","enum":["implementing","checking","reviewing","approved","contested"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["unit","to","note"],"additionalProperties":false}`)}
+		Description: "Propose moving a unit of this workstream to another state when the state machine leaves it stuck or wrong. The service routes the proposal and the result says what happened: the unit moved, it stays where it is, the move is held with Jev's view sent to you, or the move belongs to the owner and is pending on a card. " +
+			"unit: its ID; to: ready (kick a ready unit, or make a planned unit ready once every unit it depends on has merged), planned (hold a unit that has not started until its dependencies merge), implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (a candidate approved without independent review is the owner's decision, so the proposal waits as a pending owner decision) or contested (hold the unit for the owner); " +
+			"note: for the mason or reviewer, what to do differently, which it receives; for contested, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they do. Moving a unit to the state it is in restarts that stage. " +
+			"A unit sitting in a contest you raised or already ruled on stays there by default; put the new evidence in the note and Jev decides whether it supports leaving. Report to the owner what the result says happened. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. The unit's state and recent transitions are in units/<unit>/activity.json. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"to":{"type":"string","enum":["planned","ready","implementing","checking","reviewing","approved","contested"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["unit","to","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Unit         string              `json:"unit"`
@@ -363,24 +408,6 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 			}
 			return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, turn.Actor, scope.Turn))
 		}
-		if contest, contested, err := unitContest(target, stream, input.Unit); err != nil {
-			return nil, err
-		} else if contested {
-			if moveContest(contest, input.Unit) {
-				return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner moves it", input.Unit))
-			}
-			_, decisions, err := chiefDecisions(target, stream, input.Unit)
-			if err != nil {
-				return nil, err
-			}
-			if slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }) {
-				return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner moves it", contest.ID, input.Unit))
-			}
-		}
-		if input.To == UnitApproved {
-			return priorityRefusal("engineering recovery cannot bypass independent review; request reviewing instead")
-		}
-
 		return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, chiefActor, scope.Turn))
 	}
 	return tool

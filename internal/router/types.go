@@ -228,6 +228,11 @@ type Exit struct {
 	// move and the turn that made it; the target's effect records them.
 	Note string
 	Turn string
+	// Proposed is the target a proposal of the chief of staff asks for, which
+	// may differ from the default when a policy sets the default to leave the
+	// subject where it is. It is recorded, so a proposal recovered after a
+	// restart is rebuilt with the target that was asked for.
+	Proposed string
 	// TransitionID, when set, names the transition into a target, for readers
 	// that recognise a transition by its ID. It is stable for the exit.
 	TransitionID func(Target) string
@@ -263,6 +268,10 @@ type Exit struct {
 	// the delivery card); empty means the recovery card.
 	OwnerCard string
 }
+
+// Pending reports whether routing the exit left the move as a pending owner
+// decision: it belongs to the owner, and the owner decides it on a card.
+func (r Result) Pending() bool { return r.Journal == StateOwner }
 
 // Port is the router as a controller uses it: an exit that waits on a request
 // is routed in place, and an exit a scheduling pass raises is handed to the

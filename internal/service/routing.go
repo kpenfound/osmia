@@ -23,6 +23,7 @@ func (s *Service) newRouter() *router.Router {
 	lifecycle.RegisterWorkstreamEffects(effects, s.lifecycle)
 	rebuild := &router.Rebuilders{}
 	rebuild.Register(execution.UnitMachine, execution.RebuildUnitExit(s.execution))
+	rebuild.Register(intake.WorkstreamMachine, lifecycle.RebuildWorkstreamExit(s.lifecycle))
 	return &router.Router{
 		Judge:   s.jev,
 		Stops:   s.routeStops,
