@@ -61,7 +61,7 @@ func RenderHandIn(g Group, run, notes string) (string, error) {
 	} else {
 		line("- Originating run: unit `%s` of workstream `%s`.", o.Source.Unit, o.Source.Workstream)
 	}
-	line("- Run record: `%s` in the trace of workstream `%s`.", o.Run, o.Source.Workstream)
+	line("- Run record: `%s` in the trace of workstream `%s`.", o.RunPath(), o.Source.Workstream)
 	line("- Recorded: %s.", o.RecordedAt.UTC().Format(time.RFC3339))
 	line("- Engine: %s.", engineLine(ev.Engine))
 	line("")
@@ -144,7 +144,7 @@ func whereToRead(o Occurrence) string {
 	if len(refs) > 0 {
 		return "read " + strings.Join(refs, ", ")
 	}
-	return fmt.Sprintf("read the run record `%s`", o.Run)
+	return fmt.Sprintf("read the run record `%s`", o.RunPath())
 }
 
 func traceCommand(t Trace) string {
@@ -225,7 +225,7 @@ func renderHistory(b *strings.Builder, g Group, run string) {
 		if h.Source.FinalReview {
 			origin = fmt.Sprintf("the final review of workstream `%s`", h.Source.Workstream)
 		}
-		fmt.Fprintf(b, "- %s: flaky %s in %s, run record `%s`; %s.\n", h.RecordedAt.UTC().Format(time.RFC3339), codeList(h.Links), origin, h.Run, describeDecision(h.Decision))
+		fmt.Fprintf(b, "- %s: flaky %s in %s, run record `%s`; %s.\n", h.RecordedAt.UTC().Format(time.RFC3339), codeList(h.Links), origin, h.RunPath(), describeDecision(h.Decision))
 	}
 	b.WriteString("\n")
 }

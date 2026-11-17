@@ -325,6 +325,9 @@ func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit st
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		reason += "; " + flaky
 	}
+	if open := c.openFlakeFixes(run); open != "" {
+		reason += "; " + open
+	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(unit, run.Run)}
 	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitReviewing, Reason: reason},
