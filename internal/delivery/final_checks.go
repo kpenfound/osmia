@@ -35,6 +35,12 @@ import (
 // local check runs have no Source; they carry the selection, command, exit
 // status, captured output and engines of that run, and Attempt links the
 // result to its start evidence.
+//
+// Evidence is what a Dagger Cloud result shows about how it ran: the engine,
+// every check the statuses report for the commit, the traces of the failed
+// and rerun checks and the timings the statuses carry. It marks the output
+// text and parallelism, which Cloud does not report, as unavailable.
+// FlakeEvidence returns it for any record, including one written without it.
 type FinalCheckRun struct {
 	Review             int                   `json:"review"`
 	Attempt            int                   `json:"attempt,omitempty"`
@@ -65,9 +71,46 @@ type FinalCheckRun struct {
 	TraceURL           string                `json:"trace_url,omitempty"`
 	CIIdentityFallback string                `json:"ci_identity_fallback,omitempty"`
 	Engines            *api.CheckAttribution `json:"engines,omitempty"`
+	Evidence           *api.CheckEvidence    `json:"evidence,omitempty"`
 	Error              string                `json:"error,omitempty"`
 	StartedAt          time.Time             `json:"started_at"`
 	FinishedAt         time.Time             `json:"finished_at"`
+}
+
+// FlakeEvidence converts the record to the neutral evidence of its run, with
+// the run's flaky checks. A pull request record written without evidence yields
+// what its failed checks, reruns and status URL hold; a local record yields
+// what its selection, engines and output hold.
+func (r FinalCheckRun) FlakeEvidence() api.CheckEvidence {
+	var evidence api.CheckEvidence
+	switch {
+	case r.Evidence != nil:
+		evidence = *r.Evidence
+	case r.Source == api.CheckSourcePullRequest:
+		evidence = checkrun.CloudEvidence(checkrun.CloudResult{StatusURL: r.StatusURL}, r.failedBeforeRerun(), r.Flaky)
+	default:
+		evidence = checkrun.RecordedEvidence(checkrun.RecordedLocalRun{Selection: r.Selection, Engines: r.Engines, Output: r.Output, OutputPath: r.OutputPath, OutputRevision: r.OutputRevision, TraceURL: r.TraceURL, Record: FinalChecksPath(r.Review)}, r.Flaky)
+	}
+	if r.Source != api.CheckSourcePullRequest {
+		evidence.Engines = r.Engines
+	}
+	evidence.Flaky = slices.Clone(r.Flaky)
+	return evidence
+}
+
+// failedBeforeRerun lists the checks the record shows failed: those of the
+// rerun's failing posting and those still failing.
+func (r FinalCheckRun) failedBeforeRerun() []api.CheckFailure {
+	var failed []api.CheckFailure
+	for _, rerun := range r.Reruns {
+		failed = append(failed, rerun.Failed...)
+	}
+	for _, f := range r.FailedChecks {
+		if !slices.ContainsFunc(failed, func(o api.CheckFailure) bool { return o.Name == f.Name && o.TraceID == f.TraceID }) {
+			failed = append(failed, f)
+		}
+	}
+	return failed
 }
 
 func FinalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k) }
@@ -385,6 +428,7 @@ func (w *finalWatch) record(ctx context.Context, result checkrun.CloudResult, re
 	if result.Outcome == checkrun.CloudLoadFailed {
 		run.Error = "the module did not load"
 	}
+	w.captureEvidence(&run, result)
 	if err := w.write(ctx, &run); err != nil {
 		return FinalCheckRun{}, err
 	}
@@ -425,10 +469,18 @@ func (w *finalWatch) recordIncomplete(ctx context.Context, incomplete int, lates
 	if w.rerun != nil {
 		run.Reruns = []api.CheckRerun{w.rerun.CheckRerun}
 	}
+	w.captureEvidence(&run, base)
 	if err := w.write(ctx, &run); err != nil {
 		return FinalCheckRun{}, err
 	}
 	return run, IncompleteChecksError(run, incomplete+1, run.FinishedAt.Add(FinalCheckDelay(incomplete+1)))
+}
+
+// captureEvidence records what the Cloud statuses show about how the run ran,
+// from the result read and the checks the record names.
+func (w *finalWatch) captureEvidence(run *FinalCheckRun, result checkrun.CloudResult) {
+	evidence := checkrun.CloudEvidence(result, run.failedBeforeRerun(), run.Flaky)
+	run.Evidence = &evidence
 }
 
 func checkRef(s *pulls.CommitStatus) api.CheckStatusRef {

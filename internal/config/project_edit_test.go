@@ -231,6 +231,30 @@ func TestReplaceFileFailureLeavesNoTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestEditProjectSetsAndClearsFlakeFixes(t *testing.T) {
+	c, opts := projectEditFixture(t, projectConfig)
+	if c.Project.FlakeFixes {
+		t.Fatal("flake_fixes is not off by default")
+	}
+	edited, file, err := c.EditProject(pid, opts.Home, []byte(projectConfig), ProjectEdit{Bools: map[string]bool{"flake_fixes": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := projectConfig + "flake_fixes = true\n"; string(edited) != want {
+		t.Fatalf("edited:\n%s\nwant:\n%s", edited, want)
+	}
+	if !file.Project.FlakeFixes || !file.Set("flake_fixes") {
+		t.Fatalf("decoded: %+v", file)
+	}
+	back, file, err := c.EditProject(pid, opts.Home, edited, ProjectEdit{Clear: []string{"flake_fixes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(back) != projectConfig || file.Project.FlakeFixes || file.Set("flake_fixes") {
+		t.Fatalf("cleared: %q %+v", back, file)
+	}
+}
+
 func TestEditProjectSetsAndClearsTheRepoOptIn(t *testing.T) {
 	c, opts := projectEditFixture(t, projectConfig)
 	if c.Project.HearsayDeclareRepo {

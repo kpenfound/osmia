@@ -4975,6 +4975,9 @@
           "clone": {
             "type": "string"
           },
+          "flake_fixes": {
+            "type": "boolean"
+          },
           "fork": {
             "type": "string"
           },
@@ -7120,7 +7123,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -7128,7 +7131,7 @@
             "type": "boolean"
           },
           "value": {
-            "description": "The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo, or for hearsay_entities an object of local entity ID to Hearsay entity id."
+            "description": "The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo and flake_fixes, or for hearsay_entities an object of local entity ID to Hearsay entity id."
           }
         },
         "type": "object"
@@ -7163,6 +7166,13 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "flake_fixes": {
+            "description": "True turns flake-fix workstreams on for the project: a flaky check is recorded and the chief of staff may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false.",
+            "type": [
+              "null",
+              "boolean"
             ]
           },
           "fork": {

@@ -1088,6 +1088,7 @@ landing = "commit-per-unit"
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
+flake_fixes = false                 # default; true turns flake-fix workstreams on for this project
 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
@@ -1165,6 +1166,22 @@ still pending after it is recorded as an incomplete run, and the statuses are
 read again later. Listing the check links for a Jev selection has its
 own five-minute bound. A change applies to runs that start after a reload.
 
+`flake_fixes` is a boolean, `false` by default; clear the key to return to it.
+It turns flake-fix workstreams on for the project. A check that fails and then
+passes when rerun by its own link already counts as a pass in unit and
+final-review check runs, and with the default that is all that happens. With
+`flake_fixes = true` each such run is also recorded as a flake, the originating
+workgroup's chief of staff is told, and the chief of staff may open a separate
+workstream, through the dedicated flake-fix tool, to find and fix the flakiness's
+cause, or decline with a recorded reason. The setting is off by default because
+a flake-fix workstream is an ordinary workstream whose pull requests go out
+under the owner's name: the owner opts a project in rather than having it
+happen to every project. The owner still ratifies what such a workstream builds
+and approves its delivery. The setting never changes whether any check run
+passes or fails. It is validated like the other project settings: a value that
+is not `true` or `false` fails at load naming `flake_fixes`, and with the key
+left out the setting is off.
+
 A `classifier` key in a project file is accepted and ignored, so a file that has
 one still loads.
 
@@ -1181,7 +1198,7 @@ current bytes once and returns, for each effective setting (`name`, `upstream`,
 `fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
-`hearsay_entities`):
+`flake_fixes`, `hearsay_entities`):
 
 - `value`: what the file gives it, or would give it. A setting the file leaves
   out shows its default; `capacity.per_workstream` shows the loaded top-level
@@ -1204,8 +1221,9 @@ not load; fix it by hand.
 omitted setting is unchanged) and `clear`, the names of settings whose key is
 removed so the default or inherited value applies again.
 `set.hearsay_entities` sets entries by local entity ID and
-`clear_hearsay_entities` removes entries. `set.hearsay_declare_repo` is a
-boolean; `clear` removes it so the default, `false`, applies again. An empty string for `name`, `fork`
+`clear_hearsay_entities` removes entries. `set.hearsay_declare_repo` and
+`set.flake_fixes` are booleans; `clear` removes them so the default, `false`,
+applies again. An empty string for `name`, `fork`
 or `hearsay_scope` clears it. `upstream` and `clone` are required
 and cannot be cleared. A save runs under the same lock as a reload and a
 project add or removal:

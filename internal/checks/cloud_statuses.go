@@ -72,12 +72,26 @@ type CloudFailedCheck struct {
 	Status  pulls.CommitStatus `json:"status"`
 }
 
+// CloudCheck is one check the commit's statuses report, whatever its state.
+// TraceID is the `dagger trace` id its description names, when it names one,
+// and Duration the time the description says it took, zero when it names none.
+type CloudCheck struct {
+	Name      string        `json:"name"`
+	State     string        `json:"state"`
+	StatusID  int64         `json:"status_id"`
+	TraceID   string        `json:"trace_id,omitempty"`
+	TargetURL string        `json:"target_url,omitempty"`
+	Duration  time.Duration `json:"duration,omitempty"`
+}
+
 // CloudResult is the interpretation of one read of a commit's statuses.
 //
 // Load is the `load` status and Run the "Run Dagger Checks" status the result
 // was read from; two reads of one commit that saw different postings of Run
 // differ in Run.ID and its times. Counts is set for a completed run. Failed
-// lists the failing checks of a failed result, sorted by name.
+// lists the failing checks of a failed result, sorted by name. Checks lists
+// every check the statuses report for a completed run, sorted by name: all the
+// contexts but `load` and the run's own.
 type CloudResult struct {
 	Outcome    CloudOutcome         `json:"outcome"`
 	Repository string               `json:"repository"`
@@ -86,6 +100,7 @@ type CloudResult struct {
 	Run        *pulls.CommitStatus  `json:"run,omitempty"`
 	Counts     *CloudCounts         `json:"counts,omitempty"`
 	Failed     []CloudFailedCheck   `json:"failed,omitempty"`
+	Checks     []CloudCheck         `json:"checks,omitempty"`
 	StatusURL  string               `json:"status_url,omitempty"`
 	Detail     string               `json:"detail,omitempty"`
 	Document   *CloudStatusDocument `json:"-"`
@@ -151,6 +166,7 @@ func InterpretCloudStatuses(read pulls.CommitStatuses, doc *CloudStatusDocument)
 	}
 	counts := doc.Checks
 	result.Counts = &counts
+	result.Checks = cloudChecks(read)
 	switch {
 	case counts.Failed > 0:
 		result.Outcome = CloudFailed
@@ -174,6 +190,39 @@ func InterpretCloudStatuses(read pulls.CommitStatuses, doc *CloudStatusDocument)
 		}
 	}
 	return result, nil
+}
+
+// cloudChecks lists the checks the statuses report, sorted by name.
+func cloudChecks(read pulls.CommitStatuses) []CloudCheck {
+	var checks []CloudCheck
+	for _, s := range read.Statuses {
+		if s.Context == CloudLoadContext || s.Context == CloudRunContext {
+			continue
+		}
+		check := CloudCheck{Name: s.Context, State: s.State, StatusID: s.ID, TargetURL: s.TargetURL, Duration: statusDuration(s.Description)}
+		if m := traceDescription.FindStringSubmatch(s.Description); m != nil {
+			check.TraceID = m[1]
+		}
+		checks = append(checks, check)
+	}
+	sort.Slice(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
+	return checks
+}
+
+var durationDescription = regexp.MustCompile(`\bin ((?:[0-9]+(?:\.[0-9]+)?(?:ms|h|m|s))+)`)
+
+// statusDuration returns the duration a status description reports, as in
+// "Failed in 2m33s.", or zero when it reports none.
+func statusDuration(description string) time.Duration {
+	m := durationDescription.FindStringSubmatch(description)
+	if m == nil {
+		return 0
+	}
+	d, err := time.ParseDuration(m[1])
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 func failing(state string) bool { return state == "failure" || state == "error" }

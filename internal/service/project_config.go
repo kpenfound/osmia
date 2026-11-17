@@ -122,6 +122,8 @@ func settingValue(p config.Project, name string) any {
 		return p.HearsayScope
 	case "hearsay_declare_repo":
 		return p.HearsayDeclareRepo
+	case "flake_fixes":
+		return p.FlakeFixes
 	case "hearsay_entities":
 		entities := map[string]string{}
 		maps.Copy(entities, p.HearsayEntities)
@@ -233,6 +235,9 @@ func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
 	}
 	if e.Set.HearsayDeclareRepo != nil {
 		out.Bools["hearsay_declare_repo"] = *e.Set.HearsayDeclareRepo
+	}
+	if e.Set.FlakeFixes != nil {
+		out.Bools["flake_fixes"] = *e.Set.FlakeFixes
 	}
 	return out
 }

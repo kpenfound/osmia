@@ -48,6 +48,21 @@ func parseCheckReport(output string) (heading string, failures []checkFailure) {
 // parseCheckReportResults is parseCheckReport that also returns the links the
 // report shows passing, in the order they first appear.
 func parseCheckReportResults(output string) (heading string, failures []checkFailure, passed []string) {
+	heading, failures, passed, _ = scanCheckReport(output)
+	return heading, failures, passed
+}
+
+// reportLine is one check result line of a report: the check's link, its mark
+// and the rest of the line, which holds its duration.
+type reportLine struct {
+	link string
+	mark string
+	rest string
+}
+
+// scanCheckReport is parseCheckReportResults that also returns every check
+// result line of the report, in order.
+func scanCheckReport(output string) (heading string, failures []checkFailure, passed []string, results []reportLine) {
 	lines := strings.Split(reportColor.ReplaceAllString(output, ""), "\n")
 	active := -1
 	inChecks := false
@@ -84,6 +99,7 @@ func parseCheckReportResults(output string) (heading string, failures []checkFai
 		if m := reportCheck.FindStringSubmatch(line); m != nil && len(m[1]) <= max(checkIndent, childIndent) {
 			checkIndent = len(m[1])
 			active = -1
+			results = append(results, reportLine{link: m[3], mark: m[2], rest: m[4]})
 			switch m[2] {
 			case "✘":
 				failures = append(failures, checkFailure{link: m[3], heading: "✘ " + CheckLinkLabel(m[3]) + m[4], start: i + 1, end: i + 1})
@@ -105,7 +121,7 @@ func parseCheckReportResults(output string) (heading string, failures []checkFai
 			failures[active].end = i + 1
 		}
 	}
-	return heading, failures, passed
+	return heading, failures, passed, results
 }
 
 // latestFailures keeps one failure for each link: its most recent, in the order

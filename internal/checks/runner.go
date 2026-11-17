@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,8 +149,11 @@ func ResultCommand(result CheckResult, links []string) []string {
 	return Command(links)
 }
 
+// CheckParallelism is the number of checks one dagger check run runs at once.
+const CheckParallelism = 4
+
 func checkArgs(addresses []string) []string {
-	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", "4"}, addresses...)
+	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", strconv.Itoa(CheckParallelism)}, addresses...)
 }
 
 // skipArgs are checkArgs that leave out the checks skip selects.

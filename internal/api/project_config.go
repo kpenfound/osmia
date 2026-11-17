@@ -9,8 +9,8 @@ import "github.com/kpenfound/osmia/internal/config"
 // Pending says the file's value is not yet applied. When the file does not
 // load, only Name and Effective are present.
 type ProjectConfigSetting struct {
-	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo or hearsay_entities."`
-	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo, or for hearsay_entities an object of local entity ID to Hearsay entity id."`
+	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities."`
+	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo and flake_fixes, or for hearsay_entities an object of local entity ID to Hearsay entity id."`
 	Default   *bool  `json:"default,omitempty" description:"True when the file leaves the setting out and Value is its default or inherited value."`
 	Effective any    `json:"effective" description:"The value in the loaded configuration."`
 	Pending   bool   `json:"pending" description:"True when Value differs from Effective: the file holds an edit that is not yet applied."`
@@ -51,6 +51,7 @@ type ProjectConfigValues struct {
 	CapacityGitOperations *int              `json:"capacity.git_operations,omitempty"`
 	HearsayScope          *string           `json:"hearsay_scope,omitempty" description:"A Hearsay entity id, such as work:<source>:<project>, that replaces the project's default read entity."`
 	HearsayDeclareRepo    *bool             `json:"hearsay_declare_repo,omitempty" description:"True posts the project to Hearsay with its GitHub repo declared, which makes its records visible to that repository's readers. Default false."`
+	FlakeFixes            *bool             `json:"flake_fixes,omitempty" description:"True turns flake-fix workstreams on for the project: a flaky check is recorded and the chief of staff may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false."`
 	HearsayEntities       map[string]string `json:"hearsay_entities,omitempty" description:"Entries to set, by local entity ID, each a Hearsay entity id."`
 }
 

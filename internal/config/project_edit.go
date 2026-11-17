@@ -13,7 +13,7 @@ import (
 // ProjectSettings lists the settings of a project configuration file that
 // have an effect, in display order. hearsay_entities is the mapping whose
 // entries are set and cleared one by one.
-var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "hearsay_entities"}
+var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "flake_fixes", "hearsay_entities"}
 
 // ProjectPin identifies the exact bytes of a project configuration file.
 func ProjectPin(data []byte) string {
@@ -80,7 +80,7 @@ type ProjectEdit struct {
 var (
 	stringSettings   = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "upstream_rebase", "pull_request_poll", "checks_timeout", "hearsay_scope"}
 	intSettings      = []string{"capacity.per_workstream", "capacity.git_operations"}
-	boolSettings     = []string{"hearsay_declare_repo"}
+	boolSettings     = []string{"hearsay_declare_repo", "flake_fixes"}
 	requiredSettings = []string{"upstream", "clone"}
 	// optionalSettings have an empty string for a default: an empty value
 	// clears them.

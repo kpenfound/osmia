@@ -304,6 +304,120 @@ its package or the whole project. A check whose link is the address that failed,
 such as a selected test run alone or a check with no filters, replays its
 failure and stays failed.
 
+### After a flake is recorded
+
+Recording a flake changes no outcome: the run passes, fails or stays incomplete
+exactly as it does without anything below. What follows applies only to a
+project with `flake_fixes = true`
+([configuration](configuration.md#project-configtoml)); with the default it is off,
+nothing is recorded or sent, and the chief of staff's `flake_fix` tool refuses.
+
+**Groups and occurrences.** Flakes are grouped by flake group, not by exact
+test link. A test-level check groups with its enclosing package or collection
+item (for Go, its `go-package`: the `go-test` filter is dropped), and a
+package-level or standalone check is its own group. No group is a whole module
+or a collection root. A flaky local link from a unit run and a Dagger Cloud
+check name from a final review are resolved against the project's known checks,
+so the same check, and sibling tests of one package, land in the same group
+whichever way they were reported. A Cloud name tied to no known check is a group
+of its own, marked unresolved. An occurrence is the flaky checks of one run in
+one group. A run with flaky checks in two groups records two occurrences, and
+recording is idempotent per run and group.
+
+**The flake record.** Each unit or final-review check run whose record lists a
+flaky check, including a run that failed for another reason, is recorded as
+occurrences in the project's flake record, kept in the project's trace. Session
+check runs, the owner's own ad hoc runs, record nothing. An occurrence holds the
+group, the flaky links, the originating workstream and unit or the final review,
+the run record, the evidence the run captured, and whether a flake-fix
+workstream's own run produced it. The evidence is captured when the run is
+recorded: the other checks that ran in the same invocation and their
+parallelism, the engine attribution, the captured output and the
+`[passed on rerun]` diagnostics, and timings where the runner has them. A
+final review on Dagger Cloud records the full set of checks the commit reported,
+the failed and rerun trace references and the cloud engine; where Cloud exposes
+no output text or parallelism, the evidence says so and names the trace to read.
+The record also keeps, per group, its history, its open flake-fix workstream and
+a generation. Recording runs from the durable run records, on its own and
+catching up after a restart, so it does not depend on the unit still checking or
+the final review still in progress.
+
+**The per-run notice.** For a run that does not belong to a flake-fix
+workstream, the originating workgroup's chief of staff receives exactly one
+notice, whatever mix of groups the run has. It lists every occurrence with its
+group, flaky links and run record. Occurrences whose group has no open flake-fix
+workstream are awaiting a decision, with how to open or decline each through
+`flake_fix`. Occurrences that joined an open flake-fix workstream are
+informational and name it.
+
+**Open or decline.** The chief of staff calls `flake_fix` for an occurrence. It
+cannot hand in anything else, and Jev is not asked whether to open.
+
+- `open` hands in a flake-fix workstream from a hand-in the service writes from
+  the occurrence's evidence plus the chief's notes. It is an ordinary hand-in of
+  the project whose check flaked: upstream base, normal priority, debate not
+  skipped, the architect, the committee and the owner's ratification, and the
+  owner's delivery approval. Its records name the chief of staff as having
+  opened it and the originating workstream. The hand-in frames the flaky link as
+  where the flakiness showed up and asks for the cause to be found and fixed,
+  with the reasoning and evidence recorded. It requires no change to the named
+  test or any file, no deterministic reproduction and no run of N consecutive
+  passes, and it tells reviewers not to raise a finding solely because the named
+  test is unchanged or the flake did not reproduce on demand. A cause outside the
+  repository takes the existing "no change needed" escalation.
+- `decline` requires a reason, which is recorded in the originating workstream's
+  trace and feed. A later flake in the same group notifies the chief again.
+
+Each occurrence has one durable decision: opened (naming the workstream), joined
+(naming the workstream) or declined (with the reason). It is final: calling the
+tool again returns the decision and does nothing more, after the workstream was
+delivered or abandoned and after a restart. The tool refuses when the setting is
+off, for an unknown occurrence and for one recorded by a flake-fix workstream's
+own run. An opening reserved before an interruption is completed with its own
+reserved key.
+
+**One open workstream per group.** The hand-in key is a hash of the project, the
+flake group and the group's generation, so concurrent or repeated opens for a
+group, even from different workstreams, open one workstream. When the group's
+workstream is delivered or abandoned, the generation advances and the group's
+next new occurrence can open the next one, carrying the group's earlier history.
+An occurrence decided earlier never opens another.
+
+**Surfacing to an open workstream.** A flake in a group whose flake-fix
+workstream is open, the same test or a sibling, joins it. The run's links in
+that group go to the open workstream's chief of staff as new evidence, once per
+open workstream per run, and no new workstream opens.
+
+**No cascade.** A flake found by a flake-fix workstream's own check runs is
+added to the flake record but sends no notice, surfaces nothing and opens
+nothing.
+
+**The originating workstream is never held.** Its units and final review
+continue exactly as they would without this, whether the chief opens, declines
+or has not acted, and whether recording or notifying succeeds, is delayed or
+temporarily fails, since a failed step is retried later. Once an occurrence is
+opened, joined or declined, the originating workstream's feed names the
+flake-fix workstream or the reason, and a unit's pass reason recorded while a
+flake-fix workstream is open for a flaky check's group names that workstream.
+
+**Announcements are reconciled.** A decision is committed before it is
+announced, so the flake recorder's periodic pass announces every decided
+occurrence, whether the chief decided it or the recorder joined it, until each
+destination is written. The destinations are independent and each is marked in
+the flake record only after its own write: the decision transition in the
+originating workstream's trace, which its feed shows, and, for a joined
+occurrence, the surfacing to the open workstream's chief of staff. A failure at
+one destination or one occurrence leaves only that destination owed and is
+retried by later passes and after a restart, with no further tool call, and the
+single transition and surfacing it writes are keyed so nothing is written
+twice. A delivered or abandoned originating workstream still takes its
+transition. A destination whose workstream was archived, by the owner or by the
+chief of staff through archive-on-merge, is closed as moot, because archiving
+deletes that trace and feed: the flake record notes who archived it, the
+occurrence's decision stays as committed, and its other destination is still
+owed. None of this holds back the originating workstream, its archive-on-merge
+or its cleanup.
+
 ## Cloud fallback
 
 With `[dagger] check_fallback = "cloud"` and an `engine` other than `cloud`
