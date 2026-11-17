@@ -379,6 +379,43 @@ func TestNoticeAndSurfacingMarkersAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestAnnouncementMarkersAndMootNotesArePerDestinationAndSurviveARestart(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	o := recordOne(t, f, groupA, "1")
+	if _, err := f.store.Decline(ctx, groupA, o.Run, "added by the unit"); err != nil {
+		t.Fatal(err)
+	}
+	moot := Moot{Destination: DestinationTarget, Workstream: "w_00000000000000000000000000000002", ArchivedBy: "chief_of_staff", Note: "archived"}
+	for range 2 {
+		if err := f.store.MarkAnnounced(ctx, groupA, o.Run, DestinationOrigin); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.store.MarkMoot(ctx, groupA, o.Run, moot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A destination that was written is never closed as moot afterwards.
+	if err := f.store.MarkMoot(ctx, groupA, o.Run, Moot{Destination: DestinationOrigin, ArchivedBy: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	f.restart()
+	g, _, _ := f.store.Group(groupA)
+	got, _ := g.Find(o.Run)
+	if len(got.Announced) != 1 || !got.IsAnnounced(DestinationOrigin) || got.IsAnnounced(DestinationTarget) {
+		t.Fatalf("announced %+v", got.Announced)
+	}
+	if len(got.Moot) != 1 || !got.IsMoot(DestinationTarget) || got.IsMoot(DestinationOrigin) || got.Moot[0].ArchivedBy != "chief_of_staff" || got.Moot[0].At.IsZero() {
+		t.Fatalf("moot %+v", got.Moot)
+	}
+	if got.Decision.State != Declined || got.Decision.Reason != "added by the unit" {
+		t.Fatalf("the markers changed the decision: %+v", got.Decision)
+	}
+	if err := f.store.MarkAnnounced(ctx, groupA, "units/none", DestinationOrigin); err == nil {
+		t.Error("marked an unknown occurrence")
+	}
+}
+
 func TestRecordedFromAFlakeFixWorkstreamIsKept(t *testing.T) {
 	f := newFixture(t)
 	o := unitRun("1", groupA+"&go-test=TestOne")

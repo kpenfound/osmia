@@ -400,6 +400,24 @@ opened, joined or declined, the originating workstream's feed names the
 flake-fix workstream or the reason, and a unit's pass reason recorded while a
 flake-fix workstream is open for a flaky check's group names that workstream.
 
+**Announcements are reconciled.** A decision is committed before it is
+announced, so the flake recorder's periodic pass announces every decided
+occurrence, whether the chief decided it or the recorder joined it, until each
+destination is written. The destinations are independent and each is marked in
+the flake record only after its own write: the decision transition in the
+originating workstream's trace, which its feed shows, and, for a joined
+occurrence, the surfacing to the open workstream's chief of staff. A failure at
+one destination or one occurrence leaves only that destination owed and is
+retried by later passes and after a restart, with no further tool call, and the
+single transition and surfacing it writes are keyed so nothing is written
+twice. A delivered or abandoned originating workstream still takes its
+transition. A destination whose workstream was archived, by the owner or by the
+chief of staff through archive-on-merge, is closed as moot, because archiving
+deletes that trace and feed: the flake record notes who archived it, the
+occurrence's decision stays as committed, and its other destination is still
+owed. None of this holds back the originating workstream, its archive-on-merge
+or its cleanup.
+
 ## Cloud fallback
 
 With `[dagger] check_fallback = "cloud"` and an `engine` other than `cloud`

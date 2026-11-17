@@ -70,6 +70,35 @@ type Surfacing struct {
 	At         time.Time           `json:"at"`
 }
 
+// Destinations of a decided occurrence's announcement. Each is delivered,
+// marked and, if its workstream is archived, closed on its own.
+const (
+	// DestinationOrigin is the decision transition in the originating
+	// workstream's trace, which its feed shows.
+	DestinationOrigin = "origin"
+	// DestinationTarget is the surfacing of a joined occurrence's links to the
+	// open flake-fix workstream's chief of staff. Surfaced marks it delivered.
+	DestinationTarget = "target"
+)
+
+// Announcement marks the originating destination as written.
+type Announcement struct {
+	Destination string    `json:"destination"`
+	At          time.Time `json:"at"`
+}
+
+// Moot records an announcement destination closed because its own workstream
+// was archived, which deletes the trace and feed the announcement would go to.
+// The occurrence's decision is unchanged.
+type Moot struct {
+	Destination string              `json:"destination"`
+	Workstream  config.WorkstreamID `json:"workstream"`
+	// ArchivedBy is who archived the workstream: "owner" or "chief_of_staff".
+	ArchivedBy string    `json:"archived_by"`
+	Note       string    `json:"note"`
+	At         time.Time `json:"at"`
+}
+
 // Occurrence is the flaky checks of one run in one flake group.
 type Occurrence struct {
 	ID string `json:"id"`
@@ -87,7 +116,23 @@ type Occurrence struct {
 	Noticed *Delivery `json:"noticed,omitempty"`
 	// Surfaced marks the surfacings to open workstreams, one per workstream.
 	Surfaced []Surfacing `json:"surfaced,omitempty"`
-	Decision Decision    `json:"decision"`
+	// Announced marks the destinations of the decision's announcement that
+	// were written, other than the surfacing Surfaced marks.
+	Announced []Announcement `json:"announced,omitempty"`
+	// Moot records the destinations closed because their workstream was
+	// archived.
+	Moot     []Moot   `json:"moot,omitempty"`
+	Decision Decision `json:"decision"`
+}
+
+// IsAnnounced reports whether the originating destination was written.
+func (o Occurrence) IsAnnounced(destination string) bool {
+	return slices.ContainsFunc(o.Announced, func(a Announcement) bool { return a.Destination == destination })
+}
+
+// IsMoot reports whether the destination was closed as moot.
+func (o Occurrence) IsMoot(destination string) bool {
+	return slices.ContainsFunc(o.Moot, func(m Moot) bool { return m.Destination == destination })
 }
 
 // Closure is a flake-fix workstream the group has finished with.
@@ -327,5 +372,33 @@ func (g *Group) markSurfaced(run string, workstream config.WorkstreamID, at time
 		return false, nil
 	}
 	o.Surfaced = append(o.Surfaced, Surfacing{Workstream: workstream, At: at})
+	return true, nil
+}
+
+// markAnnounced marks run's occurrence as announced to the destination.
+func (g *Group) markAnnounced(run, destination string, at time.Time) (bool, error) {
+	o, ok := g.find(run)
+	if !ok {
+		return false, ErrUnknownOccurrence
+	}
+	if o.IsAnnounced(destination) {
+		return false, nil
+	}
+	o.Announced = append(o.Announced, Announcement{Destination: destination, At: at})
+	return true, nil
+}
+
+// markMoot closes run's occurrence's destination as moot. A destination that
+// was already announced or closed stays as it is.
+func (g *Group) markMoot(run string, m Moot, at time.Time) (bool, error) {
+	o, ok := g.find(run)
+	if !ok {
+		return false, ErrUnknownOccurrence
+	}
+	if o.IsMoot(m.Destination) || o.IsAnnounced(m.Destination) {
+		return false, nil
+	}
+	m.At = at
+	o.Moot = append(o.Moot, m)
 	return true, nil
 }

@@ -323,3 +323,19 @@ func (s *Store) MarkSurfaced(ctx context.Context, group, run string, workstream 
 	_, err := s.update(ctx, group, "flake-surfaced", nil, func(g *Group) (bool, error) { return g.markSurfaced(run, workstream, s.now()) })
 	return err
 }
+
+// MarkAnnounced marks run's occurrence in group as written to the
+// announcement destination. It is idempotent per destination.
+func (s *Store) MarkAnnounced(ctx context.Context, group, run, destination string) error {
+	_, err := s.update(ctx, group, "flake-announced", nil, func(g *Group) (bool, error) { return g.markAnnounced(run, destination, s.now()) })
+	return err
+}
+
+// MarkMoot closes run's occurrence in group's announcement destination as
+// moot, noting who archived its workstream. The decision is unchanged, and the
+// occurrence's other destinations are untouched. It is idempotent per
+// destination.
+func (s *Store) MarkMoot(ctx context.Context, group, run string, m Moot) error {
+	_, err := s.update(ctx, group, "flake-moot", nil, func(g *Group) (bool, error) { return g.markMoot(run, m, s.now()) })
+	return err
+}

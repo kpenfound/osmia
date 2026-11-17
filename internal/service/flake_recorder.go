@@ -37,7 +37,8 @@ const flakeRescan = 5 * time.Minute
 // recorded in a project's workstreams into flake occurrences in the project's
 // flake record, tells the originating workgroup's chief of staff once for each
 // run, and surfaces the run to the open flake-fix workstream of each group that
-// has one.
+// has one. Each pass also announces every decided occurrence at each destination
+// still owed, whoever decided it and whatever became of its source run.
 //
 // It works from the stored run records, not from the transaction that
 // recorded them, so it does not depend on the unit still checking or the final
@@ -152,6 +153,14 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 		}
 		f.done[run.key()] = true
 		delete(f.logged, run.key())
+	}
+	// Occurrences the runs just joined are announced now, not on the next
+	// pass.
+	if err := f.announce(ctx); err != nil {
+		finished = false
+		f.report("announce", err)
+	} else {
+		delete(f.logged, "announce")
 	}
 	if finished {
 		delete(f.logged, "settle")
@@ -321,7 +330,10 @@ func (f *flakeRecorder) process(ctx context.Context, run flakeRun) error {
 		if o.Decision.State != flakes.Joined || o.Decision.Workstream == "" || slices.ContainsFunc(o.Surfaced, func(s flakes.Surfacing) bool { return s.Workstream == o.Decision.Workstream }) {
 			continue
 		}
-		if err := f.surface(ctx, store, run, o); err != nil {
+		f.s.flakeFixMu.Lock()
+		err := f.s.announceToTarget(ctx, f.repository, store, o.group, o.Occurrence)
+		f.s.flakeFixMu.Unlock()
+		if err != nil {
 			return err
 		}
 	}

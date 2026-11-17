@@ -109,10 +109,18 @@ func flakePosts(t *testing.T, repository *trace.Repository, stream config.Workst
 
 func flakeNoticeBodies(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []string {
 	t.Helper()
-	posted, bodies := flakePosts(t, repository, stream, "flake-notice-")
-	if len(posted) != len(bodies) {
-		t.Fatalf("%d notice transitions but %d notice events", len(posted), len(bodies))
+	// A notice is one transaction, but the transitions and the outbox are two
+	// reads, so a notice committed between them shows in only one.
+	var posted []trace.Transition
+	var bodies []string
+	for range 100 {
+		posted, bodies = flakePosts(t, repository, stream, "flake-notice-")
+		if len(posted) == len(bodies) {
+			return bodies
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("%d notice transitions but %d notice events", len(posted), len(bodies))
 	return bodies
 }
 

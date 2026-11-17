@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/flakes"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -180,8 +181,11 @@ func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, 
 			return flakeFixResult{}, why, err
 		}
 	}
+	// The decision is committed. A destination of its announcement that
+	// fails stays owed and is reconciled by a later flake pass, so the tool
+	// still answers with the decision.
 	if err := s.announceFlakeDecision(ctx, repository, store, group, run); err != nil {
-		return flakeFixResult{}, "", err
+		ghlog.Logger(ctx).Warn("the flake decision will be announced by the next flake pass", "occurrence", id, "error", err.Error())
 	}
 	found, ok, err = findFlakeOccurrence(store, id)
 	if err != nil || !ok {
@@ -306,12 +310,15 @@ func flakeDecisionSubject(occurrence string) string {
 	return "flake-decision-" + flakeDigest("decision", occurrence)
 }
 
-// announceFlakeDecision makes the occurrence's decision visible: a transition
-// in the originating workstream's trace, which its feed shows, naming the
-// flake-fix workstream or the declining reason, and, for an occurrence that
-// joined an open workstream, the surfacing of the run's links to that
-// workstream's chief of staff. Each is made once, so repeating it changes
-// nothing.
+// announceFlakeDecision makes the occurrence's decision visible at each of its
+// destinations: a transition in the originating workstream's trace, which its
+// feed shows, naming the flake-fix workstream or the declining reason, and, for
+// an occurrence that joined an open workstream, the surfacing of the run's
+// links to that workstream's chief of staff. The destinations are tried
+// independently, each is written once and marked only after its write
+// succeeded, and a destination whose workstream was archived is closed as
+// moot, so repeating the call changes nothing. It returns the failures of the
+// destinations still owed. The caller holds flakeFixMu.
 func (s *Service) announceFlakeDecision(ctx context.Context, repository *trace.Repository, store *flakes.Store, group, run string) error {
 	g, found, err := store.Group(group)
 	if err != nil || !found {
@@ -321,41 +328,147 @@ func (s *Service) announceFlakeDecision(ctx context.Context, repository *trace.R
 	if !ok {
 		return flakes.ErrUnknownOccurrence
 	}
-	var to, reason string
-	switch o.Decision.State {
-	case flakes.Opened:
-		to, reason = "opened", fmt.Sprintf("the chief of staff opened flake-fix workstream %s for flake occurrence %s of group %s (%s)", o.Decision.Workstream, o.ID, group, codeList(o.Links))
-	case flakes.Joined:
-		to, reason = "joined", fmt.Sprintf("flake occurrence %s of group %s joined the open flake-fix workstream %s (%s)", o.ID, group, o.Decision.Workstream, codeList(o.Links))
-	case flakes.Declined:
-		to, reason = "declined", fmt.Sprintf("the chief of staff declined flake occurrence %s of group %s (%s): %s", o.ID, group, codeList(o.Links), o.Decision.Reason)
-	default:
+	if !o.Decision.Final() {
 		return nil
 	}
+	return errors.Join(s.announceToOrigin(ctx, repository, store, group, o), s.announceToTarget(ctx, repository, store, group, o))
+}
+
+// flakeDecisionText is the originating transition's destination state and
+// reason for the occurrence's decision.
+func flakeDecisionText(o flakes.Occurrence, group string) (to, reason string) {
+	switch o.Decision.State {
+	case flakes.Opened:
+		return "opened", fmt.Sprintf("the chief of staff opened flake-fix workstream %s for flake occurrence %s of group %s (%s)", o.Decision.Workstream, o.ID, group, codeList(o.Links))
+	case flakes.Joined:
+		return "joined", fmt.Sprintf("flake occurrence %s of group %s joined the open flake-fix workstream %s (%s)", o.ID, group, o.Decision.Workstream, codeList(o.Links))
+	}
+	return "declined", fmt.Sprintf("the chief of staff declined flake occurrence %s of group %s (%s): %s", o.ID, group, codeList(o.Links), o.Decision.Reason)
+}
+
+// closeFlakeDestination closes the occurrence's destination as moot because
+// its workstream was archived, noting in the flake record who archived it.
+func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store, group string, o flakes.Occurrence, destination string, workstream config.WorkstreamID, archive runtime.Archive) error {
+	by := archivedBy(archive)
+	who := "the owner"
+	if by == api.ArchivedByChief {
+		who = "the chief of staff, through archive-on-merge"
+	}
+	note := fmt.Sprintf("closed as moot: workstream %s was archived by %s, which deletes the trace and feed this announcement of the %s decision would be written to", workstream, who, o.Decision.State)
+	return store.MarkMoot(ctx, group, o.Run, flakes.Moot{Destination: destination, Workstream: workstream, ArchivedBy: by, Note: note})
+}
+
+// announceToOrigin writes the occurrence's decision transition in the
+// originating workstream's trace unless it is already written or the
+// workstream was archived. A delivered or abandoned workstream still takes it:
+// the transition has a subject of its own, apart from the workstream's state.
+func (s *Service) announceToOrigin(ctx context.Context, repository *trace.Repository, store *flakes.Store, group string, o flakes.Occurrence) error {
+	if o.IsAnnounced(flakes.DestinationOrigin) || o.IsMoot(flakes.DestinationOrigin) {
+		return nil
+	}
+	origin := o.Source.Workstream
+	if archive, archived := s.archivedWorkstream(string(origin)); archived {
+		return s.closeFlakeDestination(ctx, store, group, o, flakes.DestinationOrigin, origin, archive)
+	}
+	if err := s.step("flake-announce-origin " + o.ID); err != nil {
+		return fmt.Errorf("announcing flake occurrence %s in workstream %s: %w", o.ID, origin, err)
+	}
 	subject := flakeDecisionSubject(o.ID)
-	state, err := repository.Workflow(o.Source.Workstream, subject)
+	streams, err := repository.Workstreams()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(streams, origin) {
+		return fmt.Errorf("announcing flake occurrence %s: workstream %s has no trace", o.ID, origin)
+	}
+	state, err := repository.Workflow(origin, subject)
 	if err != nil {
 		return err
 	}
 	if state.Value == "" {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject, Revision: 1, Project: repository.Project(), Workstream: o.Source.Workstream, At: s.now(), Actor: chiefActor, Cause: flakeFixToolName}
+		to, reason := flakeDecisionText(o, group)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject, Revision: 1, Project: repository.Project(), Workstream: origin, At: s.now(), Actor: chiefActor, Cause: flakeFixToolName}
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: to, Reason: reason}}
-		if _, err := repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
-			return err
+		if _, err := repository.Transact(ctx, tx); err != nil {
+			if !errors.Is(err, trace.ErrConflict) {
+				return fmt.Errorf("announcing flake occurrence %s in workstream %s: %w", o.ID, origin, err)
+			}
+			if state, err = repository.Workflow(origin, subject); err != nil || state.Value == "" {
+				return errors.Join(err, fmt.Errorf("announcing flake occurrence %s in workstream %s: the trace changed concurrently", o.ID, origin))
+			}
 		}
 	}
-	if o.Decision.State == flakes.Joined && o.Decision.Workstream != "" && !slices.ContainsFunc(o.Surfaced, func(sf flakes.Surfacing) bool { return sf.Workstream == o.Decision.Workstream }) && !o.FromFlakeFix {
-		recorder := &flakeRecorder{s: s, repository: repository}
-		run := flakeRun{stream: o.Source.Workstream, path: o.RunPath(), source: o.Source}
-		return recorder.surface(ctx, store, run, located{group: group, Occurrence: o})
+	return store.MarkAnnounced(ctx, group, o.Run, flakes.DestinationOrigin)
+}
+
+// announceToTarget surfaces a joined occurrence's links to the open flake-fix
+// workstream's chief of staff unless that is already done or the workstream was
+// archived.
+func (s *Service) announceToTarget(ctx context.Context, repository *trace.Repository, store *flakes.Store, group string, o flakes.Occurrence) error {
+	target := o.Decision.Workstream
+	if o.Decision.State != flakes.Joined || target == "" || o.FromFlakeFix || o.IsMoot(flakes.DestinationTarget) ||
+		slices.ContainsFunc(o.Surfaced, func(sf flakes.Surfacing) bool { return sf.Workstream == target }) {
+		return nil
 	}
-	return nil
+	if archive, archived := s.archivedWorkstream(string(target)); archived {
+		return s.closeFlakeDestination(ctx, store, group, o, flakes.DestinationTarget, target, archive)
+	}
+	if err := s.step("flake-announce-target " + o.ID); err != nil {
+		return fmt.Errorf("surfacing flake occurrence %s to workstream %s: %w", o.ID, target, err)
+	}
+	recorder := &flakeRecorder{s: s, repository: repository}
+	run := flakeRun{stream: o.Source.Workstream, path: o.RunPath(), source: o.Source}
+	return recorder.surface(ctx, store, run, located{group: group, Occurrence: o})
+}
+
+// announce reconciles the announcement of every decided occurrence of the
+// project's flake record, the ones the recorder joined as well as those the
+// chief of staff decided. It does not depend on the run being processed now or
+// the chief repeating the tool call. A failure of one destination of one
+// occurrence leaves it owed for the next pass and does not stop the others.
+func (f *flakeRecorder) announce(ctx context.Context) error {
+	store := f.s.flakeStore(f.repository)
+	groups, err := store.Groups()
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, g := range groups {
+		for _, o := range g.Occurrences {
+			if !o.Decision.Final() || f.announced(o) {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			f.s.flakeFixMu.Lock()
+			err := f.s.announceFlakeDecision(ctx, f.repository, store, g.Group, o.Run)
+			f.s.flakeFixMu.Unlock()
+			if err != nil {
+				failures = append(failures, err)
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// announced reports whether nothing of the occurrence's announcement is owed.
+func (f *flakeRecorder) announced(o flakes.Occurrence) bool {
+	if !o.IsAnnounced(flakes.DestinationOrigin) && !o.IsMoot(flakes.DestinationOrigin) {
+		return false
+	}
+	target := o.Decision.Workstream
+	if o.Decision.State != flakes.Joined || target == "" || o.FromFlakeFix || o.IsMoot(flakes.DestinationTarget) {
+		return true
+	}
+	return slices.ContainsFunc(o.Surfaced, func(sf flakes.Surfacing) bool { return sf.Workstream == target })
 }
 
 // settle finishes what the flake record leaves partway and closes what is
-// over: every reserved opening is completed with its own key, and a group whose
-// flake-fix workstream was delivered or abandoned ends its association with it,
-// so the group's next occurrence opens the next generation. It returns the
+// over: every reserved opening is completed with its own key, the announcement
+// of every decided occurrence is reconciled per destination, and a group whose
+// flake-fix workstream was delivered or abandoned ends its association with
+// it, so the group's next occurrence opens the next generation. It returns the
 // failures it met, each retried by the next pass.
 func (f *flakeRecorder) settle(ctx context.Context) error {
 	store := f.s.flakeStore(f.repository)
@@ -372,7 +485,7 @@ func (f *flakeRecorder) settle(ctx context.Context) error {
 		} else if why != "" {
 			return errors.New(why)
 		}
-		return f.s.announceFlakeDecision(ctx, f.repository, store, group, o.Run)
+		return nil
 	}
 	for _, g := range groups {
 		for _, o := range g.Occurrences {
@@ -386,6 +499,9 @@ func (f *flakeRecorder) settle(ctx context.Context) error {
 				failures = append(failures, err)
 			}
 		}
+	}
+	if err := f.announce(ctx); err != nil {
+		failures = append(failures, err)
 	}
 	if groups, err = store.Groups(); err != nil {
 		return errors.Join(append(failures, err)...)
