@@ -416,6 +416,34 @@ func (f *watchFixture) failingRun() (original pulls.CommitStatus, checks []pulls
 	return original, checks
 }
 
+func TestFinalChecksRerunNamesTheOrganizationOnlyWithoutAFork(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, fork, org, want string
+	}{
+		{"no fork", "", "acme", "cloud checks rerun --failed --pr 7 --org acme\n"},
+		{"fork", "me/widgets", "acme", "cloud checks rerun --failed --pr 7\n"},
+		{"no organization", "", "", "cloud checks rerun --failed --pr 7\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t)
+			f.cfg.Project.Fork, f.cfg.Dagger.Organization = tc.fork, tc.org
+			f.afterWait()
+			f.failingRun()
+			f.mustWait()
+			if calls := f.rerunCalls(); len(calls) != 1 || !strings.HasPrefix(calls[0], tc.want) {
+				t.Fatalf("rerun calls %q, want %q", calls, tc.want)
+			}
+			request, err := ReadFinalCheckRerun(f.repo, stream, 1, 1)
+			fixturekit.Must(t, err)
+			if got := strings.Join(request.Command, " ") + "\n"; got != "dagger "+tc.want {
+				t.Fatalf("recorded command %q", got)
+			}
+		})
+	}
+}
+
 func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)

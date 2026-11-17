@@ -1,6 +1,10 @@
 package config
 
-import "github.com/kpenfound/agentcore/agent"
+import (
+	"regexp"
+
+	"github.com/kpenfound/agentcore/agent"
+)
 
 // ManagedDaggerEngineName is the container shared by service checks and masons.
 const ManagedDaggerEngineName = "osmia-dagger-engine"
@@ -18,14 +22,20 @@ const (
 // which cannot finish on the service's engine on the Cloud engine.
 const DaggerCheckFallbackCloud = "cloud"
 
+// daggerOrganization is a Dagger Cloud organization name.
+var daggerOrganization = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 // DaggerConfig selects the service's engine and names its optional Cloud
 // credential. Loading configuration never reads the credential's value.
-// CheckFallback is empty (off) or DaggerCheckFallbackCloud.
+// CheckFallback is empty (off) or DaggerCheckFallbackCloud. Organization is
+// the Dagger Cloud organization the token belongs to, named on the Cloud
+// check reruns of projects without a fork.
 type DaggerConfig struct {
 	Version       string `toml:"version" json:"version,omitempty"`
 	Engine        string `toml:"engine" json:"engine"`
 	CloudTokenEnv string `toml:"cloud_token_env" json:"cloud_token_env,omitempty"`
 	CheckFallback string `toml:"check_fallback" json:"check_fallback,omitempty"`
+	Organization  string `toml:"organization" json:"organization,omitempty"`
 }
 
 // ResolvedDagger describes a validated service engine. Version is the expected
@@ -75,6 +85,9 @@ func (d DaggerConfig) validate(path string, versionSet bool) error {
 	}
 	if d.CloudTokenEnv != "" && !environmentName.MatchString(d.CloudTokenEnv) {
 		return fieldError(path, "dagger.cloud_token_env", "must name an environment variable")
+	}
+	if d.Organization != "" && !daggerOrganization.MatchString(d.Organization) {
+		return fieldError(path, "dagger.organization", "must be a Dagger Cloud organization name")
 	}
 	if d.Engine == string(DaggerEngineCloud) && d.CloudTokenEnv == "" {
 		return fieldError(path, "dagger.cloud_token_env", "is required for the cloud engine")

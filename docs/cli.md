@@ -159,7 +159,8 @@ After each push the service reads no Dagger Cloud status for 2 minutes, then
 reads the pushed commit's combined statuses at `pull_request_poll`. The overall
 result is the **Run Dagger Checks** status; a completed run with cancelled or
 unaccounted checks is incomplete, never a pass, and a failure is rerun once with
-`dagger cloud checks rerun --failed --pr <N>` and settled only by a posting made
+`dagger cloud checks rerun --failed --pr <N>` (with `--org` from
+`dagger.organization` for a project without a fork) and settled only by a posting made
 after the rerun was requested. `osmia delivery` shows the result,
 `osmia checks <workstream-id> keep-waiting|continue` answers a **Checks
 missing** question about one push, and [the running guide](running.md#draft-pull-request-and-cloud-checks)

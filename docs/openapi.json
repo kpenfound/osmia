@@ -4761,6 +4761,9 @@
           "engine": {
             "type": "string"
           },
+          "organization": {
+            "type": "string"
+          },
           "version": {
             "type": "string"
           }

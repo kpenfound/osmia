@@ -342,7 +342,8 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 			n++
 		}
 	}
-	record := ChecksRerunRecord{Push: push.Number, PullRequest: push.PullRequest, PushedCommit: push.Commit, Command: append([]string{"dagger"}, checkrun.RerunAllCommand(push.PullRequest)...), RequestedAt: s.Now()}
+	org := rerunOrganization(cfg)
+	record := ChecksRerunRecord{Push: push.Number, PullRequest: push.PullRequest, PushedCommit: push.Commit, Command: append([]string{"dagger"}, checkrun.RerunAllCommand(push.PullRequest, org)...), RequestedAt: s.Now()}
 	write := func() error {
 		data, err := json.MarshalIndent(record, "", "  ")
 		if err != nil {
@@ -363,7 +364,7 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 	if err := s.Step("final-checks-rerun-all-requested"); err != nil {
 		return ChecksRerunRecord{}, "", err
 	}
-	runErr := rerunner.RerunAll(ctx, s.rerunDirectory(ctx, cfg, repository, stream), push.PullRequest)
+	runErr := rerunner.RerunAll(ctx, s.rerunDirectory(ctx, cfg, repository, stream), push.PullRequest, org)
 	if ctx.Err() != nil {
 		return ChecksRerunRecord{}, "", ctx.Err()
 	}
@@ -377,6 +378,17 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 	forgetPoll(repository, stream, push.Number)
 	repository.WakeWorkflow()
 	return record, "", nil
+}
+
+// rerunOrganization is the Dagger Cloud organization a rerun of cfg's
+// project names with --org: dagger.organization for a project without a fork,
+// and none for a project with one, whose pull request checks run in an
+// organization the service's token cannot be assumed to belong to.
+func rerunOrganization(cfg *config.Config) string {
+	if cfg == nil || cfg.Project.Fork != "" {
+		return ""
+	}
+	return cfg.Dagger.Organization
 }
 
 // rerunDirectory is the workstream's checkout, where a Dagger Cloud rerun is

@@ -457,7 +457,10 @@ statuses of the pushed head commit in the upstream repository:
   completes.
 - On a failure the service asks Dagger Cloud once to rerun the failed checks:
   `dagger cloud checks rerun --failed --pr <N>`, run from the workstream's
-  checkout with the token the `[dagger] cloud_token_env` setting names. The
+  checkout with the token the `[dagger] cloud_token_env` setting names. For a
+  project without a fork, `--org` names the `[dagger] organization` setting,
+  which an organization token needs; a project with a fork reruns without it,
+  so an organization token can rerun only the checks of projects without one. The
   `dagger` CLI must be on the service's search path and the variable must be set
   in its environment; without them the rerun cannot be made and the final
   review keeps waiting and says so. The rerun runs on the same commit, so the
@@ -480,7 +483,8 @@ cycle, and it records the delivery brief for the review.
 **Load never ran.** When the first read after the 2 minutes finds no `load`
 status, the chief of staff gets one notice for that push, and the watch goes on.
 The chief can poll the statuses at once or ask Dagger Cloud to rerun every check
-of the pull request (`dagger cloud checks rerun --all --pr <N>`), and it can
+of the pull request (`dagger cloud checks rerun --all --pr <N>`, with the same
+`--org` rule), and it can
 bring you a **Checks missing** entry with two answers: keep waiting, or continue
 the final review without check results. This is also the way for a project that
 has no Cloud Checks. Only your answer continues without results, and it applies

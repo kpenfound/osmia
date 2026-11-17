@@ -83,6 +83,10 @@ func TestServiceDaggerValidation(t *testing.T) {
 		{"wrong engine type", "engine = ['private-secret']", "dagger.engine"},
 		{"wrong version type", "version = ['private-secret']", "dagger.version"},
 		{"wrong env type", "cloud_token_env = ['private-secret']", "dagger.cloud_token_env"},
+		{"organization flag", "organization = '--private-secret'", "dagger.organization"},
+		{"organization space", "organization = 'private secret'", "dagger.organization"},
+		{"organization path", "organization = 'private-secret/x'", "dagger.organization"},
+		{"wrong organization type", "organization = ['private-secret']", "dagger.organization"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := LoadTopLevel(fixture(t, topConfig+"[dagger]\n"+tc.section+"\n", projectConfig))
@@ -94,6 +98,20 @@ func TestServiceDaggerValidation(t *testing.T) {
 				t.Fatal("field error exposed the configured value")
 			}
 		})
+	}
+}
+
+func TestDaggerOrganization(t *testing.T) {
+	cfg, err := Load(fixture(t, topConfig+"[dagger]\ncloud_token_env = 'OSMIA_CHECK_TOKEN'\norganization = 'acme-corp'\n", projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dagger.Organization != "acme-corp" {
+		t.Fatalf("organization %q", cfg.Dagger.Organization)
+	}
+	cfg, err = Load(fixture(t, topConfig, projectConfig))
+	if err != nil || cfg.Dagger.Organization != "" {
+		t.Fatalf("absent organization %q, %v", cfg.Dagger.Organization, err)
 	}
 }
 

@@ -19,12 +19,13 @@ type CloudRerunner interface {
 	// CanRerun reports why a rerun cannot be requested, or nil.
 	CanRerun() error
 	// RerunFailed requests the rerun from dir, a checkout of the pull
-	// request's repository. It returns once the request is made, not when
-	// the checks finish.
-	RerunFailed(ctx context.Context, dir string, pullRequest int) error
+	// request's repository, in the Dagger Cloud organization org, or in the
+	// one Dagger Cloud infers when org is empty. It returns once the request
+	// is made, not when the checks finish.
+	RerunFailed(ctx context.Context, dir string, pullRequest int, org string) error
 	// RerunAll requests the rerun of every check of the pull request, from
-	// dir, with the same return as RerunFailed.
-	RerunAll(ctx context.Context, dir string, pullRequest int) error
+	// dir and in org, with the same return as RerunFailed.
+	RerunAll(ctx context.Context, dir string, pullRequest int, org string) error
 }
 
 // ErrCloudRerunUnavailable is a rerun that cannot be requested because no
@@ -35,15 +36,24 @@ var ErrCloudRerunUnavailable = errors.New("a Dagger Cloud rerun needs a Dagger C
 const maxRerunOutput = 2048
 
 // RerunCommand is the Dagger CLI invocation that reruns the failed checks of
-// pull request number, without the program name.
-func RerunCommand(pullRequest int) []string {
-	return []string{"cloud", "checks", "rerun", "--failed", "--pr", strconv.Itoa(pullRequest)}
+// pull request number, without the program name. A non-empty org is passed
+// as --org.
+func RerunCommand(pullRequest int, org string) []string {
+	return withOrganization([]string{"cloud", "checks", "rerun", "--failed", "--pr", strconv.Itoa(pullRequest)}, org)
 }
 
 // RerunAllCommand is the Dagger CLI invocation that reruns every check of
-// pull request number, without the program name.
-func RerunAllCommand(pullRequest int) []string {
-	return []string{"cloud", "checks", "rerun", "--all", "--pr", strconv.Itoa(pullRequest)}
+// pull request number, without the program name. A non-empty org is passed
+// as --org.
+func RerunAllCommand(pullRequest int, org string) []string {
+	return withOrganization([]string{"cloud", "checks", "rerun", "--all", "--pr", strconv.Itoa(pullRequest)}, org)
+}
+
+func withOrganization(args []string, org string) []string {
+	if org == "" {
+		return args
+	}
+	return append(args, "--org", org)
 }
 
 // CanRerun reports ErrCloudRerunUnavailable when the runner has no token.
@@ -54,19 +64,19 @@ func (d DaggerChecks) CanRerun() error {
 	return nil
 }
 
-// RerunFailed runs `dagger cloud checks rerun --failed --pr <N>` in dir. Only
+// RerunFailed runs `dagger cloud checks rerun --failed --pr <N> [--org <org>]` in dir. Only
 // the explicit allow-list reaches the CLI: a private home, the search path and
 // the Cloud token, never the engine selection, since the command talks to
 // Dagger Cloud and starts no engine. dir is used as it is; it is not
 // prepared or initialised.
-func (d DaggerChecks) RerunFailed(ctx context.Context, dir string, pullRequest int) error {
-	return d.rerun(ctx, dir, RerunCommand(pullRequest))
+func (d DaggerChecks) RerunFailed(ctx context.Context, dir string, pullRequest int, org string) error {
+	return d.rerun(ctx, dir, RerunCommand(pullRequest, org))
 }
 
-// RerunAll runs `dagger cloud checks rerun --all --pr <N>` in dir, under the
-// same rules as RerunFailed.
-func (d DaggerChecks) RerunAll(ctx context.Context, dir string, pullRequest int) error {
-	return d.rerun(ctx, dir, RerunAllCommand(pullRequest))
+// RerunAll runs `dagger cloud checks rerun --all --pr <N> [--org <org>]` in
+// dir, under the same rules as RerunFailed.
+func (d DaggerChecks) RerunAll(ctx context.Context, dir string, pullRequest int, org string) error {
+	return d.rerun(ctx, dir, RerunAllCommand(pullRequest, org))
 }
 
 func (d DaggerChecks) rerun(ctx context.Context, dir string, args []string) error {

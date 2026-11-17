@@ -499,7 +499,7 @@ func ReadFinalCheckRerun(repository *trace.Repository, stream config.WorkstreamI
 // before the command runs, so a restart that finds the record never runs it
 // again, and the failing posting that stays on the commit is told apart from
 // the rerun's own. The command runs in the workstream's checkout with the
-// token cloud_token_env names.
+// token cloud_token_env names, in the organization rerunOrganization gives.
 func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResult) error {
 	a := w.a
 	rerunner := a.S.CloudRerun
@@ -509,7 +509,8 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 	if err := rerunner.CanRerun(); err != nil {
 		return fmt.Errorf("final review %d cannot rerun the failed checks of push %d: %w; set the environment variable dagger.cloud_token_env names", w.report.Review, w.push.Number, err)
 	}
-	record := FinalCheckRerunRecord{Review: w.report.Review, Push: w.push.Number, PullRequest: w.push.PullRequest, PushedCommit: w.push.Commit, Command: append([]string{"dagger"}, checkrun.RerunCommand(w.push.PullRequest)...)}
+	org := rerunOrganization(w.cfg)
+	record := FinalCheckRerunRecord{Review: w.report.Review, Push: w.push.Number, PullRequest: w.push.PullRequest, PushedCommit: w.push.Commit, Command: append([]string{"dagger"}, checkrun.RerunCommand(w.push.PullRequest, org)...)}
 	record.RequestedAt, record.Original = a.S.Now(), checkRef(result.Run)
 	if result.Counts != nil {
 		record.Counts = &api.CheckCounts{Total: result.Counts.Total, Passed: result.Counts.Passed, Failed: result.Counts.Failed, Cancelled: result.Counts.Cancelled}
@@ -524,7 +525,7 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 		return err
 	}
 	dir := a.S.rerunDirectory(ctx, w.cfg, a.Repository, w.stream)
-	runErr := rerunner.RerunFailed(ctx, dir, w.push.PullRequest)
+	runErr := rerunner.RerunFailed(ctx, dir, w.push.PullRequest, org)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

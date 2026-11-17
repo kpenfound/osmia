@@ -732,8 +732,8 @@ failed checks. A run with no completed "Run Dagger Checks" status within
 recorded as incomplete and read again after a wait that doubles with each
 further run, up to an hour. The final reader's prompt carries the result; neither
 it nor a unit reviewer runs checks. A completed result is read back instead of
-read again. The one `dagger cloud checks rerun --failed --pr <N>` of a failure
-runs from the workstream's checkout and receives PATH, a temporary HOME and
+read again. The one `dagger cloud checks rerun --failed --pr <N>` of a failure,
+with `--org` set from `dagger.organization` for a project without a fork, runs from the workstream's checkout and receives PATH, a temporary HOME and
 the Dagger Cloud token `cloud_token_env` names, without engine, provider,
 GitHub or SSH credentials. Final reviews take no check slot.
 There is no command fallback.
@@ -769,6 +769,7 @@ The top-level `[dagger]` section selects the service's engine:
 engine = "managed"
 version = "v0.20.5"
 cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
+organization = "my-org"
 ```
 
 | Key | Default | Validation/meaning |
@@ -776,6 +777,7 @@ cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
 | `engine` | `"auto"` | `auto`, `managed`, `cloud` or an explicit `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` address |
 | `version` | Host Dagger CLI release, resolved at runtime | Expected engine release, such as `v0.20.5` or `0.20.5`; a mismatch is reported rather than enforced |
 | `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` and for `check_fallback = "cloud"`, and used for the `dagger cloud checks rerun` of a pull request's failed Cloud checks, which cannot be requested without it |
+| `organization` | Unset | The Dagger Cloud organization the token belongs to. A project without a `fork` passes it as `--org` to its `dagger cloud checks rerun` commands, which an organization token needs; a project with a fork runs its reruns without `--org`, because its pull request's checks run in the upstream's organization. Must be a Dagger Cloud organization name |
 | `check_fallback` | `""` (off) | `""` or `"cloud"`. With `"cloud"`, a check run that cannot finish on the service's engine is retried on the Dagger Cloud engine; see [Cloud fallback for checks](#cloud-fallback-for-checks). Any other value fails to load, naming `dagger.check_fallback` |
 
 `auto` lets the host CLI choose an engine. `managed` selects Osmia's

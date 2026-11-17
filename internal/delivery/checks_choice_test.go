@@ -92,6 +92,7 @@ func (f *watchFixture) answer(e InboxEntry, decision string) (ChecksChoiceRespon
 func TestChiefPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
+	f.cfg.Project.Fork, f.cfg.Dagger.Organization = "", "acme"
 	f.assemble()
 	f.api.set(f.loaded(), f.pending(2, 40*time.Second))
 	poll := ChecksToolOf(f.load(), f.repo, f.chief("poll"))
@@ -107,7 +108,7 @@ func TestChiefPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
 
 	got = f.call(poll, `{"action":"rerun","push":1}`)
 	calls := f.rerunCalls()
-	if got["done"] != true || len(calls) != 1 || !strings.HasPrefix(calls[0], "cloud checks rerun --all --pr 7\n") || !strings.Contains(calls[0], "token="+cloudToken+"\n") {
+	if got["done"] != true || len(calls) != 1 || !strings.HasPrefix(calls[0], "cloud checks rerun --all --pr 7 --org acme\n") || !strings.Contains(calls[0], "token="+cloudToken+"\n") {
 		t.Fatalf("rerun %v, calls %q", got, calls)
 	}
 
