@@ -47,10 +47,27 @@ func HandInWorkstream(project config.ProjectID, key string) config.WorkstreamID 
 	return config.WorkstreamID("w_" + hex.EncodeToString(sum[:16]))
 }
 
-// handIn checks that the project is active and its charter has rules, then
+// HandInOrigin says a hand-in is made on the owner's behalf by someone else:
+// the actor its records name in place of the owner, and the reason its
+// hand-in transition records. The workstream it creates is an ordinary
+// hand-in in every other respect.
+type HandInOrigin struct {
+	Actor trace.Actor
+	// Reason is what the hand-in transition records. It ends with the path of
+	// the handed document, which the service appends.
+	Reason string
+}
+
+// HandIn checks that the project is active and its charter has rules, then
 // copies the input into a new workstream and moves it to the handed state. The
 // project may be left out while exactly one project is active.
 func (s *Controller) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, *APIError) {
+	return s.HandInAs(ctx, req, nil)
+}
+
+// HandInAs is HandIn made for origin instead of the owner. A nil origin is
+// the owner's own hand-in.
+func (s *Controller) HandInAs(ctx context.Context, req HandInRequest, origin *HandInOrigin) (HandInResponse, *APIError) {
 	projects := req.Projects
 	if projects == nil {
 		project, api := s.ProjectFor(req.Project)
@@ -110,7 +127,7 @@ func (s *Controller) HandIn(ctx context.Context, req HandInRequest) (HandInRespo
 	if err != nil {
 		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
 	}
-	h := HandIn{S: s.HandInDependencies(), Repository: repository, Req: req, Stream: stream, Source: source, Name: name, Trace: workstreamTrace}
+	h := HandIn{S: s.HandInDependencies(), Repository: repository, Req: req, Stream: stream, Source: source, Name: name, Trace: workstreamTrace, Origin: origin}
 	// A key whose input is already copied finishes without reading it again.
 	if out, done, api := h.Record(ctx, nil); done || api != nil {
 		return out, api
@@ -132,6 +149,16 @@ type HandIn struct {
 	Stream       config.WorkstreamID
 	Source, Name string
 	Trace        string
+	// Origin is who handed the work in when it is not the owner.
+	Origin *HandInOrigin
+}
+
+// actor is the actor the hand-in's records name.
+func (h HandIn) actor() trace.Actor {
+	if h.Origin != nil {
+		return h.Origin.Actor
+	}
+	return OwnerActor
 }
 
 func (h HandIn) Failed(step string) (HandInResponse, bool, *APIError) {
@@ -235,7 +262,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			now = h.S.Now().UTC()
 		}
 		if exists {
-			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, OwnerActor)
+			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, h.actor())
 		} else {
 			// A new workstream records the backend its workspaces use; it
 			// keeps it until it is delivered or abandoned.
@@ -243,7 +270,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			if checkErr != nil {
 				return HandInResponse{}, false, &APIError{Code: Unavailable, Message: fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
 			}
-			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, OwnerActor)
+			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, h.actor())
 		}
 		if err != nil {
 			return h.Failed("creating")
@@ -253,7 +280,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		// the fast path never runs briefly without one: a workstream never
 		// has a chief of staff of its own, and ensureWorkgroups backfilling
 		// this on a later start changes nothing further.
-		if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, OwnerActor, HandInTransition); err != nil {
+		if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, h.actor(), HandInTransition); err != nil {
 			return h.Failed("recording the workgroup of")
 		}
 		if req.Base != "" && len(projects) == 1 {
@@ -276,7 +303,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 				return HandInResponse{}, false, api
 			}
 		}
-		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: HandedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: OwnerActor, Cause: HandInTransition},
+		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: HandedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: h.actor(), Cause: HandInTransition},
 			Path: "handed/" + h.Name, Content: *content, Source: h.Source}
 		if err := repository.Append(ctx, *doc); err != nil {
 			return h.Failed("copying the input into")
@@ -296,8 +323,11 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 	}
 	// The transition carries the handed document's timestamp, so a retry
 	// repeats the committed transition exactly.
-	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: HandInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: OwnerActor, Cause: HandInTransition}
+	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: HandInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: h.actor(), Cause: HandInTransition}
 	reason := "the owner handed in " + doc.Path + " from " + h.Source
+	if h.Origin != nil {
+		reason = h.Origin.Reason + " (" + doc.Path + ")"
+	}
 	if req.SkipDebate {
 		reason += " and skipped debate"
 	}

@@ -388,3 +388,47 @@ func TestRecordedFromAFlakeFixWorkstreamIsKept(t *testing.T) {
 		t.Fatalf("occurrence %+v, %v", got, err)
 	}
 }
+
+func TestAReservationKeepsTheChiefsNotesAcrossARestart(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	o := recordOne(t, f, groupA, "1")
+	reserved, err := f.store.ReserveWithNotes(ctx, groupA, o.Run, "Look at the shared fixture.")
+	if err != nil || reserved.State != Opening || reserved.Notes != "Look at the shared fixture." {
+		t.Fatalf("reserving: %+v, %v", reserved, err)
+	}
+	f.restart()
+	// A later reservation of the same occurrence keeps the first one's notes.
+	again, err := f.store.ReserveWithNotes(ctx, groupA, o.Run, "Other notes.")
+	if err != nil || again.Notes != "Look at the shared fixture." || again.Key != reserved.Key {
+		t.Fatalf("reserving again: %+v, %v", again, err)
+	}
+}
+
+func TestAGroupIsAssociatedWithItsOpenOrReservedWorkstream(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	o := recordOne(t, f, groupA, "1")
+	if g, _, _ := f.store.Group(groupA); len(g.Associated()) != 0 {
+		t.Fatalf("a group with no workstream is associated with %v", g.Associated())
+	}
+	reserved, err := f.store.Reserve(ctx, groupA, o.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, _, _ := f.store.Group(groupA); len(g.Associated()) != 1 || g.Associated()[0] != reserved.Workstream {
+		t.Fatalf("a reserved opening is associated with %v, want %s", g.Associated(), reserved.Workstream)
+	}
+	if _, err := f.store.Opened(ctx, groupA, o.Run, ""); err != nil {
+		t.Fatal(err)
+	}
+	if g, _, _ := f.store.Group(groupA); len(g.Associated()) != 1 || g.Associated()[0] != reserved.Workstream {
+		t.Fatalf("an open workstream is associated with %v, want %s", g.Associated(), reserved.Workstream)
+	}
+	if _, err := f.store.CloseWorkstream(ctx, reserved.Workstream); err != nil {
+		t.Fatal(err)
+	}
+	if g, _, _ := f.store.Group(groupA); len(g.Associated()) != 0 {
+		t.Fatalf("a closed group is associated with %v", g.Associated())
+	}
+}

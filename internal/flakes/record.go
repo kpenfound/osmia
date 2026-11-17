@@ -40,6 +40,9 @@ type Decision struct {
 	// its key names), and the one an Opened or Joined decision names.
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 	Reason     string              `json:"reason,omitempty"`
+	// Notes are the chief of staff's notes reserved with an Opening decision,
+	// so an interrupted opening is completed with the notes it was given.
+	Notes string `json:"notes,omitempty"`
 }
 
 // Final reports whether the decision can no longer change.
@@ -191,9 +194,10 @@ func (g *Group) record(in OccurrenceInput, at time.Time) (Occurrence, bool, erro
 
 // reserve decides run's occurrence to open the group's workstream. A pending
 // occurrence of a group with an open workstream joins it; otherwise the
-// group's current generation and key are reserved for it. An occurrence that
-// already has a decision keeps it. The result reports whether it changed.
-func (g *Group) reserve(run string, at time.Time) (Decision, bool, error) {
+// group's current generation and key are reserved for it, with the chief of
+// staff's notes. An occurrence that already has a decision keeps it. The
+// result reports whether it changed.
+func (g *Group) reserve(run, notes string, at time.Time) (Decision, bool, error) {
 	o, ok := g.find(run)
 	if !ok {
 		return Decision{}, false, ErrUnknownOccurrence
@@ -206,7 +210,7 @@ func (g *Group) reserve(run string, at time.Time) (Decision, bool, error) {
 		return o.Decision, true, nil
 	}
 	key := HandInKey(g.Project, g.Group, g.Generation)
-	o.Decision = Decision{State: Opening, At: at, Generation: g.Generation, Key: key, Workstream: intake.HandInWorkstream(g.Project, key)}
+	o.Decision = Decision{State: Opening, At: at, Generation: g.Generation, Key: key, Workstream: intake.HandInWorkstream(g.Project, key), Notes: notes}
 	return o.Decision, true, nil
 }
 

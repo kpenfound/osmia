@@ -248,6 +248,9 @@ type Service struct {
 	reloadErr *ReloadError
 	projectMu sync.Mutex // serializes project registration, removal, reload and project configuration saves
 	handInMu  sync.Mutex // serializes hand-ins
+	// flakeFixMu serializes opening flake-fix workstreams, so occurrences of
+	// one group never race to reserve and hand in.
+	flakeFixMu sync.Mutex
 	sessionMu sync.Mutex // serializes session opens
 	turns     runningTurns
 	options   Options

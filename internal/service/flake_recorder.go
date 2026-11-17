@@ -123,6 +123,14 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 	if f.scanned && generation == f.generation && now.Sub(f.at) < flakeRescan {
 		return nil
 	}
+	// Openings left partway are completed and finished workstreams closed
+	// before new runs are recorded, so a run never joins a workstream that is
+	// over.
+	finished := true
+	if err := f.settle(ctx); err != nil {
+		finished = false
+		f.report("settle", err)
+	}
 	runs, err := f.collect()
 	if err != nil {
 		return err
@@ -130,7 +138,6 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 	if f.done == nil {
 		f.done = map[string]bool{}
 	}
-	finished := true
 	for _, run := range runs {
 		if f.done[run.key()] {
 			continue
@@ -145,6 +152,9 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 		}
 		f.done[run.key()] = true
 		delete(f.logged, run.key())
+	}
+	if finished {
+		delete(f.logged, "settle")
 	}
 	f.scanned, f.generation, f.at = finished, generation, now
 	return nil
@@ -431,7 +441,7 @@ func (f *flakeRecorder) notice(ctx context.Context, run flakeRun, occurrences []
 		fmt.Fprintf(&b, "\nAwaiting your decision (%d):\n", len(pending))
 		for _, o := range pending {
 			fmt.Fprintf(&b, "\n- Occurrence `%s`, flake group `%s`: flaky %s. Run record `%s`.\n", o.ID, o.group, codeList(o.Links), o.RunPath())
-			fmt.Fprintf(&b, "  To open a flake-fix workstream that finds and fixes the cause, call %s with action \"open\", occurrence \"%s\" and, if useful, your notes. To decline, call %s with action \"decline\", occurrence \"%s\" and a reason (for example, the flaky test was added by the unit itself). A decision on this occurrence is final.\n", flakeFixToolName, o.ID, flakeFixToolName, o.ID)
+			fmt.Fprintf(&b, "  To open a flake-fix workstream that finds and fixes the cause, call %s with action \"open\", occurrence \"%s\", workstream \"%s\" and, if useful, your notes. To decline, call %s with action \"decline\", occurrence \"%s\", workstream \"%s\" and a reason (for example, the flaky test was added by the unit itself). A decision on this occurrence is final.\n", flakeFixToolName, o.ID, run.stream, flakeFixToolName, o.ID, run.stream)
 		}
 	}
 	if len(decided) > 0 {

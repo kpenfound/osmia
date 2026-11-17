@@ -356,6 +356,14 @@ func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) cor
 	return controls.decide(r, scope)
 }
 
+// FlakeFixTool returns the flake_fix tool of the claimed chief-of-staff turn
+// scope names, as the service composes it.
+func (a TestAccess) FlakeFixTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	controls := &runtimeControls{}
+	controls.service.Store(a.s)
+	return controls.flakeFix(r, scope)
+}
+
 // TriageTool returns the triage_finding tool of the claimed chief-of-staff turn
 // scope names, as the service composes it.
 func (a TestAccess) TriageTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {

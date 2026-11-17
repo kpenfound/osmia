@@ -48,6 +48,10 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	case err != nil:
 		return AbandonResponse{}, failed
 	}
+	// A flake-fix workstream's group ends its association with it, so the
+	// group's next occurrence opens the next one. The flake pass repeats this
+	// if it fails here.
+	s.closeFlakeFix(ctx, repository, stream)
 	s.turns.cancel(stream)
 	if _, err := repository.CancelTurns(context.WithoutCancel(ctx), stream, s.now(), abandonActor, cancelReason); err != nil {
 		return AbandonResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("workstream %s is abandoned but its queued turns could not be cancelled; they are cancelled at the next start. Check the trace repository", stream)}

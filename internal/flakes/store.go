@@ -206,7 +206,13 @@ func (s *Store) Record(ctx context.Context, in OccurrenceInput) (o Occurrence, a
 // before the hand-in is made. An occurrence that is already decided keeps its
 // decision. The returned decision is the occurrence's decision after the call.
 func (s *Store) Reserve(ctx context.Context, group, run string) (Decision, error) {
-	return s.decide(ctx, group, run, "flake-reserve", func(g *Group) (Decision, bool, error) { return g.reserve(run, s.now()) })
+	return s.ReserveWithNotes(ctx, group, run, "")
+}
+
+// ReserveWithNotes is Reserve that keeps the chief of staff's notes with the
+// reservation, for the hand-in the reserved opening is completed with.
+func (s *Store) ReserveWithNotes(ctx context.Context, group, run, notes string) (Decision, error) {
+	return s.decide(ctx, group, run, "flake-reserve", func(g *Group) (Decision, bool, error) { return g.reserve(run, notes, s.now()) })
 }
 
 // Opened records that the hand-in for run's reserved opening created
@@ -277,6 +283,22 @@ func (g Group) holds(workstream config.WorkstreamID) bool {
 	return slices.ContainsFunc(g.Occurrences, func(o Occurrence) bool {
 		return o.Decision.State == Opening && o.Decision.Generation == g.Generation && o.Decision.Workstream == workstream
 	})
+}
+
+// Associated returns the workstreams the group is currently tied to: its open
+// flake-fix workstream, or else those of the openings reserved in its current
+// generation. Closing one of them ends the association.
+func (g Group) Associated() []config.WorkstreamID {
+	if g.Open != nil {
+		return []config.WorkstreamID{g.Open.Workstream}
+	}
+	var out []config.WorkstreamID
+	for _, o := range g.Occurrences {
+		if o.Decision.State == Opening && o.Decision.Generation == g.Generation && !slices.Contains(out, o.Decision.Workstream) {
+			out = append(out, o.Decision.Workstream)
+		}
+	}
+	return out
 }
 
 // OpenWorkstream returns the group's open flake-fix workstream.
