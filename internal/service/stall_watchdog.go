@@ -307,12 +307,44 @@ func (w stallWatch) assess(ctx context.Context, stream config.WorkstreamID, unit
 		// still standing a further window later has the owner's recovery card.
 		return w.openRecovery(ctx, stream, unit, state, *rec, now, after)
 	}
+	// A hold that stood for the window raises the stall again. A stall that Jev
+	// held and held again is one nobody clears: it ends on the recovery card
+	// instead of being asked a third time.
+	held, err := w.heldStalls(stream, *x)
+	if err != nil {
+		return err
+	}
+	if len(held) >= maxStallHolds {
+		return w.openRecovery(ctx, stream, unit, state, held[len(held)-1], now, after)
+	}
 	submit := w.submit
 	if submit == nil {
 		submit = func(x router.Exit) bool { return w.s.SubmitExit(x, nil) }
 	}
 	submit(*x)
 	return nil
+}
+
+// maxStallHolds is how many times the router holds the stalled exit of a
+// subject in one state before the stall ends on the owner's recovery card.
+const maxStallHolds = 2
+
+// heldStalls returns the earlier exits with the trigger of x, on its subject in
+// its state, that the router held, oldest first.
+func (w stallWatch) heldStalls(stream config.WorkstreamID, x router.Exit) ([]router.Record, error) {
+	records, err := router.Records(w.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	key := router.OccurrenceKey(x)
+	var out []router.Record
+	for _, rec := range records {
+		if rec.Subject == x.Subject && rec.Trigger == x.Trigger && rec.Version == x.Version && rec.State == router.StateHeld && rec.Occurrence != key {
+			out = append(out, rec)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b router.Record) int { return a.Decided.Compare(b.Decided) })
+	return out, nil
 }
 
 // exit builds the stalled exit of a unit, or of the workstream when unit is

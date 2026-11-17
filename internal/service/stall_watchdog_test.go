@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
@@ -542,6 +543,76 @@ func TestStalledExitsOfferTheDefaultAndTheWaysToStartTheStageAgain(t *testing.T)
 		}
 		if tc.state == AssembledState && x.Targets[1].Bar != router.BarModest {
 			t.Fatalf("a fresh final review is a departure at %q", x.Targets[1].Bar)
+		}
+	}
+}
+
+// A stall that Jev holds, and holds again when the window passes and the unit
+// stalls again, is one nobody clears: it ends on the owner's recovery card
+// instead of being asked a third time, and that card is opened once however many
+// passes find it.
+func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
+		r := jevfixture.DefaultFits(a)
+		r.PickA, r.PickB = execution.UnitImplementing, execution.TargetWait
+		return r
+	}}
+	f := newStallFixture(t, "", p)
+	w := f.watch("45m")
+	round := func(at time.Duration) map[string]router.Exit {
+		t.Helper()
+		f.quietFor(at)
+		got := f.pass(t, w)
+		for _, x := range got {
+			if _, err := f.s.RouteExit(ctx, x); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return got
+	}
+	held := func() int {
+		t.Helper()
+		n := 0
+		for _, rec := range routeRecordsOf(t, f.repo, stream) {
+			if rec.Trigger == execution.TriggerStalled && rec.State == router.StateHeld {
+				n++
+			}
+		}
+		return n
+	}
+
+	if round(46*time.Minute)[execution.TriggerStalled].Subject == "" || held() != 1 {
+		t.Fatalf("the first stall was not held: %d held", held())
+	}
+	if round(96*time.Minute)[execution.TriggerStalled].Subject == "" || held() != 2 {
+		t.Fatalf("the stall after the first hold was not held: %d held", held())
+	}
+	if cards := recoveryEntriesOf(t, f.s, f.repo, stream); len(cards) != 0 {
+		t.Fatalf("a stall held once has %d cards", len(cards))
+	}
+
+	// A further window later nobody has cleared it: no third request to Jev, one card.
+	asked := len(f.jev.TransitionRequests())
+	if got := round(146 * time.Minute); got[execution.TriggerStalled].Subject != "" {
+		t.Fatalf("a stall held twice was raised a third time: %+v", got)
+	}
+	if n := len(f.jev.TransitionRequests()); n != asked || held() != 2 {
+		t.Fatalf("Jev was asked %d more times and %d stalls are held", n-asked, held())
+	}
+	cards := recoveryEntriesOf(t, f.s, f.repo, stream)
+	if len(cards) != 1 {
+		t.Fatalf("the stalled unit has %d recovery cards, want 1: %+v", len(cards), cards)
+	}
+	m := cards[0].Recovery
+	if m == nil || m.Origin != api.RecoveryStall || m.Subject != trace.UnitSubject(stallUnit) || m.From != UnitImplementing || m.Target != UnitImplementing || m.Machine != execution.UnitMachine {
+		t.Fatalf("the card pins %+v", m)
+	}
+	for _, at := range []time.Duration{150 * time.Minute, 4 * time.Hour} {
+		round(at)
+		if got := recoveryEntriesOf(t, f.s, f.repo, stream); len(got) != 1 || recoveryDocuments(t, f.repo, stream) != 1 || held() != 2 {
+			t.Fatalf("later passes made %d cards and %d records and hold %d stalls", len(got), recoveryDocuments(t, f.repo, stream), held())
 		}
 	}
 }
