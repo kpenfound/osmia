@@ -697,12 +697,19 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 			}
 			records = append(records, router.Entry{Kind: "edge", ID: string(e.From), Text: text})
 		}
+		// One blocking edge is one upstream to summarise; several are not, and
+		// the workstream's own summary stands for them.
+		var single *dependencyCase
+		if len(c.blocking) == 1 {
+			e := c.blocking[0]
+			single = &dependencyCase{Upstream: e.From, Type: e.Type, Edge: &e}
+		}
 		x := s.clearingExit(repo, c.stream, c.state, clearing{
 			Subject: EdgeWaitSubject, Trigger: TriggerEdgeResolved, Notice: "edge", Cause: cause, HeaderCause: "edge-availability",
 			Reason:  "the workstream's blocking edges resolved",
 			Doubt:   question("merge_in_doubt", "The records show that an upstream's merge is not final: it was reverted, or observed on another branch than the one the dependent builds on."),
 			Facts:   map[string]any{"blocking_edges": len(c.blocking), "observation_revision": c.revision},
-			Records: records, Intent: "A dependent workstream starts its work only after the workstreams it hard-depends on have merged.",
+			Records: records, Dependency: single,
 			Unresolved: func(ctx context.Context) (string, error) {
 				edges, err := IncomingMergeEdges(repo, c.stream)
 				if err != nil {

@@ -524,19 +524,42 @@ func (s *Controller) upstreamOutcome(up *trace.Repository, c dependencyCase, fac
 // workstream and its approved outcomes now; earlier reviews' findings were
 // answered by the revisions after them.
 func workstreamIntent(repo *trace.Repository, stream config.WorkstreamID) (string, []router.Entry, map[string]any, error) {
+	return workstreamSummary(repo, stream, false)
+}
+
+// workstreamIntentOrMissing is workstreamIntent for an exit that must route
+// whatever the records hold: a part of the summary that cannot be read is said
+// so in its place, and the rest of the summary stays.
+func workstreamIntentOrMissing(repo *trace.Repository, stream config.WorkstreamID) (string, []router.Entry, map[string]any) {
+	intent, entries, facts, _ := workstreamSummary(repo, stream, true)
+	return intent, entries, facts
+}
+
+// workstreamSummary builds the summary workstreamIntent describes. When
+// tolerant is false a record that cannot be read is an error; when it is true
+// the summary says which part of the records could not be read.
+func workstreamSummary(repo *trace.Repository, stream config.WorkstreamID, tolerant bool) (string, []router.Entry, map[string]any, error) {
 	facts := map[string]any{}
 	what := fmt.Sprintf("workstream %s", stream)
 	spec, err := readSealedSpec(repo, stream)
 	if err != nil {
-		return "", nil, nil, err
+		if !tolerant {
+			return "", nil, nil, err
+		}
+		spec = sealedSpec{Stream: stream, Missing: []string{"the workstream's records cannot be read: " + oneLineError(err)}}
 	}
 	intent, intentCut := spec.intentText(what)
 	facts["intent_cut"] = intentCut
 	entries, count := spec.acceptance("sealed acceptance", what)
 	facts["acceptance_outcomes"], facts["acceptance_shown"] = count.Total, count.Shown
+	if tolerant && len(spec.Criteria) > 0 && len(spec.Missing) > 0 {
+		// The acceptance outcomes were read, so they do not say what else the
+		// records lack.
+		entries = append(entries, missingEntry("sealed plan", string(stream), strings.Join(spec.Missing, "; ")))
+	}
 
 	reports, err := delivery.FinalReports(repo, stream)
-	if err != nil {
+	if err != nil && !tolerant {
 		return "", nil, nil, err
 	}
 	facts["final_reviews"] = len(reports)
@@ -547,9 +570,12 @@ func workstreamIntent(repo *trace.Repository, stream config.WorkstreamID) (strin
 			break
 		}
 	}
-	if report == nil {
+	switch {
+	case err != nil:
+		entries = append(entries, missingEntry("final review findings", string(stream), "the final reports cannot be read: "+oneLineError(err)))
+	case report == nil:
 		entries = append(entries, missingEntry("final review findings", string(stream), "no final review has read the workstream, so there are no findings"))
-	} else {
+	default:
 		findings := slices.Clone(report.Findings)
 		sort.SliceStable(findings, func(i, j int) bool {
 			return findings[i].Severity == delivery.FindingBlocking && findings[j].Severity != delivery.FindingBlocking
@@ -567,7 +593,11 @@ func workstreamIntent(repo *trace.Repository, stream config.WorkstreamID) (strin
 
 	moves, err := WorkstreamMoves(repo, stream)
 	if err != nil {
-		return "", nil, nil, err
+		if !tolerant {
+			return "", nil, nil, err
+		}
+		entries = append(entries, missingEntry("earlier moves", string(stream), "the earlier moves cannot be read: "+oneLineError(err)))
+		return intent, entries, facts, nil
 	}
 	facts["earlier_moves"] = len(moves)
 	shown := moves
@@ -588,4 +618,35 @@ func workstreamIntent(repo *trace.Repository, stream config.WorkstreamID) (strin
 		entries = append(entries, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: text})
 	}
 	return intent, entries, facts, nil
+}
+
+// waitIntent returns the intent evidence of the exit from a wait on c, when the
+// wait is on one upstream workstream or base: the dependency summary of
+// dependencyIntent. A wait that has no single upstream to summarise gets the
+// workstream summary instead. Nothing here fails the exit: what the records
+// lack is said in the evidence.
+func (s *Controller) waitIntent(repo *trace.Repository, stream config.WorkstreamID, c *dependencyCase) (string, []router.Entry, map[string]any) {
+	if c == nil {
+		return workstreamIntentOrMissing(repo, stream)
+	}
+	return s.dependencyIntent(repo, stream, *c)
+}
+
+// withIntentEvidence adds the intent evidence to an exit's own evidence: the
+// intent text when the exit has none, the entries after the exit's own, and the
+// counts under keys the exit's own facts do not use.
+func withIntentEvidence(own router.Evidence, intent string, entries []router.Entry, facts map[string]any) router.Evidence {
+	if own.Intent == "" {
+		own.Intent = intent
+	}
+	merged := make(map[string]any, len(own.Facts)+len(facts))
+	for k, v := range facts {
+		merged[k] = v
+	}
+	for k, v := range own.Facts {
+		merged[k] = v
+	}
+	own.Facts = merged
+	own.Records = append(slices.Clone(own.Records), entries...)
+	return own
 }

@@ -386,7 +386,6 @@ func (w stallWatch) exit(stream config.WorkstreamID, unit string, state trace.Wo
 	evidence := router.Evidence{Facts: facts, Records: records}
 	reason := fmt.Sprintf("Stalled: %s made no progress for %d minutes with nothing to explain it", name, minutes)
 	if unit == "" {
-		evidence.Intent = "The workstream's sealed spec and plan are what the owner approved."
 		x := w.s.lifecycle().StalledExit(w.repository, stream, state, lifecycle.StalledInput{Cause: cause, Actor: stallActor, Notice: body, Reason: reason, Evidence: evidence, At: now})
 		return &x, nil
 	}

@@ -329,6 +329,10 @@ func (s *Controller) StalledExit(repo *trace.Repository, stream config.Workstrea
 		targets = append(targets, intake.ExitTarget(intake.TriggerStalled, t))
 	}
 	id := fmt.Sprintf("ws-stalled-%d", feature.Version)
+	// The watchdog's own facts and records stay as they are; the workstream's
+	// approved intent comes from the records, whatever they hold.
+	intent, entries, facts := workstreamIntentOrMissing(repo, stream)
+	in.Evidence = withIntentEvidence(in.Evidence, intent, entries, facts)
 	return router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: intake.WorkstreamMachine,
 		Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version,

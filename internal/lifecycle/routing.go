@@ -135,8 +135,10 @@ type clearing struct {
 	Doubt   router.Question
 	Facts   map[string]any
 	Records []router.Entry
-	// Intent says what the wait protects.
-	Intent string
+	// Dependency is the single upstream workstream or base the wait is on; the
+	// exit's intent evidence summarises it. A wait with no single upstream
+	// gets the summary of the workstream instead.
+	Dependency *dependencyCase
 	// Unresolved returns why the wait does not clear now, or "" while it does.
 	Unresolved func(ctx context.Context) (string, error)
 }
@@ -148,6 +150,7 @@ type clearing struct {
 // Jev has kept the wait for it.
 func (s *Controller) clearingExit(repo *trace.Repository, stream config.WorkstreamID, state trace.WorkflowState, c clearing) router.Exit {
 	id := fmt.Sprintf("%s-%d", c.Subject, state.Version+1)
+	intent, entries, facts := s.waitIntent(repo, stream, c.Dependency)
 	return router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: DependencyMachine,
 		Subject: c.Subject, From: state.Value, Version: state.Version, Trigger: c.Trigger, Cause: c.Cause, HeaderCause: c.HeaderCause, Actor: foremanActor,
@@ -160,7 +163,7 @@ func (s *Controller) clearingExit(repo *trace.Repository, stream config.Workstre
 				Corroborate: []router.Condition{{Question: c.Doubt.Name, AtLeast: router.LevelModest}}},
 		},
 		Questions:    []router.Question{c.Doubt},
-		Evidence:     router.Evidence{Intent: c.Intent, Facts: c.Facts, Records: c.Records},
+		Evidence:     withIntentEvidence(router.Evidence{Facts: c.Facts, Records: c.Records}, intent, entries, facts),
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
 			return router.Effect{Events: []trace.Event{trace.Notice(id, c.Notice, c.Reason)}, Reason: c.Reason}, nil

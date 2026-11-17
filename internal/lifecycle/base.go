@@ -282,10 +282,10 @@ func (s *Controller) BaseWaitPass(ctx context.Context, repo *trace.Repository) e
 			}
 			x := s.clearingExit(repo, stream, state, clearing{
 				Subject: BaseWaitSubject, Trigger: TriggerBaseAvailable, Notice: "base", Cause: cause, HeaderCause: "base-availability", Reason: reason,
-				Doubt:   question("base_unusable", "The records show the base still cannot be built on: its branch is missing, unsealed or about to be abandoned."),
-				Facts:   map[string]any{"observation_revision": revision},
-				Records: []router.Entry{{Kind: "base", ID: string(dependency.Base), Text: fmt.Sprintf("the base of workstream %s, workstream %s, is available", stream, dependency.Base)}},
-				Intent:  "A workstream that builds on another workstream's branch waits while that base is abandoned, unsealed or missing.",
+				Doubt:      question("base_unusable", "The records show the base still cannot be built on: its branch is missing, unsealed or about to be abandoned."),
+				Facts:      map[string]any{"observation_revision": revision},
+				Records:    []router.Entry{{Kind: "base", ID: string(dependency.Base), Text: fmt.Sprintf("the base of workstream %s, workstream %s, is available", stream, dependency.Base)}},
+				Dependency: &dependencyCase{Upstream: dependency.Base, Type: BaseEdgeType},
 				Unresolved: func(ctx context.Context) (string, error) {
 					why, _, err := s.baseWaitReason(ctx, repo, dependency)
 					if why != "" {
