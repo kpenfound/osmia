@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -569,13 +570,18 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 			continue
 		}
 		var summary string
+		event := TraceEvent{At: h.At, Ref: refOf(r)}
 		switch v := r.(type) {
 		case trace.Image:
 			summary = "image: " + imageURL(v.Workstream, v.ID)
 		case trace.ImageReference:
 			summary = "image reference: " + imageURL(v.Member, v.ImageID)
 		case trace.Transition:
+			if router.IsJournal(v.Subject) {
+				continue
+			}
 			summary = fmt.Sprintf("%s: %s -> %s: %s", v.Subject, orNone(v.From), v.To, v.Reason)
+			event.DecidedBy, event.Judgment, event.DefaultTo, event.Departed = v.DecidedBy, v.Judgment, v.DefaultTo, v.Departed()
 		case trace.Document:
 			summary = fmt.Sprintf("%s revision %d", v.Path, v.Revision)
 		case trace.Question:
@@ -593,7 +599,8 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 		default:
 			continue
 		}
-		t.History = append(t.History, TraceEvent{At: h.At, Ref: refOf(r), Summary: summary})
+		event.Summary = summary
+		t.History = append(t.History, event)
 	}
 	sort.SliceStable(t.History, func(i, j int) bool { return t.History[i].At.Before(t.History[j].At) })
 }

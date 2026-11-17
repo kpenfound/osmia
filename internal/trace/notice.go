@@ -37,14 +37,20 @@ func Progress(transition, key, body string) Event {
 // header identifies the transition; a retry with the same header, value and
 // reason returns the state it committed.
 func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason string) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, nil, to, reason, nil)
+	return r.setFeatureState(ctx, h, nil, to, reason, nil, Routing{})
+}
+
+// SetFeatureStateRouted is SetFeatureState recording how the transition router
+// chose the transition; a retry must record the same routing.
+func (r *Repository) SetFeatureStateRouted(ctx context.Context, h Header, to, reason string, route Routing) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, nil, to, reason, nil, route)
 }
 
 // MoveFeatureState is SetFeatureState from an expected current state: it
 // refuses with ErrConflict when the workstream is in another state, unless
 // the same transition was already recorded.
 func (r *Repository) MoveFeatureState(ctx context.Context, h Header, from, to, reason string) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, &from, to, reason, nil)
+	return r.setFeatureState(ctx, h, &from, to, reason, nil, Routing{})
 }
 
 // MoveFeatureStateWith is MoveFeatureState that records the given
@@ -52,7 +58,13 @@ func (r *Repository) MoveFeatureState(ctx context.Context, h Header, from, to, r
 // the feature's. A retry of the same feature transition returns the state it
 // committed and records nothing more.
 func (r *Repository) MoveFeatureStateWith(ctx context.Context, h Header, from, to, reason string, with ...Transaction) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, &from, to, reason, nil, with...)
+	return r.setFeatureState(ctx, h, &from, to, reason, nil, Routing{}, with...)
+}
+
+// MoveFeatureStateRouted is MoveFeatureStateWith recording how the transition
+// router chose the feature transition; a retry must record the same routing.
+func (r *Repository) MoveFeatureStateRouted(ctx context.Context, h Header, from, to, reason string, route Routing, with ...Transaction) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, &from, to, reason, nil, route, with...)
 }
 
 // SetFeatureStateUnless is SetFeatureState, except that it refuses with
@@ -60,10 +72,16 @@ func (r *Repository) MoveFeatureStateWith(ctx context.Context, h Header, from, t
 // even for a retry of a transition that already committed.
 // The check and the write hold the same lock.
 func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, reason string, refused ...string) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, nil, to, reason, refused)
+	return r.setFeatureState(ctx, h, nil, to, reason, refused, Routing{})
 }
 
-func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string, with ...Transaction) (WorkflowState, error) {
+// SetFeatureStateUnlessRouted is SetFeatureStateUnless recording how the
+// transition router chose the transition; a retry must record the same routing.
+func (r *Repository) SetFeatureStateUnlessRouted(ctx context.Context, h Header, to, reason string, route Routing, refused ...string) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, nil, to, reason, refused, route)
+}
+
+func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string, route Routing, with ...Transaction) (WorkflowState, error) {
 	r, err := r.scoped(h.Workstream)
 	if err != nil {
 		return WorkflowState{}, err
@@ -84,7 +102,7 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 		}
 	}
 	if old, ok := v.transactions[h.ID]; ok {
-		if old.Transition.Subject != FeatureSubject || !equalJSON(old.Transition.Header, h) || old.Transition.To != to || old.Transition.Reason != reason {
+		if old.Transition.Subject != FeatureSubject || !equalJSON(old.Transition.Header, h) || old.Transition.To != to || old.Transition.Reason != reason || old.Transition.Routing() != route {
 			return WorkflowState{}, ErrConflict
 		}
 		return WorkflowState{Version: old.ExpectedVersion + 1, Value: to}, nil
@@ -97,7 +115,7 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 		body = fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, to, reason)
 	}
 	tx := Transaction{ExpectedVersion: state.Version,
-		Transition: Transition{Header: h, Subject: FeatureSubject, From: state.Value, To: to, Reason: reason},
+		Transition: Transition{Header: h, Subject: FeatureSubject, From: state.Value, To: to, Reason: reason}.withRouting(route),
 		Events:     []Event{Progress(h.ID, "state", body)}}
 	for _, other := range with {
 		if other.Transition.Subject == FeatureSubject {

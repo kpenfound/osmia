@@ -51,8 +51,7 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 		t.Fatalf("move %+v", out.Move)
 	}
 	state := workflowOf(t, repo, stream, "resume")
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	must(t, err)
+	transitions := workTransitions(t, repo, stream)
 	moved := transitions[len(transitions)-1]
 	if state.Value != UnitImplementing || !isMove(moved, "resume") || moved.Actor != ownerActor || !strings.Contains(moved.Reason, note) {
 		t.Fatalf("unit %s after %+v", state.Value, moved)
@@ -232,8 +231,11 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if out := m.resolve(t, `{"unit":"resume","decision":"review","note":"Review it."}`); !strings.Contains(out, "moved to contested for the owner") {
 		t.Fatalf("the chief of staff ruled on the owner's contest: %s", out)
 	}
-	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it."}`); !strings.Contains(out, "the owner moves it") {
-		t.Fatalf("the chief of staff moved the owner's contest: %s", out)
+	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "stays contested") || strings.Contains(out, "the owner moves it") {
+		t.Fatalf("the chief of staff moved out of the contest it raised: %s", out)
+	}
+	if m.state(t).Value != UnitContested {
+		t.Fatalf("a proposal that followed the default moved the unit to %s", m.state(t).Value)
 	}
 	entry, ok, err := m.f.s.contestedEntry(m.repo, m.stream, "resume")
 	must(t, err)
@@ -280,8 +282,7 @@ func TestChiefOfStaffRecordsTheOwnersMove(t *testing.T) {
 	if !strings.Contains(string(out), `"by":"owner"`) {
 		t.Fatalf("move_unit: %s", out)
 	}
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	must(t, err)
+	transitions := workTransitions(t, repo, stream)
 	if moved := transitions[len(transitions)-1]; moved.Actor != ownerActor || moved.To != UnitImplementing {
 		t.Fatalf("move %+v", moved)
 	}

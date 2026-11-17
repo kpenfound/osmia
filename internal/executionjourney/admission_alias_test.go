@@ -31,7 +31,6 @@ const baseWaitSubject = lifecycle.BaseWaitSubject
 
 var changeHeld = lifecycle.ChangeHeld
 
-
 var concurrentOperation = service.TestConcurrentOperation
 var conversationOperation = service.TestConversationOperation
 var jump = fixturekit.Jump

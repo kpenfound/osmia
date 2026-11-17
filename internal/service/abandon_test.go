@@ -2,6 +2,7 @@ package service
 
 import (
 	context "context"
+	json "encoding/json"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	http "net/http"
 	os "os"
@@ -16,6 +17,7 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	adaptertest "github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	reconcile "github.com/kpenfound/osmia/internal/reconcile"
+	router "github.com/kpenfound/osmia/internal/router"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -65,8 +67,27 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 	if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "handed/stdin"); err != nil || string(data) != "# Design\n" {
 		t.Fatalf("handed copy: %q %v", data, err)
 	}
-	if docs, err := trace.Read[trace.Document](r, stream); err != nil || len(docs) != 1 {
-		t.Fatalf("documents %+v %v", docs, err)
+	// The owner's abandonment is a pinned move, so the only other document is
+	// the router's record of it.
+	docs, err := trace.Read[trace.Document](r, stream)
+	must(t, err)
+	var handedCopies, routes []trace.Document
+	for _, d := range docs {
+		switch {
+		case d.Path == "handed/stdin":
+			handedCopies = append(handedCopies, d)
+		case strings.HasPrefix(d.Path, "routes/"):
+			routes = append(routes, d)
+		}
+	}
+	if len(docs) != 2 || len(handedCopies) != 1 || len(routes) != 1 || handedCopies[0].Revision != 1 || handedCopies[0].Content != "# Design\n" {
+		t.Fatalf("documents %+v", docs)
+	}
+	var route router.Record
+	must(t, json.Unmarshal([]byte(routes[0].Content), &route))
+	if route.Rule != "pinned" || route.Authority != "owner" || route.DecidedBy != "owner" || route.Target != AbandonedState || route.Default != AbandonedState ||
+		route.JevRequested || route.Judgment != "" || route.State != router.StateCommitted {
+		t.Fatalf("route record %+v", route)
 	}
 	st, err := f.c.Status(ctx, stream)
 	must(t, err)

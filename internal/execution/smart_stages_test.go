@@ -103,8 +103,15 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 			t.Fatalf("judgment %d: %+v", i, record)
 		}
 	}
-	costs, err := trace.Read[trace.Cost](repo, stream)
+	all, err := trace.Read[trace.Cost](repo, stream)
 	must(t, err)
+	// The router's transition requests are costs of their own.
+	var costs []trace.Cost
+	for _, cost := range all {
+		if cost.Entry.Scope.Thread != "decisions" {
+			costs = append(costs, cost)
+		}
+	}
 	if len(costs) != 3 {
 		t.Fatalf("costs %+v", costs)
 	}

@@ -97,8 +97,7 @@ func TestChiefOfStaffResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 		t.Fatalf("resolve_contested: %s", out)
 	}
 	state := c.state(t)
-	transitions, err := trace.Read[trace.Transition](c.repo, c.stream)
-	must(t, err)
+	transitions := workTransitions(t, c.repo, c.stream)
 	last := transitions[len(transitions)-1]
 	if state.Value != UnitReviewing || last.Actor != chiefActor || !strings.Contains(last.Reason, "chief of staff ruled review") {
 		t.Fatalf("resolved unit %s by %+v", state.Value, last)

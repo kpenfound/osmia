@@ -226,6 +226,31 @@ the caller explicitly selects a shuffle setting.
 running-service fixtures and share the same harness;
 `TestMain` closes Chromium after each package's tests finish.
 
+## Routing journeys
+
+Five journeys run the transition router through the running service rather
+than its parts against fixtures. They use fake masons, checks and pull requests
+and the fixture Jev (`internal/jev/jevfixture`), which answers every
+`decide-transition` request that the default fits unless a test scripts it to
+depart, hold or fail. Select them with `--go-package` and `--go-test`:
+
+| Journey | Test | What it follows |
+| --- | --- | --- |
+| A unit goes quiet and Jev departs | `TestJourneyAStalledUnitIsDepartedFromByJev` (`internal/executionjourney`) | The scheduler's stall watchdog raises `stalled`, the router's worker asks Jev, the departure is committed with `decided_by`, `default_to` and the judgment, the `departed` route span, "decided by Jev" in the feed, the trace API and `osmia trace`, and one Hearsay decision with no author. |
+| A dependent whose upstream ended | `TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn` and `TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoesOn` (`internal/lifecycle`) | The exit from waiting, the waiver (Jev's drop) or the adopted merge, the dependent's first unit starting and its mason's turn queued where the mason pass skipped it while it waited, unblocked through repeated reconciliation and a restart, and the Hearsay waiver decision. |
+| A chief proposal departs from a soft policy | `TestJourneyAChiefProposalDepartingFromASoftPolicyIsRoutedAndCommitted` (`internal/executionjourney`) | The proposal's default, the departure committed through the shared effects, the route span, the feed, the trace and Hearsay, and the tool results that never ask the owner for a phrase. |
+| A hold becomes a stall, then a recovery card | `TestJourneyAnUnresolvedHoldBecomesAStallAndARecoveryCardTheOwnerApproves` and `TestJourneyAStallJevKeepsHoldingEndsOnARecoveryCardTheOwnerApproves` (`internal/executionjourney`) | A held stall, the stall that follows, the one card, its approval with the answer the card carries as a pinned owner decision, and the card closing. |
+| A Jev outage | `TestJourneyAScriptedJevOutageCommitsDefaultsInDegradedMode` and `TestJourneyAJevThatNeverAnswersIsWaitedOnOnlyUntilItsTimeout` (`internal/executionjourney`) | A unit built, checked, reviewed and contested on defaults alone, `fallback` in the transitions, the route records and the spans, the status showing Jev degraded, and no request waiting longer than Jev's timeout. |
+
+Each journey also checks that every request Jev got was the narrow questions of
+a routed exit, so the step journals (project registration and creation, the
+workgroup-change journal, publication operations, outbox delivery and turn
+admission) asked Jev nothing. The service exposes two hooks for them in
+`internal/service/testing_routing.go`: one lets the next scheduler pass read the
+records for stalls without waiting on the wall clock, and one runs a Hearsay
+publish pass against a fake connectors listener
+(`internal/servicetest/fixturekit/hooks.go`).
+
 ## Keep service tests focused
 
 Service lifecycle tests start real reconcilers and write durable traces to

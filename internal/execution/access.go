@@ -357,7 +357,7 @@ func (r *reviewers) ResumeContested(ctx context.Context, stream config.Workstrea
 	return r.resumeContested(ctx, stream, unit, state, contests...)
 }
 func (r *reviewers) ApplyBounceRuling(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult, ruling ContestedRuling, docs []trace.Document) error {
-	return r.applyBounceRuling(ctx, stream, unit, state, result, ruling, docs)
+	return r.applyBounceRuling(ctx, false, stream, unit, state, result, ruling, docs)
 }
 
 var BounceRevisionTransition = bounceRevisionTransition
@@ -383,7 +383,7 @@ func (f *foreman) Header(id string, stream config.WorkstreamID, unit, cause stri
 	return f.header(id, stream, unit, cause, at)
 }
 func (f *foreman) Request(ctx context.Context, stream config.WorkstreamID, unit string, review trace.Document, result UnitReviewResult) error {
-	return f.request(ctx, stream, unit, review, result)
+	return f.request(ctx, stream, unit, review, result, 1)
 }
 
 var DecodeLand = decodeLand
@@ -398,7 +398,7 @@ func (f *foreman) Outcome(stream config.WorkstreamID, in landInput) (*coreadapte
 var LandingCommit = landingCommit
 
 func (f *foreman) Land(ctx context.Context, operation string, stream config.WorkstreamID, in landInput, g workspace.Provider, requested time.Time) (coreadapter.OperationResult, error) {
-	return f.land(ctx, operation, stream, in, g, requested)
+	return f.land(ctx, operation, stream, in, g, requested, recording{})
 }
 func (f *foreman) RequestedAt(stream config.WorkstreamID, operation string) (time.Time, error) {
 	return f.requestedAt(stream, operation)
@@ -415,7 +415,7 @@ const SubjectLength = subjectLength
 var LandingMessage = landingMessage
 
 func (f *foreman) Record(ctx context.Context, stream config.WorkstreamID, in landInput, operation string, review trace.Document, result UnitReviewResult, commit string) (coreadapter.OperationResult, error) {
-	return f.record(ctx, stream, in, operation, review, result, commit)
+	return f.record(ctx, stream, in, operation, review, result, commit, "")
 }
 
 var NewlyReady = newlyReady
@@ -474,14 +474,14 @@ func (r rebaser) Outcome(stream config.WorkstreamID, in rebaseInput) (*coreadapt
 var RebasedSnapshot = rebasedSnapshot
 
 func (r rebaser) Rebase(ctx context.Context, operation string, stream config.WorkstreamID, in rebaseInput, g workspace.Provider, requested time.Time) (coreadapter.OperationResult, error) {
-	return r.rebase(ctx, operation, stream, in, g, requested)
+	return r.rebase(ctx, operation, stream, in, g, requested, recording{})
 }
 
 var RebaseCarrying = rebaseCarrying
 var RebasedConflicts = rebasedConflicts
 
 func (r rebaser) Record(ctx context.Context, stream config.WorkstreamID, in rebaseInput, operation string, rebase UnitRebase) (coreadapter.OperationResult, error) {
-	return r.record(ctx, stream, in, operation, rebase)
+	return r.record(ctx, stream, in, operation, rebase, "")
 }
 func (r rebaser) Refuse(ctx context.Context, stream config.WorkstreamID, in rebaseInput, reason string) (coreadapter.OperationResult, error) {
 	return r.refuse(ctx, stream, in, reason)

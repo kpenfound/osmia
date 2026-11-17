@@ -47,6 +47,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{asked.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Recommendation: "Keep it in files."}, at)
 	must(t, err)
+	plantReport(t, live, stream, "index", at)
 	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
 	move(trace.UnitSubject("index"), "index-contested-1", UnitContested, reviewerActor)
 	raiseFixtureContest(t, live, stream, "index")

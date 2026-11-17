@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/charter"
@@ -41,6 +42,10 @@ func (b Bundle) Render() string {
 		if len(spec.Graph) > 0 {
 			line("\n### Workstream graph")
 			for _, edge := range spec.Graph {
+				if slices.Contains(spec.Dropped, edge) {
+					line("- %s -> %s (%s): dropped by %s, which no longer waits on it; the upstream has not merged", edge.From, edge.To, edge.Type, edge.To)
+					continue
+				}
 				line("- %s -> %s (%s)", edge.From, edge.To, edge.Type)
 			}
 		}
@@ -56,6 +61,10 @@ func (b Bundle) Render() string {
 		line("source: edge-observation.json (record edge-observation)")
 		line("Build against the upstream branch or commit while waiting. After a merge, update the dependency reference to its merged commit within the ratified slice, then run checks and final review. Publication and readiness require fresh owner delivery approval.")
 		for _, dependency := range b.Dependencies {
+			if dependency.Waived {
+				line("- %s (%s): dropped, not merged; this workstream no longer waits on it and builds without it", dependency.Upstream, dependency.Type)
+				continue
+			}
 			line("- %s (%s): %s; build reference: %s; merged: %t; merged commit: %s", dependency.Upstream, dependency.Type, dependency.Reference, dependency.BuildBranch, dependency.Merged, dependency.Commit)
 		}
 	}

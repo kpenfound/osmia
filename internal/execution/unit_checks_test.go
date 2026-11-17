@@ -91,7 +91,14 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)
-	if slices.ContainsFunc(docs, func(d trace.Document) bool { return strings.HasPrefix(d.Path, "judgments/") }) {
+	// The router's own decide-transition judgments are not the check
+	// selection's: none of those is recorded with Jev unconfigured.
+	if slices.ContainsFunc(docs, func(d trace.Document) bool {
+		var record struct {
+			Task string `json:"task"`
+		}
+		return strings.HasPrefix(d.Path, "judgments/") && (json.Unmarshal([]byte(d.Content), &record) != nil || record.Task != jev.TransitionTask)
+	}) {
 		t.Fatal("a judgment was recorded with Jev unconfigured")
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)

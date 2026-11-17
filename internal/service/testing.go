@@ -372,11 +372,21 @@ func (a TestAccess) TriageTool(r *trace.Repository, scope coreadapter.Scope) cor
 	return controls.triageFinding(r, scope)
 }
 
+// SetRouterJudge binds a fixture judge to the transition router alone, so that
+// the exits of a running fixture are asked of a Jev that finds the default
+// fits while Jev's other decisions are made as the service's own Jev makes them.
+func (a TestAccess) SetRouterJudge(j *jev.Judge) {
+	a.s.mu.Lock()
+	defer a.s.mu.Unlock()
+	a.s.router.Judge = j
+}
+
 // SetJudge binds a fixture judge for test-controlled check selection.
 func (a TestAccess) SetJudge(j *jev.Judge) {
 	a.s.mu.Lock()
 	defer a.s.mu.Unlock()
 	a.s.jev = j
+	a.s.router.Judge = j
 	// Final reviewers retain the dependencies composed for their stages.
 	for _, p := range a.s.projects {
 		if p.pipeline == nil {

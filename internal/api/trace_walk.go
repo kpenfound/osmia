@@ -118,11 +118,18 @@ type TraceTurn struct {
 	UnknownCosts int             `json:"unknown_costs"`
 }
 
-// TraceEvent is one record in a unit's history.
+// TraceEvent is one record in a unit's history. DecidedBy, Judgment and
+// DefaultTo are how the transition router chose a transition, present only on
+// a transition that recorded them; Departed is true when Jev departed from the
+// default to make it, and only then.
 type TraceEvent struct {
-	At      time.Time `json:"at"`
-	Ref     TraceRef  `json:"ref"`
-	Summary string    `json:"summary"`
+	At        time.Time `json:"at"`
+	Ref       TraceRef  `json:"ref"`
+	Summary   string    `json:"summary"`
+	DecidedBy string    `json:"decided_by,omitempty"`
+	Judgment  string    `json:"judgment,omitempty"`
+	DefaultTo string    `json:"default_to,omitempty"`
+	Departed  bool      `json:"departed,omitempty"`
 }
 
 // UnitTrace is the walk of one unit: where it is defined, its task and

@@ -10,7 +10,9 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -44,6 +46,9 @@ type pipeline struct {
 }
 
 func (p *pipeline) schedule(ctx context.Context) error {
+	// Jev is never asked on the scheduling path: the hooks hand their exits to
+	// the router's worker.
+	ctx = router.OnSchedulingPath(ctx)
 	if next := p.next.Swap(nil); next != nil {
 		p.current.Store(next)
 	}
@@ -84,6 +89,29 @@ func (a stagedAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 }
 func (a stagedAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return a.pick(a.pipeline.current.Load()).Apply(ctx, op)
+}
+
+var _ reconcile.Bounded = stagedAdapter{}
+
+// Bound, Failing and GiveUp pass the operation's bounds on from the staged
+// adapter when it has them.
+func (a stagedAdapter) Bound(op coreadapter.Operation) bool {
+	b, ok := a.pick(a.pipeline.current.Load()).(reconcile.Bounded)
+	return ok && b.Bound(op)
+}
+
+func (a stagedAdapter) Failing(ctx context.Context, op coreadapter.Operation, failures int, reason string) error {
+	if b, ok := a.pick(a.pipeline.current.Load()).(reconcile.Bounded); ok {
+		return b.Failing(ctx, op, failures, reason)
+	}
+	return nil
+}
+
+func (a stagedAdapter) GiveUp(ctx context.Context, op coreadapter.Operation, why reconcile.GiveUpReason) (coreadapter.OperationResult, error) {
+	if b, ok := a.pick(a.pipeline.current.Load()).(reconcile.Bounded); ok {
+		return b.GiveUp(ctx, op, why)
+	}
+	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }
 
 // reload reads the top-level configuration and every registered project's

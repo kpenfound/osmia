@@ -5,7 +5,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-
 type fakePulls = fixturekit.FakePulls
 
 const masonWrote = intakefixture.MasonWrote

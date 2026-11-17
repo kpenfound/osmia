@@ -7,6 +7,7 @@ import (
 
 	slices "slices"
 	testing "testing"
+	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -58,13 +59,21 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	defer f.stop(t)
 	// A continuation that starts before the higher-priority workstream is
 	// paused ends once it is, so the lower-priority workstream's mason takes
-	// the slot; one that starts later keeps its turn running.
+	// the slot; one that starts later keeps its turn running. The test sets the
+	// pause only after a continuation is running, so which side of the pause a
+	// continuation falls on does not depend on how fast the scheduler dispatches
+	// it.
 	hiPaused := make(chan struct{})
+	running := make(chan struct{}, 16)
 	continued := func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		select {
 		case <-hiPaused:
 			<-ctx.Done()
 			return nil, ctx.Err()
+		default:
+		}
+		select {
+		case running <- struct{}{}:
 		default:
 		}
 		select {
@@ -117,6 +126,11 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 		t.Fatalf("decisions on resume of %s: %q, want %q", hi, got, want)
 	}
 
+	select {
+	case <-running:
+	case <-time.After(demoTimeout):
+		t.Fatalf("no continuation of a mason of %s started before the pause", hi)
+	}
 	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"}
 	mutation(t, f.c, "PUT", "pause", PauseRequest(pause))
 	close(hiPaused)

@@ -15,8 +15,10 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	config "github.com/kpenfound/osmia/internal/config"
+	intake "github.com/kpenfound/osmia/internal/intake"
 	kb "github.com/kpenfound/osmia/internal/kb"
 	plan "github.com/kpenfound/osmia/internal/plan"
+	router "github.com/kpenfound/osmia/internal/router"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -321,6 +323,11 @@ func TestSealingResumesFromTheBranchTheCloneHolds(t *testing.T) {
 	reason := fmt.Sprintf("sealing 1 of spec.md revision 1 and plan.json revision 1 failed: the clone has a branch %s at %s that is not on upstream/main; it is not the service's feature branch", branch, local)
 	if got := f.transition(t, stream, "seal-1-failed"); got.Reason != reason || got.From != "sealing-1" || got.Cause != "seal-1" {
 		t.Fatalf("the failure %+v", got)
+	} else if got.To != "failed-1" || got.DefaultTo != "failed-1" || got.DecidedBy != trace.DecidedByCode || got.Departed() {
+		t.Fatalf("the failure does not record the default it took: %+v", got)
+	}
+	if rec, ok := f.routeOf(t, stream, intake.TriggerSealFailed); !ok || rec.Outcome != router.OutcomeFollowed || rec.Default != intake.TargetFailed || rec.State != router.StateCommitted {
+		t.Fatalf("route %+v (found %v)", rec, ok)
 	}
 	if body := f.notice(t, stream, "seal-1-failed"); body != fmt.Sprintf("The sealing of spec.md revision 1 and plan.json revision 1 failed and the workstream is not ratified: the clone has a branch %s at %s that is not on upstream/main; it is not the service's feature branch. Once that is put right, ratifying the same revisions again asks for the sealing again.", branch, local) {
 		t.Fatalf("the notice %q", body)

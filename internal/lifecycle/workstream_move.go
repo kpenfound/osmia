@@ -12,6 +12,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -30,9 +32,10 @@ var WorkstreamMoveTargets = []string{
 
 	SketchedState, InShedState, RatifiedState, BuildingState, AssembledState, DeliveredState, AbandonedState}
 
-// ChiefMoveTargets are the feature states the chief of staff moves a
-// workstream to on its own judgment. Every other target stands for an owner
-// decision, which it only relays.
+// ChiefMoveTargets are the feature states a proposal of the chief of staff
+// moves a workstream to by default. A proposal of any other move, a redraft,
+// another round of debate or a return to delivered, leaves the workstream where
+// it is by default, and Jev may depart from that at the strict bar.
 var ChiefMoveTargets = []string{BuildingState, AssembledState}
 
 func WorkstreamMovePath(n int) string {
@@ -104,7 +107,11 @@ func ReopenHeld(repo *trace.Repository, stream config.WorkstreamID) (bool, error
 }
 
 // MoveWorkstream moves a workstream to another feature state, as actor: the
-// owner, or the chief of staff on the owner's behalf in turn.
+// owner, or the chief of staff in turn. The owner's move is a pinned move. The
+// chief of staff's is a proposal the router decides: it commits the move, leaves
+// the workstream where it is, holds it, or, for ratification and abandonment,
+// which the proposal cannot carry the authority for, leaves a pending owner
+// decision.
 //
 // A move to sketched asks the architect for a redraft with the note, to
 // in-shed for one more round of debate, to ratified ratifies the latest
@@ -134,6 +141,14 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
+	}
+	if actor.Kind != ownerActor.Kind {
+		switch req.To {
+		case RatifiedState, AbandonedState:
+			return WorkstreamMoveResponse{}, s.proposeGate(ctx, repo, stream, req.To, note, actor, turn)
+		case SketchedState, InShedState:
+			return s.proposeShed(ctx, repo, stream, req.To, note, actor, turn)
+		}
 	}
 	respond := func(detail string) (WorkstreamMoveResponse, *APIError) {
 		after, err := repo.Workflow(stream, trace.FeatureSubject)
@@ -175,104 +190,118 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 		}
 		return respond("the owner abandoned the workstream: " + note)
 	}
-	if action, err := PublicationInFlight(repo, stream); err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's operations"}
-	} else if action != "" {
-		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "the workstream's publication is in flight; it moves once the publication has an outcome"}
+	records, api := s.workstreamMoveRecords(ctx, repo, stream, feature, req.To, note, actor, turn, s.Now())
+	if api != nil {
+		return WorkstreamMoveResponse{}, api
 	}
-	by := "the " + rulerName(actor)
-	var reason string
-	switch req.To {
-	case BuildingState:
-		switch feature.Value {
-		case AssembledState:
-			reason = fmt.Sprintf("%s moved the workstream from assembled to building on %s", by, featureBranch(stream))
-		case DeliveredState:
-			pr, api := OpenPullRequest(repo, stream)
-			if api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s reopened the delivered workstream on %s, where pull request #%d stays open; it is updated only after a fresh final review and the owner's delivery approval", by, featureBranch(stream), pr.PullRequest)
-		case BuildingState:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is already building", stream)}
-		default:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to building once it is assembled or delivered with an open pull request", featureState(feature.Value))}
-		}
-		reason += "; it stays building until a revision filed after this move is decided and its units land, or until it is moved to assembled, and its final review then runs again"
-	case AssembledState:
-		switch feature.Value {
-		case AssembledState:
-			reason = fmt.Sprintf("%s asked for a fresh final review of the assembled branch", by)
-		case DeliveredState:
-			pr, api := OpenPullRequest(repo, stream)
-			if api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s returned the delivered workstream to assembled for a fresh final review; pull request #%d stays open and is updated only after the owner's delivery approval", by, pr.PullRequest)
-		case BuildingState:
-			if api := s.Assemblable(repo, stream); api != nil {
-				return WorkstreamMoveResponse{}, api
-			}
-			reason = fmt.Sprintf("%s moved the workstream from building to assembled for a fresh final review", by)
-		default:
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; it moves to assembled once it is building, assembled or delivered with an open pull request", featureState(feature.Value))}
-		}
-	case DeliveredState:
-		if feature.Value != BuildingState && feature.Value != AssembledState {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the workstream is %s; only a reopened workstream moves back to delivered", featureState(feature.Value))}
-		}
-		pr, api := OpenPullRequest(repo, stream)
-		if api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		if api := s.Assemblable(repo, stream); api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		tip, api := s.FeatureTip(ctx, repo, stream)
-		if api != nil {
-			return WorkstreamMoveResponse{}, api
-		}
-		if tip != pr.Reviewed && tip != pr.Commit {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("feature branch %s moved to %s since pull request #%d was published; it is delivered through a fresh final review and the owner's delivery approval", featureBranch(stream), tip, pr.PullRequest)}
-		}
-		reason = fmt.Sprintf("%s returned the reopened workstream to delivered; feature branch %s is still what pull request #%d carries", by, featureBranch(stream), pr.PullRequest)
+	policy, err := s.workstreamMovePolicy(repo, stream, feature, req.To, actor)
+	if err != nil {
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's final reviews"}
 	}
-	reason += ": " + note
+	res, err := s.routeWorkstreamMove(ctx, repo, stream, feature, req.To, note, actor, turn, policy)
+	switch {
+	case err != nil:
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed && res.Target == NoMoveTarget:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s stays %s and was not moved to %s: %s, and Jev judged that the evidence does not support the move. The proposal, the earlier moves and Jev's judgment are in the trace", stream, feature.Value, req.To, policy.Why)}
+	case res.Committed:
+		move := records.move
+		if res.Target != req.To {
+			// Jev departed from the chief of staff's proposal: the move
+			// recorded is the one it entered.
+			if entered, ok, err := latestWorkstreamMove(repo, stream); err == nil && ok {
+				move = entered
+			}
+		}
+		return WorkstreamMoveResponse{Workstream: stream, State: res.State, Detail: records.reason, Move: &move}, nil
+	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
+	case res.Pending():
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: pendingOwnerMove(stream, req.To, res, recoveryCard)}
+	}
+	return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not moved to %s: the move is held (%s). %s Nothing moved, and the workstream stays %s", stream, req.To, res.Hold, res.Reason, feature.Value)}
+}
+
+// recoveryCard names where the owner decides a move that belongs to the owner
+// and has no card of its own.
+const recoveryCard = router.RecoveryCard
+
+// pendingOwnerMove says what became of a proposal that belongs to the owner: it
+// is a pending owner decision, and where the owner decides it.
+func pendingOwnerMove(stream config.WorkstreamID, to string, res router.Result, card string) string {
+	why := "the owner decides it"
+	switch {
+	case res.Hold == router.HoldIntent:
+		why = "Jev judged that it would change what the owner approved"
+	case to == RatifiedState:
+		why = "ratification is the owner's decision"
+	case to == AbandonedState:
+		why = "abandonment is the owner's decision"
+	}
+	return fmt.Sprintf("workstream %s was not moved to %s: %s. The move is pending as an owner decision on %s; nothing moved", stream, to, why, card)
+}
+
+// proposeGate routes the chief of staff's proposal to ratify or abandon the
+// workstream. A proposal carries no authority for an owner gate, so the router
+// commits nothing and leaves the move as a pending owner decision, on the
+// ratification card for a ratification and the recovery card otherwise. The
+// answer is the account of that, for the chief of staff to pass on.
+func (s *Controller) proposeGate(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor, turn string) *APIError {
+	res, err := s.proposeToOwner(ctx, repo, stream, to, note, actor, turn)
+	switch {
+	case err != nil:
+		return &APIError{Code: Internal, Message: "cannot record the proposal"}
+	case res.Hold == router.HoldStale:
+		return &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
+	}
+	card := recoveryCard
+	if to == RatifiedState {
+		card = "the ratification card"
+	}
+	return &APIError{Code: Conflict, Message: pendingOwnerMove(stream, to, res, card)}
+}
+
+// proposeShed routes the chief of staff's proposal to ask the architect for a
+// redraft (to sketched) or to run another round of debate (to in-shed) after
+// debate concluded. Leaving the decision to the owner is the default, and Jev
+// may depart from it at the strict bar.
+func (s *Controller) proposeShed(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor, turn string) (WorkstreamMoveResponse, *APIError) {
+	if s.Router == nil {
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "routing a workstream's moves is unavailable"}
+	}
+	x, api := s.Intake().ShedProposalExit(string(stream), intake.ShedProposal{Redraft: to == SketchedState, Note: note, Turn: turn, Actor: actor, At: s.Now()})
+	if api != nil {
+		return WorkstreamMoveResponse{}, api
+	}
 	moves, err := WorkstreamMoves(repo, stream)
 	if err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
 	}
-	subject, err := repo.Workflow(stream, WorkstreamMoveSubject)
-	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
+	for _, m := range moves {
+		x.Evidence.Records = append(x.Evidence.Records, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: fmt.Sprintf("%s moved the workstream from %s to %s: %s", m.By, m.From, m.To, m.Note)})
 	}
-	n := len(moves) + 1
-	move := WorkstreamMove{Move: n, From: feature.Value, To: req.To, Note: note, By: rulerName(actor), Turn: turn}
-	data, err := json.MarshalIndent(move, "", "  ")
-	if err != nil {
-		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	cause := turn
-	if cause == "" {
-		cause = trace.FeatureSubject + "-" + feature.Value
-	}
-	id := WorkstreamMoveDocument(n)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: actor, Cause: cause}
-	doc := trace.Document{Header: h, Path: WorkstreamMovePath(n), Content: string(data) + "\n"}
-	h.Schema, h.ID, h.Cause = "osmia.trace.transition", id+"-recorded", id
-	txs := []trace.Transaction{{ExpectedVersion: subject.Version, Transition: trace.Transition{Header: h, Subject: WorkstreamMoveSubject, From: subject.Value, To: fmt.Sprintf("moved-%d", n), Reason: reason}, Events: []trace.Event{trace.Notice(h.ID, "workstream", fmt.Sprintf("Workstream %s: %s.", stream, strings.TrimSuffix(reason, ".")))}}}
-	if feature.Value != req.To {
-		fh := h
-		fh.ID = id + "-" + req.To
-		txs = append(txs, trace.Transaction{ExpectedVersion: feature.Version, Transition: trace.Transition{Header: fh, Subject: trace.FeatureSubject, From: feature.Value, To: req.To, Reason: reason}})
-	}
-	if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
-		}
+	res, err := s.Router.Route(ctx, x)
+	switch {
+	case err != nil:
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
+	case res.Committed && res.Target == intake.TargetWait:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s stays where it is and was not moved to %s: the chief of staff does not ask for a redraft or another round of debate by default, and Jev judged that the evidence does not support it. The proposal and Jev's judgment are in the trace", stream, to)}
+	case res.Committed:
+		feature, err := repo.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
+		}
+		detail := "the architect redrafts the spec and the plan with your note"
+		if to == InShedState {
+			detail = "the committee runs one more round of debate"
+		}
+		return WorkstreamMoveResponse{Workstream: stream, State: feature.Value, Detail: detail}, nil
+	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}
+	case res.Pending():
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: pendingOwnerMove(stream, to, res, recoveryCard)}
 	}
-	return WorkstreamMoveResponse{Workstream: stream, State: req.To, Detail: reason, Move: &move}, nil
+	return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not moved to %s: the move is held (%s). %s Nothing moved", stream, to, res.Hold, res.Reason)}
 }
 
 // PublicationInFlight returns the action of a publication of the workstream
@@ -371,14 +400,20 @@ func (s *Controller) OwnerMoveWorkstream(ctx context.Context, raw string, req Wo
 }
 
 // MoveWorkstream returns the move_workstream tool of one claimed
-// chief-of-staff turn. The chief of staff moves its workstream to building or
-// assembled on its own judgment. Every other target stands for an owner
-// decision: in a turn answering the owner, it records the owner's own move. A
-// Move the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing. A shared chief of
-// staff names the member that moves.
+// chief-of-staff turn. The chief of staff proposes a move of its workstream and
+// the transition router decides it: the result says whether the workstream
+// moved, stays where it is, is held, or has a pending owner decision on a card.
+// In a turn answering the owner, it records the owner's own move. A move that is
+// not made is an ordinary result, {"recorded":false,"reason":...}, which says
+// what became of it. A shared chief of staff names the member that moves.
 func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Move this workstream to another feature state when the state machine leaves it stuck or wrong. to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land, so file the revision that repairs it next), " + "assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " + "or, only to record an owner decision, sketched (the architect redrafts with the note), in-shed (one more round of debate), ratified (ratify the latest packet), delivered (return a reopened workstream whose branch is unchanged since its pull request was published) or abandoned. " + "A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["to","note"],"additionalProperties":false}`)}
+	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Propose moving this workstream to another feature state when the state machine leaves it stuck or wrong. The service routes the proposal and the result says what happened: the workstream moved, it stays where it is, the move is held with Jev's view sent to you, or the move belongs to the owner and is pending on a card. " +
+		"to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land, so file the revision that repairs it next), " +
+		"assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " +
+		"sketched (the architect redrafts the spec and the plan with the note, once debate concluded), in-shed (one more round of debate, once debate concluded), delivered (return a reopened workstream whose branch is unchanged since its pull request was published), " +
+		"or ratified and abandoned, which are the owner's decisions: the proposal waits as a pending owner decision on a card. " +
+		"Reopening after final reviews found blocking problems the maximum number of times, a redraft, another round and a return to delivered leave the workstream where it is by default; put the evidence in the note and Jev decides whether it supports the move. " +
+		"A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. Report to the owner what the result says happened. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["to","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			To           string              `json:"to"`
@@ -423,18 +458,6 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 				return priorityRefusal("owner_decided is only for a move the owner asked for in the message this turn answers")
 			}
 			return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, turn.Actor, scope.Turn))
-		}
-		if !slices.Contains(ChiefMoveTargets, input.To) {
-			return priorityRefusal(fmt.Sprintf("a move to %s is the owner's decision; present it to the owner, and record it with owner_decided once the owner asks for it", input.To))
-		}
-		if input.To == BuildingState {
-			rounds, err := finalRoundsWithBlocking(target, stream)
-			if err != nil {
-				return nil, err
-			}
-			if rounds >= maxFinalRounds {
-				return priorityRefusal(fmt.Sprintf("final reviews have found blocking problems %d times; reopening the workstream for further revisions is the owner's decision", rounds))
-			}
 		}
 		return WorkstreamMoveResult(s.MoveWorkstream(ctx, target, stream, request, chiefActor, scope.Turn))
 	}

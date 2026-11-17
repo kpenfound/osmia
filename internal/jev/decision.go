@@ -212,6 +212,11 @@ func (j *Judge) threshold() float64 {
 	return config.DefaultJevDecisionThreshold
 }
 
+// DecisionThreshold is the configured [jev] decision_threshold, or its default
+// while the setting is out of range: the probability a decision needs to be
+// binding.
+func (j *Judge) DecisionThreshold() float64 { return j.threshold() }
+
 // acceptance is the acceptance value a decision judgment records: the
 // threshold in force.
 func acceptance(threshold float64) string {

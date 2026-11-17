@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -124,9 +125,10 @@ func (f *ArchitectScenario) Documents(t *testing.T, stream config.WorkstreamID, 
 
 func (f *ArchitectScenario) Transitions(t *testing.T, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
-	Transitions, err := trace.Read[trace.Transition](f.Repository(), stream)
+	all, err := trace.Read[trace.Transition](f.Repository(), stream)
 	fixturekit.Must(t, err)
-	return Transitions
+	// The router's journal is its own bookkeeping, not a transition of the work.
+	return slices.DeleteFunc(all, func(tr trace.Transition) bool { return router.IsJournal(tr.Subject) })
 }
 
 func (f *ArchitectScenario) DraftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {

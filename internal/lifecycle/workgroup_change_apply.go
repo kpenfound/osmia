@@ -168,7 +168,11 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 		if c.Request.Kind == "cancel" {
-			if err := s.CancelChangeMember(ctx, repo, row.Workstream, *c); err != nil {
+			if err := s.CancelChangeMember(ctx, repo, row.Workstream, *c); errors.Is(err, errAbandonmentRouting) {
+				// The router's worker decides the abandonment beside this pass;
+				// the member is applied once it has.
+				return nil
+			} else if err != nil {
 				return err
 			}
 		} else {
@@ -341,9 +345,7 @@ func (s *Controller) CancelChangeMember(ctx context.Context, repo *trace.Reposit
 		return err
 	}
 	if st.Value != AbandonedState {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "cancel-" + c.ID, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: ownerActor, Cause: WorkgroupChangeDocument(c.ID)}
-		_, err = repo.SetFeatureStateUnless(ctx, h, AbandonedState, c.Request.Change, AbandonedState)
-		if err != nil {
+		if err := s.abandonForChange(ctx, repo, stream, c); err != nil {
 			return err
 		}
 	}
@@ -421,6 +423,7 @@ func (s *Controller) SettleChangeRequester(ctx context.Context, c WorkgroupChang
 	}
 	return a.ResumeUnit(ctx, pa.Origin, req, cause, verb, "owner", transitions)
 }
+
 func (s *Controller) ReworkChangeMember(ctx context.Context, repo *trace.Repository, row amendment.StreamImpact, c *WorkgroupChange) error {
 	stream := row.Workstream
 	cause := WorkgroupChangeDocument(c.ID)

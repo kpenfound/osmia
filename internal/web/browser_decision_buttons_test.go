@@ -51,7 +51,9 @@ func newDecisionButtonFixture(t *testing.T, entry string, delivery ...string) *d
 			f.mu.Lock()
 			f.requests = append(f.requests, decisionRequest{Path: r.URL.Path, Method: r.Method, Body: body})
 			f.mu.Unlock()
-			ok := `{"detail":"Decision recorded.","upstream":{"remote":"upstream","branch":"main"}}`
+			// The reply carries the fields of every answer the card kinds take,
+			// among them an approved recovery move's.
+			ok := `{"detail":"Decision recorded.","upstream":{"remote":"upstream","branch":"main"},"workstream":"w_000","occurrence":"unit-index@4/unit.stalled/stalled-1","subject":"unit-index","unit":"index","from":"checking","target":"checking"}`
 			if strings.HasPrefix(r.URL.Path, "/v1/delivery/") {
 				// An approved delivery answers with the final review it published.
 				ok = fmt.Sprintf(`{"review":%d,"commit":%q}`, testPins.review, testPins.commit)

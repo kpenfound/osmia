@@ -68,12 +68,15 @@ type Bundle struct {
 }
 
 type DependencyReference struct {
-	Upstream    config.WorkstreamID `json:"upstream"`
-	Type        string              `json:"type"`
-	Merged      bool                `json:"merged"`
-	Reference   string              `json:"reference,omitempty"`
-	Commit      string              `json:"commit,omitempty"`
-	BuildBranch string              `json:"build_branch,omitempty"`
+	Upstream config.WorkstreamID `json:"upstream"`
+	Type     string              `json:"type"`
+	Merged   bool                `json:"merged"`
+	// Waived says this workstream dropped the dependency with a waiver in its
+	// own trace: it no longer waits on it, and the upstream has not merged.
+	Waived      bool   `json:"waived,omitempty"`
+	Reference   string `json:"reference,omitempty"`
+	Commit      string `json:"commit,omitempty"`
+	BuildBranch string `json:"build_branch,omitempty"`
 }
 
 // ProjectSpecView is the project spec of the scope's workstream's
@@ -87,7 +90,37 @@ type ProjectSpecView struct {
 	Behavior  string             `json:"behavior"`
 	Contracts []trace.Contract   `json:"contracts,omitempty"`
 	Graph     []trace.Edge       `json:"graph,omitempty"`
-	Slice     *trace.Slice       `json:"slice,omitempty"`
+	// Dropped is the part of Graph that the scope's workstream dropped with a
+	// waiver in its own trace. The spec still names those edges.
+	Dropped []trace.Edge `json:"dropped,omitempty"`
+	Slice   *trace.Slice `json:"slice,omitempty"`
+}
+
+// edgeWaiverDocument is the document of the dependencies a workstream
+// dropped, as the lifecycle records it in the dependent's own trace.
+const edgeWaiverDocument = "edge-waivers"
+
+type droppedDependency struct {
+	Upstream config.WorkstreamID `json:"upstream"`
+	Type     string              `json:"type"`
+}
+
+// droppedDependencies returns the dependencies stream dropped, from the latest
+// revision of its waiver document.
+func droppedDependencies(documents []trace.Document) ([]droppedDependency, error) {
+	for _, document := range slices.Backward(documents) {
+		if document.ID != edgeWaiverDocument {
+			continue
+		}
+		var waivers struct {
+			Waivers []droppedDependency `json:"waivers"`
+		}
+		if err := json.Unmarshal([]byte(document.Content), &waivers); err != nil {
+			return nil, fmt.Errorf("dependency waivers: %w", err)
+		}
+		return waivers.Waivers, nil
+	}
+	return nil, nil
 }
 
 type ProjectNotice struct {
@@ -241,6 +274,17 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		if err != nil {
 			return Bundle{}, err
 		}
+		dropped, err := droppedDependencies(documents)
+		if err != nil {
+			return Bundle{}, err
+		}
+		if b.ProjectSpec != nil {
+			for _, e := range b.ProjectSpec.Graph {
+				if e.To == scope.Workstream && slices.ContainsFunc(dropped, func(d droppedDependency) bool { return d.Upstream == e.From && d.Type == e.Type }) {
+					b.ProjectSpec.Dropped = append(b.ProjectSpec.Dropped, e)
+				}
+			}
+		}
 		for _, document := range slices.Backward(documents) {
 			if document.ID != "edge-observation" {
 				continue
@@ -252,6 +296,9 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 				return Bundle{}, fmt.Errorf("dependency references: %w", err)
 			}
 			b.Dependencies = observation.Edges
+			for i, d := range b.Dependencies {
+				b.Dependencies[i].Waived = slices.ContainsFunc(dropped, func(w droppedDependency) bool { return w.Upstream == d.Upstream && w.Type == d.Type })
+			}
 			break
 		}
 	}

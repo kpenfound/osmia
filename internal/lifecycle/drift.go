@@ -203,7 +203,7 @@ func (f *Foreman) RequestDrift(ctx context.Context, stream config.WorkstreamID, 
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(f.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: DriftAction, Input: input}
 	reason := fmt.Sprintf("%s: drift rebase %d fetches %s of %s and rebases %s onto it; the seal's upstream base moves once the branch has", why, k, f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, featureBranch(stream))
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: f.header(transition, stream, "", fmt.Sprintf("%s-%d", seal.DocumentID, doc.Revision), f.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason}, Events: []trace.Event{{ID: event, Kind: DriftAction, Body: fmt.Sprintf("Rebase %s onto upstream", featureBranch(stream)), Operation: &op}}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: f.header(transition, stream, "", fmt.Sprintf("%s-%d", seal.DocumentID, doc.Revision), f.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason}), Events: []trace.Event{{ID: event, Kind: DriftAction, Body: fmt.Sprintf("Rebase %s onto upstream", featureBranch(stream)), Operation: &op}}}
 	if _, err := f.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -248,7 +248,7 @@ func (d Drifter) Stream(op coreadapter.Operation, in DriftInput) (config.Workstr
 }
 
 // Outcome returns the recorded result of drift rebase k: succeeded once it
-// is recorded rebased, skipped or held, nil before.
+// is recorded rebased, skipped, held or asked for again, nil before.
 func (d Drifter) Outcome(stream config.WorkstreamID, k int) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
@@ -257,7 +257,7 @@ func (d Drifter) Outcome(stream config.WorkstreamID, k int) (*coreadapter.Operat
 	transition, _ := DriftIDs(k)
 	for _, t := range transitions {
 		switch t.ID {
-		case transition + "-" + DriftRebased, transition + "-" + DriftSkipped, transition + "-" + DriftHeld:
+		case transition + "-" + DriftRebased, transition + "-" + DriftSkipped, transition + "-" + DriftHeld, transition + "-" + DriftRetried:
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		}
 	}
@@ -416,7 +416,7 @@ func (d Drifter) Drift(ctx context.Context, operation string, stream config.Work
 		}
 		var held DriftHeldError
 		if rebase, err = d.Resolve(ctx, stream, rebase); errors.As(err, &held) {
-			return d.Hold(ctx, stream, rebase, operation, held.Why)
+			return d.Hold(ctx, stream, rebase, operation, held)
 		} else if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -460,7 +460,7 @@ func (d Drifter) Drift(ctx context.Context, operation string, stream config.Work
 			}
 			var held DriftHeldError
 			if rebase, err = d.Resolve(ctx, stream, rebase); errors.As(err, &held) {
-				return d.Hold(ctx, stream, rebase, operation, held.Why)
+				return d.Hold(ctx, stream, rebase, operation, held)
 			} else if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
@@ -709,7 +709,7 @@ func (d Drifter) Record(ctx context.Context, stream config.WorkstreamID, rebase 
 		return coreadapter.OperationResult{}, err
 	}
 	transition, _ := DriftIDs(rebase.Drift)
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: d.header(transition+"-"+outcome, stream, "", rebase.Operation, d.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", outcome, rebase.Drift), Reason: reason}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: d.header(transition+"-"+outcome, stream, "", rebase.Operation, d.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", outcome, rebase.Drift), Reason: reason})}
 	if visible != "" {
 		tx.Events = []trace.Event{trace.UpstreamMoved(tx.Transition.ID, stream, rebase.Move(), visible)}
 	}
@@ -727,13 +727,16 @@ func (d Drifter) Record(ctx context.Context, stream config.WorkstreamID, rebase 
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// Hold records that the conflict resolution of the drift rebase that
-// rebase records stops, for the reason why: its resolution workspace is
-// removed, the feature branch and the seal stay, and the drift subject
-// moves to held-<k> with a notice. A held drift rebase is over, and the
-// workstream takes no other until the owner asks for one or the chief of
-// staff hands it back.
-func (d Drifter) Hold(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase, operation, why string) (coreadapter.OperationResult, error) {
+// Hold finishes the conflict resolution of the drift rebase that rebase
+// records, which stops for the reason held names: its resolution workspace is
+// removed, and the router decides the drift subject's next state. By default
+// it moves to held-<k> with a notice, the feature branch and the seal stay,
+// and the workstream takes no other drift rebase until the owner asks for
+// one or the chief of staff hands this one back. Jev may instead ask for the
+// drift rebase again from the start. Either ends this operation. A hold the
+// router keeps without moving leaves the operation pending for another
+// attempt.
+func (d Drifter) Hold(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase, operation string, held DriftHeldError) (coreadapter.OperationResult, error) {
 	if err := d.Release(ctx, stream); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -741,15 +744,11 @@ func (d Drifter) Hold(ctx context.Context, stream config.WorkstreamID, rebase Dr
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	transition, _ := DriftIDs(rebase.Drift)
-	id := transition + "-" + DriftHeld
-	reason := fmt.Sprintf("drift rebase %d is held for the owner: %s; feature branch %s stays at %s, the seal is unchanged, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back", rebase.Drift, why, rebase.Branch, rebase.Before)
-	if rebase.Verdict != nil && rebase.Verdict.Summary != "" {
-		reason += "; the last review found: " + rebase.Verdict.Summary
+	if recorded, outcomeErr := d.Outcome(stream, rebase.Drift); outcomeErr == nil && recorded != nil {
+		return *recorded, nil
 	}
-	visible := fmt.Sprintf("Drift rebase %d onto upstream %s is held for the owner: %s. The feature branch and the seal stay, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back with a note for its drift mason and reviewer.", rebase.Drift, rebase.Upstream.Commit, why)
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: d.header(id, stream, "", operation, d.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", DriftHeld, rebase.Drift), Reason: reason}, Events: []trace.Event{trace.Notice(id, "drift", visible)}}
-	if _, err := d.repository.Transact(ctx, tx); err != nil {
+	res, err := d.s.routeExit(ctx, d.heldExit(stream, state, rebase, operation, held))
+	if err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if recorded, outcomeErr := d.Outcome(stream, rebase.Drift); outcomeErr == nil && recorded != nil {
 				return *recorded, nil
@@ -757,7 +756,17 @@ func (d Drifter) Hold(ctx context.Context, stream config.WorkstreamID, rebase Dr
 		}
 		return coreadapter.OperationResult{}, err
 	}
-	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+	if !res.Committed {
+		if recorded, outcomeErr := d.Outcome(stream, rebase.Drift); outcomeErr == nil && recorded != nil {
+			return *recorded, nil
+		}
+		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d is held by the router (%s), not moved: %s", rebase.Drift, res.Hold, held.Why)
+	}
+	recorded, err := d.Outcome(stream, rebase.Drift)
+	if err != nil || recorded == nil {
+		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d: the router's move is not recorded as its outcome: %v", rebase.Drift, err)
+	}
+	return *recorded, nil
 }
 
 // DriftRebaseNotes describes every drift rebase of the workstream whose
@@ -805,7 +814,7 @@ func (d Drifter) Skip(ctx context.Context, stream config.WorkstreamID, k int, op
 	}
 	transition, _ := DriftIDs(k)
 	reason := fmt.Sprintf("drift rebase %d changed nothing: %s", k, why)
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: d.header(transition+"-"+DriftSkipped, stream, "", operation, d.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", DriftSkipped, k), Reason: reason}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: d.header(transition+"-"+DriftSkipped, stream, "", operation, d.s.Now()), Subject: DriftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", DriftSkipped, k), Reason: reason})}
 	if _, err := d.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if recorded, outcomeErr := d.Outcome(stream, k); outcomeErr == nil && recorded != nil {

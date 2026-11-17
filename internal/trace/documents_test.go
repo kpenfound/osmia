@@ -447,6 +447,10 @@ func TestEdgeObservationDocumentPathIsAccepted(t *testing.T) {
 	acceptedPath(t, "workstream-edge-observation", "edge-observation.json", "{\"edges\":[]}\n", "edge-observation-extra.json")
 }
 
+func TestEdgeWaiverDocumentPathIsAccepted(t *testing.T) {
+	acceptedPath(t, "workstream-edge-waivers", "edge-waivers.json", "{\"waivers\":[]}\n", "edge-waivers-extra.json")
+}
+
 // A session's check run and its captured output are recorded under
 // session-checks/, mirroring a workstream's own final check runs under
 // final/; an unlisted name in the same directory is refused.

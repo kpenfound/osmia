@@ -88,12 +88,7 @@ func (g loopGuard) Pass(ctx context.Context) error {
 				return err
 			}
 		}
-		sessions := 0
-		for _, c := range costs {
-			if c.Workstream == stream && c.Entry.At.After(since) {
-				sessions++
-			}
-		}
+		sessions := sessionsSince(costs, stream, since)
 		if sessions < limit {
 			continue
 		}
@@ -102,6 +97,19 @@ func (g loopGuard) Pass(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// sessionsSince counts the agent sessions of the workstream recorded after
+// since. Every request to Jev costs one, whoever asked it, so a routed move
+// counts toward the loop guard like any other session.
+func sessionsSince(costs []trace.Cost, stream config.WorkstreamID, since time.Time) int {
+	sessions := 0
+	for _, c := range costs {
+		if c.Workstream == stream && c.Entry.At.After(since) {
+			sessions++
+		}
+	}
+	return sessions
 }
 
 // pause records the loop guard's next pause of the workstream, with a notice

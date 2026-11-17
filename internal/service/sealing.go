@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/reconcile"
 )
 
 // repositoryAdapter routes repository-boundary operations: sealings to the
@@ -63,4 +65,45 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return coreadapter.OperationResult{}, errors.New("no repository adapter is configured")
 	}
 	return a.other.Apply(ctx, op)
+}
+
+var _ reconcile.Bounded = repositoryAdapter{}
+
+// boundedBy returns the reconciler that bounds the operation: the foreman for
+// landings and rebases, the publisher for publications.
+func (a repositoryAdapter) boundedBy(op coreadapter.Operation) (reconcile.Bounded, bool) {
+	var b reconcile.Bounded
+	switch op.Action {
+	case LandAction, RebaseAction:
+		b = a.lands
+	case PublishAction, publishUpstreamAction:
+		var ok bool
+		if b, ok = a.publishes.(reconcile.Bounded); !ok {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	return b, b.Bound(op)
+}
+
+// Bound reports whether the operation is a landing, a rebase or a publication,
+// whose attempts are bounded and always reach a result.
+func (a repositoryAdapter) Bound(op coreadapter.Operation) bool {
+	_, ok := a.boundedBy(op)
+	return ok
+}
+
+func (a repositoryAdapter) Failing(ctx context.Context, op coreadapter.Operation, failures int, reason string) error {
+	if b, ok := a.boundedBy(op); ok {
+		return b.Failing(ctx, op, failures, reason)
+	}
+	return nil
+}
+
+func (a repositoryAdapter) GiveUp(ctx context.Context, op coreadapter.Operation, why reconcile.GiveUpReason) (coreadapter.OperationResult, error) {
+	if b, ok := a.boundedBy(op); ok {
+		return b.GiveUp(ctx, op, why)
+	}
+	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }

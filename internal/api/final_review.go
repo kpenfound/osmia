@@ -17,6 +17,7 @@ type FinalReport struct {
 	Maintenance  bool             `json:"maintenance,omitempty"`
 	BaseCheck    int              `json:"base_check,omitempty"`
 	EdgeResolved string           `json:"edge_resolved,omitempty"`
+	EdgeWaived   string           `json:"edge_waived,omitempty"`
 	Move         int              `json:"move,omitempty"`
 	Review       int              `json:"review"`
 	Operation    string           `json:"operation"`

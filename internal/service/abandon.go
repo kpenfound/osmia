@@ -11,6 +11,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -38,15 +40,33 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 		return AbandonResponse{}, api
 	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: abandonTransition}
-	state, err := repository.SetFeatureStateUnless(ctx, h, AbandonedState, reason, AbandonedState, DeliveredState)
-	switch {
-	case errors.Is(err, trace.ErrFeatureState):
-		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
-	case errors.Is(err, trace.ErrConflict):
-		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
-	case err != nil:
+	state, err := repository.RawWorkflow(stream, trace.FeatureSubject)
+	if err != nil {
 		return AbandonResponse{}, failed
+	}
+	if state.Value == AbandonedState || state.Value == DeliveredState {
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
+	}
+	// Abandonment is an owner gate: the owner's decision is applied as a pinned
+	// move, through the router's commit and hard-prerequisite check.
+	body := fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, AbandonedState, reason)
+	if state.Value == "" {
+		body = fmt.Sprintf("Workstream state changed to %s: %s", AbandonedState, reason)
+	}
+	res, err := s.RouteExit(ctx, intake.PinnedMove{
+		Repo: repository, Stream: stream, Subject: trace.FeatureSubject, State: state,
+		Trigger: intake.TriggerAbandon, Cause: abandonTransition, Target: AbandonedState, Description: "Abandon the workstream.", Gate: true,
+		Ref: abandonTransition, ID: abandonTransition, HeaderCause: abandonTransition, Reason: reason, Actor: ownerActor, At: s.now(),
+		Events: []trace.Event{trace.Progress(abandonTransition, "state", body)},
+	}.Exit())
+	switch {
+	case err != nil:
+		s.log().Warn("cannot record the abandonment of a workstream", "workstream", string(stream), "error", err.Error())
+		return AbandonResponse{}, failed
+	case res.Hold == router.HoldStale:
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
+	case !res.Committed:
+		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not abandoned: the router held it (%s). %s", stream, res.Hold, res.Reason)}
 	}
 	// A flake-fix workstream's group ends its association with it, so the
 	// group's next occurrence opens the next one. The flake pass repeats this

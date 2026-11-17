@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -64,7 +65,7 @@ func failureContestID(response string) string { return trace.EventID(response, "
 // stay in the thread's log. A turn that contested the unit once never does
 // again, so an owner ruling moves the unit on. It reports whether the unit
 // moved.
-func contestFailure(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, at time.Time) (bool, error) {
+func contestFailure(ctx context.Context, s *Controller, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, at time.Time) (bool, error) {
 	if !exhausted(last) {
 		return false, nil
 	}
@@ -74,14 +75,27 @@ func contestFailure(ctx context.Context, repo *trace.Repository, stream config.W
 		return false, err
 	}
 	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile: %s", role, last.Request.TurnID, unit, failureHistory(last))
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: last.Response.ID}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: from, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
-	if _, err := repo.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
-		return false, nil
-	} else if err != nil {
-		return false, err
+	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, "the infrastructure failure repeats", true)
+}
+
+// contestTurn routes the exit of a unit whose latest turn failed or was
+// interrupted again and again. The default is to contest it; the router may
+// instead queue the turn once more, unless retry is false: the turns
+// interrupted in a row reached maxRecoveries, a limit that stays hard, so the
+// retry is not offered. The exit is handed to the router's worker.
+func (s *Controller) contestTurn(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, id, reason, failure string, retry bool) error {
+	targets := []string{UnitContested}
+	if retry && (from == UnitImplementing || from == UnitReviewing) {
+		targets = append(targets, from)
 	}
-	return true, nil
+	_, err := s.raise(ctx, true, UnitExitInput{
+		Repo: repo, Stream: stream, Unit: unit, State: state, Trigger: TriggerTurnFailed, Cause: last.Response.ID,
+		Default: UnitContested, Targets: targets, Actor: actor,
+		ID: id, HeaderCause: last.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", reason)},
+		Note: failure,
+		Evidence: router.Evidence{Facts: map[string]any{"role": role}, Records: []router.Entry{{Kind: "turn", ID: last.Request.TurnID, Text: reason}}},
+	})
+	return err
 }
 
 // maxRecoveries is how many turns of one piece of work may be interrupted in
@@ -112,7 +126,7 @@ func interruptedInARow(th trace.Thread) int {
 // turns were interrupted, moving it from `from` with a notice for the chief
 // of staff, instead of continuing the work once more. It reports whether the
 // unit moved.
-func contestInterrupted(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, th trace.Thread, at time.Time) (bool, error) {
+func contestInterrupted(ctx context.Context, s *Controller, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, th trace.Thread, at time.Time) (bool, error) {
 	n := interruptedInARow(th)
 	if n < maxRecoveries {
 		return false, nil
@@ -120,14 +134,7 @@ func contestInterrupted(ctx context.Context, repo *trace.Repository, stream conf
 	last := th.Turns[len(th.Turns)-1]
 	id := trace.EventID(last.Response.ID, "contested")
 	reason := fmt.Sprintf("the latest %d %s turns of unit %s were interrupted in a row, the latest %s, so the unit is contested instead of its work continuing again", n, role, unit, last.Request.TurnID)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: last.Response.ID}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: from, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
-	if _, err := repo.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
+	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, fmt.Sprintf("%d turns in a row were interrupted", n), false)
 }
 
 // contestFailure contests an implementing unit whose mason's latest turn
@@ -141,10 +148,10 @@ func (m *masons) contestFailure(ctx context.Context, stream config.WorkstreamID,
 	if err != nil {
 		return false, err
 	}
-	if contested, err := contestInterrupted(ctx, m.repository, stream, unit, state, UnitImplementing, masonActor, masonRole, th, m.s.Now()); err != nil || contested {
+	if contested, err := contestInterrupted(ctx, m.s, m.repository, stream, unit, state, UnitImplementing, masonActor, masonRole, th, m.s.Now()); err != nil || contested {
 		return contested, err
 	}
-	return contestFailure(ctx, m.repository, stream, unit, state, UnitImplementing, masonActor, masonRole, th.Turns[len(th.Turns)-1], m.s.Now())
+	return contestFailure(ctx, m.s, m.repository, stream, unit, state, UnitImplementing, masonActor, masonRole, th.Turns[len(th.Turns)-1], m.s.Now())
 }
 
 // failedReview reports whether a contest was raised because a reviewer turn

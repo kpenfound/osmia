@@ -87,7 +87,10 @@ func (j *Jujutsu) Checkpoint(ctx context.Context, operation string, at time.Time
 
 // Settle drops the operation's checkpoint.
 func (j *Jujutsu) Settle(ctx context.Context, operation string) error {
-	_, unlock := lockClone(ctx, j.Clone)
+	_, unlock, err := lockClone(ctx, j.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	if err := os.Remove(j.checkpointPath(operation)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -107,10 +110,18 @@ func (j *Jujutsu) Settle(ctx context.Context, operation string) error {
 // progress whose branch moved from under it is then put on the branch when
 // it holds nothing of its own, or exactly the files of the branch's commit,
 // as after a snapshot. A workspace made after the entry is no longer one of
-// the repository's, as Workspace reports, so Acquire makes it again.
-func (j *Jujutsu) Recover(ctx context.Context) ([]string, error) {
-	ctx, unlock := lockClone(ctx, j.Clone)
+// the repository's, as Workspace reports, so Acquire makes it again. A
+// restoration that fails keeps every checkpoint and marks the clone as
+// needing recovery until a Recover succeeds.
+func (j *Jujutsu) Recover(ctx context.Context) (recovered []string, err error) {
+	ctx, unlock, err := lockClone(ctx, j.Clone)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
+	// A restoration that fails leaves the clone marked as needing recovery,
+	// and one that succeeds clears the mark. A deadline alone clears nothing.
+	defer func() { cloneLockOf(cloneKey(j.Clone)).markRecovery(err != nil) }()
 	entries, err := os.ReadDir(j.checkpoints())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

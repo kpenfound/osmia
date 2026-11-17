@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -48,7 +49,28 @@ type EdgeMergeStatus struct {
 	Reference   string              `json:"reference,omitempty"`
 	Commit      string              `json:"commit,omitempty"`
 	BuildBranch string              `json:"build_branch,omitempty"`
+	// Ended says why an unmerged upstream can no longer merge: EndedAbandoned
+	// or EndedClosed. It is empty while the upstream is alive and never set on
+	// a merged edge.
+	Ended string `json:"ended,omitempty"`
+	// Integrated is the commit of the upstream's base branch that already
+	// holds the upstream's changes, and IntegratedReference names it, when the
+	// upstream's changes reached the base branch without a merge the factory
+	// recorded. It is evidence an unmerged upstream is already in the base
+	// branch; it does not make the edge merged.
+	Integrated          string `json:"integrated,omitempty"`
+	IntegratedReference string `json:"integrated_reference,omitempty"`
 }
+
+// The reasons an upstream can no longer merge, the values of EdgeMergeStatus's
+// Ended.
+const (
+	// EndedAbandoned: the upstream workstream was abandoned or ended without
+	// being delivered.
+	EndedAbandoned = "abandoned"
+	// EndedClosed: the upstream's own pull request was closed without merging.
+	EndedClosed = "closed"
+)
 
 // EdgeObservation is the content of edgeObservationDocument.
 type EdgeObservation struct {
@@ -92,17 +114,24 @@ func terminalInResolvedWorkgroup(repo *trace.Repository, stream config.Workstrea
 	return state.Value == AbandonedState || state.Value == DeliveredState, nil
 }
 
-// IncomingMergeEdges returns stream's incoming hard_block and merge_order
+// IncomingMergeEdges returns the incoming hard_block and merge_order edges
+// that still bind stream: EffectiveIncomingEdges.
+func IncomingMergeEdges(repo *trace.Repository, stream config.WorkstreamID) ([]trace.Edge, error) {
+	return EffectiveIncomingEdges(repo, stream)
+}
+
+// AllIncomingMergeEdges returns stream's incoming hard_block and merge_order
 // edges from the ratified project spec of the workgroup it belongs to, or
 // none while it belongs to no workgroup or that workgroup's graph names
-// none. A contract edge is never returned: it resolves the moment the
-// Project spec that carries it is ratified, which is already true by the
-// time any caller can read it, so it never needs to wait or be observed.
-// A terminal member of a workgroup recorded resolved has none, and its
-// workgroup's approval and project spec are not read. For any other member
-// the edges are read in place from the revision-keyed project spec state,
-// without copying the spec.
-func IncomingMergeEdges(repo *trace.Repository, stream config.WorkstreamID) ([]trace.Edge, error) {
+// none, whether or not a waiver drops them. A contract edge is never returned:
+// it resolves the moment the Project spec that carries it is ratified, which
+// is already true by the time any caller can read it, so it never needs to
+// wait or be observed. A terminal member of a workgroup recorded resolved has
+// none, and its workgroup's approval and project spec are not read. For any
+// other member the edges are read in place from the revision-keyed project
+// spec state, without copying the spec. Readers that decide what blocks the
+// stream use EffectiveIncomingEdges instead.
+func AllIncomingMergeEdges(repo *trace.Repository, stream config.WorkstreamID) ([]trace.Edge, error) {
 	if terminal, err := terminalInResolvedWorkgroup(repo, stream); err != nil || terminal {
 		return nil, err
 	}
@@ -281,8 +310,8 @@ func WorkgroupMergeOrderResolved(repo *trace.Repository, stream config.Workstrea
 
 // WorkgroupEdgePending reports whether a delivered workstream's own current
 // pull request is still recorded a draft from a workgroup merge-order edge
-// that has since merged, so a fresh maintenance review, delivery approval
-// and publication are due to mark it ready. Like the same-repo drift
+// that has since merged or been dropped by a waiver, so a fresh maintenance
+// review, delivery approval and publication are due to mark it ready. Like the same-repo drift
 // Pending flag it mirrors, this stays true until the dependent's own
 // Publication is refreshed, never merely until a fresh final review is
 // recorded: recording that review alone (before the fresh delivery approval
@@ -293,8 +322,16 @@ func WorkgroupMergeOrderResolved(repo *trace.Repository, stream config.Workstrea
 // for repairs even though the edge's merge remains recorded.
 func WorkgroupEdgePending(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	resolved, err := WorkgroupMergeOrderResolved(repo, stream)
-	if err != nil || resolved == "" {
+	if err != nil {
 		return false, err
+	}
+	if resolved == "" {
+		// A merge-order edge the dependent dropped after it published its pull
+		// request as a draft frees that draft the same way: a fresh review and
+		// delivery approval are due, though no upstream merged.
+		if resolved, err = WorkgroupMergeOrderWaived(repo, stream); err != nil || resolved == "" {
+			return false, err
+		}
 	}
 	publication, found, err := currentOwnPublication(repo, stream)
 	if err != nil || !found {
@@ -306,8 +343,22 @@ func WorkgroupEdgePending(repo *trace.Repository, stream config.WorkstreamID) (b
 // UpstreamMergeStatus reads verified upstream merge evidence or polls its
 // Current publication. Archived members use pinned merge identity after cleanup
 // or their retained trace while available. Retirement itself grants no merge.
-// The caller records the observation only in the dependent's trace.
+// The caller records the observation only in the dependent's trace. It also
+// reports why an unmerged upstream can no longer merge, and whether its changes
+// already reached the base branch, as evidence for the exit from waiting.
 func (s *Controller) UpstreamMergeStatus(ctx context.Context, repo *trace.Repository, edge trace.Edge) (EdgeMergeStatus, error) {
+	out, err := s.upstreamMergeStatus(ctx, repo, edge)
+	if err != nil {
+		return out, err
+	}
+	if out.Merged {
+		out.Ended = ""
+		return out, nil
+	}
+	return s.observeIntegration(ctx, repo, edge, out)
+}
+
+func (s *Controller) upstreamMergeStatus(ctx context.Context, repo *trace.Repository, edge trace.Edge) (EdgeMergeStatus, error) {
 	out := EdgeMergeStatus{Upstream: edge.From, Type: edge.Type}
 	archive, archived := s.ArchivedWorkstream(string(edge.From))
 	// Cleanup can evict and close a scoped child between separate reads. Only
@@ -365,6 +416,9 @@ func (s *Controller) UpstreamMergeStatus(ctx context.Context, repo *trace.Reposi
 		return readError(err)
 	}
 	if feature.Value != DeliveredState {
+		if feature.Value == AbandonedState {
+			out.Ended = EndedAbandoned
+		}
 		if edge.Type == trace.EdgeMergeOrder {
 			out.BuildBranch = fmt.Sprintf("%s@%s", s.About(upstream).Project.PushRepository(), featureBranch(edge.From))
 		}
@@ -390,6 +444,7 @@ func (s *Controller) UpstreamMergeStatus(ctx context.Context, repo *trace.Reposi
 		return readError(err)
 	} else if revision > 0 && outcome.PullRequest == publication.PullRequest {
 		if outcome.Outcome == ownPullRequestOutcomeClosed {
+			out.Ended = EndedClosed
 			return out, nil
 		}
 		if outcome.Outcome == ownPullRequestOutcomeMerged {
@@ -408,6 +463,9 @@ func (s *Controller) ArchivedEdgeMergeStatus(ctx context.Context, out EdgeMergeS
 	if ArchiveResolved(archive) && archive.ResolutionEvidence == "merged" && archive.MergeCommit != "" && archive.MergeReference != "" {
 		out.Merged, out.Commit, out.Reference = true, archive.MergeCommit, archive.MergeReference
 		return out, nil
+	}
+	if archive.State == AbandonedState || archive.ResolutionEvidence == "cancelled" {
+		out.Ended = EndedAbandoned
 	}
 	if p := archive.Publication; p.PullRequest > 0 {
 		publication := DeliveryPublication{Upstream: p.Upstream, Fork: p.Fork, Branch: p.Branch, Commit: p.Commit, PullRequest: p.PullRequest}
@@ -457,7 +515,10 @@ func (s *Controller) EdgeResolverPass(ctx context.Context, repo *trace.Repositor
 	}
 	for _, stream := range pollOrder(ctx, s, EdgePoll, streams, func(stream config.WorkstreamID) config.WorkstreamID { return stream }) {
 		if err := s.PollTask(ctx, repo, EdgePoll, stream, func(ctx context.Context) error {
-			return s.resolveEdges(ctx, repo, stream)
+			if err := s.resolveEdges(ctx, repo, stream); err != nil {
+				return err
+			}
+			return s.raiseBaseExit(ctx, repo, stream)
 		}); err != nil {
 			return err
 		}
@@ -556,12 +617,24 @@ func AllEdgesResolved(observed EdgeObservation, edges []trace.Edge) bool {
 // wait message as its reason, and a feed notice, exactly as baseWaitPass
 // Records a same-repo base's availability; neither creates an inbox entry,
 // because waiting on a merge is status, never an escalation (spec#15).
+// Entering the wait is the one thing an unresolved edge can mean, so the pass
+// records it as the code default. The wait ending is an exit the router
+// decides: it ends the wait by default, and Jev may keep the dependent waiting
+// for the observation that resolved it.
 func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) error {
 	streams, err := nonSessionWorkstreams(repo)
 	if err != nil {
 		return err
 	}
+	type clears struct {
+		stream   config.WorkstreamID
+		state    trace.WorkflowState
+		revision int
+		blocking []trace.Edge
+		observed EdgeObservation
+	}
 	var transactions []trace.Transaction
+	var cleared []clears
 	err = repo.WithWorkstreamSnapshot(func() error {
 		for _, stream := range streams {
 			edges, err := IncomingMergeEdges(repo, stream)
@@ -570,8 +643,9 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 			}
 			blocking := EdgesOfType(edges, trace.EdgeHardBlock)
 			var observed EdgeObservation
+			revision := 0
 			if len(blocking) > 0 {
-				if observed, _, _, err = EdgeObservationAt(repo, stream); err != nil {
+				if observed, revision, _, err = EdgeObservationAt(repo, stream); err != nil {
 					return err
 				}
 			}
@@ -590,12 +664,13 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 			if state.Value == next || state.Value == "" && next == "available" {
 				continue
 			}
-			id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
-			if reason == "" {
-				reason = "the workstream's blocking edges resolved"
+			if next == "available" {
+				cleared = append(cleared, clears{stream: stream, state: state, revision: revision, blocking: blocking, observed: observed})
+				continue
 			}
+			id := fmt.Sprintf("%s-%d", EdgeWaitSubject, state.Version+1)
 			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: foremanActor, Cause: "edge-availability"}
-			transactions = append(transactions, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "edge", reason)}})
+			transactions = append(transactions, trace.Transaction{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: next, Reason: reason}), Events: []trace.Event{trace.Notice(id, "edge", reason)}})
 		}
 		return nil
 	})
@@ -604,6 +679,56 @@ func (s *Controller) EdgeWaitPass(ctx context.Context, repo *trace.Repository) e
 	}
 	for _, tx := range transactions {
 		if _, err := repo.Transact(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, c := range cleared {
+		cause := fmt.Sprintf("edge-resolved-%d", c.revision)
+		if kept, err := keptWaiting(repo, c.stream, EdgeWaitSubject, cause); err != nil {
+			return err
+		} else if kept {
+			continue
+		}
+		var records []router.Entry
+		for _, e := range c.blocking {
+			text := fmt.Sprintf("hard_block edge from %s: observed merged", e.From)
+			if i := slices.IndexFunc(c.observed.Edges, func(m EdgeMergeStatus) bool { return m.Upstream == e.From && m.Type == e.Type }); i >= 0 && c.observed.Edges[i].Reference != "" {
+				text += " as " + c.observed.Edges[i].Reference
+			}
+			records = append(records, router.Entry{Kind: "edge", ID: string(e.From), Text: text})
+		}
+		// One blocking edge is one upstream to summarise; several are not, and
+		// the workstream's own summary stands for them.
+		var single *dependencyCase
+		if len(c.blocking) == 1 {
+			e := c.blocking[0]
+			single = &dependencyCase{Upstream: e.From, Type: e.Type, Edge: &e}
+		}
+		x := s.clearingExit(repo, c.stream, c.state, clearing{
+			Subject: EdgeWaitSubject, Trigger: TriggerEdgeResolved, Notice: "edge", Cause: cause, HeaderCause: "edge-availability",
+			Reason:  "the workstream's blocking edges resolved",
+			Doubt:   question("merge_in_doubt", "The records show that an upstream's merge is not final: it was reverted, or observed on another branch than the one the dependent builds on."),
+			Facts:   map[string]any{"blocking_edges": len(c.blocking), "observation_revision": c.revision},
+			Records: records, Dependency: single,
+			Unresolved: func(ctx context.Context) (string, error) {
+				edges, err := IncomingMergeEdges(repo, c.stream)
+				if err != nil {
+					return "", err
+				}
+				blocking := EdgesOfType(edges, trace.EdgeHardBlock)
+				var observed EdgeObservation
+				if len(blocking) > 0 {
+					if observed, _, _, err = EdgeObservationAt(repo, c.stream); err != nil {
+						return "", err
+					}
+				}
+				if reference, found := FirstUnresolvedEdge(blocking, observed); found {
+					return fmt.Sprintf("an incoming edge is unresolved again: %s", reference), nil
+				}
+				return "", nil
+			},
+		})
+		if _, err := s.routeExit(ctx, x); err != nil {
 			return err
 		}
 	}
@@ -689,5 +814,5 @@ func (s *Controller) resolveEdges(ctx context.Context, repo *trace.Repository, s
 	if err := s.EdgeUpdatePass(ctx, repo, stream); err != nil {
 		return err
 	}
-	return nil
+	return s.raiseEdgeExits(ctx, repo, stream, next)
 }

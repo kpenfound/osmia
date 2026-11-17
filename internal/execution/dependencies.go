@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -46,6 +47,16 @@ type Dependencies struct {
 	Checks              ReviewChecks
 	CloudChecks         ReviewChecks
 	Jev                 *jev.Judge
+	// Router routes every exit of a unit: the controllers raise the trigger,
+	// the default, the legal targets and the evidence, and the router chooses
+	// the state.
+	Router Router
+	// Limits reports why agent work cannot start on a workstream now: a spent
+	// budget or provider usage limit, or the loop guard having counted its
+	// limit of sessions. The targets of a unit's exits that start work meet it
+	// as a hard prerequisite when they are offered and when they are applied.
+	// Nil stops nothing.
+	Limits func(ctx context.Context, x router.Exit) (string, error)
 }
 type Controller struct{ Dependencies }
 

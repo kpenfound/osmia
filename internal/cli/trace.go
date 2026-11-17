@@ -61,7 +61,7 @@ func traceUnit(w io.Writer, u wire.UnitTrace) {
 	fmt.Fprintf(w, "  Cost: $%.4f, %d unknown\n", u.CostUSD, u.UnknownCosts)
 	for _, e := range u.History {
 		traceRef(w, "  Event", &e.Ref)
-		fmt.Fprintf(w, "    %s\n", e.Summary)
+		fmt.Fprintf(w, "    %s%s\n", e.Summary, departedByJev(e.Departed))
 	}
 	traceGaps(w, u.Gaps)
 }
@@ -149,6 +149,17 @@ func showTrace(w io.Writer, result any) {
 		traceDelivery(w, v.Delivery)
 		traceGaps(w, v.Gaps)
 	}
+}
+
+// departedByJev is the label of a transition Jev departed from the default to
+// make, with its separator, and empty for any other transition: one that
+// followed the default, fell back to it, was pinned by an owner or a gate
+// decision, or was never routed.
+func departedByJev(departed bool) string {
+	if departed {
+		return " (decided by Jev)"
+	}
+	return ""
 }
 
 // decidedByJev is the label of a decision Jev made, with its separator, and

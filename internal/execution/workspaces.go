@@ -11,7 +11,10 @@ import (
 // checkpointed runs one local step and its durable progress write. External
 // calls belong before or after this span, using the original context. The
 // callback uses the supplied context to share the clone lock with workspace
-// methods. An interrupted step is recovered before another step can run.
+// methods. An interrupted step is recovered before another step can run. A
+// step that cannot take the clone lock before ctx ends returns a workspace
+// contention error without touching the clone, and one whose restoration
+// fails returns a workspace recovery error; both are retried by the caller.
 func checkpointed(ctx context.Context, operation string, at time.Time, providers []workspace.Provider, step func(context.Context) (coreadapter.OperationResult, error)) (result coreadapter.OperationResult, err error) {
 	err = workspace.LocalStep(ctx, operation, at, providers, func(local context.Context) error {
 		var stepErr error

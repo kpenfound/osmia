@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"

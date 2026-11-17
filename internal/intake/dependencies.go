@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -34,6 +35,7 @@ type Dependencies struct {
 	ArchivedWorkstream   func(raw string) (runtime.Archive, bool)
 	BaseEntry            func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	DiscoveryEntries     func(repository *trace.Repository, stream config.WorkstreamID) ([]InboxEntry, error)
+	RecoveryEntries      func(repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error)
 	ChangeHeld           func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
 	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
@@ -94,6 +96,10 @@ type Dependencies struct {
 	Jev                   *jev.Judge
 	TrackTurn             func(config.WorkstreamID, context.CancelFunc) func()
 	Options               Execution
+	// Router applies the workstream's gate decisions as pinned moves, routes
+	// the exits Jev judges and routes the chief of staff's decision on a
+	// committee objection. A pass hands its exits to the router's worker.
+	Router router.Port
 }
 
 // ProjectCreation is the service's project creation as a design start uses
@@ -119,6 +125,7 @@ type Execution struct {
 	Issues    issues.Client
 	Controls  *Controls
 }
+
 type Controller struct{ Dependencies }
 
 func New(deps Dependencies) *Controller { return &Controller{Dependencies: deps} }

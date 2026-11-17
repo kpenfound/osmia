@@ -56,12 +56,19 @@ type Document struct {
 
 func (Document) traceRecord() {}
 
+// Transition is one change of a workflow subject's state. DecidedBy,
+// Judgment and DefaultTo record how the transition router chose it (see
+// Routing); a transition no router chose, and every transition written before
+// they existed, has none of them.
 type Transition struct {
 	Header
-	Subject string `json:"subject"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Reason  string `json:"reason"`
+	Subject   string `json:"subject"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
+	DefaultTo string `json:"default_to,omitempty"`
 }
 
 func (Transition) traceRecord() {}
@@ -319,7 +326,7 @@ func validate(r Record) error {
 	case Document:
 		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n")) && ValidDecisionActor(v)
 	case Transition:
-		valid = key(v.Subject) && present(v.To) && present(v.Reason)
+		valid = key(v.Subject) && present(v.To) && present(v.Reason) && ValidRouting(v.To, v.Routing())
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Amendment:
@@ -372,7 +379,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || hearsayPostedPath(parts) || hearsayKeptPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || flakePath(parts) || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
+	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == "edge-waivers.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || routePath(parts) || recoveryPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -600,6 +607,17 @@ func toolPath(parts []string) bool {
 
 func judgmentPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "judgments" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+// routePath reports whether parts name a route journal record: routes/<id>.json.
+func routePath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "routes" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+// recoveryPath reports whether parts name a recovery card record:
+// recovery/<id>.json.
+func recoveryPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "recovery" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
 func memoryPath(parts []string) bool {

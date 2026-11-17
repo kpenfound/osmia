@@ -46,7 +46,7 @@ The records you will read most, by `schema`:
 
 | `schema` | What it answers |
 |---|---|
-| `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
+| `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit`. A transition the router chose also has `decided_by` (`code`, `jev`, `fallback`, `owner`, `jev_gate` or `reviewer`), `default_to` (the state the default would have entered) and, when a Jev judgment is behind it, `judgment`; older transitions have none of the three |
 | `osmia.trace.cost` | One cost record per session: `$.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `$.entry.At`, `$.entry.Usage` (`CostUSD`, `Turns`) |
 | `osmia.trace.turn-request`, `osmia.trace.turn-response` | Each turn's request (`agent_id`, `actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
 | `osmia.trace.status` | The chief of staff's status revisions: `goal`, `note`, `agents` |

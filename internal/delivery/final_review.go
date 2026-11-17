@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
@@ -68,6 +69,13 @@ type FinalReviewInput struct {
 	// from the current summary is stale: a workgroup dependency merged
 	// since, and a fresh review and owner approval are required (spec#13).
 	EdgeResolved string `json:"edge_resolved,omitempty"`
+	// EdgeWaived is workgroupMergeOrderWaived's summary of the incoming
+	// merge_order edges the workstream dropped, read when the review was asked
+	// for. A waiver is no merge, so it never appears in EdgeResolved; a review
+	// whose EdgeWaived differs from the current summary is stale, because what
+	// the pull request waits on changed, and a fresh review and owner approval
+	// are required.
+	EdgeWaived string `json:"edge_waived,omitempty"`
 	// Move counts the workstream's moves to building or assembled when the
 	// review was asked for. Each such move asks for a fresh review of the
 	// branch, even when nothing else it reads changed.
@@ -250,12 +258,18 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 			break
 		}
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: foremanActor, Cause: cause}
-	_, err = a.Repository.MoveFeatureState(ctx, h, BuildingState, AssembledState, reason)
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
+	feature, err := a.Repository.RawWorkflow(stream, trace.FeatureSubject)
+	if err != nil || feature.Value != BuildingState {
+		return err
 	}
-	return err
+	// Assembling is the one way out of building once every unit has merged; the
+	// router keeps it as the exit's default.
+	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
+		Repo: a.Repository, Stream: stream, Subject: trace.FeatureSubject, State: feature,
+		Trigger: intake.TriggerUnitsMerged, Cause: id, ID: id, HeaderCause: cause, Reason: reason, Actor: foremanActor,
+		Target: intake.TargetAssembled, Description: "Assemble the workstream: every unit of the sealed plan has merged.",
+		Events: []trace.Event{intake.FeatureProgress(id, BuildingState, AssembledState, reason)},
+	}.Exit())
 }
 
 // AllMerged reports whether the building workstream's plan has units and
@@ -303,11 +317,17 @@ func (a *FinalReviewer) Governing(ctx context.Context, stream config.WorkstreamI
 	if err != nil {
 		return FinalReviewInput{}, seal.Seal{}, err
 	}
+	edgeWaived := ""
+	if a.S.WorkgroupMergeOrderWaived != nil {
+		if edgeWaived, err = a.S.WorkgroupMergeOrderWaived(a.Repository, stream); err != nil {
+			return FinalReviewInput{}, seal.Seal{}, err
+		}
+	}
 	moves, err := a.S.ReviewMoves(a.Repository, stream)
 	if err != nil {
 		return FinalReviewInput{}, seal.Seal{}, err
 	}
-	return FinalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
+	return FinalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, EdgeWaived: edgeWaived, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
 }
 
 // reads reports whether a review asked for with in, or recorded as report,
@@ -318,7 +338,7 @@ func (in FinalReviewInput) Reads(now FinalReviewInput) bool {
 }
 
 func ReportInput(r FinalReport) FinalReviewInput {
-	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
+	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, EdgeWaived: r.EdgeWaived, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
 // request asks for the next final review of an assembled workstream unless
@@ -426,10 +446,14 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: FinalReviewSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", now.Review), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Run final review %d", now.Review), Operation: &op}}}
-	if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
-		return err
-	}
-	return nil
+	// Asking for the review is the one way out of the previous round; the router
+	// keeps it as the exit's default.
+	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
+		Repo: a.Repository, Stream: stream, Subject: FinalReviewSubject, State: subject, Machine: FinalMachine,
+		Trigger: intake.TriggerFinalRequested, Cause: transition, ID: transition, HeaderCause: AssembledState, Reason: reason, Actor: FinalReviewActor,
+		Target: TargetRequested, Enters: fmt.Sprintf("requested-%d", now.Review), Description: "Ask for the final review of the assembled branch.",
+		Events: tx.Events,
+	}.Exit())
 }
 
 func DecodeFinalReview(op coreadapter.Operation) (FinalReviewInput, error) {
@@ -589,7 +613,7 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if !found {
 		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, Move: in.Move, Review: in.Review, Operation: op.ID, Outcome: FinalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
+	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, EdgeWaived: in.EdgeWaived, Move: in.Move, Review: in.Review, Operation: op.ID, Outcome: FinalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
 	fail := func(reason string) (coreadapter.OperationResult, error) {
 		report.Failure = reason
 		return a.Record(ctx, stream, report)
@@ -626,7 +650,7 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if now.Move != in.Move {
 		return fail(fmt.Sprintf("the workstream was moved since the review was asked for; move %d asks for a fresh review", now.Move))
 	}
-	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
+	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.EdgeWaived != in.EdgeWaived || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
 	}
 	g, err := featureWorkspaces(cfg, a.Repository).Of(stream)
@@ -1195,12 +1219,12 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation}
-	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: h, Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+	plain := trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation},
+			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
+		Events: []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
-	txs := []trace.Transaction{tx}
+	var followups []trace.Transaction
 	if report.Outcome == FinalReviewed && report.Maintenance && edgePending {
 		added, found, err := a.Followup(stream, report, revision)
 		if err != nil {
@@ -1222,19 +1246,17 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 			makeHeader := func(key, cause string) trace.Header {
 				return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: key, Revision: 1, Project: a.Repository.Project(), Workstream: stream, Unit: added.Unit.ID, At: at, Actor: FinalReviewActor, Cause: cause}
 			}
-			txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d of the post-merge dependency update found blocking problems: %s; report %s revision %d", report.Review, added.Gap, FinalReportPath, revision)}})
-			txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to repair the post-merge dependency update from final review %d", added.Unit.ID, report.Review)}})
+			followups = append(followups, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d of the post-merge dependency update found blocking problems: %s; report %s revision %d", report.Review, added.Gap, FinalReportPath, revision)}})
+			followups = append(followups, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to repair the post-merge dependency update from final review %d", added.Unit.ID, report.Review)}})
 		}
 	}
-	if _, err := a.Repository.RecordDocumentsWith(ctx, documents, txs...); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			if recorded, outcomeErr := a.Outcome(stream, report.Review); outcomeErr == nil && recorded != nil {
-				return *recorded, nil
-			}
-		}
+	blocking := ReportBlocking(report)
+	rounds, err := FinalRoundsWithBlocking(a.Repository, stream)
+	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return outcome, nil
+	return a.routeFinal(ctx, finalExitInput{Stream: stream, State: state, Report: report, ID: id, Reason: reason, Body: body, Blocking: blocking, Rounds: rounds,
+		Documents: documents, Followups: followups, Plain: plain, At: at}, outcome)
 }
 
 func CountSeverity(findings []FinalFinding, severity string) int {
@@ -1563,6 +1585,7 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 		{"dependency observation", report.BaseCheck, now.BaseCheck},
 		{"delivery maintenance", report.Maintenance, now.Maintenance},
 		{"workgroup edge resolution", report.EdgeResolved, now.EdgeResolved},
+		{"workgroup edge waiver", report.EdgeWaived, now.EdgeWaived},
 		{"workstream move", report.Move, now.Move},
 		{"seal", report.Seal, now.Seal},
 		{"spec hash", report.SpecHash, latest.SpecHash},

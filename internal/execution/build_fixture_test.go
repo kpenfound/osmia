@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -26,6 +27,9 @@ type buildFixture struct {
 	unitsFixture
 	s     *Controller
 	clock *fixturekit.DemoClock
+	// jev answers the router's transition requests: the default fits unless a
+	// test scripts it.
+	jev *jevfixture.Transitions
 }
 
 func newBuildFixture(t *testing.T, key string) *buildFixture {
@@ -76,6 +80,8 @@ func newBuildFixture(t *testing.T, key string) *buildFixture {
 		UnitRebaseConflicts: func(*trace.Repository, config.WorkstreamID, string, string) ([]string, error) { return nil, nil },
 		Checks:              &fixturekit.FakeChecks{Outcomes: fixturekit.Passing()},
 	})
+	f.jev = &jevfixture.Transitions{}
+	routeWith(f.s, f.clock.Now, f.jev)
 	provider, err := intake.FeatureWorkspaces(u.cfg, u.repository).Of(stream)
 	must(t, err)
 	acquired, err := provider.Acquire(ctx, vcs.Request{Name: string(stream), Ref: u.base, Branch: featureBranch(stream)})

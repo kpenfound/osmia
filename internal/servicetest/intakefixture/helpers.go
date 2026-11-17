@@ -20,6 +20,7 @@ import (
 
 	api "github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
+	router "github.com/kpenfound/osmia/internal/router"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	status "github.com/kpenfound/osmia/internal/status"
@@ -251,7 +252,7 @@ func AllTransitions(t *testing.T, root config.Root, project config.ProjectID, st
 	for _, body := range WorkstreamRecords(t, root, project, stream, "events.jsonl") {
 		var tr trace.Transition
 		Must(t, json.Unmarshal(body, &tr))
-		if tr.Schema == "osmia.trace.transition" {
+		if tr.Schema == "osmia.trace.transition" && !router.IsJournal(tr.Subject) {
 			out = append(out, tr)
 		}
 	}

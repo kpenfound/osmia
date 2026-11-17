@@ -221,6 +221,18 @@ func TestReadsNeverAskJevOrRecordWhileAGatesJudgmentIsPending(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("Jev was never asked")
 	}
+	// The debate's conclusion is also routed, asking Jev for a transition
+	// judgment of its own in the background; it is final before the reads are
+	// compared with the records.
+	eventually(t, "the concluded debate's transition judgment", func() bool {
+		records, _ := judgments(t, f.repository(), stream)
+		for _, r := range records {
+			if o := r.Occurrence; o != nil && o.Kind == jev.TransitionKind && strings.Contains(o.Key, "ws.shed_concluded") {
+				return r.State != jev.StateStarted
+			}
+		}
+		return false
+	})
 	_, before := judgments(t, f.repository(), stream)
 	for range 5 {
 		if entries := f.ratificationEntries(t, stream); len(entries) != 0 {

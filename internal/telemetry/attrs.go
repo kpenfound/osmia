@@ -39,6 +39,12 @@ var (
 	KeySlotWaitMS    = Key("slot_wait_ms")
 	KeyCostUSD       = Key("cost_usd")
 	KeyCostKnown     = Key("cost_known")
+	KeyDecidedBy     = Key("decided_by")
+	KeyDefaultState  = Key("default_state")
+	KeyDeviated      = Key("deviated")
+	KeyTrigger       = Key("trigger")
+	KeyConfidence    = Key("confidence")
+	KeyJudgment      = Key("judgment")
 )
 
 // The OpenTelemetry GenAI convention attributes a turn span may carry. They
@@ -70,6 +76,8 @@ var allowed = map[string]kind{
 	KeyOutcome: kindToken, KeyCause: kindToken, KeyState: kindToken, KeyNextState: kindToken,
 	KeyWaitReason: kindToken, KeyKind: kindToken, KeyPauseScope: kindToken, KeyPauseSource: kindToken,
 	KeyCovered: kindInt, KeySlotWaitMS: kindInt, KeyCostUSD: kindFloat, KeyCostKnown: kindBool,
+	KeyDecidedBy: kindToken, KeyDefaultState: kindToken, KeyDeviated: kindBool,
+	KeyTrigger: kindToken, KeyConfidence: kindToken, KeyJudgment: kindID,
 	KeyGenAIOperation: kindToken, KeyGenAIProvider: kindID, KeyGenAIModel: kindID,
 	KeyGenAIAgentName: kindID, KeyGenAIAgentID: kindID,
 }
@@ -209,6 +217,29 @@ func State(state string) Attr { return String(KeyState, state) }
 
 // NextState is the state a transition entered.
 func NextState(state string) Attr { return String(KeyNextState, state) }
+
+// DecidedBy says who chose the transition that ended the interval, as an
+// enumerated word.
+func DecidedBy(by string) Attr { return String(KeyDecidedBy, by) }
+
+// DefaultState is the state the transition router's default would have
+// entered.
+func DefaultState(state string) Attr { return String(KeyDefaultState, state) }
+
+// Deviated records whether a transition entered a state other than its
+// default.
+func Deviated(deviated bool) Attr { return Bool(KeyDeviated, deviated) }
+
+// Trigger is what raised an exit to the transition router, as an enumerated
+// word.
+func Trigger(trigger string) Attr { return String(KeyTrigger, trigger) }
+
+// Confidence is the band of Jev's confidence in the state a route chose, as
+// an enumerated word.
+func Confidence(band string) Attr { return String(KeyConfidence, band) }
+
+// Judgment is the ID of the Jev judgment record behind a decision.
+func Judgment(id string) Attr { return String(KeyJudgment, id) }
 
 // WaitReason is why work waited for capacity, as an enumerated word.
 func WaitReason(reason string) Attr { return String(KeyWaitReason, reason) }

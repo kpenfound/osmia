@@ -70,4 +70,3 @@ func (s *Service) reservationWaitFate(repository *trace.Repository, streams []co
 	}
 	return "", false
 }
-

@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -149,7 +150,7 @@ func (r *reviewers) Pass(ctx context.Context) error {
 			st := b.states[trace.UnitSubject(unit)]
 			if st.Value == UnitContested {
 				if contest, ok := b.reviewTransitions[trace.UnitSubject(unit)]; ok {
-					if err := r.resumeContested(ctx, stream, unit, st, contest); err != nil {
+					if err := r.resumeContestedBy(ctx, true, stream, unit, st, contest); err != nil {
 						return err
 					}
 				}
@@ -261,12 +262,17 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 			id += fmt.Sprintf("-%d", state.Version)
 		}
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: cause}
-	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: to, Reason: reason}})
-	if errors.Is(err, trace.ErrConflict) {
-		return state.Value, nil
+	res, err := r.s.raise(ctx, true, UnitExitInput{
+		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerQuestionFollow, Cause: id,
+		Default: to, Targets: []string{to}, Actor: reviewerActor, ID: id, HeaderCause: cause, Reason: reason,
+	})
+	switch {
+	case err != nil:
+		return "", err
+	case res.Committed:
+		return to, nil
 	}
-	return to, err
+	return state.Value, nil
 }
 
 func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, paused bool) error {
@@ -295,7 +301,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
-				if contested, err := contestInterrupted(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
+				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
 					return err
 				}
 				return r.recover(ctx, last)
@@ -303,7 +309,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			if last.CompletedAt.IsZero() {
 				return nil
 			}
-			if contested, err := contestFailure(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
+			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
 				return err
 			}
 			transitions, err := trace.Read[trace.Transition](r.repository, stream)
@@ -339,7 +345,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
-				if contested, err := contestInterrupted(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
+				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
 					return err
 				}
 				return r.recover(ctx, last)
@@ -347,7 +353,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			if last.CompletedAt.IsZero() {
 				return nil
 			}
-			if contested, err := contestFailure(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
+			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
 				return err
 			}
 			if last.Status() != "idle" {
@@ -427,11 +433,13 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 func (r *reviewers) contestMissingVerdict(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn) error {
 	id := trace.EventID(last.Response.ID, "contested")
 	reason := fmt.Sprintf("the reviewer's turn %s ended without recording a verdict", last.Request.TurnID)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: last.Response.ID}
-	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err := r.s.raise(ctx, true, UnitExitInput{
+		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewNoVerdict, Cause: last.Response.ID,
+		Default: UnitContested, Targets: []string{UnitContested, UnitReviewing}, Actor: reviewerActor,
+		ID: id, HeaderCause: last.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+		Note:     reason,
+		Evidence: router.Evidence{Records: []router.Entry{{Kind: "review turn", ID: last.Request.TurnID, Text: reason}}},
+	})
 	return err
 }
 
@@ -689,8 +697,11 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		return errors.New(reason)
 	}
 	to := UnitApproved
+	trigger := TriggerReviewApproved
+	targets := []string{UnitApproved, UnitReviewing, UnitChecking, UnitContested}
 	if result.Verdict.Decision == "material_findings" {
-		to = UnitImplementing
+		to, trigger = UnitImplementing, TriggerReviewRejected
+		targets = []string{UnitImplementing, UnitReviewing, UnitContested}
 		if result.Bounces >= r.cfg.Shed.MaxBounces {
 			to = UnitContested
 		}
@@ -700,22 +711,74 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d material send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
 	notice := trace.Progress
 	if to == UnitContested {
 		notice = trace.Notice
 	}
-	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	revision, err := r.reviewRevision(stream, unit)
 	if err != nil {
 		return err
 	}
-	if to == UnitImplementing {
+	in := UnitExitInput{
+		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: trigger, Cause: result.Turn,
+		Default: to, Targets: targets, Actor: reviewerActor,
+		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))},
+		Note: reason,
+		Evidence: router.Evidence{Facts: map[string]any{"send_backs": result.Bounces, "max_send_backs": r.cfg.Shed.MaxBounces, "findings": len(result.Verdict.Findings)},
+			Records: []router.Entry{{Kind: "verdict", ID: reviewDocument(unit), Text: verdictText(result.Verdict)}}},
+	}
+	if result.Verdict.Decision == "satisfactory" {
+		// The verdict is what authorises the approval, and only for the
+		// candidate it reviewed: the router checks it again when it enters
+		// approved.
+		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", reviewDocument(unit), revision), Valid: r.verdictHolds(stream, unit, result)}
+	}
+	res, err := r.s.raise(ctx, true, in)
+	if err == nil && sentBack(res) {
 		return r.enqueueFindings(ctx, stream, unit, result)
 	}
-	return nil
+	return err
+}
+
+// reviewRevision returns the latest revision of the unit's review.json.
+func (r *reviewers) reviewRevision(stream config.WorkstreamID, unit string) (int, error) {
+	docs, err := trace.Read[trace.Document](r.repository, stream)
+	if err != nil {
+		return 0, err
+	}
+	revision := 0
+	for _, d := range docs {
+		if d.ID == reviewDocument(unit) && d.Revision > revision {
+			revision = d.Revision
+		}
+	}
+	return revision, nil
+}
+
+// verdictHolds returns the check that the reviewer's satisfactory verdict is
+// still the unit's latest and still reviews the unit's current candidate, base,
+// spec, plan and report. It returns why not, or "".
+func (r *reviewers) verdictHolds(stream config.WorkstreamID, unit string, result UnitReviewResult) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		latest, ok, err := r.storedResult(stream, unit, trace.WorkflowState{})
+		if err != nil {
+			return "", err
+		}
+		if !ok || latest.Turn != result.Turn || latest.Verdict.Decision != "satisfactory" {
+			return "a later review replaced the reviewer's verdict", nil
+		}
+		return r.staleInputs(ctx, stream, unit, latest.Identity)
+	}
+}
+
+// verdictText is a reviewer's verdict as the router's evidence: the decision,
+// its summary and each finding.
+func verdictText(v UnitVerdict) string {
+	text := v.Decision + ": " + v.Summary
+	for _, f := range v.Findings {
+		text += fmt.Sprintf("\n- %s: %s (action: %s)", f.Severity, f.Evidence, f.Action)
+	}
+	return text
 }
 
 func staleReview(reviewed, current UnitReviewIdentity) string {
@@ -819,22 +882,25 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 		}
 		refreshes++
 	}
+	to, id, why, cause := UnitReviewing, fmt.Sprintf("%s-review-refresh-%d", subject, state.Version), reason, reviewDocument(unit)
+	var notice trace.Event
+	targets := []string{UnitReviewing, UnitChecking, UnitContested}
 	if refreshes+1 >= maxReviewRefreshes {
-		id := fmt.Sprintf("%s-contested-refresh-%d", subject, state.Version)
-		why := fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: latest}
-		_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReviewing, To: UnitContested, Reason: why}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))}})
-		if errors.Is(err, trace.ErrConflict) {
-			return nil
-		}
-		return err
+		// maxReviewRefreshes stays a hard limit: the review is not offered again.
+		targets = []string{UnitChecking, UnitContested}
+		to, id, cause = UnitContested, fmt.Sprintf("%s-contested-refresh-%d", subject, state.Version), latest
+		why = fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
+		notice = trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))
+	} else {
+		notice = trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)
 	}
-	id := fmt.Sprintf("%s-review-refresh-%d", subject, state.Version)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
-	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReviewing, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err = r.s.raise(ctx, true, UnitExitInput{
+		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewRefused, Cause: id,
+		Default: to, Targets: targets, Actor: reviewerActor,
+		ID: id, HeaderCause: cause, Reason: why, Events: []trace.Event{notice},
+		Note:     why,
+		Evidence: router.Evidence{Facts: map[string]any{"refused_in_a_row": refreshes + 1, "max_refused_in_a_row": maxReviewRefreshes}, Records: []router.Entry{{Kind: "refusal", Text: reason}}},
+	})
 	return err
 }
 
@@ -843,11 +909,11 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 func (r *reviewers) recheck(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, identity UnitReviewIdentity) error {
 	id := fmt.Sprintf("%s-%s-review-%d", trace.UnitSubject(unit), UnitChecking, state.Version)
 	reason := fmt.Sprintf("no completed check run is recorded for candidate %s from %s; its checks run before it is reviewed", identity.Candidate.Revision, identity.Candidate.BaseRevision)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
-	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitChecking, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" returns to checking: "+reason+".")}})
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
+	_, err := r.s.raise(ctx, true, UnitExitInput{
+		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewNeedsChecks, Cause: id,
+		Default: UnitChecking, Targets: []string{UnitChecking}, Actor: reviewerActor,
+		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" returns to checking: "+reason+".")},
+	})
 	return err
 }
 

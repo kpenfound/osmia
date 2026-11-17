@@ -286,9 +286,11 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	result, err := rebaser{lands}.Apply(ctx, ops[0].Operation)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("the conflicted rebase %+v %v", result, err)
+	// The rebase records its result, as every attempt does, so it no longer
+	// holds the unit.
+	result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
+	if result.Outcome != "succeeded" {
+		t.Fatalf("the conflicted rebase %+v", result)
 	}
 	rebases := unitRebases(t, repository, stream, "dedupe")
 	if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{masonWrote}) || rebases[0].State != UnitApproved || rebases[0].Snapshot != before.Candidate {
@@ -399,8 +401,8 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	if result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation); err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("the rebase %+v %v", result, err)
+	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
+		t.Fatalf("the rebase %+v", result)
 	}
 	must(t, m.Pass(ctx))
 	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitChecking {
@@ -425,8 +427,8 @@ func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	if result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation); err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("the conflicted rebase %+v %v", result, err)
+	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
+		t.Fatalf("the conflicted rebase %+v", result)
 	}
 	must(t, lands.Pass(ctx))
 
@@ -473,8 +475,7 @@ func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing
 	if len(ops) != 1 {
 		t.Fatalf("rebases: %+v", ops)
 	}
-	result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation)
-	must(t, err)
+	result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
 	if result.Outcome != "succeeded" {
 		t.Fatalf("rebase: %+v", result)
 	}

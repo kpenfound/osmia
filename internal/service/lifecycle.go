@@ -56,6 +56,7 @@ func (s *Service) lifecycle() *lifecycle.Controller {
 		UnresolvedWork:     unresolvedWork,
 		KeepForPublication: s.keepForCleanup,
 		ThreadRunner:       s.threadRunner,
+		Router:             routerPort{s},
 	})
 }
 
@@ -260,6 +261,8 @@ var edgePublicationWait = lifecycle.EdgePublicationWait
 var unresolvedMergeOrderEdge = lifecycle.UnresolvedMergeOrderEdge
 
 var workgroupMergeOrderResolved = lifecycle.WorkgroupMergeOrderResolved
+
+var workgroupMergeOrderWaived = lifecycle.WorkgroupMergeOrderWaived
 
 var workgroupEdgePending = lifecycle.WorkgroupEdgePending
 

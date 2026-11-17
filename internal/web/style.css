@@ -2173,6 +2173,23 @@ button.danger:disabled:hover {
   margin: 0.35rem 0 0;
 }
 
+.decision dl.move {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.2rem 1rem;
+  margin: 0.35rem 0 0.5rem;
+  max-width: 70ch;
+}
+
+.decision dl.move dt {
+  color: var(--text-muted);
+}
+
+.decision dl.move dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .card-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2675,6 +2692,7 @@ details.footnote > :not(summary) {
 .workgroup-graph { margin: 1rem 0; padding: 0.75rem; background: var(--surface-sunken); border-radius: var(--radius-sm); }
 .workgroup-graph figcaption { font-weight: 600; }
 .workgroup-graph p { overflow-wrap: anywhere; }
+.workgroup-graph p[data-dropped] { color: var(--text-muted); }
 #project-home { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; }
 
 .managed-repo { padding: 0.75rem 0; min-width: 0; }

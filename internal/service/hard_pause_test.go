@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -124,7 +125,10 @@ func hardPauseService(t *testing.T, cfg *config.Config, repo *trace.Repository, 
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}
+	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store, jev: &jev.Judge{}}
+	// An abandonment is a pinned move through the router, which asks Jev
+	// nothing for it.
+	s.router = s.newRouter()
 	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: repo, Turns: backend, Now: clock.Now},
 		Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)}, nil

@@ -273,8 +273,9 @@ The member view is laid out like a chat client:
   changes the approved intent, an escalated question, an escalated contested
   unit or an escalated objection reaches `jev.decision_threshold` (0.9 by
   default), its pick is recorded as your decision, the flow continues as if you
-  had chosen it, and the entry never appears. Activity and the trace label
-  such a decision "decided by Jev". Otherwise the entry reaches you with Jev's
+  had chosen it, and the entry never appears. The trace labels such a decision
+  "decided by Jev"; Activity labels a state change that way only when Jev
+  departed from the default next state. Otherwise the entry reaches you with Jev's
   pick and confidence as its recommendation. Delivery approval, charter
   proposals, "no change needed" escalations, cancellation and anything that
   needs your own words are always yours. Without Jev's API key the service

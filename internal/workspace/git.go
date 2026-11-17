@@ -777,14 +777,21 @@ func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, _ time.Ti
 	if err := g.dropReplay(ctx, dir); err != nil {
 		return "", nil, err
 	}
-	defer g.dropReplay(context.WithoutCancel(ctx), dir)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupDeadline)
+		defer cancel()
+		_ = g.dropReplay(cleanup, dir)
+	}()
 	if err := os.MkdirAll(g.Directory, 0700); err != nil {
 		return "", nil, err
 	}
 	if err := func() error {
-		locked, unlock := lockClone(ctx, g.Clone)
+		locked, unlock, err := lockClone(ctx, g.Clone)
+		if err != nil {
+			return err
+		}
 		defer unlock()
-		_, err := g.run(locked, "worktree", "add", "--quiet", "--detach", dir, head)
+		_, err = g.run(locked, "worktree", "add", "--quiet", "--detach", dir, head)
 		return err
 	}(); err != nil {
 		return "", nil, err
@@ -1098,7 +1105,10 @@ func markedFiles(dir string, paths []string) ([]string, error) {
 // dropReplay removes Replay's temporary worktree at dir, and what a stop left
 // of it.
 func (g *Git) dropReplay(ctx context.Context, dir string) error {
-	ctx, unlock := lockClone(ctx, g.Clone)
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	entries, err := g.list(ctx)
 	if err != nil {
@@ -1241,7 +1251,10 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 			// Re-read after taking ownership: an Acquire may have recreated this
 			// workspace since the unlocked list, and must not be pruned away.
 			if !holdsClone(ctx, cloneKey(g.Clone)) {
-				local, unlock := lockClone(ctx, g.Clone)
+				local, unlock, err := lockClone(ctx, g.Clone)
+				if err != nil {
+					return Worktree{}, false, err
+				}
 				defer unlock()
 				return g.Workspace(local, name)
 			}
@@ -1303,14 +1316,17 @@ func (g *Git) replayedBranch(ctx context.Context, dir string) (string, error) {
 // Git then removes the registration of a missing directory. A directory that
 // still has its .git file is left to Git.
 func (g *Git) forget(ctx context.Context, entry listed) error {
-	ctx, unlock := lockClone(ctx, g.Clone)
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	if _, err := os.Lstat(filepath.Join(entry.path, ".git")); errors.Is(err, os.ErrNotExist) {
 		if err := os.RemoveAll(entry.path); err != nil {
 			return err
 		}
 	}
-	_, err := g.run(ctx, "worktree", "remove", "--force", entry.path)
+	_, err = g.run(ctx, "worktree", "remove", "--force", entry.path)
 	return err
 }
 
@@ -1322,7 +1338,10 @@ func (g *Git) forget(ctx context.Context, entry listed) error {
 // branch; a directory in the way that is no worktree of the clone is left
 // alone and reported.
 func (g *Git) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, error) {
-	ctx, unlock := lockClone(ctx, g.Clone)
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
 	if req.Name == "" || req.Branch == "" {
 		return nil, errors.New("a workspace request needs a name and a branch")
@@ -1367,19 +1386,25 @@ func (g *Git) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, erro
 
 // Release removes the worktree, whatever it holds; the branch stays.
 func (g *Git) Release(ctx context.Context, w vcs.Workspace) error {
-	ctx, unlock := lockClone(ctx, g.Clone)
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	if w == nil || w.Directory() == "" {
 		return errors.New("no workspace to release")
 	}
-	_, err := g.run(ctx, "worktree", "remove", "--force", w.Directory())
+	_, err = g.run(ctx, "worktree", "remove", "--force", w.Directory())
 	return err
 }
 
 // Prune forgets the provider's own worktrees, those under Directory, whose
 // directories are gone. The owner's other worktrees are left alone.
 func (g *Git) Prune(ctx context.Context) error {
-	ctx, unlock := lockClone(ctx, g.Clone)
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	entries, err := g.list(ctx)
 	if err != nil {
@@ -1445,7 +1470,7 @@ func (g *Git) runInRaw(ctx context.Context, dir string, extra []string, args ...
 
 // runInput runs Git the way runInRaw does, with input as its standard input.
 func (g *Git) runInput(ctx context.Context, dir string, extra []string, input io.Reader, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Stdin = input
 	cmd.Env = []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
 	for _, name := range []string{"PATH", "HOME", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH", "XDG_CONFIG_HOME", "TMPDIR"} {
@@ -1456,7 +1481,14 @@ func (g *Git) runInput(ctx context.Context, dir string, extra []string, input io
 	cmd.Env = append(cmd.Env, extra...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	var lock *cloneLock
+	if hold := holdFor(ctx, cloneKey(g.Clone)); hold != nil {
+		lock = hold.lock
+	}
+	if err := runCommand(ctx, lock, cmd, "git "+args[0]); err != nil {
+		if errors.Is(err, ErrProcessRunning) {
+			return "", fmt.Errorf("git %s: %w", args[0], err)
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("git %s: %w", args[0], ctxErr)
 		}

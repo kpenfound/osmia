@@ -154,10 +154,7 @@ func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 		if err != nil || current.Value != UnitReviewing || current.Version != state.Version+1 {
 			t.Fatalf("%s: stale state %+v: %v", tc.name, current, err)
 		}
-		transitions, err := trace.Read[trace.Transition](repo, stream)
-		if err != nil {
-			t.Fatal(err)
-		}
+		transitions := workTransitions(t, repo, stream)
 		if !strings.Contains(transitions[len(transitions)-1].Reason, "stale "+tc.name) {
 			t.Fatalf("%s: reason: %s", tc.name, transitions[len(transitions)-1].Reason)
 		}

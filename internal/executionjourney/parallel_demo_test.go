@@ -30,7 +30,11 @@ const demoPlan = `{"version": 1, "units": [
 func TestParallelUnitsDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons, passed := newParallelMasonFixtureCounting(t, 2, 3, demoPlan)
+	// A workstream runs at most per_workstream turns. Its reviewers and the
+	// continuation held for upload run beside audit's mason, so the allowance
+	// leaves room for all four whichever order the router's worker commits the
+	// units' moves in.
+	f, masons, passed := newParallelMasonFixtureCounting(t, 2, 4, demoPlan)
 	defer func() { f.stop(t) }()
 	recovered := masonAgent("dedupe") + "-recover-1"
 	masons.Play[masonTurnID("resume")] = reportDone("Uploads resume")
