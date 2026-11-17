@@ -145,6 +145,30 @@ func TestHearsayRepoOptInDefaultsOffAndNamesItsField(t *testing.T) {
 	}
 }
 
+func TestFlakeFixesDefaultsOffAndIsAKnownStrictKey(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || c.Project.FlakeFixes {
+		t.Fatalf("left out: %+v %v", c.Project, err)
+	}
+	c, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = true\n"))
+	if err != nil || !c.Project.FlakeFixes {
+		t.Fatalf("opt-in: %+v %v", c.Project, err)
+	}
+	c, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = false\n"))
+	if err != nil || c.Project.FlakeFixes {
+		t.Fatalf("explicit off: %+v %v", c.Project, err)
+	}
+	var field *FieldError
+	_, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = \"yes\"\n"))
+	if !errors.As(err, &field) || field.Field != "flake_fixes" {
+		t.Fatalf("wrong type: %v", err)
+	}
+	_, err = Load(fixture(t, topConfig, projectConfig+"flake_fix = true\n"))
+	if err == nil || !strings.Contains(err.Error(), "flake_fix") {
+		t.Fatalf("an unknown key was accepted: %v", err)
+	}
+}
+
 func TestHearsayScopeAndEntitiesMustBeEntityIDs(t *testing.T) {
 	for _, tc := range []struct{ name, project, field string }{
 		{"old scope name", projectConfig + "hearsay_scope = \"osmia-ab12\"\n", "hearsay_scope"},

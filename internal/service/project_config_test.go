@@ -116,6 +116,7 @@ func TestProjectConfigReadReturnsTheFileSnapshot(t *testing.T) {
 		"capacity.per_workstream": {float64(s.current().Capacity.PerWorkstream), true},
 		"hearsay_scope":           {"", true},
 		"hearsay_declare_repo":    {false, true},
+		"flake_fixes":             {false, true},
 		"hearsay_entities":        {map[string]any{}, true},
 	} {
 		setting := settingOf(t, got, name)
@@ -259,6 +260,52 @@ cart = "code:shop:cart"
 	must(t, err)
 	if !reflect.DeepEqual(again, saved.ProjectConfigResponse) {
 		t.Fatalf("snapshot after the save differs:\n%+v\n%+v", again, saved.ProjectConfigResponse)
+	}
+}
+
+// flake_fixes is off until a pinned save turns it on; the running service
+// adopts the value, and clearing the key returns to the default.
+func TestProjectConfigSaveTurnsFlakeFixesOnAndOff(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, c, opts, files := projectConfigFixture(t)
+	got, err := c.ProjectConfig(ctx, project)
+	must(t, err)
+	if setting := settingOf(t, got, "flake_fixes"); setting.Value != false || setting.Effective != false || setting.Default == nil || !*setting.Default || setting.Pending {
+		t.Fatalf("before: %+v", setting)
+	}
+	if s.current().For(project).Project.FlakeFixes {
+		t.Fatal("flake_fixes is not off by default")
+	}
+
+	on, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.FlakeFixes = yes(true) })})
+	must(t, err)
+	if on.Outcome != ProjectConfigApplied || !strings.Contains(readFile(t, files.project), "flake_fixes = true\n") {
+		t.Fatalf("on: %+v\n%s", on, readFile(t, files.project))
+	}
+	if setting := settingOf(t, on.ProjectConfigResponse, "flake_fixes"); setting.Value != true || setting.Effective != true || *setting.Default || setting.Pending {
+		t.Fatalf("after turning on: %+v", setting)
+	}
+	if !s.current().For(project).Project.FlakeFixes {
+		t.Fatal("the running service did not adopt flake_fixes = true")
+	}
+	if fresh, err := config.Load(opts.Config); err != nil || !fresh.Project.FlakeFixes {
+		t.Fatalf("a fresh load: %v", err)
+	}
+
+	off, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: on.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.FlakeFixes = yes(false) })})
+	must(t, err)
+	if setting := settingOf(t, off.ProjectConfigResponse, "flake_fixes"); setting.Value != false || setting.Effective != false || *setting.Default || setting.Pending {
+		t.Fatalf("after turning off: %+v", setting)
+	}
+	if s.current().For(project).Project.FlakeFixes {
+		t.Fatal("the running service did not adopt flake_fixes = false")
+	}
+
+	cleared, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: off.Pin, Clear: []string{"flake_fixes"}})
+	must(t, err)
+	if strings.Contains(readFile(t, files.project), "flake_fixes") || !*settingOf(t, cleared.ProjectConfigResponse, "flake_fixes").Default {
+		t.Fatalf("cleared:\n%s", readFile(t, files.project))
 	}
 }
 

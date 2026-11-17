@@ -253,6 +253,10 @@ type Project struct {
 	// declared, which makes its records visible to the repository's readers.
 	// Off, the project is posted without repos.
 	HearsayDeclareRepo bool `toml:"hearsay_declare_repo" json:"hearsay_declare_repo,omitempty"`
+	// FlakeFixes turns flake-fix workstreams on for the project: with it on,
+	// a flaky check is recorded and the chief of staff may open a workstream
+	// to fix its cause. Off, a flaky check is only counted as a pass.
+	FlakeFixes bool `toml:"flake_fixes" json:"flake_fixes,omitempty"`
 	// UpstreamRebase is the Go duration between a workstream's scheduled
 	// drift rebases; zero disables them.
 	UpstreamRebase string `toml:"upstream_rebase" json:"upstream_rebase"`
@@ -834,7 +838,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
 		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env", "check_fallback", "organization"}, key[1])
