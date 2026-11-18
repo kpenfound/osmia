@@ -35,11 +35,16 @@ type ChangeRequest struct {
 }
 
 // ChangeDecision approves precisely the presented impact. PR disposition is
-// selected at cancellation, and never authorizes a push or a merge.
+// selected at cancellation, and never authorizes a push or a merge. DecidedBy
+// is "jev" for a cancellation Jev decided at the owner threshold, with
+// Judgment naming its judgment record; the chief of staff's tool never sets
+// them.
 type ChangeDecision struct {
 	Revision     int    `json:"revision"`
 	Decision     string `json:"decision"`
 	PullRequests string `json:"pull_requests,omitempty"`
+	DecidedBy    string `json:"decided_by,omitempty"`
+	Judgment     string `json:"judgment,omitempty"`
 }
 type DeltaAssessment struct {
 	Member     string   `json:"member"`
@@ -571,6 +576,7 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 			if err := DecodeToolInput(raw, &in); err != nil {
 				return nil, err
 			}
+			in.DecidedBy, in.Judgment = "", ""
 			out, api = s.DecideChange(ctx, address, in.ID, in.ChangeDecision)
 		} else {
 			var in ChangeRequest

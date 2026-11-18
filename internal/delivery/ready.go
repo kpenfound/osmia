@@ -112,7 +112,7 @@ func MarkedReadyOnHost(ctx context.Context, rt router.Port, repository *trace.Re
 	tx := trace.Transaction{ExpectedVersion: feature.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: feature.Value, To: DeliveredState, Reason: reason},
 		Events:     []trace.Event{trace.Notice(deliveredID, "state", fmt.Sprintf("Workstream delivered: the owner marked pull request #%d ready for review at %s.", pr.Number, pr.URL))}}
-	res, err := routeDelivered(ctx, rt, repository, stream, TriggerReadyOnHost, []trace.Document{doc}, tx)
+	res, err := routeDelivered(ctx, rt, repository, stream, TriggerReadyOnHost, "", []trace.Document{doc}, tx)
 	if err != nil {
 		return false, err
 	}

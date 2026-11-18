@@ -76,7 +76,7 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
-	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5, DecisionThreshold: 0.9}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
+	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s", CheckThreshold: 0.5, DecisionThreshold: 0.9, OwnerThreshold: 0.9}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
 		t.Fatalf("jev defaults: %+v", c.Jev)
 	}
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
@@ -179,6 +179,24 @@ func TestJevDecisionThreshold(t *testing.T) {
 	cfg, err := Load(fixture(t, topConfig, projectConfig))
 	if err != nil || cfg.Jev.DecisionThreshold != 0.9 {
 		t.Fatalf("default decision threshold = %v %v", cfg.Jev.DecisionThreshold, err)
+	}
+}
+
+// owner_threshold loads with a default of 0.9 and is independent of
+// decision_threshold.
+func TestJevOwnerThreshold(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  float64
+	}{{"0.95", 0.95}, {"1", 1}, {"0.4", 0.4}} {
+		cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\nowner_threshold = "+c.value+"\n", projectConfig))
+		if err != nil || cfg.Jev.OwnerThreshold != c.want || cfg.Jev.DecisionThreshold != 0.7 {
+			t.Fatalf("owner_threshold = %s: %+v %v", c.value, cfg.Jev, err)
+		}
+	}
+	cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\n", projectConfig))
+	if err != nil || cfg.Jev.OwnerThreshold != 0.9 || cfg.Jev.DecisionThreshold != 0.7 {
+		t.Fatalf("default owner threshold = %+v %v", cfg.Jev, err)
 	}
 }
 
@@ -442,6 +460,10 @@ func TestInvalid(t *testing.T) {
 		{"jev decision threshold negative", topConfig + "[jev]\ndecision_threshold = -0.1\n", "", "jev.decision_threshold"},
 		{"jev decision threshold above one", topConfig + "[jev]\ndecision_threshold = 1.01\n", "", "jev.decision_threshold"},
 		{"jev decision threshold nan", topConfig + "[jev]\ndecision_threshold = nan\n", "", "jev.decision_threshold"},
+		{"jev owner threshold zero", topConfig + "[jev]\nowner_threshold = 0\n", "", "jev.owner_threshold"},
+		{"jev owner threshold negative", topConfig + "[jev]\nowner_threshold = -0.5\n", "", "jev.owner_threshold"},
+		{"jev owner threshold above one", topConfig + "[jev]\nowner_threshold = 1.2\n", "", "jev.owner_threshold"},
+		{"jev owner threshold nan", topConfig + "[jev]\nowner_threshold = nan\n", "", "jev.owner_threshold"},
 		{"jev unknown key", topConfig + "[jev]\nclassification = true\n", "", "jev.classification"},
 		{"transcribe url scheme", topConfig + "[transcribe]\nurl = 'ftp://whisper.example/v1/audio/transcriptions'\n", "", "transcribe.url"},
 		{"transcribe url relative", topConfig + "[transcribe]\nurl = '/v1/audio/transcriptions'\n", "", "transcribe.url"},

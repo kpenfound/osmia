@@ -1710,8 +1710,14 @@ timeout = "10s"
 # ranking selects a link, above 0 and at most 1. Tune against a versioned model.
 check_threshold = 0.5
 # The confidence at or above which Jev's pick on a decision is binding, above
-# 0 and at most 1. One value serves every decision kind.
+# 0 and at most 1. It serves every decision kind but the owner's own.
 decision_threshold = 0.9
+# The confidence at or above which Jev's pick on one of the owner's own
+# decisions is binding, above 0 and at most 1, independent of
+# decision_threshold: delivery approval, charter proposals and conflicts
+# between charters, an architect's escalation, cancellation and the owner's
+# own objections.
+owner_threshold = 0.9
 # When no check reaches the threshold, run this many highest-scored links.
 # Non-negative integer; 0 (default) runs every check instead.
 check_fallback_picks = 0
@@ -1806,6 +1812,22 @@ reason. When the service refuses the transition a binding pick calls for, the
 item goes to the owner's inbox with Jev's judgment (a discovery as a
 `discovery` entry, an amendment as its amendment card, a finding on the
 delivery card) and Jev is not asked again.
+
+The owner gates (a ratification, an amendment that changes approved intent,
+an escalated question, contested unit or objection) are decided by Jev at
+`[jev] decision_threshold`. The owner's own decisions go through the same gate
+worker at `[jev] owner_threshold` instead: the delivery card (approve as
+presented), a charter proposal (ratify the chief of staff's rule or decline),
+a conflict between charters and an architect's escalation such as a project
+that needs no change (the options the chief of staff wrote), a presented
+cancellation (approve and close or leave the open pull requests as drafts, or
+reject) and the owner's own objection (dismiss or overrule). A binding pick is
+recorded as the ordinary decision with Jev as its decider, actor and judgment,
+and carried out through the owner's own path; a delivery approval pins the
+same review identity and publishes the same text as the owner's. Below the
+threshold the card reaches the owner with Jev's pick as its recommendation.
+Jev never writes text: an option carried out with text is offered only when
+the chief of staff already wrote it.
 
 Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,

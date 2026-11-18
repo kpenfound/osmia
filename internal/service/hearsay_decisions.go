@@ -644,7 +644,11 @@ func (st *publishStream) acceptedFindings() []publishedDecision {
 		review  int
 		finding string
 	}
-	first := map[key]trace.Document{}
+	type accepted struct {
+		doc      trace.Document
+		approval delivery.DeliveryApproval
+	}
+	first := map[key]accepted{}
 	var order []key
 	var approvals []trace.Document
 	for _, d := range st.documents {
@@ -655,26 +659,34 @@ func (st *publishStream) acceptedFindings() []publishedDecision {
 	slices.SortStableFunc(approvals, func(a, b trace.Document) int { return a.Revision - b.Revision })
 	for _, d := range approvals {
 		var approval delivery.DeliveryApproval
-		if json.Unmarshal([]byte(d.Content), &approval) != nil {
+		if json.Unmarshal([]byte(d.Content), &approval) != nil || !trace.ValidDecisionActor(d) {
+			continue
+		}
+		if approval.DecidedBy == trace.DecidedByJev && !jevDecider(approval.DecidedBy, approval.Judgment) {
 			continue
 		}
 		for _, finding := range approval.AcceptedBlocking {
 			k := key{approval.Review, finding}
 			if _, ok := first[k]; !ok {
-				first[k] = d
+				first[k] = accepted{d, approval}
 				order = append(order, k)
 			}
 		}
 	}
 	var out []publishedDecision
 	for _, k := range order {
-		d := first[k]
-		out = append(out, publishedDecision{
+		a := first[k]
+		d := publishedDecision{
 			id: decisionID(string(st.id()), "accepted", fmt.Sprint(k.review), shortHash(k.finding)), by: byOwner, workstream: st.id(),
 			context:  fmt.Sprintf("Final review %d found this blocking: %s", k.review, strings.TrimSpace(k.finding)),
 			outcome:  "Accepted at delivery as it is: " + strings.TrimSpace(k.finding),
 			rejected: []string{"Repair it through a plan revision before delivery"}, rationale: "The owner approved delivery and accepted the finding instead of having it fixed.",
-			created: d.At, updated: d.At})
+			created: a.doc.At, updated: a.doc.At}
+		if a.approval.DecidedBy == trace.DecidedByJev {
+			d.id, d.by, d.judgment = jevID(st.id(), "accepted", fmt.Sprint(k.review), shortHash(k.finding)), byJev, a.approval.Judgment
+			d.rationale = jevNote(a.approval.Judgment, "Jev approved delivery for the owner and accepted the finding instead of having it fixed.")
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -756,6 +768,17 @@ func (st *publishStream) charterDecisions() []publishedDecision {
 		}
 		if note != "" {
 			d.rationale += " Owner's note: " + note
+		}
+		if p.DecidedBy == trace.DecidedByJev {
+			if !jevDecider(p.DecidedBy, p.Judgment) || c.Decided.Actor != trace.JevActor {
+				continue
+			}
+			verb := "ratified"
+			if p.Decision != trace.CharterRatify {
+				verb = "declined"
+			}
+			d.id, d.by, d.judgment = jevID(st.id(), "charter", p.Question), byJev, p.Judgment
+			d.rationale = jevNote(p.Judgment, fmt.Sprintf("Jev %s the proposed rule for the owner.", verb))
 		}
 		out = append(out, d)
 	}

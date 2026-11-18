@@ -367,7 +367,21 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
 }
 
+// ApproveDelivery records the owner's approval to mark the pull request ready
+// for review.
 func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
+	return s.ApproveDeliveryBy(ctx, raw, req, "")
+}
+
+// ApproveDeliveryBy is ApproveDelivery for an approval that may be Jev's: a
+// non-empty judgment names the Jev judgment the approval comes from, and the
+// approval is recorded with Jev as its decider and actor. It pins the same
+// review identity and draft hash as the owner's and takes no edited
+// description or messages.
+func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req DeliveryDecision, judgment string) (DeliveryApproval, *APIError) {
+	if judgment != "" && (req.Description != nil || req.Messages != nil) {
+		return DeliveryApproval{}, &APIError{Code: Validation, Message: "Jev approves the presented description and messages as they are"}
+	}
 	presented, api := s.DeliveryPresentation(ctx, raw)
 	if api != nil {
 		return DeliveryApproval{}, api
@@ -443,6 +457,11 @@ func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req Delive
 	}
 	r := presented.Report
 	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Title: presented.Title, Description: description, DescriptionHash: DescriptionHash(description), Messages: messages, Style: presented.Style, At: s.Now(), AcceptedBlocking: blocking}
+	actor, who := ownerActor, "the owner"
+	if judgment != "" {
+		approval.DecidedBy, approval.Judgment = trace.DecidedByJev, judgment
+		actor, who = trace.JevActor, "Jev, the decision maker for the owner,"
+	}
 	content, err := json.Marshal(approval)
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot encode delivery approval"}
@@ -452,8 +471,10 @@ func (s *Controller) ApproveDelivery(ctx context.Context, raw string, req Delive
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read delivery state"}
 	}
 	id := fmt.Sprintf("delivery-owner-%d", prior.Revision+1)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DeliveryDocument, Revision: prior.Revision + 1, Project: project, Workstream: stream, At: approval.At, Actor: ownerActor, Cause: id}, Path: DeliveryPath, Content: string(content)}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: ownerHeader(id, project, stream, "delivery-approval", approval.At), Subject: DeliverySubject, From: state.Value, To: fmt.Sprintf("approved-%d", prior.Revision+1), Reason: fmt.Sprintf("the owner approved description %s for final review %d at %s", approval.DescriptionHash, approval.Review, approval.Commit)}}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DeliveryDocument, Revision: prior.Revision + 1, Project: project, Workstream: stream, At: approval.At, Actor: actor, Cause: id}, Path: DeliveryPath, Content: string(content)}
+	header := ownerHeader(id, project, stream, "delivery-approval", approval.At)
+	header.Actor = actor
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: header, Subject: DeliverySubject, From: state.Value, To: fmt.Sprintf("approved-%d", prior.Revision+1), Reason: fmt.Sprintf("%s approved description %s for final review %d at %s", who, approval.DescriptionHash, approval.Review, approval.Commit)}}
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return DeliveryApproval{}, &APIError{Code: Conflict, Message: "delivery decision changed; read the current presentation"}

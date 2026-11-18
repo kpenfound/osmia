@@ -977,7 +977,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				for _, m := range presentation.Approval.Messages {
 					fmt.Fprintf(stdout, "\nApproved commit %s:\n%s\n", m.Commit, m.Message)
 				}
-				fmt.Fprintf(stdout, "\nApproved description:\n%s", presentation.Approval.Description)
+				fmt.Fprintf(stdout, "\nApproved description%s:\n%s", decidedByJev(presentation.Approval.DecidedBy), presentation.Approval.Description)
 			}
 			if m := presentation.Merge; m != nil {
 				fmt.Fprintf(stdout, "\nMerged by you outside the factory: %s/%s at %s holds %s at %s\n", m.Upstream.Remote, m.Upstream.Branch, m.Upstream.Commit, m.Branch, m.Commit)
@@ -2180,7 +2180,7 @@ func showCharterProposal(w io.Writer, p wire.CharterProposalView) {
 		fmt.Fprintf(w, "    %s\n", line)
 	}
 	if p.Decision != "" {
-		fmt.Fprintf(w, "  Decision: %s\n", p.Decision)
+		fmt.Fprintf(w, "  Decision: %s%s\n", p.Decision, decidedByJev(p.DecidedBy))
 	}
 	if p.Note != "" {
 		fmt.Fprintf(w, "  Note: %s\n", p.Note)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -538,8 +539,25 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		if c.Reply != "" {
 			text += "\nArchitect: " + c.Reply
 		}
-		if c.Decision != nil {
+		switch {
+		case c.Decision != nil && c.Decision.DecidedBy == trace.DecidedByJev:
+			text += fmt.Sprintf("\nDecided by Jev (judgment %s): %s", c.Decision.Judgment, c.Decision.Decision)
+			if c.Decision.PullRequests != "" {
+				text += ", open PRs " + c.Decision.PullRequests
+			}
+		case c.Decision != nil:
 			text += "\nOwner decision: " + c.Decision.Decision
+		case c.Request.Kind == "cancel":
+			if res, err := jev.Recorded(repository, host, jev.KindCancellation, jev.CancellationKey(c.ID, c.Revision)); err == nil {
+				switch {
+				case res.Status == jev.Nonbinding && res.Deferred:
+					text += "\nJev deferred this decision to you."
+				case res.Status == jev.Nonbinding:
+					text += fmt.Sprintf("\nJev recommends %s with confidence %.2f, below the %.2f it needs to decide.", res.Pick, res.Confidence, res.Threshold)
+				case res.Status == jev.Binding && res.Refused != "":
+					text += fmt.Sprintf("\nJev decided %s with confidence %.2f, but the service refused it: %s. The decision is yours.", res.Pick, res.Confidence, res.Refused)
+				}
+			}
 		}
 		docs, err := trace.Read[trace.Document](repository, host)
 		if err != nil {

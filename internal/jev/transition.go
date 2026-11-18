@@ -268,7 +268,7 @@ func (j *Judge) DecideTransition(ctx context.Context, repo *trace.Repository, re
 	}
 	judgment := Judgment{
 		Scope: scope, Cause: cause, Task: TransitionTask, Version: TransitionVersion,
-		Acceptance: acceptance(threshold), Sources: req.Sources,
+		Acceptance: acceptance("", threshold), Sources: req.Sources,
 		Occurrence: &Occurrence{Kind: TransitionKind, Key: req.Occurrence, Ask: asks, Threshold: threshold},
 		MaxBytes:   MaxDecisionBytes,
 		Request:    systemone.Request{State: req.State, Questions: questions},

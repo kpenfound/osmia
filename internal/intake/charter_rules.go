@@ -28,7 +28,7 @@ const CharterWriteAttempts = 3
 func RenderCharterProposalView(p trace.CharterProposalState, detail string) CharterProposalView {
 	return CharterProposalView{Workstream: p.Workstream, Question: p.Proposal.Question, State: p.State.Value, Rule: p.Proposal.Rule, Number: p.Proposal.Number,
 		Ruling: p.Proposal.Ruling, RulingRevision: p.Proposal.RulingRevision, OwnerResponse: p.Proposal.OwnerResponse, ProposedAt: p.Proposed.At,
-		Decision: p.Proposal.Decision, Note: p.Proposal.Note, Charter: p.Proposal.Charter, Detail: detail}
+		Decision: p.Proposal.Decision, Note: p.Proposal.Note, DecidedBy: p.Proposal.DecidedBy, Judgment: p.Proposal.Judgment, Charter: p.Proposal.Charter, Detail: detail}
 }
 
 // findCharterProposal returns the charter proposal made from question of the
@@ -88,7 +88,9 @@ func (s *Controller) CharterProposals() (CharterProposalsResponse, *APIError) {
 				return CharterProposalsResponse{}, failed
 			}
 			if !gone {
-				out.Proposals = append(out.Proposals, RenderCharterProposalView(p, ""))
+				if view, shown := s.CharterProposalCard(active.Repository, p, RenderCharterProposalView(p, "")); shown {
+					out.Proposals = append(out.Proposals, view)
+				}
 			}
 		}
 	}
@@ -132,7 +134,17 @@ func (s *Controller) DecideCharter(ctx context.Context, raw, question string, re
 // the charter. Deciding a decided proposal the same way again returns it and
 // records nothing; deciding it the other way is refused. Proposals of
 // abandoned workstreams take no decision.
-func (s *Controller) RecordCharterDecision(ctx context.Context, _ config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string) (CharterProposalView, *APIError) {
+func (s *Controller) RecordCharterDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string) (CharterProposalView, *APIError) {
+	return s.RecordCharterDecisionBy(ctx, project, stream, repository, question, req, actor, cause, Deciding{})
+}
+
+// RecordCharterDecisionBy is RecordCharterDecision for a decision that may be
+// Jev's: with a judgment, the decision is written by the Jev actor and names
+// Jev as its decider and the judgment it comes from.
+func (s *Controller) RecordCharterDecisionBy(ctx context.Context, _ config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, question string, req CharterDecisionRequest, actor trace.Actor, cause string, d Deciding) (CharterProposalView, *APIError) {
+	if d.Jev() {
+		actor = trace.JevActor
+	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on the charter proposal of question %s of workstream %s; check the trace repository", question, stream)}
 	decision := strings.TrimSpace(req.Decision)
 	if decision != trace.CharterRatify && decision != trace.CharterDecline {
@@ -158,18 +170,19 @@ func (s *Controller) RecordCharterDecision(ctx context.Context, _ config.Project
 		return CharterProposalView{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no charter proposal for question %s", stream, question)}
 	}
 	if p.State.Value != trace.CharterProposed {
-		if p.Proposal.Decision == decision {
+		if p.Proposal.Decision == decision && !d.Jev() {
 			return RenderCharterProposalView(p, fmt.Sprintf("the owner's decision to %s the charter proposal of question %s is already recorded", decision, question)), nil
 		}
 		return CharterProposalView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the charter proposal of question %s is already decided: %s", question, FeatureState(p.Proposal.Decision))}
 	}
 	next := p.Proposal
 	next.Decision, next.Note = decision, strings.TrimSpace(req.Note)
+	next.DecidedBy, next.Judgment = d.By(), d.Judgment
 	to := trace.CharterRatified
-	reason := fmt.Sprintf("the owner ratified the charter proposal of question %s; the rule is appended to the charter next", question)
+	reason := fmt.Sprintf("%s ratified the charter proposal of question %s; the rule is appended to the charter next", d.Name(), question)
 	if decision == trace.CharterDecline {
 		to = trace.CharterDeclined
-		reason = fmt.Sprintf("the owner declined the charter proposal of question %s; the charter is unchanged", question)
+		reason = fmt.Sprintf("%s declined the charter proposal of question %s; the charter is unchanged", d.Name(), question)
 	}
 	if next.Note != "" {
 		reason += ": " + next.Note

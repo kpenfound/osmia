@@ -25,7 +25,8 @@ const (
 // RoutingRoles are the roles whose questions Jev takes part in routing: the
 // workers that build a feature. A question of any other role, such as the
 // architect's judgment that a project needs no change, is the chief of
-// staff's and the owner's as it always was.
+// staff's to route without Jev; once escalated, Jev decides it at the owner's
+// gate at the owner threshold.
 var RoutingRoles = []string{"mason", "reviewer"}
 
 // RoutingSubject is an open question the chief of staff may route with Jev.
@@ -76,15 +77,15 @@ func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id
 	case q.State != trace.QuestionOpen:
 		return s, fmt.Sprintf("question %s is %s, not open; only an open question is routed", id, q.State), nil
 	case len(q.Asked.CharterConflict) > 0:
-		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner and is not decided with Jev", id), nil
+		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner's gate and the chief of staff does not route it with Jev", id), nil
 	}
 	thread, err := target.Thread(member, q.Asked.AskedBy.ID)
 	if err != nil {
-		return s, fmt.Sprintf("the asker of question %s is unknown; it is not decided with Jev", id), nil
+		return s, fmt.Sprintf("the asker of question %s is unknown; the chief of staff does not route it with Jev", id), nil
 	}
 	s.Role = thread.Identity.Role
 	if !slices.Contains(RoutingRoles, s.Role) {
-		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the chief of staff and the owner decide; it is not decided with Jev", id, s.Role), nil
+		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the chief of staff escalates as it judges and the owner's gate decides; the chief of staff does not route it with Jev", id, s.Role), nil
 	}
 	return s, "", nil
 }

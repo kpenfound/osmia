@@ -472,6 +472,8 @@ func (s *Service) intake() *intake.Controller {
 		Current:                  s.current,
 		DeliveryDocuments:        deliveryDocuments,
 		DeliveryEntry:            s.deliveryEntry,
+		DeliveryGate:             s.deliveryGate,
+		CancellationGates:        s.cancellationGates,
 		DriftEntry:               driftEntry,
 		Effective:                s.effective,
 		FactoryContext:           factoryContext,

@@ -85,7 +85,7 @@ func (g *gateJev) Requests() []systemone.Request {
 // gateJudge is a judge asking p under the default decision threshold, or an
 // unconfigured one when p is nil.
 func gateJudge(now func() time.Time, p *gateJev) *jev.Judge {
-	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "3s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold}
+	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "3s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold, OwnerThreshold: config.DefaultJevOwnerThreshold}
 	j := &jev.Judge{Config: func() config.Jev { return settings }, Getenv: func(string) string { return "" }, Now: now}
 	if p != nil {
 		j.Provider, j.Getenv = p.Factory(), func(string) string { return "key" }

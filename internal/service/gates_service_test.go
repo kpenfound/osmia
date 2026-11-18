@@ -693,23 +693,17 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 	}
 }
 
-// An escalation Jev may not decide is never sent: an architect's question, such
-// as the judgment that a project needs no change, and one with no options the
-// chief of staff wrote are the owner's, and their cards show at once.
-func TestEscalationsJevMayNotDecideAreNeverSent(t *testing.T) {
+// An escalation with no options the chief of staff wrote is never sent: Jev
+// never writes the text of a ruling, so the card shows at once for the owner,
+// whoever asked.
+func TestEscalationsWithoutWrittenOptionsAreNeverSent(t *testing.T) {
 	t.Parallel()
-	for name, c := range map[string]struct {
-		role    string
-		options []string
-	}{
-		"an architect's question": {architectRole, []string{"Keep the project.", "Abandon the hand-in."}},
-		"no written options":      {masonRole, nil},
-	} {
-		t.Run(name, func(t *testing.T) {
+	for _, role := range []string{masonRole, architectRole} {
+		t.Run(role, func(t *testing.T) {
 			t.Parallel()
 			p := &gateJev{confidence: 0.99}
 			f := newGateFixture(t, p)
-			escalate(t, f, c.role, c.options...)
+			escalate(t, f, role)
 			if gates := f.gates(t); len(gates) != 0 {
 				t.Fatalf("gates %+v", gates)
 			}
@@ -721,6 +715,50 @@ func TestEscalationsJevMayNotDecideAreNeverSent(t *testing.T) {
 			}
 			if _, revisions := judgments(t, f.repo, fixturekit.Stream); len(p.Requests()) != 0 || revisions != 0 {
 				t.Fatalf("%d requests, %d judgment revisions", len(p.Requests()), revisions)
+			}
+		})
+	}
+}
+
+// An architect's escalation, such as the judgment that a project needs no
+// change, is one of the owner's own decisions: Jev decides it from the options
+// the chief of staff wrote at the owner threshold, not the decision threshold.
+func TestJevDecidesAnArchitectsEscalationAtTheOwnerThreshold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		owner float64
+		ruled bool
+	}{"at the owner threshold": {0.9, true}, "below it": {0.97, false}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return options[0] }}
+			f := newGateFixture(t, p)
+			settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "3s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: 0.5, OwnerThreshold: c.owner}
+			f.s.jev.Config = func() config.Jev { return settings }
+			escalate(t, f, architectRole, "Keep the project.", "Drop it from the hand-in.")
+			gates := f.gates(t)
+			if len(gates) != 1 || gates[0].Kind != jev.KindArchitectEscalation || len(gates[0].Options) != 2 || gates[0].Options[0].Description != "Keep the project." {
+				t.Fatalf("gates %+v", gates)
+			}
+			f.w.handle(ctx, gates[0])
+			states, err := f.repo.Questions(fixturekit.Stream)
+			must(t, err)
+			_, record, _ := decisionJudgment(t, f.repo, fixturekit.Stream, jev.KindArchitectEscalation, jev.QuestionKey("1"))
+			if record.Occurrence == nil || record.Occurrence.Threshold != c.owner {
+				t.Fatalf("judgment %+v", record)
+			}
+			ruled := states[0].Ruling != nil && states[0].Ruling.DecidedBy == trace.DecidedByJev && states[0].Ruling.OwnerResponse == "Keep the project."
+			if ruled != c.ruled {
+				t.Fatalf("question %+v", states[0])
+			}
+			if !c.ruled {
+				entries, err := f.repo.Inbox()
+				must(t, err)
+				card, open, err := f.s.intake().EscalationCard(f.repo, entries[0], intake.InboxView(entries[0]))
+				if err != nil || !open || card.Jev == nil || card.Jev.Binding || !strings.Contains(card.Recommendation, "Jev recommends Keep the project.") {
+					t.Fatalf("card %+v open %v: %v", card, open, err)
+				}
 			}
 		})
 	}
@@ -811,36 +849,6 @@ func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	w.handle(ctx, *gate)
 	if len(p.Requests()) != 1 {
 		t.Fatalf("requests: %d", len(p.Requests()))
-	}
-}
-
-// Delivery approval is the owner's alone: a workstream that waits for it has
-// no gate Jev may decide, so nothing is sent for it and no judgment is
-// recorded.
-func TestDeliveryApprovalIsNeverAGateForJev(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, _ := deliveryFixture(t)
-	defer f.stop(t)
-	inbox, api := f.s.inbox(context.Background())
-	if api != nil {
-		t.Fatal(api)
-	}
-	delivery := 0
-	for _, e := range inbox.Entries {
-		if e.Kind == InboxDelivery && e.Workstream == stream {
-			delivery++
-		}
-	}
-	if delivery != 1 {
-		t.Fatalf("delivery cards: %+v", inbox.Entries)
-	}
-	gates, err := f.s.intake().ReachedGates(context.Background(), &intake.Project{ID: repository.Project(), Repository: repository})
-	must(t, err)
-	if len(gates) != 0 {
-		t.Fatalf("gates of a delivery waiting for approval: %+v", gates)
-	}
-	if _, revisions := judgments(t, repository, stream); revisions != 0 {
-		t.Fatalf("%d judgment revisions", revisions)
 	}
 }
 

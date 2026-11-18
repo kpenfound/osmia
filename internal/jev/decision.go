@@ -21,8 +21,8 @@ import (
 // judgment task name and version.
 type DecisionKind string
 
-// The decision kinds: the owner gates Jev decides, and the chief of staff's
-// decisions.
+// The decision kinds: the owner gates Jev decides, the owner's own decisions
+// Jev decides at the owner threshold, and the chief of staff's decisions.
 const (
 	KindRatification       DecisionKind = "ratification"
 	KindIntentAmendment    DecisionKind = "intent-amendment"
@@ -35,29 +35,47 @@ const (
 	KindPlanAmendment      DecisionKind = "plan-amendment"
 	KindDiscovery          DecisionKind = "discovery-disposition"
 	KindTriage             DecisionKind = "final-review-triage"
+
+	KindDeliveryApproval    DecisionKind = "delivery-approval"
+	KindCharterProposal     DecisionKind = "charter-proposal"
+	KindCharterConflict     DecisionKind = "charter-conflict"
+	KindArchitectEscalation DecisionKind = "architect-escalation"
+	KindOwnerObjection      DecisionKind = "owner-objection"
+	KindCancellation        DecisionKind = "cancellation"
 )
 
 // kindSpec is what a kind's judgments ask. Bump version whenever the
 // instructions, the meaning of the options or the acceptance rule changes;
-// decisions recorded under the old version stay as they were.
+// decisions recorded under the old version stay as they were. An owner kind
+// is one of the owner's own decisions, binding at [jev] owner_threshold
+// rather than decision_threshold.
 type kindSpec struct {
 	version      int
 	instructions string
+	owner        bool
 }
 
 var kinds = map[DecisionKind]kindSpec{
 	KindRatification: {1, "The state is a ratification packet of a feature the factory drafted: the spec and plan revisions, what the committee objected to and how those objections stand. " +
-		"Should the owner's ratification be given, so the feature is built as drafted? Choose ratify only when nothing in the packet needs the owner's attention."},
-	KindIntentAmendment:    {1, "The state is an amendment request that changes the approved intent of a feature, with the debate about it. Choose whether to approve or decline it."},
-	KindEscalatedQuestion:  {1, "The state is a question the chief of staff escalated to the owner, with the options the chief wrote and its evidence. Choose the option the owner would choose."},
-	KindEscalatedContest:   {1, "The state is a unit of work contested after repeated failed attempts, escalated to the owner with the options its card offers. Choose the option the owner would choose."},
-	KindEscalatedObjection: {1, "The state is a committee objection escalated to the owner at the ratification gate, with the options its card offers. Choose the option the owner would choose."},
-	KindQuestionRouting:    {1, "The state is a question a worker asked while building a feature, with the chief of staff's evidence. Choose how it is routed: answered within the approved intent, routed as an amendment, or escalated to the owner."},
-	KindContestedRuling:    {1, "The state is a contested unit of work, with the chief of staff's evidence. Choose how the chief of staff rules: review again, revise the unit, or escalate to the owner."},
-	KindObjection:          {1, "The state is a committee objection to the spec or plan, with the chief of staff's evidence. Choose whether the chief dismisses it or escalates it to the owner."},
-	KindPlanAmendment:      {1, "The state is an amendment request that leaves the approved intent unchanged, with the debate about it. Choose whether to approve or decline it."},
-	KindDiscovery:          {1, "The state is a piece of work a worker discovered during a feature. Choose its disposition: assign it to a unit, decline it, or retain it as a suggestion."},
-	KindTriage:             {1, "The state is one blocking finding of a final review, with the chief of staff's evidence. Choose whether it needs code in the revision or is left to the owner."},
+		"Should the owner's ratification be given, so the feature is built as drafted? Choose ratify only when nothing in the packet needs the owner's attention.", false},
+	KindIntentAmendment:    {1, "The state is an amendment request that changes the approved intent of a feature, with the debate about it. Choose whether to approve or decline it.", false},
+	KindEscalatedQuestion:  {1, "The state is a question the chief of staff escalated to the owner, with the options the chief wrote and its evidence. Choose the option the owner would choose.", false},
+	KindEscalatedContest:   {1, "The state is a unit of work contested after repeated failed attempts, escalated to the owner with the options its card offers. Choose the option the owner would choose.", false},
+	KindEscalatedObjection: {1, "The state is a committee objection escalated to the owner at the ratification gate, with the options its card offers. Choose the option the owner would choose.", false},
+	KindQuestionRouting:    {1, "The state is a question a worker asked while building a feature, with the chief of staff's evidence. Choose how it is routed: answered within the approved intent, routed as an amendment, or escalated to the owner.", false},
+	KindContestedRuling:    {1, "The state is a contested unit of work, with the chief of staff's evidence. Choose how the chief of staff rules: review again, revise the unit, or escalate to the owner.", false},
+	KindObjection:          {1, "The state is a committee objection to the spec or plan, with the chief of staff's evidence. Choose whether the chief dismisses it or escalates it to the owner.", false},
+	KindPlanAmendment:      {1, "The state is an amendment request that leaves the approved intent unchanged, with the debate about it. Choose whether to approve or decline it.", false},
+	KindDiscovery:          {1, "The state is a piece of work a worker discovered during a feature. Choose its disposition: assign it to a unit, decline it, or retain it as a suggestion.", false},
+	KindTriage:             {1, "The state is one blocking finding of a final review, with the chief of staff's evidence. Choose whether it needs code in the revision or is left to the owner.", false},
+
+	KindDeliveryApproval: {1, "The state is the owner's delivery card for an assembled feature: the final review's findings, the check result, the chief of staff's delivery brief and the pull request text the service will publish. " +
+		"Should the owner mark the pull request ready for review with exactly that text? Choose approve only when nothing on the card needs the owner's attention.", true},
+	KindCharterProposal:     {1, "The state is a rule the chief of staff proposed for the project's charter from an owner ruling, with the charter as it stands. Choose whether the owner ratifies the rule as written or declines it.", true},
+	KindCharterConflict:     {1, "The state is a conflict between the charters of the projects a feature touches, put to the owner with the options the card offers. Choose the option the owner would choose.", true},
+	KindArchitectEscalation: {1, "The state is a question the architect raised and the chief of staff escalated to the owner, such as the judgment that a selected project needs no change, with the options the chief wrote. Choose the option the owner would choose.", true},
+	KindOwnerObjection:      {1, "The state is an objection the owner raised to the spec or plan, standing at the ratification gate, with the debate about it. Choose how the owner disposes of it now: dismiss it, or overrule it and proceed.", true},
+	KindCancellation:        {1, "The state is the impact summary of cancelling a workgroup or one of its member workstreams: what happens to each workstream and to its open pull requests. Choose the option the owner would choose.", true},
 }
 
 // Kinds returns the decision kinds in a fixed order.
@@ -78,6 +96,10 @@ func (k DecisionKind) Task() string { return "decide-" + string(k) }
 
 // Version is the judgment version of k's task.
 func (k DecisionKind) Version() int { return kinds[k].version }
+
+// Owner reports whether k is one of the owner's own decisions, binding at the
+// owner threshold.
+func (k DecisionKind) Owner() bool { return kinds[k].owner }
 
 // Occurrence identifies the one subject occurrence a decision judgment
 // belongs to, within its workstream: a decision kind and the subject's key.
@@ -103,6 +125,19 @@ func ObjectionKey(id string) string { return "objection:" + id }
 func DiscoveryKey(id string) string { return "discovery:" + id }
 func FindingKey(review int, finding string) string {
 	return fmt.Sprintf("finding:review-%d:%s", review, finding)
+}
+func CharterKey(question string) string { return "charter:" + question }
+
+// DeliveryKey is the occurrence of one delivery card: the final review, its
+// revision, the reviewed commit and the draft's hash it pins.
+func DeliveryKey(review, revision int, commit, draft string) string {
+	return fmt.Sprintf("delivery:review-%d:revision-%d:%s:%s", review, revision, commit, draft)
+}
+
+// CancellationKey is the occurrence of one cancellation's impact summary at the
+// revision it was presented.
+func CancellationKey(change string, revision int) string {
+	return fmt.Sprintf("cancellation:%s:revision-%d", change, revision)
 }
 
 // maxOccurrenceKey bounds an occurrence key.
@@ -217,10 +252,33 @@ func (j *Judge) threshold() float64 {
 // binding.
 func (j *Judge) DecisionThreshold() float64 { return j.threshold() }
 
-// acceptance is the acceptance value a decision judgment records: the
+// OwnerThreshold is the configured [jev] owner_threshold, or its default while
+// the setting is out of range: the probability a pick on one of the owner's
+// own decisions needs to be binding.
+func (j *Judge) OwnerThreshold() float64 {
+	if t := j.Config().OwnerThreshold; t > 0 && t <= 1 {
+		return t
+	}
+	return config.DefaultJevOwnerThreshold
+}
+
+// Threshold is the probability a pick of kind needs to be binding: the owner
+// threshold for the owner's own decisions, the decision threshold otherwise.
+func (j *Judge) Threshold(kind DecisionKind) float64 {
+	if kind.Owner() {
+		return j.OwnerThreshold()
+	}
+	return j.threshold()
+}
+
+// acceptance is the acceptance value a decision judgment of kind records: the
 // threshold in force.
-func acceptance(threshold float64) string {
-	return "decision_threshold=" + strconv.FormatFloat(threshold, 'g', -1, 64)
+func acceptance(kind DecisionKind, threshold float64) string {
+	name := "decision_threshold="
+	if kind.Owner() {
+		name = "owner_threshold="
+	}
+	return name + strconv.FormatFloat(threshold, 'g', -1, 64)
 }
 
 // recorded is one judgment record of an occurrence at its latest revision.
@@ -375,7 +433,7 @@ func lockOccurrence(repo *trace.Repository, stream config.WorkstreamID, kind Dec
 // binding pick or nonbinding answer is returned as recorded, whatever the
 // request, model or threshold are now, and after a restart. Only an occurrence
 // with no result sends a request, and the pick is binding when its confidence
-// reaches the global decision threshold. Every failure is a recorded
+// reaches the threshold of its kind. Every failure is a recorded
 // fallback, never a pick, and a later ask of the same occurrence asks Jev
 // again. It must not run on the scheduling path.
 func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req DecisionRequest) Result {
@@ -404,7 +462,7 @@ func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req Decision
 			asks++
 		}
 	}
-	threshold := j.threshold()
+	threshold := j.Threshold(req.Kind)
 	options, err := decisionOptions(req.Options)
 	if err != nil {
 		return fallback(ReasonRejected, err.Error())
@@ -436,7 +494,7 @@ func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req Decision
 		Depth:      req.Depth,
 		Task:       req.Kind.Task(),
 		Version:    spec.version,
-		Acceptance: acceptance(threshold),
+		Acceptance: acceptance(req.Kind, threshold),
 		Sources:    req.Sources,
 		Occurrence: &Occurrence{Kind: string(req.Kind), Key: req.Occurrence, Ask: asks, Threshold: threshold},
 		MaxBytes:   MaxDecisionBytes,

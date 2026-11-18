@@ -4235,10 +4235,19 @@
           "charter": {
             "type": "integer"
           },
+          "decided_by": {
+            "type": "string"
+          },
           "decision": {
             "type": "string"
           },
           "detail": {
+            "type": "string"
+          },
+          "jev": {
+            "$ref": "#/components/schemas/InboxJev"
+          },
+          "judgment": {
             "type": "string"
           },
           "note": {
@@ -4937,6 +4946,10 @@
           "model": {
             "type": "string"
           },
+          "owner_threshold": {
+            "format": "double",
+            "type": "number"
+          },
           "timeout": {
             "type": "string"
           },
@@ -5427,6 +5440,9 @@
           "commit": {
             "type": "string"
           },
+          "decided_by": {
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
@@ -5434,6 +5450,9 @@
             "type": "string"
           },
           "draft_hash": {
+            "type": "string"
+          },
+          "judgment": {
             "type": "string"
           },
           "messages": {

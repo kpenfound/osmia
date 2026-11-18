@@ -44,7 +44,8 @@ func CharterProposalID(question string) string   { return "charter_" + question 
 // questions/<n>/charter.json. Revision 1 is the chief of staff's proposal:
 // the rule text, the number the rule would take in the charter as it was
 // then, and the source ruling, its record path, revision and the owner's
-// words. The owner's decision adds Decision and Note. A ratified proposal's
+// words. The owner's decision adds Decision and Note, and a decision Jev
+// made for the owner also DecidedBy "jev" and its Judgment. A ratified proposal's
 // last revision adds the number the rule took and Charter, the charter.md
 // revision that records it.
 type CharterProposal struct {
@@ -60,6 +61,8 @@ type CharterProposal struct {
 	Number           int                 `json:"number"`
 	Decision         string              `json:"decision,omitempty"`
 	Note             string              `json:"note,omitempty"`
+	DecidedBy        string              `json:"decided_by,omitempty"`
+	Judgment         string              `json:"judgment,omitempty"`
 	Charter          int                 `json:"charter,omitempty"`
 }
 
