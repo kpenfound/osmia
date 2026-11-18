@@ -130,12 +130,16 @@ const (
 	// AuthorityJevGate is one of Jev's existing gate decisions. The exit is a
 	// pinned move.
 	AuthorityJevGate = trace.DecidedByJevGate
+	// AuthorityChief is a move or ruling of the chief of staff, which works
+	// outside the loop. The exit is a pinned move for every target but an
+	// owner gate and approval, which it never authorises.
+	AuthorityChief = trace.DecidedByChief
 )
 
-// Authority is the authority an exit carries for a reserved target. Only a
-// reviewer verdict, the owner or one of Jev's existing gate decisions
-// authorise one; nothing else does, so a chief proposal and a decide-transition
-// answer carry none.
+// Authority is the authority an exit carries. Only a reviewer verdict, the
+// owner or one of Jev's existing gate decisions authorise a reserved target; a
+// chief of staff's move pins any other target, and a decide-transition answer
+// carries none.
 type Authority struct {
 	Kind string
 	// Target is the target the authority authorises. A pinned move enters it
@@ -155,7 +159,7 @@ type Authority struct {
 
 // pinned reports whether the authority makes the exit a pinned move.
 func (a *Authority) pinned() bool {
-	return a != nil && (a.Kind == AuthorityOwner || a.Kind == AuthorityJevGate)
+	return a != nil && (a.Kind == AuthorityOwner || a.Kind == AuthorityJevGate || a.Kind == AuthorityChief)
 }
 
 // Entry is one record of an exit's evidence: the kind of record, its ID and
@@ -329,7 +333,7 @@ func (x Exit) validate() error {
 	}
 	if a := x.Authority; a != nil {
 		switch {
-		case a.Kind != AuthorityReviewer && a.Kind != AuthorityOwner && a.Kind != AuthorityJevGate:
+		case a.Kind != AuthorityReviewer && a.Kind != AuthorityOwner && a.Kind != AuthorityJevGate && a.Kind != AuthorityChief:
 			return fmt.Errorf("%q is not an authority", a.Kind)
 		case !seen[a.Target]:
 			return fmt.Errorf("the authorised target %q is not among the targets", a.Target)

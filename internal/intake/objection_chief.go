@@ -247,6 +247,9 @@ func (s *Controller) objectionExit(repository *trace.Repository, stream config.W
 	}
 	if req.Judgment != "" {
 		x.Authority = &router.Authority{Kind: router.AuthorityJevGate, Target: def, Judgment: req.Judgment}
+	} else {
+		// The chief of staff's own decision is entered as it made it.
+		x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: def}
 	}
 	return x, nil
 }
@@ -254,9 +257,8 @@ func (s *Controller) objectionExit(repository *trace.Repository, stream config.W
 // DecideObjection records the chief of staff's decision on one committee
 // objection that stands at the workstream's ratification gate: dismissed on
 // the owner's behalf, or escalated to the owner. It is refused as
-// ObjectionSubject describes. A decision is an exit the router decides: Jev's
-// binding pick is entered as it was picked, and the chief of staff's own
-// decision is entered unless Jev's answers depart from it. A non-empty
+// ObjectionSubject describes. A decision is a pinned move: Jev's binding pick
+// and the chief of staff's own decision are each entered as they were made. A non-empty
 // Judgment is the Jev judgment record whose binding pick the decision carries
 // out; the decision then names Jev as its decider and the judgment as its
 // source. A decision the router holds records nothing.

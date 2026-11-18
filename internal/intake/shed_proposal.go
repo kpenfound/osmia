@@ -104,7 +104,10 @@ func (s *Controller) ShedProposalExit(raw string, in ShedProposal) (router.Exit,
 		Subject: OwnerSubject, From: o.Owner.Value, Version: o.Owner.Version,
 		Trigger: TriggerMoveProposal, Cause: cause, Actor: in.Actor, Note: note, Turn: in.Turn, At: in.At, Proposed: name,
 		Default: TargetWait, Targets: []router.Target{stay, asked},
-		Questions: []router.Question{ask("proposal_fits", "The proposed move fits the evidence."), ask("evidence_supports", "The history and the standing dissent support the move.")},
+		// The chief of staff's proposal is its own decision: the router enters
+		// the redraft or the round it asks for, after the prerequisites.
+		Authority:    &router.Authority{Kind: router.AuthorityChief, Target: name},
+		Questions:    []router.Question{ask("proposal_fits", "The proposed move fits the evidence."), ask("evidence_supports", "The history and the standing dissent support the move.")},
 		TransitionID: func(t router.Target) string { return cause + "-" + t.Name },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {
 			return router.Effect{Reason: fmt.Sprintf("workstream %s stays where it is: the proposal to ask for %s was not made: %s", stream, name, note)}, nil

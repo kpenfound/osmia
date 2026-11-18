@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,11 @@ import (
 // Upstream names the drift rebase whose upstream change the requesting turn
 // read, when it read one.
 type AmendmentRequest struct {
-	QuestionID   string
+	QuestionID string
+	// Workstream names the member a chief of staff's revision without a
+	// question is for: another member sharing its chief of staff. Empty is the
+	// chief's own workstream.
+	Workstream   config.WorkstreamID
 	Citations    []string
 	Change       string
 	Reason       string
@@ -189,6 +194,29 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			return AmendmentOutcome{}, err
 		}
 		req.QuestionID = localID
+		member = target.stream
+		log, v, err = target.loadWorkflow(member)
+		if err != nil {
+			target.mu.Unlock()
+			return AmendmentOutcome{}, err
+		}
+		records, _, err = target.scan()
+		if err != nil {
+			target.mu.Unlock()
+			return AmendmentOutcome{}, err
+		}
+	} else if scope.Role == ChiefOfStaff && req.Workstream != "" && req.Workstream != host {
+		members, err := r.WorkgroupMembers(host)
+		if err != nil {
+			return AmendmentOutcome{}, err
+		}
+		if !slices.Contains(members, req.Workstream) {
+			return AmendmentOutcome{}, refused("workstream %s does not share this chief of staff", req.Workstream)
+		}
+		target, turn, err = r.chiefTurnOn(ctx, agent, scope, req.Workstream, at)
+		if err != nil {
+			return AmendmentOutcome{}, err
+		}
 		member = target.stream
 		log, v, err = target.loadWorkflow(member)
 		if err != nil {

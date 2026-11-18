@@ -193,16 +193,15 @@ func TestApprovingARecoveryCardWhileALimitStandsIsRefused(t *testing.T) {
 			t.Parallel()
 			m := newMoveFixture(t, "recovery-limit-"+strings.NewReplacer(" ", "-").Replace(limit))
 			openRuntime(t, m.f, m.stream)
-			// Jev finds that the proposal would change what the owner approved and
-			// that a fresh review fits, so the move waits on the recovery card.
-			p := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
-				r := jevfixture.Departs(a, UnitReviewing, 0.9, 0.9)
-				r.Intent = 0.95
-				return r
-			}}
+			// The owner holds the unit, so the chief of staff's move out of that
+			// contest waits on the recovery card.
+			p := &jevfixture.Transitions{}
 			m.f.s.router.Judge = jevfixture.TransitionJudge(m.f.clock.Now, p)
-			if out := m.moveUnit(t, `{"unit":"resume","to":"checking","note":"Run the checks again."}`); !strings.Contains(out, "pending as an owner decision on the recovery card") {
-				t.Fatalf("the proposal: %s", out)
+			if _, e := m.f.s.ownerMove(context.Background(), string(m.stream), "resume", UnitMoveRequest{To: UnitContested, Note: "Hold it while I look."}); e != nil {
+				t.Fatal(e.Message)
+			}
+			if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, "pending as an owner decision on the recovery card") {
+				t.Fatalf("the chief's move: %s", out)
 			}
 			cards := recoveryEntriesOf(t, m.f.s, m.repo, m.stream)
 			if len(cards) != 1 || cards[0].Recovery == nil || cards[0].Recovery.Target != UnitReviewing {

@@ -41,7 +41,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	}
 	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.defaultState()}
 	// A decider that has no judgment, such as a fallback, cites none.
-	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner {
+	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner && d.decidedBy != trace.DecidedByChief {
 		routing.Judgment = d.judgment
 	}
 	reason := target.Reason

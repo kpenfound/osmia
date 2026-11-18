@@ -165,10 +165,9 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	}
 }
 
-// The chief of staff's proposal to move between building and assembled is not a
-// gate: the router judges it, and with a Jev that finds the default fits it
-// commits the move as the tool always did and records the default it took.
-func TestAChiefProposalToBuildingIsJudgedAndCommitsItsDefault(t *testing.T) {
+// The chief of staff's move between building and assembled is a pinned move:
+// the router commits it with the chief of staff as the decider.
+func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "route-chief-building")
 	hostFinalReviews(t, f, stream)
@@ -188,7 +187,7 @@ func TestAChiefProposalToBuildingIsJudgedAndCommitsItsDefault(t *testing.T) {
 			feature = tr
 		}
 	}
-	if feature.DecidedBy != trace.DecidedByCode || feature.DefaultTo != BuildingState || feature.Departed() {
+	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != BuildingState || feature.Departed() {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
 	rec, ok := routeOf(t, repository, stream, "ws.move_proposal")

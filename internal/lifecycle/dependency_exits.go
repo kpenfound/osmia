@@ -306,6 +306,10 @@ type dependencyCase struct {
 // ended.
 const ownerEnded = "owner"
 
+// chiefEnded is the waiver's Ended for a dependency the chief of staff dropped
+// before it ended.
+const chiefEnded = trace.ChiefOfStaff
+
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
 
 // dependencyExit returns the exit about one dependency. When the upstream ended
@@ -392,6 +396,8 @@ func (c dependencyCase) evidence() string {
 		return "its pull request was closed without merging"
 	case c.Ended == ownerEnded:
 		return "the owner dropped it"
+	case c.Ended == chiefEnded:
+		return "the chief of staff dropped it"
 	}
 	return "it was abandoned without being delivered"
 }
@@ -636,6 +642,12 @@ func (s *Controller) DropDependency(ctx context.Context, raw string, req DropDep
 // DropDependencyOf is DropDependency for a workstream whose project and trace
 // are known.
 func (s *Controller) DropDependencyOf(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repo *trace.Repository, req DropDependencyRequest) (DropDependencyResponse, *APIError) {
+	return s.dropDependency(ctx, project, stream, repo, req, ownerActor, &router.Authority{Kind: router.AuthorityOwner, Target: DependencyWaived, Ref: "owner request to drop the dependency"})
+}
+
+// dropDependency drops the dependency with the decision of actor, which
+// authority carries: the owner's, or the chief of staff's own.
+func (s *Controller) dropDependency(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repo *trace.Repository, req DropDependencyRequest, actor trace.Actor, authority *router.Authority) (DropDependencyResponse, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot drop the dependency of workstream %s; check the trace repository", stream)}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -644,8 +656,11 @@ func (s *Controller) DropDependencyOf(ctx context.Context, project config.Projec
 	if feature.Value == AbandonedState {
 		return DropDependencyResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was abandoned", stream)}
 	}
-	c := dependencyCase{Upstream: req.Upstream, Type: req.Type, Trigger: TriggerUpstreamTerminal, Cause: "owner-drop", Ended: ownerEnded, Actor: ownerActor,
-		Authority: &router.Authority{Kind: router.AuthorityOwner, Target: DependencyWaived, Ref: "owner request to drop the dependency"}}
+	cause, ended := "owner-drop", ownerEnded
+	if authority.Kind == router.AuthorityChief {
+		cause, ended = "chief-drop", chiefEnded
+	}
+	c := dependencyCase{Upstream: req.Upstream, Type: req.Type, Trigger: TriggerUpstreamTerminal, Cause: cause, Ended: ended, Actor: actor, Authority: authority}
 	if dependency, err := repo.WorkstreamBase(stream); err != nil {
 		return DropDependencyResponse{}, failed
 	} else if dependency.Base != "" && dependency.Base == req.Upstream && (req.Type == "" || req.Type == BaseEdgeType) {

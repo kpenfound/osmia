@@ -32,12 +32,6 @@ var WorkstreamMoveTargets = []string{
 
 	SketchedState, InShedState, RatifiedState, BuildingState, AssembledState, DeliveredState, AbandonedState}
 
-// ChiefMoveTargets are the feature states a proposal of the chief of staff
-// moves a workstream to by default. A proposal of any other move, a redraft,
-// another round of debate or a return to delivered, leaves the workstream where
-// it is by default, and Jev may depart from that at the strict bar.
-var ChiefMoveTargets = []string{BuildingState, AssembledState}
-
 func WorkstreamMovePath(n int) string {
 	return fmt.Sprintf("moves/move-%d.json", n)
 }
@@ -400,19 +394,20 @@ func (s *Controller) OwnerMoveWorkstream(ctx context.Context, raw string, req Wo
 }
 
 // MoveWorkstream returns the move_workstream tool of one claimed
-// chief-of-staff turn. The chief of staff proposes a move of its workstream and
-// the transition router decides it: the result says whether the workstream
-// moved, stays where it is, is held, or has a pending owner decision on a card.
+// chief-of-staff turn. The chief of staff's move is its own decision, which the
+// router enters after the hard prerequisites; ratification and abandonment are
+// owner gates that wait on a card. The result says whether the workstream moved
+// or what holds it.
 // In a turn answering the owner, it records the owner's own move. A move that is
 // not made is an ordinary result, {"recorded":false,"reason":...}, which says
 // what became of it. A shared chief of staff names the member that moves.
 func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Propose moving this workstream to another feature state when the state machine leaves it stuck or wrong. The service routes the proposal and the result says what happened: the workstream moved, it stays where it is, the move is held with Jev's view sent to you, or the move belongs to the owner and is pending on a card. " +
-		"to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land, so file the revision that repairs it next), " +
+	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Move this workstream to another feature state when the state machine leaves it stuck or wrong. The move is your decision: the service makes it unless a hard prerequisite refuses it (a landing, rebase or publication in flight, a pause or the budget), and the result says what happened. " +
+		"to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land; route_amendment reopens the workstream itself, so you rarely need this move), " +
 		"assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " +
 		"sketched (the architect redrafts the spec and the plan with the note, once debate concluded), in-shed (one more round of debate, once debate concluded), delivered (return a reopened workstream whose branch is unchanged since its pull request was published), " +
 		"or ratified and abandoned, which are the owner's decisions: the proposal waits as a pending owner decision on a card. " +
-		"Reopening after final reviews found blocking problems the maximum number of times, a redraft, another round and a return to delivered leave the workstream where it is by default; put the evidence in the note and Jev decides whether it supports the move. " +
+
 		"A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. Report to the owner what the result says happened. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["to","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -475,4 +470,61 @@ func WorkstreamMoveResult(out WorkstreamMoveResponse, api *APIError) (json.RawMe
 		State    string `json:"state"`
 		Detail   string `json:"detail"`
 	}{true, out.State, out.Detail})
+}
+
+// ReopenForRevision wraps the chief of staff's route_amendment tool: a revision
+// filed without a question for an assembled workstream, or a delivered one
+// whose pull request is open, first reopens that workstream to building on its
+// existing feature branch as the chief of staff's own move, so the revision's
+// units can be built. The result names the reopening.
+func (c *Controls) ReopenForRevision(repository *trace.Repository, scope coreadapter.Scope, route coreadapter.Tool) coreadapter.Tool {
+	inner := route.Handle
+	route.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input struct {
+			Question   string              `json:"question"`
+			Workstream config.WorkstreamID `json:"workstream"`
+			Reason     string              `json:"reason"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil || input.Question != "" {
+			return inner(ctx, raw)
+		}
+		s := c.Load()
+		if s == nil {
+			return inner(ctx, raw)
+		}
+		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		if err != nil || refusal != "" {
+			return inner(ctx, raw)
+		}
+		feature, err := target.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return nil, err
+		}
+		reopened := ""
+		if feature.Value == AssembledState || feature.Value == DeliveredState {
+			note := "Reopened so the revision the chief of staff commissioned can be built"
+			if r := strings.TrimSpace(input.Reason); r != "" {
+				note += ": " + r
+			}
+			out, api := s.MoveWorkstream(ctx, target, stream, WorkstreamMoveRequest{To: BuildingState, Note: note}, chiefActor, scope.Turn)
+			if api != nil {
+				if api.Code == Internal {
+					return nil, errors.New(api.Message)
+				}
+				return priorityRefusal("the workstream could not be reopened for the revision: " + api.Message)
+			}
+			reopened = out.Detail
+		}
+		result, err := inner(ctx, raw)
+		if err != nil || reopened == "" {
+			return result, err
+		}
+		var fields map[string]any
+		if json.Unmarshal(result, &fields) != nil {
+			return result, nil
+		}
+		fields["reopened"] = reopened
+		return json.Marshal(fields)
+	}
+	return route
 }

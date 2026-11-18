@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -124,9 +125,12 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 	properties := `"citations":{"type":"array","items":{"type":"string"}},"change":{"type":"string"},"reason":{"type":"string"}`
 	required := `"citations","change","reason"`
 	if routed {
-		properties = `"question":{"type":"string"},` + properties
+		properties = `"question":{"type":"string"},"workstream":{"type":"string"},` + properties
 	}
 	description := "Request a revised plan or spec against spec#<n> and/or plan#<unit> citations. A chief may omit question to commission replanning or bounded investigation for discovered work. Give the proposed change and reason. The request is recorded; end this turn when accepted."
+	if routed {
+		description = "Commission a revised plan or spec against spec#<n> and/or plan#<unit> citations of a workstream: the architect drafts it and the committee examines it before it is decided. Name a question to route it, or omit question to commission replanning, new units or bounded investigation for discovered work on any member at any time, including a building workstream whose units have all merged, an assembled one or a delivered one whose pull request is open; workstream names the member, the turn's own by default, and citations resolve against that member's documents. Give the proposed change and reason."
+	}
 	next := "End your turn now. The request is with the chief of staff."
 	if move != nil {
 		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
@@ -137,10 +141,11 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + properties + `},"required":[` + required + `],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Question  string   `json:"question"`
-			Citations []string `json:"citations"`
-			Change    string   `json:"change"`
-			Reason    string   `json:"reason"`
+			Question   string   `json:"question"`
+			Workstream string   `json:"workstream"`
+			Citations  []string `json:"citations"`
+			Change     string   `json:"change"`
+			Reason     string   `json:"reason"`
 		}
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
@@ -166,6 +171,16 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			} else if why != "" {
 				return encode(refusal{Reason: why})
 			}
+		}
+		if routed && input.Question == "" && input.Workstream != "" {
+			members, err := repository.WorkgroupMembers(stream)
+			if err != nil {
+				return refuse(err)
+			}
+			if !slices.Contains(members, config.WorkstreamID(input.Workstream)) {
+				return encode(refusal{Reason: fmt.Sprintf("workstream %s does not share this chief of staff", input.Workstream)})
+			}
+			target = config.WorkstreamID(input.Workstream)
 		}
 		if len(input.Citations) == 0 {
 			return encode(refusal{Reason: "at least one spec#<n> or plan#<unit> citation is required"})
@@ -237,7 +252,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 				change = strings.TrimSpace(change) + "\n\n" + followup.RevisionText(pending)
 			}
 		}
-		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
+		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Workstream: workstreamFor(input.Question, target), Citations: input.Citations, Change: change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
 		var refused *trace.QuestionRefused
 		if errors.As(err, &refused) && bound != nil && strings.TrimSpace(input.Change) != "" && strings.TrimSpace(input.Reason) != "" {
 			return hand(refused.Reason, err)
@@ -457,4 +472,13 @@ func decodeInput(raw json.RawMessage, into any) error {
 		return errors.New("tool input must be one object")
 	}
 	return nil
+}
+
+// workstreamFor names the member a revision without a question is filed for;
+// a routed question names its own.
+func workstreamFor(question string, target config.WorkstreamID) config.WorkstreamID {
+	if question != "" {
+		return ""
+	}
+	return target
 }

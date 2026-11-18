@@ -359,6 +359,7 @@ func (r *reviewers) applyBounceRuling(ctx context.Context, scheduled bool, strea
 // router. A ruling the router did not enter is a conflict.
 func (s *Controller) routeRuling(ctx context.Context, scheduled bool, in UnitExitInput, ruling ContestedRuling) *APIError {
 	in.Trigger = TriggerChiefRuling
+	in.Authority = &router.Authority{Kind: router.AuthorityChief, Target: in.Default}
 	switch ruling.By {
 	case "", "owner":
 		in.Trigger, in.Authority = TriggerOwnerRuling, &router.Authority{Kind: router.AuthorityOwner, Target: in.Default}

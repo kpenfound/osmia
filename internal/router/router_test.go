@@ -1148,3 +1148,40 @@ func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
 		}
 	})
 }
+
+// A chief of staff's move is a pinned move for an ordinary target: the router
+// commits exactly it, with no request, and records the chief of staff as the
+// decider. It never authorises an owner gate or approval: such a target is
+// refused and nothing runs.
+func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
+	f := newFx(t, &jevfixture.Transitions{})
+	f.seed("checking")
+	f.track("implementing")
+	x := f.exit()
+	x.Trigger, x.Default = "unit.move_proposal", "implementing"
+	x.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: "implementing"}
+	res := route(t, f, x)
+	if !res.Committed || res.State != "implementing" || res.Outcome != "followed" || res.Rule != "pinned" || f.ran("implementing") != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if n := len(f.provider.Requests()); n != 0 {
+		t.Fatalf("a chief move made %d requests", n)
+	}
+	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByChief || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
+		t.Fatalf("transition = %+v", m)
+	}
+
+	for _, target := range []string{"abandoned", "approved"} {
+		g := newFx(t, &jevfixture.Transitions{})
+		g.seed("checking")
+		g.track(target)
+		y := g.exit()
+		y.Trigger, y.Default = "unit.move_proposal", target
+		y.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+		y.Authority = &router.Authority{Kind: router.AuthorityChief, Target: target}
+		if res := route(t, g, y); res.Committed || g.ran(target) != 0 || g.state().Value != "checking" {
+			t.Fatalf("%s: result = %+v", target, res)
+		}
+	}
+}

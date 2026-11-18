@@ -344,103 +344,10 @@ func (f *shedFixture) objectionTransition(t *testing.T, stream config.Workstream
 	return out
 }
 
-// The chief of staff's decision on an objection is an exit the router judges.
-// With Jev finding the default fits, the decision is recorded as it was made and
-// its transition records the default it took. A scripted departure enters the
-// other decision when it clears that decision's bar, which is the strict
-// decision threshold for a dismissal and the modest bar for an escalation, and
-// a pick under its bar holds the objection with no decision recorded.
-func TestAnObjectionDecisionIsJudgedAndADepartureClearsItsBar(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 2, 1)
-	defer f.stop(t)
-	p := &faults{}
-	veto := shed.ObjectionID(1, committeeAgent(1), 1)
-	advice := shed.ObjectionID(1, committeeAgent(2), 1)
-	f.member(1, 1, 1, objects(p, shed.Charter, "spec#2", "charter#1"))
-	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
-	f.script(replyTurnID(1, 1), nil, answers(p, "Each upload is one small change with its own test.", veto, advice))
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "concluded-1")
-	p.Check(t)
-
-	jevp := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
-		switch {
-		case strings.Contains(a.State, "objection-"+veto):
-			// The chief dismisses it; Jev escalates it, which needs the modest bar.
-			return jevfixture.Departs(a, "escalated", 0.8, 0.95)
-		case strings.Contains(a.State, "objection-"+advice):
-			// The chief escalates it; Jev would dismiss it at a probability under the strict bar.
-			return jevfixture.Departs(a, "dismissed", 0.8, 0.95)
-		}
-		return jevfixture.DefaultFits(a)
-	}}
-	service.InspectForTest(f.s.Service).SetRouterJudge(jevfixture.TransitionJudge(f.clock.Now, jevp))
-	f.objectionDecided(t, stream, veto)
-	f.objectionDecided(t, stream, advice)
-	tool := f.chiefObjectionTool(t, stream)
-
-	out := decideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"The charter asks for small tested changes."}`)
-	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, "departed from your decision") {
-		t.Fatalf("the departure: %s", out)
-	}
-	moved := f.objectionTransition(t, stream, veto)
-	if moved.To != "escalated" || moved.DefaultTo != "dismissed" || moved.DecidedBy != trace.DecidedByJev || moved.Judgment == "" || !moved.Departed() {
-		t.Fatalf("the departure %+v", moved)
-	}
-	var recorded shed.ChiefDecision
-	rounds, err := shed.AllChiefDecisions(f.repository(), stream)
-	must(t, err)
-	for _, r := range rounds {
-		for _, d := range r.Decisions {
-			if d.Objection == veto {
-				recorded = d
-			}
-		}
-	}
-	if recorded.Decision != shed.Escalate || recorded.DecidedBy != trace.DecidedByJev || recorded.Judgment != moved.Judgment || !strings.Contains(recorded.Note, "The charter asks for small tested changes.") {
-		t.Fatalf("the recorded decision %+v", recorded)
-	}
-	for _, e := range f.dissent(t, stream) {
-		if e.ID == veto && !e.Escalated {
-			t.Fatalf("the departure did not escalate the objection: %+v", e)
-		}
-	}
-	f.s.setSole(&activeProject{repository: f.repository()})
-	feed, api := service.InspectForTest(f.s.Service).Feed(string(stream))
-	if api != nil {
-		t.Fatal(api.Message)
-	}
-	departed := 0
-	for _, e := range feed.Entries {
-		if e.Transition != nil && e.Transition.Departed {
-			departed++
-			if e.Transition.Subject != "objection-"+veto || e.Transition.To != "escalated" || e.Transition.DefaultTo != "dismissed" {
-				t.Fatalf("feed entry %+v", e.Transition)
-			}
-		}
-	}
-	if departed != 1 {
-		t.Fatalf("%d departures in the feed, want one", departed)
-	}
-
-	out = decideWith(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"The plan builds uploads before the index."}`)
-	if !strings.Contains(out, `"recorded":false`) {
-		t.Fatalf("a pick under the strict bar: %s", out)
-	}
-	if held := f.objectionTransition(t, stream, advice); held.ID != "" {
-		t.Fatalf("a held decision moved the objection: %+v", held)
-	}
-	for _, e := range f.dissent(t, stream) {
-		if e.ID == advice && (e.Escalated || e.Disposition != "") {
-			t.Fatalf("a held decision changed the objection: %+v", e)
-		}
-	}
-}
-
-// With Jev finding the default fits, the decision on an objection is entered as
-// the chief made it, and the objection's transition records the default.
-func TestAnObjectionDecisionThatFitsItsDefaultRecordsIt(t *testing.T) {
+// The chief of staff's decision on an objection is its own: a pinned move that
+// enters the decision as the chief made it, asks Jev nothing and records the
+// chief of staff as the decider.
+func TestAnObjectionDecisionIsEnteredAsTheChiefMadeIt(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 2, 1)
 	defer f.stop(t)
@@ -456,16 +363,23 @@ func TestAnObjectionDecisionThatFitsItsDefaultRecordsIt(t *testing.T) {
 	jevp := &jevfixture.Transitions{}
 	service.InspectForTest(f.s.Service).SetRouterJudge(jevfixture.TransitionJudge(f.clock.Now, jevp))
 	f.objectionDecided(t, stream, veto)
+	f.objectionDecided(t, stream, advice)
 	tool := f.chiefObjectionTool(t, stream)
 
 	if out := decideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"The architect's reply answers it."}`); !strings.Contains(out, `"recorded":true`) || strings.Contains(out, "departed") {
 		t.Fatalf("dismissing: %s", out)
 	}
 	moved := f.objectionTransition(t, stream, veto)
-	if moved.To != "dismissed" || moved.DefaultTo != "dismissed" || moved.DecidedBy != trace.DecidedByCode || moved.Departed() || moved.Judgment == "" {
-		t.Fatalf("the decision %+v", moved)
+	if moved.To != "dismissed" || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+		t.Fatalf("the dismissal %+v", moved)
 	}
-	if len(jevp.TransitionRequests()) != 1 {
-		t.Fatalf("Jev was asked %d times for one decision", len(jevp.TransitionRequests()))
+	if out := decideWith(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"The plan builds uploads before the index."}`); !strings.Contains(out, `"recorded":true`) {
+		t.Fatalf("escalating: %s", out)
+	}
+	if moved := f.objectionTransition(t, stream, advice); moved.To != "escalated" || moved.DecidedBy != trace.DecidedByChief {
+		t.Fatalf("the escalation %+v", moved)
+	}
+	if n := len(jevp.TransitionRequests()); n != 0 {
+		t.Fatalf("Jev was asked %d times about the chief's decisions", n)
 	}
 }

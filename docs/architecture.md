@@ -131,7 +131,7 @@ behaviour; this section locates it.
 - **Hard prerequisites** filter the targets when the exit is built and are
   checked again against current state each time a target is applied, whoever
   chose it (a Jev pick, a degraded default, a pick recovered after a restart, a
-  chief proposal, a pinned decision, a card), because a budget or an operation
+  chief of staff's move, a pinned decision, a card), because a budget or an operation
   can change without the subject's state version changing. They are: a
   candidate exists, for the targets that need one; no landing, rebase or
   publication is in flight; `merged` only after a landing; budgets and the loop
@@ -140,7 +140,9 @@ behaviour; this section locates it.
   decision; and an owner gate (ratification, delivery approval and publication,
   abandonment, a unit approved without independent review, an intent change)
   only on an exit that carries an owner decision or one of Jev's existing gate
-  decisions. A chief proposal and a `decide-transition` answer carry neither. A
+  decisions. A chief of staff's move and a `decide-transition` answer carry
+  neither; a chief move is otherwise a pinned move, entered as the chief made it
+  with `chief_of_staff` as its `decided_by`. A
   target that has become illegal records `Refuse`, commits nothing, runs no
   effect and leaves the subject held with one notice for the chief of staff.
   The checks depend on the target and never on how it was reached: a pinned

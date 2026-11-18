@@ -162,9 +162,11 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 			return UnitMoveResponse{}, api
 		}
 	}
-	// An owner's decision, and one of Jev's gate decisions, is a pinned move:
-	// the router enters exactly the target it authorises. A move of the chief
-	// of staff's own is a proposal the router judges.
+	// An owner's decision, one of Jev's gate decisions and a move of the chief
+	// of staff's own are pinned moves: the router enters exactly the target,
+	// after its hard prerequisites. A chief move that approves a candidate or
+	// moves a unit out of a contest the owner holds is the owner's, and waits
+	// as a pending owner decision.
 	cause := fmt.Sprintf("%s-%d", moveDocument(unit, state.Version), at.UnixNano())
 	var in UnitExitInput
 	switch {
@@ -180,6 +182,13 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 	default:
 		if in, err = s.proposalInput(repo, stream, unit, state, req.To, note, turn, actor, cause); err != nil {
 			return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the unit's history"}
+		}
+		if len(in.Gate) == 0 {
+			in.Default, in.ID, in.Reason = req.To, "", ""
+			if unitStarted(state.Value) {
+				in.Targets = nil
+			}
+			in.Authority = &router.Authority{Kind: router.AuthorityChief, Target: req.To}
 		}
 	}
 	res, err := s.raise(ctx, false, in)

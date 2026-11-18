@@ -53,6 +53,9 @@ func DecodeDeltaTurn(op coreadapter.Operation) (DeltaTurnInput, error) {
 	return in, nil
 }
 func DeltaTurnID(c WorkgroupChange, agent, tool string) string {
+	if c.Attempt > 0 {
+		return ChangeIdentity(fmt.Sprintf("change-%s-retry-%d-%s-%s", c.ID, c.Attempt, tool, agent))
+	}
 	return ChangeIdentity("change-" + c.ID + "-" + tool + "-" + agent)
 }
 
@@ -502,7 +505,7 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 			continue
 		}
 		if slices.ContainsFunc(changes, func(c WorkgroupChange) bool {
-			return c.State != "applied" && c.State != "rejected"
+			return c.State != "applied" && c.State != "rejected" && c.State != "failed"
 		}) {
 			break
 		}

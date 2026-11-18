@@ -231,12 +231,6 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if out := m.resolve(t, `{"unit":"resume","decision":"review","note":"Review it."}`); !strings.Contains(out, "moved to contested for the owner") {
 		t.Fatalf("the chief of staff ruled on the owner's contest: %s", out)
 	}
-	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "stays contested") || strings.Contains(out, "the owner moves it") {
-		t.Fatalf("the chief of staff moved out of the contest it raised: %s", out)
-	}
-	if m.state(t).Value != UnitContested {
-		t.Fatalf("a proposal that followed the default moved the unit to %s", m.state(t).Value)
-	}
 	entry, ok, err := m.f.s.contestedEntry(m.repo, m.stream, "resume")
 	must(t, err)
 	if !ok || entry.Recommendation != hold || strings.Join(entry.Options, ",") != "review,revise" {

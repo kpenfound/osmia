@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/router"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -757,5 +759,43 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	pull.Mu.Unlock()
 	if draft || readies != 1 || creates != 1 {
 		t.Fatalf("draft %v, marked ready %d times, pull requests opened %d times; want a ready pull request marked once and opened once", draft, readies, creates)
+	}
+}
+
+// The chief of staff drops a dependency as its own decision: the same waiver
+// as the owner's drop, entered as a pinned move with no request to Jev, with
+// the chief of staff as the decider.
+func TestTheChiefOfStaffDropsADependency(t *testing.T) {
+	t.Parallel()
+	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
+	p := &jevfixture.Transitions{}
+	routeJev(f.s, p)
+	host, err := f.repository.ChiefOfStaffHost(f.downstream)
+	must(t, err)
+	scope := intakefixture.ClaimChiefTurn(t, f.repository, f.project, host, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
+		Turn: "events_drop", Prompt: "The upstream will not merge.", Actor: serviceActor, Cause: "fixture", Token: "token-events_drop", Directory: "events_drop",
+	})
+	f.resolvePasses(t)
+	controls := &runtimeControls{}
+	controls.service.Store(f.s)
+	tool := controls.dropDependency(f.repository, scope)
+	out := callMove(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
+	if !strings.Contains(out, `"recorded":true`) {
+		t.Fatalf("the chief's drop: %s", out)
+	}
+	dropped := lastOn(t, f.repository, f.downstream, lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock))
+	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByChief || dropped.Judgment != "" {
+		t.Fatalf("the chief's drop %+v", dropped)
+	}
+	if n := len(p.TransitionRequests()); n != 0 {
+		t.Fatalf("Jev was asked %d times about the chief's decision", n)
+	}
+	waivers, _, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
+	must(t, err)
+	if len(waivers.Waivers) != 1 || waivers.Waivers[0].DecidedBy != trace.DecidedByChief || waivers.Waivers[0].Ended != trace.ChiefOfStaff {
+		t.Fatalf("waivers %+v", waivers)
+	}
+	if f.holdsMason(t, f.downstream) {
+		t.Fatal("the dependent is still held after the chief's drop")
 	}
 }

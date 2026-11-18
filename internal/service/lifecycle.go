@@ -324,6 +324,11 @@ var driftRebaseNotes = lifecycle.DriftRebaseNotes
 
 const handBackDriftTool = lifecycle.HandBackDriftTool
 
+const (
+	dropDependencyTool = lifecycle.DropDependencyTool
+	retryChangeTool    = lifecycle.RetryChangeTool
+)
+
 type DriftHandback = lifecycle.DriftHandback
 
 const driftRequestSubject = lifecycle.DriftRequestSubject
@@ -358,6 +363,18 @@ func (c *runtimeControls) ChangeControl(r *trace.Repository, scope coreadapter.S
 
 func (c *runtimeControls) MoveWorkstream(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return c.lifecycle().MoveWorkstream(r, scope)
+}
+
+func (c *runtimeControls) dropDependency(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return c.lifecycle().DropDependency(r, scope)
+}
+
+func (c *runtimeControls) retryChange(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return c.lifecycle().RetryChange(r, scope)
+}
+
+func (c *runtimeControls) reopenForRevision(r *trace.Repository, scope coreadapter.Scope, route coreadapter.Tool) coreadapter.Tool {
+	return c.lifecycle().ReopenForRevision(r, scope, route)
 }
 
 func (c *runtimeControls) HandBackDrift(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {

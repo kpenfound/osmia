@@ -75,6 +75,9 @@ type WorkgroupChange struct {
 	Retired   []config.WorkstreamID                       `json:"retired,omitempty"`
 	Followups map[config.WorkstreamID]config.WorkstreamID `json:"followups,omitempty"`
 	Failure   string                                      `json:"failure,omitempty"`
+	// Attempt counts the retries of the change's drafting and debate. Each
+	// retry queues its turns afresh under new turn IDs.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 func WorkgroupChangePath(id string) string {
@@ -877,4 +880,48 @@ func (s *Controller) EndStalledChange(ctx context.Context, host config.Workstrea
 		return &APIError{Code: Internal, Message: err.Error()}
 	}
 	return nil
+}
+
+// RetryChange starts a stuck workgroup change's drafting and debate again: a
+// change that is drafting, debating or answering, or that failed before it was
+// presented, returns to drafting with its hold cleared and its debate emptied,
+// and its turns are queued afresh on the next pass. It is the chief of staff's
+// and the owner's way past a draft or debate turn that failed or never ran.
+func (s *Controller) RetryChange(ctx context.Context, host config.WorkstreamID, id string) (WorkgroupChange, *APIError) {
+	wt, g, _, close, err := s.ChangeContext(ctx, string(host))
+	if err != nil {
+		return WorkgroupChange{}, &APIError{Code: Conflict, Message: err.Error()}
+	}
+	defer close()
+	lock := s.GroupApprovalLock(g.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	changes, err := ReadChanges(wt, g.Members[0])
+	if err != nil {
+		return WorkgroupChange{}, &APIError{Code: Internal, Message: err.Error()}
+	}
+	i := slices.IndexFunc(changes, func(c WorkgroupChange) bool { return c.ID == id })
+	if i < 0 {
+		return WorkgroupChange{}, &APIError{Code: NotFound, Message: "change not found"}
+	}
+	c := changes[i]
+	if c.Request.Kind != "amend" {
+		return c, &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup change %s is a cancellation; it has no draft to retry", id)}
+	}
+	switch {
+	case c.State == "drafting" || c.State == "debating" || c.State == "answering":
+	case c.State == "failed" && c.Decision == nil && len(c.Applied) == 0:
+	default:
+		return c, &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup change %s is %s; only a change still drafting or debating, or one that failed before it was presented, is retried", id, c.State)}
+	}
+	if later := slices.ContainsFunc(changes[i+1:], func(o WorkgroupChange) bool {
+		return o.State != "applied" && o.State != "rejected" && o.State != "failed"
+	}); later {
+		return c, &APIError{Code: Conflict, Message: "another workgroup change is pending; decide it first"}
+	}
+	c.State, c.Failure, c.Debate, c.Reply, c.Attempt = "drafting", "", nil, "", c.Attempt+1
+	if err := s.SaveChange(ctx, wt, &c); err != nil {
+		return c, &APIError{Code: Internal, Message: err.Error()}
+	}
+	return c, nil
 }

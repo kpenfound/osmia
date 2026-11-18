@@ -2,7 +2,6 @@ package executionjourney
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +64,7 @@ func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 		t.Fatalf("the kick: %s", out)
 	}
 	moved := latestOf(t, m.repo, m.stream, trace.UnitSubject("dedupe"))
-	if moved.From != UnitReady || moved.To != UnitReady || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByCode || moved.DefaultTo != UnitReady || moved.Departed() {
+	if moved.From != UnitReady || moved.To != UnitReady || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByChief || moved.DefaultTo != UnitReady || moved.Departed() {
 		t.Fatalf("the kick's transition %+v", moved)
 	}
 	recs := proposalRecords(t, m)
@@ -84,118 +83,50 @@ func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 	}
 }
 
-// The chief of staff does not move a unit out of a contest it raised itself by
-// default: the default leaves the unit contested and says so. Jev may depart
-// from that, and the departure moves the unit with the rule that chose it
-// recorded.
-func TestChiefOfStaffMovesOutOfTheContestItRaisedOnlyByADeparture(t *testing.T) {
+// The chief of staff's move takes a unit out of a contest it raised itself, and
+// out of one it already ruled on, as its own decision: a pinned move entered with
+// no request to Jev and the chief of staff recorded as the decider.
+func TestChiefOfStaffMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 	t.Parallel()
-	m := newMoveFixture(t, "propose-raised")
-	p := &jevfixture.Transitions{}
-	log := routeThrough(m.f.s, p)
-	if out := m.moveUnit(t, `{"unit":"resume","to":"contested","note":"The reviews keep finding the same gap."}`); !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("hold: %s", out)
-	}
-
-	out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The engine is back; review it."}`)
-	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "stays contested") {
-		t.Fatalf("the proposal that followed the default: %s", out)
-	}
-	assertNoPhraseRequest(t, out)
-	if m.state(t).Value != UnitContested {
-		t.Fatalf("the unit is %s", m.state(t).Value)
-	}
-	recs := proposalRecords(t, m)
-	if len(recs) != 2 || recs[1].Default != execution.TargetWait || recs[1].Target != execution.TargetWait || recs[1].Outcome != router.OutcomeFollowed || recs[1].Proposed != UnitReviewing || !slices.Contains(recs[1].Offered, UnitReviewing) {
-		t.Fatalf("route %+v", recs)
-	}
-	if got := latestOf(t, m.repo, m.stream, trace.UnitSubject("resume")); got.To != UnitContested {
-		t.Fatalf("the unit's latest transition %+v", got)
-	}
-
-	p.Script = departingTo(UnitReviewing)
-	out = m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The engine is back and the gap was fixed upstream; review it."}`)
-	if !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("the departure: %s", out)
-	}
-	moved := latestOf(t, m.repo, m.stream, trace.UnitSubject("resume"))
-	if moved.To != UnitReviewing || moved.DecidedBy != trace.DecidedByJev || moved.DefaultTo != execution.TargetWait || !moved.Departed() || moved.Judgment == "" || !strings.Contains(moved.Reason, "rule 6:departure") {
-		t.Fatalf("the departure's transition %+v", moved)
-	}
-	recs = proposalRecords(t, m)
-	if len(recs) != 3 || recs[2].Outcome != router.OutcomeDeparted || recs[2].Judgment != moved.Judgment {
-		t.Fatalf("route %+v", recs)
-	}
-	var span *router.SpanRoute
-	for _, s := range log.all() {
-		if s.Trigger == execution.TriggerMoveProposal && s.Outcome == router.OutcomeDeparted {
-			span = &s
+	t.Run("raised", func(t *testing.T) {
+		t.Parallel()
+		m := newMoveFixture(t, "move-raised")
+		p := &jevfixture.Transitions{}
+		routeThrough(m.f.s, p)
+		if out := m.moveUnit(t, `{"unit":"resume","to":"contested","note":"The reviews keep finding the same gap."}`); !strings.Contains(out, `"recorded":true`) {
+			t.Fatalf("hold: %s", out)
 		}
-	}
-	if span == nil || span.Default != execution.TargetWait || span.Chosen != UnitReviewing {
-		t.Fatalf("route span %+v", span)
-	}
-}
-
-// The chief of staff rules a contest once. Once it has, a proposal to move the
-// unit out of that contest leaves the unit where it is by default, and a
-// departure re-rules it.
-func TestChiefOfStaffReRulesAContestOnlyByADeparture(t *testing.T) {
-	t.Parallel()
-	m := newMoveFixture(t, "propose-ruled")
-	p := &jevfixture.Transitions{}
-	routeThrough(m.f.s, p)
-	m.contest(t)
-	if out := m.resolve(t, `{"unit":"resume","decision":"escalate","note":"The checks cannot run here."}`); !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("escalate: %s", out)
-	}
-
-	out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it again."}`)
-	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "stays contested") {
-		t.Fatalf("the proposal that followed the default: %s", out)
-	}
-	assertNoPhraseRequest(t, out)
-	if m.state(t).Value != UnitContested {
-		t.Fatalf("the unit is %s", m.state(t).Value)
-	}
-	recs := proposalRecords(t, m)
-	if len(recs) != 1 || recs[0].Default != execution.TargetWait || recs[0].Outcome != router.OutcomeFollowed {
-		t.Fatalf("route %+v", recs)
-	}
-
-	p.Script = departingTo(UnitReviewing)
-	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The checks run again; review it."}`); !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("the departure: %s", out)
-	}
-	if m.state(t).Value != UnitReviewing {
-		t.Fatalf("the unit is %s", m.state(t).Value)
-	}
-}
-
-// Jev holds a proposal when it cannot choose between the targets: nothing
-// moves, and the chief of staff is told the move is held, with one notice
-// carrying Jev's view.
-func TestAHeldChiefProposalMovesNothingAndSaysSo(t *testing.T) {
-	t.Parallel()
-	m := newMoveFixture(t, "propose-held")
-	p := &jevfixture.Transitions{}
-	routeThrough(m.f.s, p)
-	if out := m.moveUnit(t, `{"unit":"resume","to":"contested","note":"Hold it."}`); !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("hold: %s", out)
-	}
-	p.Script = func(a jevfixture.Ask) jevfixture.Reply {
-		r := jevfixture.Departs(a, UnitReviewing, 0.9, 0.9)
-		r.PickB = execution.TargetWait
-		return r
-	}
-	out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it."}`)
-	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "held (orders_disagree)") {
-		t.Fatalf("a held proposal moved the unit: %s", out)
-	}
-	assertNoPhraseRequest(t, out)
-	if m.state(t).Value != UnitContested {
-		t.Fatalf("the unit is %s", m.state(t).Value)
-	}
+		if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The engine is back; review it."}`); !strings.Contains(out, `"recorded":true`) {
+			t.Fatalf("the move: %s", out)
+		}
+		moved := latestOf(t, m.repo, m.stream, trace.UnitSubject("resume"))
+		if moved.To != UnitReviewing || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+			t.Fatalf("the move's transition %+v", moved)
+		}
+		if n := len(p.TransitionRequests()); n != 0 {
+			t.Fatalf("Jev got %d transition requests about chief moves", n)
+		}
+		recs := proposalRecords(t, m)
+		if len(recs) != 2 || recs[1].Authority != router.AuthorityChief || recs[1].Outcome != router.OutcomeFollowed {
+			t.Fatalf("route %+v", recs)
+		}
+	})
+	t.Run("ruled", func(t *testing.T) {
+		t.Parallel()
+		m := newMoveFixture(t, "move-ruled")
+		p := &jevfixture.Transitions{}
+		routeThrough(m.f.s, p)
+		m.contest(t)
+		if out := m.resolve(t, `{"unit":"resume","decision":"escalate","note":"The checks cannot run here."}`); !strings.Contains(out, `"recorded":true`) {
+			t.Fatalf("escalate: %s", out)
+		}
+		if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The checks run again; review it."}`); !strings.Contains(out, `"recorded":true`) {
+			t.Fatalf("the move: %s", out)
+		}
+		if m.state(t).Value != UnitReviewing {
+			t.Fatalf("the unit is %s", m.state(t).Value)
+		}
+	})
 }
 
 // A proposal to approve a candidate never carries the authority to: nothing is
@@ -283,7 +214,7 @@ func TestChiefOfStaffMovesAPlannedUnitOnlyWhenItsDependenciesMerged(t *testing.T
 		t.Fatalf("holding a planned unit: %s", out)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("dedupe"))
-	if moved.From != UnitPlanned || moved.To != UnitPlanned || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByCode {
+	if moved.From != UnitPlanned || moved.To != UnitPlanned || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByChief {
 		t.Fatalf("the transition %+v", moved)
 	}
 }

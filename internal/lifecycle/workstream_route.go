@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -178,12 +177,6 @@ func (s *Controller) workstreamMovePolicy(repo *trace.Repository, stream config.
 		return p, err
 	}
 	p.Facts["rounds_with_blocking"], p.Facts["max_final_rounds"] = rounds, maxFinalRounds
-	switch {
-	case to == BuildingState && rounds >= maxFinalRounds:
-		p.Stay, p.Why = true, fmt.Sprintf("final reviews have found blocking problems %d times, so by default the chief of staff does not reopen the workstream for further revisions", rounds)
-	case !slices.Contains(ChiefMoveTargets, to):
-		p.Stay, p.Why = true, fmt.Sprintf("by default the chief of staff moves a workstream only to %s", strings.Join(ChiefMoveTargets, " or "))
-	}
 	return p, nil
 }
 
@@ -210,8 +203,14 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 	trigger := intake.TriggerMoveProposal
 	var authority *router.Authority
 	names := []string{AssembledState, BuildingState, DeliveredState}
-	if actor.Kind == ownerActor.Kind {
+	switch {
+	case actor.Kind == ownerActor.Kind:
 		trigger, authority = intake.TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: to}
+		names = []string{to}
+	case !policy.Stay:
+		// The chief of staff's move is its own decision: the router enters
+		// exactly the target, after its hard prerequisites.
+		authority = &router.Authority{Kind: router.AuthorityChief, Target: to}
 		names = []string{to}
 	}
 	targets := make([]router.Target, 0, len(names)+1)

@@ -81,6 +81,9 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDecision) (WorkgroupChange, *APIError) {
 	return s.lifecycle().DecideChange(ctx, raw, id, d)
 }
+func (s *Service) retryChange(ctx context.Context, host config.WorkstreamID, id string) (WorkgroupChange, *APIError) {
+	return s.lifecycle().RetryChange(ctx, host, id)
+}
 func (s *Service) endStalledChange(ctx context.Context, host config.WorkstreamID, id, state string, revision uint64, reason string) *APIError {
 	return s.lifecycle().EndStalledChange(ctx, host, id, state, revision, reason)
 }
@@ -270,6 +273,9 @@ func (s *Service) planChangeMember(ctx context.Context, repo *trace.Repository, 
 }
 func (c *runtimeControls) moveWorkstream(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return c.lifecycle().MoveWorkstream(r, scope)
+}
+func (c *runtimeControls) dropDependency(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return c.lifecycle().DropDependency(r, scope)
 }
 func (c *runtimeControls) handBackDrift(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return c.lifecycle().HandBackDrift(r, scope, now)

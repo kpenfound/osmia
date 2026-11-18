@@ -227,3 +227,63 @@ func TestHeldChangeReportsHeldToTheChief(t *testing.T) {
 		t.Fatalf("failed change reported %+v", failed)
 	}
 }
+
+// A change whose draft failed before it was presented is retried: it returns to
+// drafting under a fresh attempt, the architect drafts it again, and it is
+// presented; a change that was already presented is not retried.
+func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, archived, _ := archivedMemberFixture(t)
+	defer f.stop(t)
+	var changeArchived atomic.Bool
+	var drafts atomic.Int32
+	installRetirementDelta(t, f, &drafts, func(after *trace.ProjectSpec) {
+		for i := range after.Slices {
+			sl := &after.Slices[i]
+			if sl.Workstream == archived && !changeArchived.Load() {
+				continue
+			}
+			p, err := plan.Parse([]byte(sl.Plan))
+			if err != nil || len(p.Units) == 0 {
+				continue
+			}
+			number := len(plan.ParseSpec(sl.Spec).Criteria) + 1
+			sl.Spec += fmt.Sprintf("%d. Invalid diagnostic requests are refused.\n", number)
+			p.Units = append(p.Units, plan.Unit{ID: "diagnostics", Task: "Refuse invalid diagnostic requests", Acceptance: []string{"Invalid diagnostic requests are refused"}, Criteria: []string{plan.Cite(number)}, DependsOn: []string{}, Footprint: slices.Clone(p.Units[0].Footprint)})
+			data, err := plan.Encode(p)
+			if err != nil {
+				continue
+			}
+			sl.Plan = string(data)
+		}
+	})
+	changeArchived.Store(true)
+	c, api := f.s.requestChange(ctx, string(f.origin), ChangeRequest{Key: "retried", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
+	if api != nil {
+		t.Fatal(api)
+	}
+	lifecycleAwait(t, f, "first draft failed", func() bool {
+		return currentChange(t, f.s, f.origin, c.ID).State == "failed"
+	})
+	first := drafts.Load()
+
+	changeArchived.Store(false)
+	retried, api := f.s.retryChange(ctx, f.origin, c.ID)
+	if api != nil {
+		t.Fatal(api.Message)
+	}
+	if retried.State != "drafting" || retried.Attempt != 1 || retried.Failure != "" {
+		t.Fatalf("retried change: %+v", retried)
+	}
+	lifecycleAwait(t, f, "retried change presented", func() bool {
+		c = currentChange(t, f.s, f.origin, c.ID)
+		return c.State == "presented"
+	})
+	if drafts.Load() <= first {
+		t.Fatalf("the retry drafted nothing: %d drafts before, %d after", first, drafts.Load())
+	}
+	if _, api := f.s.retryChange(ctx, f.origin, c.ID); api == nil || !strings.Contains(api.Message, "only a change still drafting or debating") {
+		t.Fatalf("a presented change was retried: %v", api)
+	}
+}

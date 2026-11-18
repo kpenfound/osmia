@@ -14,8 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
-	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/router"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -122,11 +121,11 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 	}
 }
 
-// The chief of staff moves its workstream to assembled or building on its own
-// judgment. A move to building holds the workstream there until a revision
-// is filed or it is moved to assembled. Every other target is the owner's,
-// which the chief records only in a turn answering the owner, and after three
-// final reviews with blocking findings reopening is the owner's too.
+// The chief of staff moves its workstream on its own judgment. A move to
+// building holds the workstream there until a revision is filed or it is moved
+// to assembled. Ratification and abandonment are owner gates, which the chief
+// records only in a turn answering the owner; reopening stays the chief's own
+// move after three final reviews with blocking findings.
 func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "chief-move")
@@ -139,7 +138,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	failFinalReview(t, f, repository, stream, a, 1, op)
 	tool := chiefMoveTool(t, f, repository, stream, "events_1", false)
 
-	for _, to := range []string{SketchedState, InShedState, DeliveredState, RatifiedState, AbandonedState} {
+	for _, to := range []string{SketchedState, InShedState, RatifiedState, AbandonedState} {
 		out := callMove(t, tool, fmt.Sprintf(`{"to":%q,"note":"Do it."}`, to))
 		if !strings.Contains(out, `"recorded":false`) || strings.Contains(out, "owner_decided") || strings.Contains(out, "present it to the owner") {
 			t.Fatalf("the chief of staff moved the workstream to %s on its own: %s", to, out)
@@ -194,9 +193,6 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 		revision, err := nextRevision(repository, stream, finalReportDocument)
 		must(t, err)
 		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
-	}
-	if out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`); !strings.Contains(out, "by default the chief of staff does not reopen the workstream for further revisions") {
-		t.Fatalf("the chief of staff reopened after three blocking reviews: %s", out)
 	}
 	if out := callMove(t, tool, `{"to":"assembled","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("a fresh review after three blocking reviews: %s", out)
@@ -460,60 +456,60 @@ func atTheFinalRoundLimit(t *testing.T, key string) (*shedFixture, *trace.Reposi
 	return f, repository, stream, chiefMoveTool(t, f, repository, stream, "events_1", false)
 }
 
-// maxFinalRounds sets the default of the chief of staff's proposal to reopen
-// the workstream: once the final reviews found something blocking that many
-// times, the default leaves the workstream where it is for the owner, as the
-// tool refused it before, and reopening stays on offer. With a Jev that finds
-// the default fits the chief of staff is told the move waits for the owner; a
-// scripted departure reopens the workstream past the limit and records the
-// departure with the rule that chose it.
-func TestTheFinalRoundLimitSetsTheDefaultOfAChiefReopening(t *testing.T) {
+// Final reviews that found something blocking maxFinalRounds times do not stop
+// the chief of staff: its move to reopen the workstream is its own decision,
+// entered with no request to Jev and recorded with the chief as the decider.
+func TestTheChiefReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 	t.Parallel()
-	t.Run("the default fits", func(t *testing.T) {
-		t.Parallel()
-		f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-default")
-		routeJev(f.s, &jevfixture.Transitions{})
-		out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
-		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "by default the chief of staff does not reopen the workstream for further revisions") {
-			t.Fatalf("the chief of staff reopened after the limit: %s", out)
-		}
-		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
-			t.Fatalf("the workstream %+v %v", feature, err)
-		}
-		records := routeFor(t, repository, stream, "ws.move_proposal")
-		if len(records) != 1 || records[0].Default != lifecycle.NoMoveTarget || records[0].Target != lifecycle.NoMoveTarget || records[0].Outcome != router.OutcomeFollowed ||
-			!slices.Contains(records[0].Offered, "building") || !slices.Contains(records[0].Offered, lifecycle.NoMoveTarget) {
-			t.Fatalf("route %+v", records)
-		}
-		if got := lastOn(t, repository, stream, trace.FeatureSubject); got.To == BuildingState {
-			t.Fatalf("the workstream's latest transition %+v", got)
-		}
-	})
+	f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-chief")
+	jev := &jevfixture.Transitions{}
+	routeJev(f.s, jev)
+	out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
+	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
+		t.Fatalf("the chief of staff did not reopen the workstream: %s", out)
+	}
+	moved := lastOn(t, repository, stream, trace.FeatureSubject)
+	if moved.To != BuildingState || moved.DecidedBy != trace.DecidedByChief || moved.Departed() {
+		t.Fatalf("the transition %+v", moved)
+	}
+	if n := len(jev.TransitionRequests()); n != 0 {
+		t.Fatalf("Jev got %d transition requests", n)
+	}
+}
 
-	t.Run("a scripted departure", func(t *testing.T) {
-		t.Parallel()
-		f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-departure")
-		routeJev(f.s, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
-			if a.Trigger == "ws.move_proposal" {
-				return jevfixture.Departs(a, "building", 0.96, 0.96)
-			}
-			return jevfixture.DefaultFits(a)
-		}})
-		out := callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
-		if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
-			t.Fatalf("the departure did not reopen the workstream: %s", out)
-		}
-		moved := lastOn(t, repository, stream, trace.FeatureSubject)
-		if moved.To != BuildingState || moved.DefaultTo != lifecycle.NoMoveTarget || moved.DecidedBy != trace.DecidedByJev || !moved.Departed() || moved.Judgment == "" ||
-			!strings.Contains(moved.Reason, "decide-transition table "+router.TableVersion+", rule 6:departure") {
-			t.Fatalf("the transition %+v", moved)
-		}
-		records := routeFor(t, repository, stream, "ws.move_proposal")
-		if len(records) != 1 || records[0].Outcome != router.OutcomeDeparted || records[0].Target != "building" || records[0].Judgment != moved.Judgment || records[0].Reason == "" {
-			t.Fatalf("route %+v", records)
-		}
-		if n := departuresInFeed(t, f.s, repository, stream); n != 1 {
-			t.Fatalf("%d departures in the feed, want one", n)
-		}
+// A revision the chief of staff commissions for an assembled workstream
+// reopens it to building on its existing branch, as the chief's own move,
+// before the amendment is filed: no separate move is needed.
+func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, a := newFinalFixture(t, "chief-revision")
+	hostFinalReviews(t, f, stream)
+	f.s.setSole(&activeProject{repository: repository})
+	_, op := assembleBoth(t, f, repository, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	failFinalReview(t, f, repository, stream, a, 1, op)
+	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
+		t.Fatalf("the workstream %+v %v", feature, err)
+	}
+	scope := intakefixture.ClaimChiefTurn(t, repository, f.project, stream, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
+		Turn: "events_revision", Prompt: "The final review found a gap.", Actor: serviceActor, Cause: "fixture", Token: "token-events_revision", Directory: "events_revision",
 	})
+	tools, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.s.now)
+	must(t, err)
+	i := slices.IndexFunc(tools, func(t coreadapter.Tool) bool { return t.Name == questions.RouteAmendmentTool })
+	if i < 0 {
+		t.Fatal("the chief of staff has no route_amendment tool")
+	}
+	controls := &runtimeControls{}
+	controls.service.Store(f.s)
+	tool := controls.lifecycle().ReopenForRevision(repository, scope, tools[i])
+	out := callMove(t, tool, `{"citations":["spec#1"],"change":"Add a unit that resumes interrupted runs.","reason":"The final review found that runs do not resume."}`)
+	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"reopened"`) || !strings.Contains(out, `"amendment"`) {
+		t.Fatalf("the commissioned revision: %s", out)
+	}
+	moved := lastOn(t, repository, stream, trace.FeatureSubject)
+	if moved.To != BuildingState || moved.DecidedBy != trace.DecidedByChief {
+		t.Fatalf("the reopening %+v", moved)
+	}
 }

@@ -273,60 +273,6 @@ func TestAnIntentChangingDropOfADependencyGoesToTheOwnerAndNothingIsDropped(t *t
 	}
 }
 
-// The request for a workstream proposal holds the sealed intent and acceptance
-// outcomes, the findings of the latest final review with the blocking ones
-// first, and the earlier moves, and no longer the placeholder sentence.
-func TestAWorkstreamProposalCarriesTheApprovedIntentForJev(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "intent-evidence-proposal")
-	hostFinalReviews(t, f, stream)
-	f.s.setSole(&activeProject{repository: repository})
-	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
-	assembleBoth(t, f, repository, a, stream,
-		map[string]string{"internal/trace/resume.go": "package trace\n"},
-		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	at := f.s.now()
-	recordFinalReport(t, repository, stream, at, api.FinalReport{Review: 90, Outcome: delivery.FinalReviewed, Findings: []api.FinalFinding{
-		{Severity: delivery.FindingAdvisory, Finding: "ADVISORY-FINDING reads oddly."},
-		{Severity: delivery.FindingBlocking, Criteria: []string{"spec#2"}, Finding: "BLOCKING-FINDING leaves a gap.", Action: "Close the gap."},
-	}})
-	recordMove(t, repository, stream, at, 1, api.WorkstreamMove{Move: 1, From: AssembledState, To: BuildingState, Note: "EARLIER-MOVE-NOTE", By: "the chief of staff"})
-
-	latest, _, found, err := seal.Latest(repository, stream)
-	must(t, err)
-	if !found {
-		t.Fatal("the fixture's workstream is not sealed")
-	}
-	spec, err := trace.Get[trace.Document](repository, stream, plan.SpecDocument, latest.Revision.Spec)
-	must(t, err)
-
-	tool := chiefMoveTool(t, f, repository, stream, "events_intent", false)
-	callMove(t, tool, `{"to":"building","note":"Reopen it so a revision can repair the gap."}`)
-
-	requests := p.TransitionRequests()
-	if len(requests) != 1 {
-		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
-	}
-	text := requestText(t, requests[0])
-	for _, c := range plan.ParseSpec(spec.Content).Criteria {
-		requireIn(t, "the request", text, c.Text)
-	}
-	opening := ""
-	for _, line := range strings.Split(spec.Content, "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
-			opening = line
-			break
-		}
-	}
-	requireIn(t, "the request", text, opening, "EARLIER-MOVE-NOTE", "BLOCKING-FINDING", "ADVISORY-FINDING", "Close the gap.",
-		`"findings":2`, `"blocking_findings":1`, `"earlier_moves":1`, "findings of final review 90")
-	requireNotIn(t, "the request", text, "sealed spec and plan are what the owner approved")
-	if strings.Index(text, "BLOCKING-FINDING") > strings.Index(text, "ADVISORY-FINDING") {
-		t.Fatal("the advisory finding came before the blocking one")
-	}
-}
-
 func recordMove(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, n int, move api.WorkstreamMove) {
 	t.Helper()
 	data, err := json.Marshal(move)
@@ -393,41 +339,4 @@ func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 		}
 	})
 
-	t.Run("workstream proposal", func(t *testing.T) {
-		t.Parallel()
-		f, stream, repository, a := newFinalFixture(t, "intent-evidence-large")
-		hostFinalReviews(t, f, stream)
-		f.s.setSole(&activeProject{repository: repository})
-		p := &jevfixture.Transitions{}
-		routeThrough(f.s, p)
-		assembleBoth(t, f, repository, a, stream,
-			map[string]string{"internal/trace/resume.go": "package trace\n"},
-			map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-		at := f.s.now()
-		var findings []api.FinalFinding
-		for i := 0; i < 400; i++ {
-			findings = append(findings, api.FinalFinding{Severity: delivery.FindingAdvisory, Finding: fmt.Sprintf("FINDING-%d\n```\n%s()\n```\n%s", i, code, long("finding", 300))})
-		}
-		findings = append(findings, api.FinalFinding{Severity: delivery.FindingBlocking, Finding: "BLOCKING-LAST"})
-		recordFinalReport(t, repository, stream, at, api.FinalReport{Review: 90, Outcome: delivery.FinalReviewed, Findings: findings})
-		for i := 1; i <= 40; i++ {
-			recordMove(t, repository, stream, at, i, api.WorkstreamMove{Move: i, From: AssembledState, To: BuildingState, Note: fmt.Sprintf("MOVE-%d %s", i, long("note", 300)), By: "the chief of staff"})
-		}
-		tool := chiefMoveTool(t, f, repository, stream, "events_large", false)
-		callMove(t, tool, `{"to":"building","note":"Reopen it."}`)
-
-		requests := p.TransitionRequests()
-		if len(requests) != 1 {
-			t.Fatalf("Jev got %d transition requests, want 1", len(requests))
-		}
-		text := requestText(t, requests[0])
-		if n := len(requestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
-			t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
-		}
-		requireIn(t, "the request", text, "[cut:", `"findings":401`, `"blocking_findings":1`, `"earlier_moves":40`, `"earlier_moves_shown":10`, "BLOCKING-LAST", "MOVE-40", "[code omitted]", "30 oldest")
-		requireNotIn(t, "the request", text, code, "MOVE-1 ")
-		if rec, ok := routeOf(t, repository, stream, "ws.move_proposal"); !ok || rec.Outcome == router.OutcomeFallback {
-			t.Fatalf("the request was too large to answer: %+v", rec)
-		}
-	})
 }
