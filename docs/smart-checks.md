@@ -163,18 +163,27 @@ Without that option the export remains anonymous.
 
 As soon as a unit run chooses its checks, before `dagger check` starts, it
 records `units/<unit>/checks-<n>-selection.json` in the workstream's trace.
-This immutable start evidence holds the unit, run, operation, candidate, base,
-report revision, diff digest, start time and selection. It has no result, so
-an interrupted run remains started and unfinished. The finished run's record,
+This start evidence holds the unit, run, operation, candidate, base, report
+revision, diff digest, start time and selection, and its choice never changes.
+It has no result, so an interrupted run remains started and unfinished. When
+Dagger prints a Dagger Cloud trace link while the run goes on, the record gains
+a revision with the optional `trace_url`, and another when a later link replaces
+it, so a run that is cancelled or stopped still shows its link in the feed. A
+restarted run restores its start evidence from the latest revision. The
+finished run's record,
 `units/<unit>/checks-<n>.json`, keeps the same selection beside the command,
 exit status and output. The command lists each `dagger check` actually
 started, including any failure reruns, in order and joined by `&&`; commands
 stopped by an earlier failure are absent. The output holds the combined
 reports and labels separate commands. There is one result document, one
 captured output document and one check-capacity slot for the entire run.
-Passing summaries keep every report heading. The trace link belongs to the
-last command, including the failing part when it prints one; a part that
-prints no trace leaves the link empty.
+Passing summaries keep every report heading. The result record's `trace_url`
+is the latest link any command printed, however the run ended (passed, failed,
+timed out, lost its engine, or ended incomplete after the cloud fallback); a
+command that prints no link leaves the earlier one in place, and after the
+cloud fallback the link is the cloud run's when it printed one. Links are read
+only when a Dagger Cloud token is configured; without one no record carries
+`trace_url`.
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
 the links Jev selected.

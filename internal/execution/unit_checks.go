@@ -641,7 +641,9 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 			return coreadapter.OperationResult{}, err
 		}
 	}
-	result, ran, engines, err := checkrun.RunSelectionWithFallback(ctx, checks, cloud, timeout, remembered, dir, c.checkIdentity(in), selection)
+	traces := c.watchTraces(ctx, in, run)
+	result, ran, engines, err := checkrun.RunSelectionWithFallback(traces.observed(ctx), checks, cloud, timeout, remembered, dir, c.checkIdentity(in), selection)
+	traces.stop()
 	if ctx.Err() != nil {
 		return coreadapter.OperationResult{}, ctx.Err()
 	}
@@ -649,7 +651,10 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
 	run.Selection, run.Command, run.Engines = &ran, checkrun.ResultCommand(result, ran.Links), engines
-	run.TraceURL = result.TraceURL
+	// A run that printed no link keeps the one an earlier attempt of it did.
+	if result.TraceURL != "" {
+		run.TraceURL = result.TraceURL
+	}
 	run.CIIdentityFallback = result.CIIdentityFallback
 	run.Flaky = result.Flaky
 	captured, run.ExitCode = result.Output, result.ExitCode
@@ -657,7 +662,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	run.Truncated = run.Truncated || result.Truncated
 	run.OutputPath = checkrun.CheckOutputPath(checkPath(in.Unit, in.Run))
 	run.OutputRevision = 1
-	evidence := checkrun.LocalEvidence(ran, engines, result.Output, run.OutputPath, run.OutputRevision, result.TraceURL)
+	evidence := checkrun.LocalEvidence(ran, engines, result.Output, run.OutputPath, run.OutputRevision, run.TraceURL)
 	// The record's own Engines says which engine ran each invocation.
 	evidence.Engines = nil
 	run.Evidence = &evidence

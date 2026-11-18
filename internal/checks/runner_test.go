@@ -86,7 +86,7 @@ func TestDaggerChecksRunEachFilteredViewSeparately(t *testing.T) {
 	t.Run("all pass", func(t *testing.T) {
 		log := installLoggingDagger(t, `printf 'CHECKS  ✔ 2 passed\nFull trace at https://dagger.cloud/o/traces/run%s\n' "$(wc -l < "$LOG" | tr -d ' ')"
 `)
-		result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, links)
+		result, err := (DaggerChecks{CloudToken: "runner-token"}).Check(context.Background(), t.TempDir(), Identity{}, links)
 		must(t, err)
 		if got, want := checkInvocations(t, log), []string{flags + packages, flags + item, flags + version}; !slices.Equal(got, want) {
 			t.Fatalf("invocations %q, want %q", got, want)
@@ -113,7 +113,7 @@ func TestDaggerChecksRunEachFilteredViewSeparately(t *testing.T) {
 esac
 printf 'CHECKS  ✔ 2 passed\nFull trace at https://dagger.cloud/o/traces/passed\n'
 `)
-		result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, links)
+		result, err := (DaggerChecks{CloudToken: "runner-token"}).Check(context.Background(), t.TempDir(), Identity{}, links)
 		must(t, err)
 		if got, want := checkInvocations(t, log), []string{flags + packages, flags + item, flags + "dag://failed"}; !slices.Equal(got, want) {
 			t.Fatalf("invocations %q, want %q", got, want)

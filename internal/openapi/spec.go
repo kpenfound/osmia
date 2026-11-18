@@ -48,9 +48,10 @@ and retry delays do not imply running checks. Historical results without start
 evidence have no attempt or started_at; each result revision remains visible.
 final_review gives each review's outcome, reader and turn, blocking finding and
 uncovered criterion counts, or its failure reason. Reader turns also appear as
-sessions. session_checks summarizes each completed exploratory session check run.
-Unit, final and session check entries carry trace_url when the CLI reported a
-Dagger Cloud trace. Captured check output remains in the trace.
+sessions. session_checks summarizes each exploratory session check run: its result, or while it has none (still going, or interrupted) a running entry that carries the link the run printed, with no finished_at.
+Unit, final and session check entries carry one optional trace_url, the
+Dagger Cloud trace link the CLI printed. It comes from the result record or,
+when the result has none or does not exist yet, from the start record. Captured check output remains in the trace.
 
 brief is the delivery brief the chief of staff recorded for a final review: its
 text, before_you_ship items and screenshots. It appears once per review and

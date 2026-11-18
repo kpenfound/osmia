@@ -170,8 +170,11 @@ func skipArgs(addresses, skip []string) []string {
 // report shows failed checks reruns them once (see checkRun.view). A check that
 // passes its rerun counts as passed and is listed in Flaky. The first run that
 // does not pass stops the rest and supplies the exit code and any refusal.
-// Output holds every run's report, and TraceURL is the trace of the latest run
-// that has one.
+// Output holds every run's report, and TraceURL is the latest trace link Dagger
+// printed while any run streamed its output, kept when a later run prints none
+// and when the runs end by timeout or cancellation. The link is read only when
+// the checks have a CloudToken, and a TraceObserver in ctx hears it as soon as
+// it is printed.
 func (d DaggerChecks) Check(ctx context.Context, dir string, identity Identity, links []string) (CheckResult, error) {
 	return d.CheckSkipping(ctx, dir, identity, links, nil)
 }
@@ -275,7 +278,19 @@ func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, err
 	}
 	r.result.Command = append(append(r.result.Command, "dagger"), args...)
 	var output bytes.Buffer
-	exit, err := r.checks.run(ctx, r.dir, r.env, &output, args...)
+	var sink io.Writer = &output
+	// Only a configured token earns a link; without one Dagger's setup
+	// prompts are not trace links.
+	var scan *traceScanner
+	if r.checks.CloudToken != "" {
+		scan = newTraceScanner(r.result.TraceURL, traceObserverFrom(ctx))
+		sink = &scanned{output: &output, scan: scan}
+	}
+	exit, err := r.checks.run(ctx, r.dir, r.env, sink, args...)
+	if scan != nil {
+		scan.Flush()
+		r.result.TraceURL = scan.URL()
+	}
 	report := redact.Secrets(output.String(), redact.KnownSecrets()...)
 	if r.labelled {
 		r.endLine()
@@ -286,7 +301,6 @@ func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, err
 		r.endLine()
 	}
 	r.result.Output = r.output.String()
-	r.result.TraceURL = cloudTraceURL(report)
 	return exit, report, err
 }
 

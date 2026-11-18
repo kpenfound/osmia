@@ -401,9 +401,11 @@ func sessionEntryPath(parts []string) bool {
 }
 
 // sessionCheckPath reports whether parts name a session's check run record:
-// session-checks/checks-<run>.json, or its captured output,
-// session-checks/checks-<run>-output.txt, mirroring how a workstream's own
-// final check runs are kept under final/ instead of session-checks/.
+// session-checks/checks-<run>.json, its captured output,
+// session-checks/checks-<run>-output.txt, or the unfinished evidence of a run
+// that has no result, session-checks/checks-<run>-started.json, mirroring how
+// a workstream's own final check runs are kept under final/ instead of
+// session-checks/.
 func sessionCheckPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "session-checks" {
 		return false
@@ -412,7 +414,11 @@ func sessionCheckPath(parts []string) bool {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
-	return strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n)
+	if strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n) {
+		return true
+	}
+	started := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), "-started.json")
+	return strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], "-started.json") && shedRound.MatchString("round-"+started)
 }
 
 func amendmentDraftPath(parts []string) bool {

@@ -134,13 +134,19 @@ func DescribeSelectionRun(s api.CheckSelection, a *api.CheckAttribution) string 
 // A reported failure, cancellation of ctx, a preparation error and the refusal
 // of selected links never lead to a cloud attempt. When the cloud attempt does
 // not finish either, the error names it.
+//
+// The combined result's TraceURL is the cloud segment's link when that run
+// printed one, and the latest earlier link otherwise. A TraceObserver in ctx
+// hears each link, in the order the runs print them, while the runs go on.
 func RunSelectionWithFallback(ctx context.Context, local, cloud ReviewChecks, budget time.Duration, remembered Remembered, dir string, identity Identity, selection api.CheckSelection) (CheckResult, api.CheckSelection, *api.CheckAttribution, error) {
-	o := &fallbackRun{ctx: ctx, local: local, cloud: cloud, budget: budget, remembered: remembered, dir: dir, identity: identity}
+	ctx, seen := distinctTraces(ctx)
+	o := &fallbackRun{ctx: ctx, seen: seen, local: local, cloud: cloud, budget: budget, remembered: remembered, dir: dir, identity: identity}
 	defer o.cancel()
 	if cloud == nil {
 		bounded, cancel := context.WithTimeout(ctx, budget)
 		defer cancel()
 		result, ran, err := RunSelection(bounded, local, dir, identity, selection)
+		seen(result.TraceURL)
 		attribution := &api.CheckAttribution{}
 		for _, g := range o.plan(ran.Links, false) {
 			attribution.Runs = append(attribution.Runs, g.run(api.CheckEngineLocal, "", 0))
@@ -185,6 +191,7 @@ type segment struct {
 // fallbackRun is the state of one RunSelectionWithFallback.
 type fallbackRun struct {
 	ctx          context.Context
+	seen         func(url string)
 	local, cloud ReviewChecks
 	budget       time.Duration
 	remembered   Remembered
@@ -269,6 +276,7 @@ func (o *fallbackRun) attempt(engine string, g group, skip []string) (kind int, 
 	} else {
 		result, err = runner.Check(ctx, o.dir, o.identity, g.links)
 	}
+	o.seen(result.TraceURL)
 	o.segments = append(o.segments, segment{engine: engine, group: g, result: result, before: o.refused})
 	o.refused = ""
 	o.flaky = append(o.flaky, slices.DeleteFunc(slices.Clone(result.Flaky), func(l string) bool { return slices.Contains(o.flaky, l) })...)

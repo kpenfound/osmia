@@ -76,7 +76,7 @@ func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cli := daggerfixture.Install(t, c.cfg)
 			selected := api.CheckSelection{Mode: SelectionSelected, Links: links, Judgment: "unchanged"}
-			result, ran, err := RunSelection(t.Context(), DaggerChecks{}, t.TempDir(), Identity{}, selected)
+			result, ran, err := RunSelection(t.Context(), DaggerChecks{CloudToken: "selected-token"}, t.TempDir(), Identity{}, selected)
 			must(t, err)
 			if !reflect.DeepEqual(ran, selected) {
 				t.Fatalf("selection changed: %+v", ran)
@@ -100,8 +100,8 @@ func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 			if c.status == ChecksFailed && !slices.Equal(failed, []string{daggerfixture.TestB}) {
 				t.Fatalf("failed %q", failed)
 			}
-			if c.status == ChecksIncomplete && result.TraceURL != "" {
-				t.Fatalf("trace belongs to earlier passing part: %s", result.TraceURL)
+			if c.status == ChecksIncomplete && result.TraceURL != "https://dagger.cloud/fixture/traces/2" {
+				t.Fatalf("a run without a link keeps the earlier part's: %q", result.TraceURL)
 			}
 			summary, _ := SummarizeCheckOutput(result.Output, result.ExitCode)
 			if c.status == ChecksPassed && strings.Count(summary, "CHECKS") != 3 {

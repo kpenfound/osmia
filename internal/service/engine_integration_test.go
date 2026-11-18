@@ -90,7 +90,13 @@ func TestServiceEngineUnitChecks(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.TraceURL != engineTestTrace || run.CIIdentityFallback != "" {
+			// Without a Cloud token no link is recorded, even though the fake
+			// CLI prints a dagger.cloud URL.
+			wantTrace := ""
+			if tc.token != "" {
+				wantTrace = engineTestTrace
+			}
+			if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.TraceURL != wantTrace || run.CIIdentityFallback != "" {
 				t.Fatalf("unit run: %+v", run)
 			}
 			assertEngineCheckOutput(t, captured, tc.mode, tc.token, tc.runner, report.Candidate)
@@ -104,14 +110,20 @@ func TestServiceEngineUnitChecks(t *testing.T) {
 				}
 			}
 			feed := readFeed(t, f.c, w)
-			found := false
+			found, linked := false, false
 			for _, e := range feed.Entries {
-				if e.UnitChecks != nil && e.UnitChecks.TraceURL == engineTestTrace {
+				if e.UnitChecks == nil {
+					continue
+				}
+				if e.UnitChecks.TraceURL == engineTestTrace {
 					found = true
+				}
+				if e.UnitChecks.TraceURL != "" {
+					linked = true
 				}
 			}
 			raw, _ := json.Marshal(feed)
-			if !found || strings.Contains(string(raw), engineTestToken) {
+			if tc.token != "" && !found || tc.token == "" && linked || strings.Contains(string(raw), engineTestToken) {
 				t.Fatalf("feed: %s", raw)
 			}
 			if strings.Contains(logs.String(), engineTestToken) {
