@@ -93,6 +93,9 @@ func resolvedPaths(m kb.Map, names []string) ([]string, bool) {
 				}
 			}
 		}
+		if len(matches) == 0 && kb.IsPathPattern(name) {
+			continue
+		}
 		if len(matches) != 1 {
 			return nil, true
 		}

@@ -114,3 +114,17 @@ func TestMatchPathPatternCoversDirectoriesAndGlobs(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveEntitiesAcceptsRawPathGlobs(t *testing.T) {
+	m := Map{Version: Version, Entities: []Entity{}}
+	got := m.ResolveEntities([]string{"cmd/kern/**", "web/*.html", "internal/config", "cmd.kern", "docs", "../escape", "a/**b"})
+	want := Footprint{Entities: []string{}, Paths: []string{"cmd/kern/**", "internal/config", "web/*.html"}, Unresolved: []string{"cmd.kern", "docs", "../escape", "a/**b"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %#v\nwant %#v", got, want)
+	}
+	// An entity name wins over a pattern reading of the same text.
+	named := Map{Version: Version, Entities: []Entity{{ID: "web", Name: "web", Aliases: []string{"web/*"}, Paths: []string{"site"}}}}
+	if fp := named.ResolveEntities([]string{"web/*"}); !reflect.DeepEqual(fp.Paths, []string{"site"}) || !reflect.DeepEqual(fp.Entities, []string{"web"}) {
+		t.Fatalf("alias: %#v", fp)
+	}
+}

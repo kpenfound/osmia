@@ -152,7 +152,7 @@ func TestReseedSeedsAnUpstreamHeadOnceForEveryTrigger(t *testing.T) {
 	if _, revisions := ledger.counts(); revisions != 1 || ledger.causes[0] != "reseed-c1" {
 		t.Fatalf("%d revisions with causes %v, want one caused by reseed-c1", revisions, ledger.causes)
 	}
-	if got := paths(t, ledger.revision[0]); !reflect.DeepEqual(got, []string{"api", "web"}) {
+	if got := paths(t, ledger.revision[0]); !reflect.DeepEqual(got, []string{"api", "**", "web"}) {
 		t.Fatalf("recorded map has %v", got)
 	}
 }
@@ -204,7 +204,7 @@ func TestReseedNeverSeedsAnAncestorOfTheLastSeededCommit(t *testing.T) {
 	if _, revisions := ledger.counts(); revisions != 1 {
 		t.Fatalf("%d revisions, want the one seeded from the newer commit", revisions)
 	}
-	if got := paths(t, ledger.revision[0]); !reflect.DeepEqual(got, []string{"api", "web"}) {
+	if got := paths(t, ledger.revision[0]); !reflect.DeepEqual(got, []string{"api", "**", "web"}) {
 		t.Fatalf("map has %v", got)
 	}
 	// A commit that is not an ancestor moves the map forward.
@@ -251,7 +251,7 @@ func TestReseedIsPure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := paths(t, ledger.revision[1]); !reflect.DeepEqual(got, []string{"api"}) {
+	if got := paths(t, ledger.revision[1]); !reflect.DeepEqual(got, []string{"api", "**"}) {
 		t.Fatalf("the entity of the removed directory stayed: %v", got)
 	}
 }
@@ -363,7 +363,7 @@ func TestReseedRecordsRevisionsInTheTrace(t *testing.T) {
 		t.Fatalf("revisions: %+v", docs)
 	}
 	m, revision, err := LoadRevision(r)
-	if err != nil || revision != 2 || len(m.Entities) != 2 {
+	if err != nil || revision != 2 || len(m.Entities) != 3 {
 		t.Fatalf("loaded revision %d: %+v, %v", revision, m, err)
 	}
 }

@@ -229,6 +229,16 @@ const fixtureSeed = `{
       ]
     },
     {
+      "id": "repo",
+      "name": "the whole repository",
+      "aliases": [],
+      "paths": [
+        "**"
+      ],
+      "owners": [],
+      "part_of": []
+    },
+    {
       "id": "web",
       "name": "web",
       "aliases": [],
@@ -304,7 +314,7 @@ func TestSeedReadOnlyClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Entities) != 1 || m.Entities[0].ID != "src" || !reflect.DeepEqual(m.Entities[0].Owners, []string{"@a"}) {
+	if len(m.Entities) != 2 || m.Entities[0].ID != "src" || m.Entities[1].ID != RootID || !reflect.DeepEqual(m.Entities[0].Owners, []string{"@a"}) {
 		t.Fatalf("seed: %#v", m)
 	}
 }
@@ -384,7 +394,7 @@ func TestSeedIDCollisionsAndAliases(t *testing.T) {
 	want := map[string][]string{
 		"a-b": {"a-b"}, "a_b": {"a-b-2"},
 		"cmd": {"cmd"}, "cmd/x": {"cmd.x"}, "pkg": {"pkg"}, "pkg/x": {"pkg.x"}, "pkg/cmd": {"pkg.cmd"},
-		"internal": {"internal"}, "internal/y": {"internal.y", "y"},
+		"internal": {"internal"}, "internal/y": {"internal.y", "y"}, "**": {RootID},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
@@ -417,7 +427,7 @@ func TestSeedSkipsPathsWithoutValidID(t *testing.T) {
 	for _, e := range m.Entities {
 		got = append(got, e.ID+"="+e.Primary())
 	}
-	want := []string{"packages=packages", "packages.-types=packages/@types", "packages.-private=packages/_private", "src=src", "src.-gen=src/_gen"}
+	want := []string{"packages=packages", "packages.-types=packages/@types", "packages.-private=packages/_private", "src=src", "src.-gen=src/_gen", "repo=**"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
 	}
@@ -441,5 +451,42 @@ func TestSeedIgnoresCodeownersOutsideClone(t *testing.T) {
 	docs, ok := m.Lookup("docs")
 	if !ok || !reflect.DeepEqual(docs.Owners, []string{"@root"}) {
 		t.Fatalf("docs: %#v", m)
+	}
+}
+
+func TestSeedReadmeOnlyRepositoryHasRootEntity(t *testing.T) {
+	clone := t.TempDir()
+	writeTree(t, clone, map[string]string{"README.md": "# new\n"})
+	m, err := Seed(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Entities) != 1 || m.Entities[0].ID != RootID || !reflect.DeepEqual(m.Entities[0].Paths, []string{"**"}) {
+		t.Fatalf("entities: %+v", m.Entities)
+	}
+	if fp := m.ResolveEntities([]string{RootID}); len(fp.Unresolved) != 0 || !reflect.DeepEqual(fp.Paths, []string{"**"}) {
+		t.Fatalf("root footprint: %+v", fp)
+	}
+}
+
+func TestSeedRootEntityYieldsToRepoDirectory(t *testing.T) {
+	clone := t.TempDir()
+	writeTree(t, clone, map[string]string{"repo/": ""})
+	m, err := Seed(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(m); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, e := range m.Entities {
+		ids[e.Primary()] = e.ID
+	}
+	if ids["repo"] != "repo" || ids["**"] != "repo-root" {
+		t.Fatalf("ids: %v", ids)
 	}
 }

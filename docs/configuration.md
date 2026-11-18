@@ -1069,7 +1069,10 @@ not exposed by this tool. Workstream documents remain available through
 
 The entity map, `kb/entities.json`, is computed by the service alone. It holds
 one entity per directory of the repository, named from CODEOWNERS and the
-directory structure, and no agent writes it. Registration records the first
+directory structure, plus the root entity `repo` covering the whole repository,
+and no agent writes it. A unit footprint names entities by ID or alias, or names
+raw path globs such as `cmd/tool/**` that may match no file yet; an entry is a
+raw glob when it names no entity and holds a `/` or a glob character. Registration records the first
 revision from the clone's tracked files. After that the service re-seeds the map
 from the project's upstream default branch when an architect draft starts and
 again just before a sealing resolves its plan's footprints, and before the owner's plan edit, a ratification or an amendment draft is validated: it fetches the

@@ -182,7 +182,7 @@ func TestProjectOnboarding(t *testing.T) {
 		t.Fatalf("entities to paths: %+v", fp)
 	}
 	loc := local.ResolvePaths([]string{"internal/trace/git.go", "cmd/demo/main.go", "docs/unknown.md"})
-	if want := []kb.PathMatch{{Path: "internal/trace/git.go", Entities: []string{"internal", "internal.trace"}}, {Path: "cmd/demo/main.go", Entities: []string{"cmd", "cmd.demo"}}}; len(loc.Matches) != len(want) || !slices.Equal(loc.Unresolved, []string{"docs/unknown.md"}) {
+	if want := []kb.PathMatch{{Path: "internal/trace/git.go", Entities: []string{"internal", "internal.trace"}}, {Path: "cmd/demo/main.go", Entities: []string{"cmd", "cmd.demo"}}, {Path: "docs/unknown.md", Entities: []string{kb.RootID}}}; len(loc.Matches) != len(want) || len(loc.Unresolved) != 0 || !slices.Equal(loc.Matches[2].Entities, []string{kb.RootID}) {
 		t.Fatalf("paths to entities: %+v", loc)
 	}
 	// The service's file provider assembles a footprint's bundle.

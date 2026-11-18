@@ -18,6 +18,10 @@ var CodeownersFiles = []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWN
 // entities of their own.
 var Containers = []string{"apps", "cmd", "crates", "internal", "libs", "packages", "pkg", "services"}
 
+// RootID is the ID of the entity that covers the whole repository. When a
+// directory already takes it, the root entity is RootID + "-root".
+const RootID = "repo"
+
 // rule is one CODEOWNERS line translated to an entity path pattern.
 type rule struct {
 	pattern string
@@ -26,7 +30,8 @@ type rule struct {
 }
 
 // Seed builds the entity map of a clone from its CODEOWNERS file and its
-// directory structure. It only reads the clone, never follows a symlink out
+// directory structure, plus one root entity covering the whole repository, so
+// even a repository holding only a README has an entity a footprint can name. It only reads the clone, never follows a symlink out
 // of it, and returns the same map for the same files.
 func Seed(clone string) (Map, error) {
 	root, err := os.OpenRoot(clone)
@@ -120,6 +125,11 @@ func build(set map[string]bool, rules []rule) Map {
 		}
 		m.Entities = append(m.Entities, e)
 	}
+	root := RootID
+	if taken[root] {
+		root = RootID + "-root"
+	}
+	m.Entities = append(m.Entities, Entity{ID: root, Name: "the whole repository", Aliases: []string{}, Paths: []string{"**"}, Owners: []string{}, PartOf: []string{}})
 	return m
 }
 

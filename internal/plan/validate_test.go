@@ -98,7 +98,7 @@ func TestValidate(t *testing.T) {
 		{
 			name:  "unresolved footprint",
 			edit:  func(p *Plan) { p.Units[0].Footprint = []string{"trace", "absent", "docs"} },
-			wants: []Problem{{UnresolvedFootprint, "parser", "", `footprint "absent" names no entity with a path in kb/entities.json`}, {UnresolvedFootprint, "parser", "", `footprint "docs" names no entity with a path in kb/entities.json`}},
+			wants: []Problem{{UnresolvedFootprint, "parser", "", `footprint "absent" names no entity with a path in kb/entities.json and is not a path glob`}, {UnresolvedFootprint, "parser", "", `footprint "docs" names no entity with a path in kb/entities.json and is not a path glob`}},
 		},
 		{
 			name:  "empty footprint",
@@ -132,7 +132,7 @@ func TestValidate(t *testing.T) {
 				{UnknownDependency, "parser", "", `depends on unit "ghost", which the plan does not have`},
 				{MissingTask, "parser", "", "no acceptance is written"},
 				{UnknownCriterion, "parser", "spec#9", "the spec has no criterion 9"},
-				{UnresolvedFootprint, "validator", "", `footprint "nowhere" names no entity with a path in kb/entities.json`},
+				{UnresolvedFootprint, "validator", "", `footprint "nowhere" names no entity with a path in kb/entities.json and is not a path glob`},
 				{UncoveredCriterion, "", "spec#1", "no unit serves this criterion"},
 				{DependencyCycle, "parser", "", "dependency cycle parser -> validator -> parser"},
 			},
@@ -177,5 +177,27 @@ func TestCyclesAreReportedOncePerCycle(t *testing.T) {
 	want := [][]string{{"a", "b", "c", "a"}, {"d", "e", "d"}}
 	if got := cycles(p); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestValidateNewRepositoryPlanWithPathGlobs(t *testing.T) {
+	// A repository holding only a README seeds just the root entity.
+	m := kb.Map{Version: kb.Version, Entities: []kb.Entity{{ID: kb.RootID, Name: "the whole repository", Paths: []string{"**"}}}}
+	spec := "# Kern\n\n## Acceptance criteria\n\n1. A skeleton builds.\n2. The server starts.\n"
+	p := Plan{Version: Version, Units: []Unit{
+		{ID: "skeleton", Task: "Lay out the module and set up dagger check.", Acceptance: []string{"dagger check passes"}, Criteria: []string{"spec#1"}, Footprint: []string{kb.RootID}},
+		{ID: "server", Task: "Serve the API.", Acceptance: []string{"The server answers"}, Criteria: []string{"spec#2"}, DependsOn: []string{"skeleton"}, Footprint: []string{"cmd/kern/**", "internal/server"}},
+	}}
+	if problems := Validate(ParseSpec(spec), p, m); len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	p.Units[1].DependsOn = nil
+	got, err := DecideStart(p, m, "server", []string{"skeleton"})
+	if err != nil || !reflect.DeepEqual(got.Blockers, []StartBlocker{{"skeleton", OverlapReason}}) {
+		t.Fatalf("a unit naming the root entity overlaps every other unit: %#v, %v", got, err)
+	}
+	p.Units = append(p.Units, Unit{ID: "web", Footprint: []string{"web/**"}})
+	if got, err := DecideStart(p, m, "web", []string{"server"}); err != nil || !got.CanStart {
+		t.Fatalf("disjoint path globs start together: %#v, %v", got, err)
 	}
 }

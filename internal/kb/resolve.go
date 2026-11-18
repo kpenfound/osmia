@@ -13,9 +13,17 @@ type Footprint struct {
 	Entities []string
 	// Paths are their path patterns.
 	Paths []string
-	// Unresolved are the names that match no entity, or whose entities have
-	// no path pattern at all, in input order.
+	// Unresolved are the names that match no entity and are not path
+	// patterns, or whose entities have no path pattern at all, in input order.
 	Unresolved []string
+}
+
+// IsPathPattern reports whether a footprint name that names no entity is a
+// raw path pattern instead: a valid entity path pattern holding a "/" or a
+// glob character. A raw pattern may match no path that exists yet, so a unit
+// can name the files it will create.
+func IsPathPattern(name string) bool {
+	return strings.ContainsAny(name, "/*?[") && CheckPattern(name) == nil
 }
 
 // PathMatch lists the most specific entities for one repository path.
@@ -64,6 +72,10 @@ func (m Map) ResolveEntities(names []string) Footprint {
 	for _, name := range names {
 		e, ok := m.Lookup(name)
 		if !ok {
+			if IsPathPattern(name) {
+				paths[name] = true
+				continue
+			}
 			out.Unresolved = append(out.Unresolved, name)
 			continue
 		}

@@ -125,7 +125,7 @@ func Validate(spec Spec, p Plan, entities kb.Map) []Problem {
 			add(UnresolvedFootprint, u.ID, "", "declares no footprint")
 		}
 		for _, name := range entities.ResolveEntities(u.Footprint).Unresolved {
-			add(UnresolvedFootprint, u.ID, "", "footprint %q names no entity with a path in kb/entities.json", name)
+			add(UnresolvedFootprint, u.ID, "", "footprint %q names no entity with a path in kb/entities.json and is not a path glob", name)
 		}
 	}
 
