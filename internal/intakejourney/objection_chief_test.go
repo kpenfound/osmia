@@ -8,12 +8,14 @@ import (
 	fmt "fmt"
 	slices "slices"
 	strings "strings"
+	atomic "sync/atomic"
 	testing "testing"
 	time "time"
 
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	intake "github.com/kpenfound/osmia/internal/intake"
 	jev "github.com/kpenfound/osmia/internal/jev"
 	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
 	service "github.com/kpenfound/osmia/internal/service"
@@ -377,7 +379,13 @@ func TestAnObjectionDecisionIsEnteredAsTheChiefMadeIt(t *testing.T) {
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	jevp := &jevfixture.Transitions{}
+	var judged atomic.Int32
+	jevp := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
+		if a.Trigger == intake.TriggerObjectionDecision {
+			judged.Add(1)
+		}
+		return jevfixture.DefaultFits(a)
+	}}
 	service.InspectForTest(f.s.Service).SetRouterJudge(jevfixture.TransitionJudge(f.clock.Now, jevp))
 	f.objectionDecided(t, stream, veto)
 	f.objectionDecided(t, stream, advice)
@@ -396,7 +404,7 @@ func TestAnObjectionDecisionIsEnteredAsTheChiefMadeIt(t *testing.T) {
 	if moved := f.objectionTransition(t, stream, advice); moved.To != "escalated" || moved.DecidedBy != trace.DecidedByChief {
 		t.Fatalf("the escalation %+v", moved)
 	}
-	if n := len(jevp.TransitionRequests()); n != 0 {
+	if n := judged.Load(); n != 0 {
 		t.Fatalf("Jev was asked %d times about the chief's decisions", n)
 	}
 }
