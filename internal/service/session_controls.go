@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
@@ -275,15 +277,82 @@ func sessionCheckRuns(repo *trace.Repository, stream config.WorkstreamID) ([]Ses
 	return runs, nil
 }
 
+// SessionCheckStart is the unfinished evidence of a session check run: the
+// link Dagger printed while the run was still going, recorded under the run's
+// number before any result exists. It is not a result; only the run's
+// SessionCheckRun establishes that it finished. Each revision holds the
+// latest link the run printed.
+type SessionCheckStart struct {
+	Run       int             `json:"run"`
+	Commit    string          `json:"commit"`
+	Kind      string          `json:"kind"`
+	Selection *CheckSelection `json:"selection,omitempty"`
+	TraceURL  string          `json:"trace_url"`
+	StartedAt time.Time       `json:"started_at"`
+}
+
+// sessionCheckStartDocumentID names the unfinished evidence of a session's
+// check run.
+func sessionCheckStartDocumentID(run int) string {
+	return sessionCheckDocumentID(run) + "-started"
+}
+
+// sessionCheckStartPath names the trace document the unfinished evidence of a
+// session's check run is recorded as.
+func sessionCheckStartPath(run int) string {
+	return fmt.Sprintf("session-checks/checks-%d-started.json", run)
+}
+
+var sessionCheckStartPattern = regexp.MustCompile(`^session-checks/checks-[0-9]+-started\.json$`)
+
+// sessionCheckStarts returns the unfinished evidence of every check run
+// recorded for the session, at its latest revision.
+func sessionCheckStarts(repo *trace.Repository, stream config.WorkstreamID) ([]SessionCheckStart, error) {
+	docs, err := trace.Read[trace.Document](repo, stream)
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]trace.Document{}
+	var order []string
+	for _, d := range docs {
+		if !sessionCheckStartPattern.MatchString(d.Path) {
+			continue
+		}
+		if _, seen := latest[d.ID]; !seen {
+			order = append(order, d.ID)
+		}
+		if d.Revision > latest[d.ID].Revision {
+			latest[d.ID] = d
+		}
+	}
+	starts := make([]SessionCheckStart, 0, len(order))
+	for _, id := range order {
+		var start SessionCheckStart
+		if err := json.Unmarshal([]byte(latest[id].Content), &start); err != nil {
+			return nil, fmt.Errorf("%s: %w", latest[id].Path, err)
+		}
+		starts = append(starts, start)
+	}
+	return starts, nil
+}
+
 // nextSessionCheckRun returns the run number the session's next check uses.
+// A run that recorded only unfinished evidence keeps its number.
 func nextSessionCheckRun(repo *trace.Repository, stream config.WorkstreamID) (int, error) {
 	runs, err := sessionCheckRuns(repo, stream)
+	if err != nil {
+		return 0, err
+	}
+	starts, err := sessionCheckStarts(repo, stream)
 	if err != nil {
 		return 0, err
 	}
 	run := 0
 	for _, r := range runs {
 		run = max(run, r.Run)
+	}
+	for _, st := range starts {
+		run = max(run, st.Run)
 	}
 	return run + 1, nil
 }
@@ -314,6 +383,86 @@ func recordSessionCheckRun(ctx context.Context, repository *trace.Repository, pr
 		docs = append(docs, trace.Document{Header: oh, Path: run.OutputPath, Content: captured})
 	}
 	return repository.RecordDocuments(ctx, docs)
+}
+
+// sessionTraceEvidence records the trace link of one session check run as
+// unfinished evidence while the run goes on. The link a run prints is handed
+// to see, which returns at once; a goroutine records it, one extra revision
+// of the run's start document for each link that replaces another, so a slow
+// write never holds up the output Dagger prints.
+type sessionTraceEvidence struct {
+	ctx        context.Context
+	repository *trace.Repository
+	project    config.ProjectID
+	stream     config.WorkstreamID
+	start      SessionCheckStart
+	now        func() time.Time
+	log        *slog.Logger
+
+	mu      sync.Mutex
+	pending string
+	latest  string
+	wake    chan struct{}
+	done    chan struct{}
+}
+
+// newSessionTraceEvidence starts recording start's links. Its writes use a
+// context that outlives ctx's cancellation, so a link the run printed before
+// the request was cancelled still reaches the history.
+func newSessionTraceEvidence(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, start SessionCheckStart, now func() time.Time, log *slog.Logger) *sessionTraceEvidence {
+	e := &sessionTraceEvidence{ctx: context.WithoutCancel(ctx), repository: repository, project: project, stream: stream, start: start, now: now, log: log, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	go e.record()
+	return e
+}
+
+// see is the trace observer of the run.
+func (e *sessionTraceEvidence) see(url string) {
+	e.mu.Lock()
+	e.pending, e.latest = url, url
+	e.mu.Unlock()
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (e *sessionTraceEvidence) record() {
+	defer close(e.done)
+	revision, written := 0, ""
+	for range e.wake {
+		e.mu.Lock()
+		url := e.pending
+		e.mu.Unlock()
+		if url == "" || url == written {
+			continue
+		}
+		start := e.start
+		start.TraceURL = url
+		data, err := json.MarshalIndent(start, "", "  ")
+		if err != nil {
+			continue
+		}
+		id := sessionCheckStartDocumentID(start.Run)
+		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision + 1, Project: e.project, Workstream: e.stream, At: e.now(), Actor: ownerActor, Cause: sessionCheckDocumentID(start.Run)}
+		doc := trace.Document{Header: h, Path: sessionCheckStartPath(start.Run), Content: string(data) + "\n"}
+		// A failed write leaves the evidence at its earlier revision; the
+		// result the run records carries the link as well.
+		if err := e.repository.RecordDocuments(e.ctx, []trace.Document{doc}); err != nil {
+			e.log.Warn("session check trace link not recorded", "workstream", string(e.stream), "run", start.Run, "error", err.Error())
+			continue
+		}
+		revision, written = revision+1, url
+	}
+}
+
+// finish waits for the link the run last printed to be recorded and returns
+// it, or "" when the run printed none.
+func (e *sessionTraceEvidence) finish() string {
+	close(e.wake)
+	<-e.done
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.latest
 }
 
 // sessionCheckLocks guards against two check runs of the same session
@@ -417,7 +566,21 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 			return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the check runs of session %s; check the trace repository", stream)}
 		}
 	}
-	result, selection, engines, checkErr := checkrun.RunSelectionWithFallback(ctx, checks, cloud, timeout, remembered, dir, identity, selection)
+	chosen := selection
+	evidence := newSessionTraceEvidence(ctx, repository, project, stream, SessionCheckStart{Run: run, Commit: head, Kind: sessionCheckKind(chosen), Selection: &chosen, StartedAt: startedAt}, s.now, s.log())
+	result, selection, engines, checkErr := checkrun.RunSelectionWithFallback(checkrun.WithTraceObserver(ctx, evidence.see), checks, cloud, timeout, remembered, dir, identity, selection)
+	latestLink := evidence.finish()
+	if result.TraceURL == "" {
+		result.TraceURL = latestLink
+	}
+	// A run the request's cancellation cut short records no result; the link
+	// it printed stays in the session's history as unfinished evidence. A run
+	// that ended on its own records its result whether or not the request is
+	// still there to hear it.
+	if ctx.Err() != nil && checkErr != nil {
+		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("the check run of session %s was cancelled before it finished", stream)}
+	}
+	ctx = context.WithoutCancel(ctx)
 	if errors.Is(checkErr, context.DeadlineExceeded) {
 		checkErr = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}

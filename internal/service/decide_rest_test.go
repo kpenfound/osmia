@@ -139,13 +139,17 @@ func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
 	k := newAmendmentKit(t, p, amendedSpec, validPlan)
+	// The service that planted the amendment was still running when it was
+	// presented, and may have judged it already; only decide's own refusal is
+	// under test, so count what exists once the service has stopped.
+	_, before := judgments(t, k.repo, k.stream)
 	out := intakefixture.Handle(t, k.decide, decideAmendmentInput)
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "owner") {
 		t.Fatalf("decide: %s", out)
 	}
-	records, _ := judgments(t, k.repo, k.stream)
-	if k.requests() != 0 || len(records) != 0 {
-		t.Fatalf("%d requests, %d judgments", k.requests(), len(records))
+	_, after := judgments(t, k.repo, k.stream)
+	if k.requests() != 0 || after != before {
+		t.Fatalf("%d requests, %d judgment revisions before decide and %d after", k.requests(), before, after)
 	}
 	if out := intakefixture.Handle(t, k.amend, approveAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "owner decision") {
 		t.Fatalf("decide_amendment: %s", out)

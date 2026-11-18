@@ -55,6 +55,12 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 				return nil, err
 			}
 			put(checkDocumentID(start.Unit, start.Run), FeedEntry{Kind: "unit_checks", At: d.At, UnitChecks: &FeedUnitChecks{TraceURL: start.TraceURL, Unit: start.Unit, Run: start.Run, State: "running", Selection: feedSelection(&start.Selection), StartedAt: start.StartedAt}})
+		case sessionCheckStartPattern.MatchString(d.Path):
+			var start SessionCheckStart
+			if err := decode(d, &start); err != nil {
+				return nil, err
+			}
+			put(sessionCheckDocumentID(start.Run), FeedEntry{Kind: "session_checks", At: start.StartedAt, SessionChecks: &api.FeedSessionChecks{Run: start.Run, Commit: start.Commit, Kind: start.Kind, State: "running", Selection: feedSelection(start.Selection), TraceURL: start.TraceURL, StartedAt: start.StartedAt}})
 		case finalCheckStartPathPattern.MatchString(d.Path):
 			var start FinalCheckAttempt
 			if err := decode(d, &start); err != nil {
@@ -111,7 +117,13 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &run); err != nil {
 				return nil, err
 			}
-			put(d.ID, FeedEntry{Kind: "session_checks", At: run.FinishedAt, SessionChecks: &api.FeedSessionChecks{Run: run.Run, Commit: run.Commit, Kind: run.Kind, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, TraceURL: run.TraceURL, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt}})
+			// A result supersedes the run's unfinished evidence; it keeps that
+			// evidence's link when the result carries none.
+			entry := FeedEntry{Kind: "session_checks", At: run.FinishedAt, SessionChecks: &api.FeedSessionChecks{Run: run.Run, Commit: run.Commit, Kind: run.Kind, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, TraceURL: run.TraceURL, StartedAt: run.StartedAt, FinishedAt: &run.FinishedAt}}
+			if i, ok := indexes[d.ID]; ok && entry.SessionChecks.TraceURL == "" {
+				entry.SessionChecks.TraceURL = out[i].SessionChecks.TraceURL
+			}
+			put(d.ID, entry)
 		case d.Path == finalReportPath:
 			var report FinalReport
 			if err := decode(d, &report); err != nil {

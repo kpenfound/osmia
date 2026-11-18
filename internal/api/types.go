@@ -1475,19 +1475,21 @@ type FeedFinalChecks struct {
 	FinishedAt   *time.Time          `json:"finished_at,omitempty"`
 }
 
-// FeedSessionChecks summarizes one completed exploratory session check run.
+// FeedSessionChecks summarizes one exploratory session check run: a finished
+// result, or the unfinished evidence of a run that printed a trace link and
+// has recorded no result.
 type FeedSessionChecks struct {
 	Run        int                 `json:"run"`
 	Commit     string              `json:"commit"`
 	Kind       string              `json:"kind"`
-	State      string              `json:"state" enum:"passed,failed,incomplete"`
+	State      string              `json:"state" enum:"running,passed,failed,incomplete" description:"running marks a run with no recorded result: it is still going or was interrupted before it recorded one."`
 	Selection  *FeedCheckSelection `json:"selection,omitempty"`
 	Failed     []string            `json:"failed,omitempty"`
 	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
 	Error      string              `json:"error,omitempty"`
-	TraceURL   string              `json:"trace_url,omitempty" description:"Dagger Cloud trace link recorded on the run's result."`
+	TraceURL   string              `json:"trace_url,omitempty" description:"Dagger Cloud trace link of the run; taken from the result record, otherwise from the run's unfinished evidence."`
 	StartedAt  time.Time           `json:"started_at"`
-	FinishedAt time.Time           `json:"finished_at"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty" description:"Absent while the run has no recorded result."`
 }
 
 // FeedFinalReview is a recorded review outcome. Reader and Turn identify its

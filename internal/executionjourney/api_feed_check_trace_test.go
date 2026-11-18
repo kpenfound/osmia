@@ -117,3 +117,29 @@ func TestFeedSessionChecksShowTheResultTraceLink(t *testing.T) {
 		t.Fatalf("entries: %+v", entries)
 	}
 }
+
+func TestFeedSessionChecksShowUnfinishedEvidenceUntilAResultSupersedesIt(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ result, want string }{
+		"evidence link kept": {"", startTrace},
+		"result link won":    {resultTrace, resultTrace},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := feedFixtureRepo(t, "fse-")
+			at := demoStart
+			feedDocument(t, repo, stream, "session-check-1-started", "session-checks/checks-1-started.json", 1, at, map[string]any{"run": 1, "commit": "abc", "kind": "full", "trace_url": startTrace, "started_at": at})
+			entries, err := feedEntries(repo, repo, stream)
+			must(t, err)
+			if len(entries) != 1 || entries[0].SessionChecks.State != "running" || entries[0].SessionChecks.TraceURL != startTrace || entries[0].SessionChecks.FinishedAt != nil {
+				t.Fatalf("unfinished: %+v", entries)
+			}
+			finished := at.Add(time.Minute)
+			feedDocument(t, repo, stream, "session-check-1", "session-checks/checks-1.json", 1, finished, SessionCheckRun{Run: 1, Commit: "abc", Kind: "full", Status: ChecksPassed, TraceURL: tc.result, StartedAt: at, FinishedAt: finished})
+			entries, err = feedEntries(repo, repo, stream)
+			must(t, err)
+			if len(entries) != 1 || entries[0].SessionChecks.State != ChecksPassed || entries[0].SessionChecks.TraceURL != tc.want || entries[0].SessionChecks.FinishedAt == nil {
+				t.Fatalf("finished: %+v", entries)
+			}
+		})
+	}
+}
