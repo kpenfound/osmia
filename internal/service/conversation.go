@@ -24,6 +24,12 @@ import (
 // priority guidance and the workstream's rendered bundle follow it.
 const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
 
+// chiefGuidance is the guidance of every chief-of-staff turn the service
+// starts with the chief's full toolset: owner messages and follow-ups.
+func chiefGuidance() string {
+	return strings.Join([]string{followUpGuidance, chiefDocumentsGuidance, priorityGuidance, pauseGuidance, changeGuidance, amendmentGuidance, charterGuidance, contestGuidance, objectionGuidance, driftHandbackGuidance, ownerWritingGuidance}, "\n\n")
+}
+
 // now is the service clock: the reconciliation clock when one is supplied.
 func (s *Service) now() time.Time {
 	if s.options.Reconciliation.Now != nil {
@@ -185,7 +191,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + objectionGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefGuidance() + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

@@ -172,6 +172,8 @@ type charterer = intake.Charterer
 
 const chiefDocumentsGuidance = intake.ChiefDocumentsGuidance
 
+const followUpGuidance = intake.FollowUpGuidance
+
 func (s *Service) agentProfile(cfg *config.Config, role string, agent string) (coreadapter.Profile, error) {
 	return s.intake().AgentProfile(cfg, role, agent)
 }

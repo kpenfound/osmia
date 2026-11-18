@@ -21,6 +21,11 @@ const ChiefEvents = "You are the chief of staff for workstream %s. The prompt li
 // host workstream, and that the chief must qualify that member's questions.
 const ChiefEventsOtherMember = " These events are about workstream %s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\"."
 
+// FollowUpGuidance tells the chief of staff how to keep work moving: read the
+// work each action queued, and check back with follow_up instead of promising
+// the owner that work will happen.
+const FollowUpGuidance = "Events and messages are information you act on to keep the work moving. Every action tool's result lists under queued the work the service queued or is running because of it, or says under nothing_will_run why nothing will run and until when. Tell the owner work is under way only when a result shows it queued. When nothing is queued and you expect something to change later, call follow_up with after (5m to 24h), a reason and, for a shared chief, the workstream, and you get a turn back then with what changed; a newer follow_up for the same workstream replaces an unfired one, and your pending follow-ups are listed in the project context. When an action of yours starts no work and you schedule no follow_up, the service schedules one at the stall window."
+
 func (s *Controller) ChiefEventsSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
 	skip := ChiefOfStaffSkip(repository)
 	return func(stream config.WorkstreamID) (bool, error) {
@@ -76,7 +81,7 @@ func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *tra
 		if host != stream {
 			note = fmt.Sprintf(ChiefEventsOtherMember, stream, stream)
 		}
-		return fmt.Sprintf(ChiefEvents, host) + note + "\n\n" + ChiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + AmendmentGuidance + "\n\n" + ContestGuidance + "\n\n" + ObjectionGuidance + "\n\n" + DriftHandbackGuidance + "\n\n" + OwnerWritingGuidance + "\n\n" + context, nil
+		return fmt.Sprintf(ChiefEvents, host) + note + "\n\n" + FollowUpGuidance + "\n\n" + ChiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + AmendmentGuidance + "\n\n" + ContestGuidance + "\n\n" + ObjectionGuidance + "\n\n" + DriftHandbackGuidance + "\n\n" + OwnerWritingGuidance + "\n\n" + context, nil
 	}
 }
 

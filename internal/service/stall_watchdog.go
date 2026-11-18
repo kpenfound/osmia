@@ -432,6 +432,7 @@ func (w stallWatch) exit(stream config.WorkstreamID, unit string, state trace.Wo
 	if len(failures) > 0 {
 		body += " Last failure: " + strings.Join(failures, "; ") + "."
 	}
+	body += " " + stallTurnRule + " A turn on this notice that ends with none of them gets a check-back from the service."
 	evidence := router.Evidence{Facts: facts, Records: records}
 	reason := fmt.Sprintf("Stalled: %s made no progress for %d minutes with nothing to explain it", name, minutes)
 	if unit == "" {

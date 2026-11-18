@@ -55,6 +55,9 @@ type conversationPath struct {
 	scanning    sync.Mutex // held for one discovery, queue and reconciliation iteration
 	mu          sync.Mutex
 	controllers []*reconcile.Controller
+	// followUpRan is when each trace's follow-ups were last read; scanning
+	// guards it.
+	followUpRan map[*trace.Repository]time.Time
 }
 
 // Drain stops the path from admitting work. It does not wait for an iteration
@@ -109,6 +112,12 @@ func (p *conversationPath) scan(ctx context.Context, targets map[config.Workgrou
 	for _, t := range targets {
 		if p.draining() {
 			return nil
+		}
+		if err := p.followUps(ctx, t.repository); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			p.s.log().Warn("follow-up scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
 		}
 		if err := p.queue(ctx, t.repository); err != nil {
 			if ctx.Err() != nil {
