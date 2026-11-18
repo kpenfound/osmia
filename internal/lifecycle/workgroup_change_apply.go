@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
@@ -59,17 +58,26 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		_ = json.Unmarshal(data, &result)
 		c.Result = &result
 	}
-	var holds []string
+	// A member archived after the impact was presented is terminal. It is
+	// recorded as retired and receives no effect; nothing waits on it.
+	retire := func(stream config.WorkstreamID) error {
+		return s.RetireChangeMember(ctx, wt, c, stream)
+	}
+	pending := func(row amendment.StreamImpact) bool {
+		return row.Action != amendment.Leave && !slices.Contains(c.Applied, row.Workstream) && !slices.Contains(c.Retired, row.Workstream)
+	}
 
 	// Install every barrier before any member receives changed documents. A
 	// crash during this loop resumes it; approval has already pinned the delta.
 	for _, row := range c.Impact.Streams {
-		if c.State == "releasing" || row.Action == amendment.Leave || row.Action == amendment.FollowUp {
+		if c.State == "releasing" || !pending(row) || row.Action == amendment.FollowUp {
 			continue
 		}
 		repo, err := s.ChangeMemberRepository(wt, row.Workstream)
 		if errors.Is(err, trace.ErrMemberRetired) {
-			holds = append(holds, err.Error())
+			if err := retire(row.Workstream); err != nil {
+				return err
+			}
 			continue
 		}
 		if err != nil {
@@ -85,21 +93,16 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	if len(holds) > 0 {
-		if err := s.HoldChange(ctx, wt, c, strings.Join(holds, "; ")); err != nil {
-			return err
-		}
-	}
-	// Every available affected member reaches a safe boundary before the
-	// first effect. A retired prerequisite remains held independently.
+	// Every live affected member reaches a safe boundary before the first
+	// effect.
 	for _, row := range c.Impact.Streams {
-		if row.Action == amendment.Leave || slices.Contains(c.Applied, row.Workstream) {
+		if !pending(row) {
 			continue
 		}
 		repo, err := s.ChangeMemberRepository(wt, row.Workstream)
 		if errors.Is(err, trace.ErrMemberRetired) {
-			if !slices.Contains(holds, err.Error()) {
-				holds = append(holds, err.Error())
+			if err := retire(row.Workstream); err != nil {
+				return err
 			}
 			continue
 		}
@@ -128,13 +131,13 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		}
 	}
 	for n, row := range c.Impact.Streams {
-		if row.Action == amendment.Leave || slices.Contains(c.Applied, row.Workstream) {
+		if !pending(row) {
 			continue
 		}
 		repo, err := s.ChangeMemberRepository(wt, row.Workstream)
 		if errors.Is(err, trace.ErrMemberRetired) {
-			if !slices.Contains(holds, err.Error()) {
-				holds = append(holds, err.Error())
+			if err := retire(row.Workstream); err != nil {
+				return err
 			}
 			continue
 		}
@@ -159,8 +162,8 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		}
 		repo, err = s.ChangeMemberRepository(wt, row.Workstream)
 		if errors.Is(err, trace.ErrMemberRetired) {
-			if !slices.Contains(holds, err.Error()) {
-				holds = append(holds, err.Error())
+			if err := retire(row.Workstream); err != nil {
+				return err
 			}
 			continue
 		}
@@ -199,9 +202,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	if len(holds) > 0 {
-		return s.HoldChange(ctx, wt, c, strings.Join(holds, "; "))
-	}
 	if err := s.HoldChange(ctx, wt, c, ""); err != nil {
 		return err
 	}
@@ -219,12 +219,16 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	// Release only after every member and the shared spec are reconciled.
+	// Release only after every member and the shared spec are reconciled. A
+	// member archived since its effect has no barrier left to release.
 	for _, row := range c.Impact.Streams {
-		if row.Action == amendment.Leave {
+		if row.Action == amendment.Leave || slices.Contains(c.Retired, row.Workstream) {
 			continue
 		}
 		repo, err := s.ChangeMemberRepository(wt, row.Workstream)
+		if errors.Is(err, trace.ErrMemberRetired) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -241,10 +245,33 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	if err := s.SettleChangeRequester(ctx, *c); err != nil {
+	// A retired requester has no waiting unit to resume. Its ruling stays a
+	// recoverable diagnostic on the applied change; survivors do not wait.
+	if err := s.SettleChangeRequester(ctx, *c); err != nil && !errors.Is(err, trace.ErrMemberRetired) {
 		return err
 	}
 	c.State = "applied"
+	return s.SaveChange(ctx, wt, c)
+}
+
+// RetireChangeMember records that an affected member was archived before the
+// approved change reached it. The member is terminal and receives no effect;
+// an amended result keeps its ratified slice.
+func (s *Controller) RetireChangeMember(ctx context.Context, wt *trace.Repository, c *WorkgroupChange, stream config.WorkstreamID) error {
+	if slices.Contains(c.Retired, stream) {
+		return nil
+	}
+	c.Retired = append(c.Retired, stream)
+	if c.Result != nil {
+		if old, ok := trace.SliceFor(c.Before, stream); ok {
+			for n := range c.Result.Slices {
+				if c.Result.Slices[n].Workstream == stream {
+					c.Result.Slices[n] = old
+				}
+			}
+		}
+	}
+	s.Log().Warn("archived workgroup member receives no change effect", "workgroup", c.Workgroup, "change", c.ID, "member", stream)
 	return s.SaveChange(ctx, wt, c)
 }
 func (s *Controller) ChangeMemberMerged(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) (bool, error) {

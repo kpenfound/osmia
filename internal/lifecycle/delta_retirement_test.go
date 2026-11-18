@@ -21,7 +21,7 @@ func TestDesignProductionQueuedDeltaRetiresBeforeExecution(t *testing.T) {
 	for _, unavailable := range []bool{false, true} {
 		name := "unchanged-retired-slice"
 		if unavailable {
-			name = "changed-retired-slice-held"
+			name = "changed-retired-slice-refused"
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -166,24 +166,12 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 		return found && !a.CleanedAt.IsZero()
 	})
 	if unavailable {
-		lifecycleAwait(t, f, "survivor unavailable-history hold", func() bool {
-			project := f.project
-			if survivor == f.stream2 {
-				project = f.project2
-			}
-			repo, err := f.s.repository(project)
-			must(t, err)
-			ops, err := repo.Operations(survivor)
-			must(t, err)
-			return slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
-				return op.Operation.Action == deltaTurnAction && op.Result == nil && slices.ContainsFunc(op.History, func(a trace.OperationAction) bool {
-					return a.Kind == "retry" && strings.Contains(a.Failure, string(address)) && strings.Contains(a.Failure, "unavailable validation history")
-				})
-			})
+		// The archived member's slice is frozen: the draft is refused with a
+		// reason naming it, and the turn ends without a proposal.
+		lifecycleAwait(t, f, "survivor draft refused", func() bool {
+			return currentChange(t, f.s, survivor, c.ID).State == "failed"
 		})
-		if got := currentChange(t, f.s, survivor, c.ID); !equalJSONTest(got, before) {
-			t.Fatal("unavailable retired validation changed the pending journal")
-		}
+		assertFrozenSliceRefusal(t, f, survivor, c.ID, address)
 	} else {
 		lifecycleAwait(t, f, "survivor delta presentation", func() bool {
 			return currentChange(t, f.s, survivor, c.ID).State == "presented"
@@ -209,7 +197,7 @@ func TestDesignProductionRetiredDeltaPreservesRunningSharedClaim(t *testing.T) {
 		retireWhileRunning bool
 	}{
 		{name: "recorded-draft"},
-		{name: "unavailable-history", unavailable: true},
+		{name: "changed-retired-slice-refused", unavailable: true},
 		{name: "running-at-retirement", retireWhileRunning: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -413,11 +401,13 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}
 	result, err := (deltaRunner{s: f.s}).Apply(ctx, intent.Operation)
 	must(t, err)
-	if result.Outcome != "completed" {
-		t.Fatalf("captured delta did not reconcile its ordinary outcome: %+v", result)
+	outcome := "completed"
+	if unavailable {
+		// A changed archived slice is refused; the turn recorded no draft.
+		outcome = "failed"
 	}
-	if unavailable && !strings.Contains(result.Evidence, "delta draft remains pending") {
-		t.Fatalf("retired dispatch did not preserve the unavailable-history hold: %+v", result)
+	if result.Outcome != outcome {
+		t.Fatalf("captured delta did not reconcile its ordinary outcome: %+v", result)
 	}
 	retained, err := wt.Thread(after.Host, architectAgent)
 	must(t, err)
@@ -427,8 +417,15 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	_, latest, _, closeLatest, err := (deltaRunner{s: f.s}).load(ctx, in)
 	must(t, err)
 	closeLatest()
-	if unavailable && !equalJSONTest(before, latest) {
-		t.Fatal("captured response with unavailable validation changed the shared decision")
+	if unavailable {
+		if latest.State != "failed" || !equalJSONTest(before.Before, latest.Before) || !equalJSONTest(before.After, latest.After) {
+			t.Fatalf("refused draft changed the shared decision: %+v", latest)
+		}
+		survivor := f.stream1
+		if survivor == address {
+			survivor = f.stream2
+		}
+		assertFrozenSliceRefusal(t, f, survivor, c.ID, address)
 	}
 	if drafts.Load() != 1 {
 		t.Fatalf("shared turn ran %d times", drafts.Load())
@@ -443,7 +440,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	ops, err := owner.Operations(address)
 	must(t, err)
 	if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
-		return op.Operation.ID == intent.Operation.ID && op.Result != nil && op.Result.Outcome == "completed"
+		return op.Operation.ID == intent.Operation.ID && op.Result != nil && op.Result.Outcome == outcome
 	}) {
 		t.Fatalf("captured retired dispatch did not settle: %+v", ops)
 	}
@@ -470,9 +467,9 @@ func deliverRetirementDelta(ctx context.Context, req agent.Request, tools *mcp.C
 	for _, mutate := range mutations {
 		mutate(&after)
 	}
-	_, err = callTool(ctx, tools, deltaDraftTool, toolMap(after))
-	if err != nil && strings.Contains(err.Error(), trace.ErrMemberRetired.Error()) {
-		return questionResult(req, "session-retirement-delta", "The draft needs unavailable member history; keep the shared decision pending."), nil
+	out, err := callTool(ctx, tools, deltaDraftTool, toolMap(after))
+	if err == nil && strings.Contains(out, `"recorded":false`) {
+		return questionResult(req, "session-retirement-delta", "Refused: "+out), nil
 	}
 	return questionResult(req, "session-retirement-delta", "The shared delta proposal is recorded."), err
 }
@@ -499,5 +496,28 @@ func installRetirementDelta(t *testing.T, f *productionDesignFixture, drafts *at
 			return previous(ctx, req, turn, tools)
 		}
 		return questionResult(req, "session-retirement-debate", "The delta contribution is recorded."), err
+	}
+}
+
+// assertFrozenSliceRefusal checks that the architect's draft was refused with
+// a reason naming the archived member whose slice it changed.
+func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor config.WorkstreamID, change string, archived config.WorkstreamID) {
+	t.Helper()
+	project := f.project
+	if survivor == f.stream2 {
+		project = f.project2
+	}
+	repo, err := f.s.repository(project)
+	must(t, err)
+	wt, host, _, closeAuthority, err := f.s.chiefRepository(context.Background(), repo, survivor)
+	must(t, err)
+	defer closeAuthority()
+	th, err := wt.Thread(host, architectAgent)
+	must(t, err)
+	turn := deltaTurnID(WorkgroupChange{ID: change}, architectAgent, deltaDraftTool)
+	if !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
+		return q.Request.TurnID == turn && q.Response != nil && strings.Contains(q.Response.Result.FinalResponse, "member "+string(archived)+" is archived and its slice is frozen")
+	}) {
+		t.Fatalf("draft changing archived member %s was not refused with its reason", archived)
 	}
 }

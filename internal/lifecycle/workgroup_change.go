@@ -51,6 +51,8 @@ type DeltaAssessment struct {
 // WorkgroupChange is the journal of the one delta debate and owner decision.
 // Before is immutable approved text; After is proposed text until approval.
 // Applied members reconcile once before the shared project spec is published.
+// Retired members were archived before the change reached them and receive no
+// effect.
 type WorkgroupChange struct {
 	ID        string                                      `json:"id"`
 	Workgroup config.WorkgroupID                          `json:"workgroup"`
@@ -70,6 +72,7 @@ type WorkgroupChange struct {
 	Reply     string                                      `json:"reply,omitempty"`
 	Decision  *ChangeDecision                             `json:"decision,omitempty"`
 	Applied   []config.WorkstreamID                       `json:"applied,omitempty"`
+	Retired   []config.WorkstreamID                       `json:"retired,omitempty"`
 	Followups map[config.WorkstreamID]config.WorkstreamID `json:"followups,omitempty"`
 	Failure   string                                      `json:"failure,omitempty"`
 }
@@ -269,6 +272,23 @@ func ChangeProjectSpec(g trace.Workgroup, repo *trace.Repository) (trace.Project
 	}
 	return spec, found, err
 }
+
+// RetiredChangeMember reads an archived member from its pinned archive record
+// rather than its live trace: its archived state, merge evidence and pull
+// request. Its units read "retired"; the member receives no change effect.
+func (s *Controller) RetiredChangeMember(wt *trace.Repository, g trace.Workgroup, id config.WorkstreamID) (amendment.Member, bool, error) {
+	retired, err := wt.MemberRetired(id)
+	if err != nil || !retired {
+		return amendment.Member{}, false, err
+	}
+	a, archived := s.ArchivedWorkstream(string(id))
+	if !archived || a.Workgroup != g.ID {
+		return amendment.Member{}, false, fmt.Errorf("archived member %s identity does not match workgroup %s", id, g.ID)
+	}
+	m := amendment.Member{Workstream: id, State: a.State, Merged: a.Resolved && a.ResolutionEvidence == "merged", Retired: true, PullRequest: a.Publication.PullRequest, Units: map[string]string{}}
+	return m, true, nil
+}
+
 func (s *Controller) SnapshotChange(g trace.Workgroup, repo *trace.Repository) (trace.ProjectSpec, []amendment.Member, error) {
 	spec, found, err := ChangeProjectSpec(g, repo)
 	if err != nil {
@@ -276,6 +296,23 @@ func (s *Controller) SnapshotChange(g trace.Workgroup, repo *trace.Repository) (
 	}
 	members := []amendment.Member{}
 	for _, id := range s.ChangeMembers(g, repo) {
+		if m, retired, err := s.RetiredChangeMember(repo, g, id); err != nil {
+			return spec, nil, err
+		} else if retired {
+			if !found {
+				spec.Behavior = "Workstream brief"
+				spec.Slices = append(spec.Slices, trace.Slice{Workstream: id, Plan: `{"version":2,"units":[]}`})
+			}
+			if sl, ok := trace.SliceFor(spec, id); ok {
+				if p, err := plan.Parse([]byte(sl.Plan)); err == nil {
+					for _, u := range p.Units {
+						m.Units[u.ID] = "retired"
+					}
+				}
+			}
+			members = append(members, m)
+			continue
+		}
 		r, err := s.ChangeMemberRepository(repo, id)
 		if err != nil {
 			return spec, nil, err
@@ -386,6 +423,11 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 	}
 	if req.Kind == "amend" || req.Scope == "workstream" && len(members) > 1 {
 		for _, m := range members {
+			if m.Retired {
+				// An archived member is terminal; only live members need an
+				// approved seal.
+				continue
+			}
 			_, _, r, api := s.ConversationTrace(string(m.Workstream))
 			if api != nil {
 				return WorkgroupChange{}, api
@@ -408,6 +450,9 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 		}
 		if !slices.Contains(s.ChangeMembers(g, wt), origin) && req.Scope == "workstream" {
 			return c, &APIError{Code: Validation, Message: "select a member workstream to cancel"}
+		}
+		if req.Scope == "workstream" && slices.ContainsFunc(members, func(m amendment.Member) bool { return m.Workstream == origin && m.Retired }) {
+			return c, &APIError{Code: Validation, Message: fmt.Sprintf("member %s is archived and already terminal; select a live member to cancel", origin)}
 		}
 		c.Impact = amendment.CancelImpact(target, before.Graph, members)
 		c.State = "presenting"
@@ -534,8 +579,27 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 		if api != nil {
 			return priorityRefusal(api.Message)
 		}
-		return json.Marshal(out)
+		return json.Marshal(out.ToolResult())
 	}}
+}
+
+// ChangeToolResult is a change as the chief's change tools report it. A
+// pending change with a recorded hold reads state "held" with its reason.
+type ChangeToolResult struct {
+	WorkgroupChange
+	Reason string `json:"reason,omitempty"`
+}
+
+// Held reports whether a pending change is held by a recorded diagnostic.
+func (c WorkgroupChange) Held() bool {
+	return c.Failure != "" && c.State != "applied" && c.State != "rejected" && c.State != "failed"
+}
+func (c WorkgroupChange) ToolResult() ChangeToolResult {
+	out := ChangeToolResult{WorkgroupChange: c}
+	if c.Held() {
+		out.State, out.Reason = "held", c.Failure
+	}
+	return out
 }
 
 // ChangeHeld is a durable admission barrier. Running turns finish their current
@@ -665,6 +729,9 @@ func (c WorkgroupChange) Summary() string {
 	b.WriteString("\nRequested change: " + c.Request.Change + "\n")
 	if c.Failure != "" {
 		b.WriteString("\nChange held: " + c.Failure + "\n")
+	}
+	for _, stream := range c.Retired {
+		fmt.Fprintf(&b, "\nArchived before this change reached it: %s. It receives no effect and its slice stays as ratified.\n", stream)
 	}
 	if c.Request.Kind != "amend" {
 		return b.String()

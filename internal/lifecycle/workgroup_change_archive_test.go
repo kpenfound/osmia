@@ -182,7 +182,9 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 	scenarios = append(scenarios, scenario{"cancel", true, true, "archive-first"}, scenario{"cancel", true, true, "change-first"}, scenario{"amend", false, true, "merged-followup"}, scenario{"amend", false, true, "merged-followup-allocation"}, scenario{"amend", false, true, "merged-followup-join"})
 	for _, tc := range scenarios {
 		kind, affectsRetired, resumeRetained := tc.kind, tc.affectsRetired, tc.resumeRetained
-		requiresHold := affectsRetired && tc.order != "change-first"
+		// An affected member archived before its effect is settled as retired:
+		// it receives no effect and the survivor's change still applies.
+		retiresAffected := affectsRetired && tc.order != "change-first"
 		t.Run(fmt.Sprintf("%s/retired-affected=%t/resume-retained=%t/%s", kind, affectsRetired, resumeRetained, tc.order), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
@@ -561,7 +563,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				if !equalJSONTest(c.Decision, pinned.Decision) || !equalJSONTest(c.Before, pinned.Before) || !equalJSONTest(c.After, pinned.After) || !equalJSONTest(c.Members, pinned.Members) || !equalJSONTest(c.Impact, pinned.Impact) {
 					t.Fatalf("%s reselected approved intent or member pins", boundary)
 				}
-				if requiresHold && slices.Contains(c.Applied, retired) {
+				if retiresAffected && slices.Contains(c.Applied, retired) {
 					t.Fatalf("%s falsely applied retired effect", boundary)
 				}
 				return c
@@ -571,7 +573,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				unblock()
 				lifecycleAwait(t, f, "survivor consumes original approval", func() bool {
 					c := check("reconciling")
-					return slices.Contains(c.Applied, survivor) && ((!requiresHold && c.State == "applied") || (requiresHold && c.State == "applying" && strings.Contains(c.Failure, trace.ErrMemberRetired.Error())))
+					return slices.Contains(c.Applied, survivor) && c.State == "applied" && slices.Contains(c.Retired, retired) == retiresAffected && c.Failure == ""
 				})
 			}
 			check("retained")
@@ -678,8 +680,8 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			if prompts != 1 || ownerDecisions != 1 {
 				t.Fatalf("continued conversation received %d impact prompts and %d owner decisions", prompts, ownerDecisions)
 			}
-			if requiresHold && !strings.Contains(finished.Summary(), trace.ErrMemberRetired.Error()) {
-				t.Fatal("impact hides its recoverable hold")
+			if retiresAffected && !strings.Contains(finished.Summary(), "Archived before this change reached it: "+string(retired)) {
+				t.Fatal("impact hides the archived member that received no effect")
 			}
 			repo, err = f.s.repository(survivorProject)
 			must(t, err)

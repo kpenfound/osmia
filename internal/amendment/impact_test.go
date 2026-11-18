@@ -160,3 +160,50 @@ func TestImpactRefusesMissingMemberAndCycles(t *testing.T) {
 		})
 	}
 }
+
+func TestRetiredMemberSliceIsFrozenAndGetsNoEffect(t *testing.T) {
+	a, b := impactStreamA, impactStreamB
+	before := trace.ProjectSpec{Behavior: "Upload", Contracts: []trace.Contract{{Name: "offset", Text: "integer"}}, Graph: []trace.Edge{{From: a, To: b, Type: trace.EdgeContract}}, Slices: []trace.Slice{
+		{Workstream: a, Spec: "## Acceptance criteria\n1. Integer offset.\n", Plan: impactPlan(t, impactUnit("contract", "spec#1")), ContractCriteria: []int{1}},
+		{Workstream: b, Spec: "## Acceptance criteria\n1. Consume offset.\n", Plan: impactPlan(t, impactUnit("consume", "spec#1")), ContractCriteria: []int{1}},
+	}}
+	members := []Member{{Workstream: a, State: "delivered", Merged: true, Retired: true, Units: map[string]string{}}, {Workstream: b, State: "delivered", PullRequest: 42, Units: map[string]string{"consume": "merged"}}}
+	after := before
+	after.Slices = slices.Clone(before.Slices)
+	after.Slices[1].Spec = "## Acceptance criteria\n1. Consume offset.\n2. Validate offset.\n"
+	after.Slices[1].Plan = impactPlan(t, impactUnit("consume", "spec#1"), impactUnit("validate", "spec#2", "consume"))
+	got, err := ClassifyImpact("delta", before, after, members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, survivor := got.Streams[0], got.Streams[1]
+	if retired.Action != Leave || retired.Pause || retired.Cascade || len(retired.Units) != 1 || retired.Units[0].Action != Leave {
+		t.Fatalf("retired member received an effect: %+v", retired)
+	}
+	if survivor.Action != Rework || !survivor.Pause || !slices.ContainsFunc(survivor.Units, func(u UnitImpact) bool { return u.Unit == "validate" && u.Action == Add }) {
+		t.Fatalf("survivor revision: %+v", survivor)
+	}
+
+	// A contract change still re-evaluates the live dependent.
+	contract := after
+	contract.Contracts = []trace.Contract{{Name: "offset", Text: "string"}}
+	got, err = ClassifyImpact("delta", before, contract, members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Streams[0].Action != Leave || got.Streams[1].Action != Rework {
+		t.Fatalf("contract cascade: %+v", got.Streams)
+	}
+
+	changed := after
+	changed.Slices = slices.Clone(after.Slices)
+	changed.Slices[0].Spec = "## Acceptance criteria\n1. String offset.\n"
+	if _, err := ClassifyImpact("delta", before, changed, members); err == nil || err.Error() != FrozenSliceProblem(a) || !strings.Contains(err.Error(), string(a)) {
+		t.Fatalf("changed retired slice = %v", err)
+	}
+
+	cancel := CancelImpact([]config.WorkstreamID{a, b}, before.Graph, []Member{{Workstream: a, State: "delivered", Retired: true}, {Workstream: b, State: "delivered", PullRequest: 42}})
+	if cancel.Streams[0].Action != Leave || cancel.Streams[1].Action != Cancel {
+		t.Fatalf("cancel impact %+v", cancel)
+	}
+}
