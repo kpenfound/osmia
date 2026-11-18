@@ -29,8 +29,16 @@ type CharterProposalView struct {
 	ProposedAt     time.Time           `json:"proposed_at"`
 	Decision       string              `json:"decision,omitempty"`
 	Note           string              `json:"note,omitempty"`
-	Charter        int                 `json:"charter,omitempty"`
-	Detail         string              `json:"detail,omitempty"`
+	// DecidedBy is "jev" for a decision Jev made for the owner, with Judgment
+	// naming its judgment record, and empty for the owner's.
+	DecidedBy string `json:"decided_by,omitempty"`
+	Judgment  string `json:"judgment,omitempty"`
+	Charter   int    `json:"charter,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	// Jev is what Jev decided about a proposal that waits for the owner after
+	// Jev's judgment: an answer below the threshold, a deferral, or a pick the
+	// service refused.
+	Jev *InboxJev `json:"jev,omitempty"`
 }
 
 // CharterProposalsResponse lists the charter proposals waiting for the

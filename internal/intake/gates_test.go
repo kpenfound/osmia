@@ -5,44 +5,74 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Only a committee objection the chief of staff escalated that blocks
-// ratification is Jev's to dispose of. The owner's own objection, a conflict
-// between member charters and one already disposed of are not, and neither is
-// one the chief of staff kept or dismissed.
-func TestOnlyAnEscalatedBlockingCommitteeObjectionIsJevs(t *testing.T) {
+// A committee objection the chief of staff escalated that blocks ratification
+// is an escalated-objection gate. The owner's own objection and a conflict
+// between member charters that block are the owner's own decisions, which Jev
+// decides at the owner threshold. One already disposed of, advice and one the
+// chief of staff kept are nobody's gate.
+func TestTheObjectionsJevDecidesAtTheRatificationGate(t *testing.T) {
 	escalated := shed.Entry{Dissent: shed.Dissent{Objection: shed.Objection{ID: "o1", Kind: shed.Charter}, Member: "agent_committee_1"}, Blocking: true, Escalated: true}
-	if !objectionIsJevs(escalated) {
-		t.Fatal("an escalated blocking committee objection is not Jev's")
+	if kind, ok := objectionKind(escalated); !ok || kind != jev.KindEscalatedObjection || !objectionIsJevs(escalated) {
+		t.Fatalf("an escalated blocking committee objection is %q %v", kind, ok)
 	}
-	for name, change := range map[string]func(*shed.Entry){
-		"the owner's own objection":   func(e *shed.Entry) { e.Member, e.Kind = shed.OwnerMember, shed.Owner },
-		"a charter conflict":          func(e *shed.Entry) { e.Kind = shed.CharterConflict },
-		"one the chief did not raise": func(e *shed.Entry) { e.Escalated = false },
-		"advice that blocks nothing":  func(e *shed.Entry) { e.Blocking = false },
-		"one already dismissed":       func(e *shed.Entry) { e.Disposition, e.Blocking = shed.Dismissed, false },
-		"one the owner sustained":     func(e *shed.Entry) { e.Disposition = shed.Sustained },
+	for name, c := range map[string]struct {
+		change func(*shed.Entry)
+		kind   jev.DecisionKind
+	}{
+		"the owner's own objection":   {func(e *shed.Entry) { e.Member, e.Kind, e.Escalated = shed.OwnerMember, shed.Owner, false }, jev.KindOwnerObjection},
+		"a charter conflict":          {func(e *shed.Entry) { e.Kind = shed.CharterConflict }, jev.KindCharterConflict},
+		"one the chief did not raise": {func(e *shed.Entry) { e.Escalated = false }, ""},
+		"advice that blocks nothing":  {func(e *shed.Entry) { e.Blocking = false }, ""},
+		"one already dismissed":       {func(e *shed.Entry) { e.Disposition, e.Blocking = shed.Dismissed, false }, ""},
+		"one the owner sustained":     {func(e *shed.Entry) { e.Disposition = shed.Sustained }, ""},
 	} {
 		e := escalated
-		change(&e)
-		if objectionIsJevs(e) {
-			t.Errorf("%s is Jev's", name)
+		c.change(&e)
+		kind, ok := objectionKind(e)
+		if ok != (c.kind != "") || kind != c.kind {
+			t.Errorf("%s is %q %v, want %q", name, kind, ok, c.kind)
 		}
+		if c.kind != "" && !c.kind.Owner() {
+			t.Errorf("%s is not one of the owner's own decisions", name)
+		}
+	}
+	if jev.KindEscalatedObjection.Owner() {
+		t.Error("an escalated objection is held to the owner threshold")
 	}
 }
 
-// An escalation whose questions report a conflict between member charters is the
-// owner's: no gate is built for it, so Jev is never asked.
-func TestAnEscalationOfACharterConflictIsNeverAGate(t *testing.T) {
-	question := trace.Question{Header: trace.Header{ID: "1", Workstream: "w_00000000000000000000000000000001"}, AskedBy: trace.Actor{Kind: "agent", ID: "mason1"}, Question: "Which charter wins?", CharterConflict: []string{"p1#1", "p2#2"}}
+// An escalation whose questions report a conflict between member charters is
+// one of the owner's own decisions: its gate is of the charter-conflict kind and
+// offers the options the chief of staff wrote.
+func TestAnEscalationOfACharterConflictIsAnOwnerGate(t *testing.T) {
+	_, repo, _ := fixturekit.HardPauseRepository(t, 0)
+	question := trace.Question{Header: trace.Header{ID: "1", Workstream: fixturekit.Stream}, AskedBy: trace.Actor{Kind: "agent", ID: "mason1"}, Question: "Which charter wins?", CharterConflict: []string{"p1#1", "p2#2"}}
 	entry := trace.InboxEntry{Number: 1, State: trace.QuestionEscalated, Options: []string{"Follow p1.", "Follow p2."}, Recommendation: "Follow p1.", Questions: []trace.QuestionState{{Asked: question, State: trace.QuestionEscalated}}}
 	c := New(Dependencies{})
-	gate, carried, err := c.escalationGate(nil, entry, InboxView(entry))
-	if err != nil || gate != nil || carried != nil {
+	gate, carried, err := c.escalationGate(repo, entry, InboxView(entry))
+	if err != nil || gate == nil || carried != nil || gate.Kind != jev.KindCharterConflict || len(gate.Options) != 2 {
 		t.Fatalf("gate %+v carried %+v: %v", gate, carried, err)
+	}
+	entry.Options = nil
+	if gate, _, err := c.escalationGate(repo, entry, InboxView(entry)); err != nil || gate != nil {
+		t.Fatalf("an escalation without the chief's options is a gate: %+v %v", gate, err)
+	}
+}
+
+// Jev never writes text: an option that is carried out with text is offered
+// only when the chief of staff wrote that text, once for each distinct text.
+func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheChiefsText(t *testing.T) {
+	options := TextOptions([]string{"Keep the project.", "  ", "", "Drop it.", "Keep the project."})
+	if len(options) != 2 || options[0] != (jev.DecisionOption{Name: "option-1", Description: "Keep the project."}) || options[1] != (jev.DecisionOption{Name: "option-4", Description: "Drop it."}) {
+		t.Fatalf("options %+v", options)
+	}
+	if options := TextOptions(nil); len(options) != 0 {
+		t.Fatalf("options without text %+v", options)
 	}
 }
 

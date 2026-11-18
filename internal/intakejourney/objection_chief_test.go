@@ -282,8 +282,9 @@ func decideObjection(t *testing.T, tool coreadapter.Tool, objection string) stri
 }
 
 // A conflict between member charters and the owner's own objection are the
-// owner's: decide refuses them as ordinary results with no request to Jev and
-// no judgment, and an objection the chief of staff may decide is judged.
+// owner's: decide refuses them as ordinary results with no decide request and
+// no judgment of the chief's kind, and an objection the chief of staff may
+// decide is judged. Jev decides the owner's at the owner's gate instead.
 func TestDecideRefusesObjectionsThatAreTheOwners(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 2, 1)
@@ -319,15 +320,31 @@ func TestDecideRefusesObjectionsThatAreTheOwners(t *testing.T) {
 			t.Fatalf("a judgment is recorded for %s: %+v %v", objection, res, err)
 		}
 	}
-	if len(provider.Requests()) != 0 {
-		t.Fatalf("%d requests for objections that are the owner's", len(provider.Requests()))
+	if n := decideRequests(provider); n != 0 {
+		t.Fatalf("%d decide requests for objections that are the owner's", n)
 	}
 	if out := decideObjection(t, decide, veto); !strings.Contains(out, `"decision":"binding"`) || !strings.Contains(out, `"pick":"dismiss"`) {
 		t.Fatalf("decide the committee's objection: %s", out)
 	}
-	if len(provider.Requests()) != 1 {
-		t.Fatalf("%d requests", len(provider.Requests()))
+	if n := decideRequests(provider); n != 1 {
+		t.Fatalf("%d decide requests", n)
 	}
+}
+
+// decideRequests counts the requests of the chief of staff's decide on an
+// objection, whose options are dismiss and escalate. The owner's gate on the
+// owner's own objection and on a charter conflict asks with its own options.
+func decideRequests(p *jevtest.Provider) int {
+	n := 0
+	for _, r := range p.Requests() {
+		for _, o := range r.Questions["decision"].Options {
+			if o.Name == "escalate" {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
 
 // objectionTransition returns the latest transition of the objection's subject.

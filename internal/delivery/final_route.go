@@ -203,8 +203,9 @@ const (
 // feature moves the workstream to delivered with its notice; docs and with are
 // the records the decision has always written beside it, in the same commit.
 // The router checks the hard prerequisites again, applies exactly this target,
-// records the owner as its authority and asks Jev nothing.
-func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger string, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
+// records the owner as its authority, or Jev when judgment names the Jev
+// judgment the approval comes from, and asks Jev nothing.
+func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger, judgment string, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
 	if rt == nil {
 		return router.Result{}, errors.New("routing the delivery of a workstream is unavailable")
 	}
@@ -213,6 +214,6 @@ func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository,
 		Repo: repo, Stream: stream, Subject: trace.FeatureSubject, State: trace.WorkflowState{Version: feature.ExpectedVersion, Value: t.From},
 		Trigger: trigger, Cause: t.ID, Target: TargetDelivered, Description: "Record the workstream delivered.", Gate: true,
 		Ref: t.Cause, ID: t.ID, HeaderCause: t.Cause, Reason: t.Reason, Actor: t.Actor, At: t.At,
-		Events: feature.Events, Documents: docs, With: with,
+		Events: feature.Events, Documents: docs, With: with, Jev: judgment,
 	}.Exit())
 }

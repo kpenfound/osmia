@@ -400,9 +400,12 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   confidence (the entry's `jev` field) when Jev gave one, and the chief of
   staff's when it did not. A confident pick the service cannot carry out, such
   as a ratification of a plan that stopped validating, also leaves the entry
-  with you, showing Jev's judgment. Delivery approval, charter proposals and
-  conflicts between charters, a project that needs no change, cancellation, your
-  own objections and anything that needs your own words are never sent to Jev.
+  with you, showing Jev's judgment. Your own decisions (the delivery card,
+  charter proposals and conflicts between charters, a project that needs no
+  change, a presented cancellation and your own objections) are sent to Jev the
+  same way and are binding at `jev.owner_threshold` instead; `charter` and
+  `delivery` label a decision Jev made "decided by Jev". An option that needs
+  words is sent only when the chief of staff already wrote them.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
   the chief of staff then rephrases it for every asker of the entry, whose
@@ -719,7 +722,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   drafted description, or the file's text instead. The service puts that
   description, with the brief's **Before you ship** items, on the open draft,
   marks it ready and moves the workstream to `delivered`. It opens no pull
-  request and pushes nothing, and Jev is never asked. A report with blocking
+  request and pushes nothing. Jev may approve the delivery card first, at
+  `jev.owner_threshold`; `delivery` then shows the approved description as
+  decided by Jev. A report with blocking
   findings or an unserved criterion is approved only with `--accept`, which
   accepts them as they are; the approval records what it accepted. The delivery
   commits were signed and pushed when the draft opened, and their messages cannot

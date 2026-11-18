@@ -82,20 +82,23 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 	f := newFixture(t)
 	settings := testSettings()
 	settings.DecisionThreshold = 0.8
+	settings.OwnerThreshold = 0.95
 	p := &jevtest.Provider{Results: []jevtest.Result{pick("a", 0.99, "b")}}
 	j := judge(&settings, p, "key")
 	tasks := map[string]bool{}
+	owner := map[string]bool{}
 	for _, kind := range jev.Kinds() {
 		if kind.Version() < 1 {
 			t.Fatalf("%s has version %d", kind, kind.Version())
 		}
 		tasks[kind.Task()] = true
+		owner[kind.Task()] = kind.Owner()
 		res := j.Decide(context.Background(), f.repo, decisionRequest(kind, "subject:1", "state", "a", "b"))
 		if res.Status != jev.Binding {
 			t.Fatalf("%s: %+v", kind, res)
 		}
 	}
-	if len(tasks) != 11 || len(jev.Kinds()) != 11 {
+	if len(tasks) != 17 || len(jev.Kinds()) != 17 {
 		t.Fatalf("tasks = %v", tasks)
 	}
 	records := f.judgmentRecords(t)
@@ -105,12 +108,50 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 			continue
 		}
 		seen[r.Task] = true
-		if r.Acceptance != "decision_threshold=0.8" || r.Occurrence == nil || r.Occurrence.Threshold != 0.8 || r.Occurrence.Key != "subject:1" || r.Version != 1 {
+		acceptance, threshold := "decision_threshold=0.8", 0.8
+		if owner[r.Task] {
+			acceptance, threshold = "owner_threshold=0.95", 0.95
+		}
+		if r.Acceptance != acceptance || r.Occurrence == nil || r.Occurrence.Threshold != threshold || r.Occurrence.Key != "subject:1" || r.Version != 1 {
 			t.Fatalf("record = %+v", r)
 		}
 	}
-	if len(seen) != 11 {
+	if len(seen) != 17 {
 		t.Fatalf("recorded tasks = %v", seen)
+	}
+}
+
+// The owner's own decisions are binding at the owner threshold, independent of
+// the decision threshold, and the other kinds keep the decision threshold.
+func TestTheOwnersOwnDecisionsAreBindingAtTheOwnerThreshold(t *testing.T) {
+	owners := []jev.DecisionKind{jev.KindDeliveryApproval, jev.KindCharterProposal, jev.KindCharterConflict, jev.KindArchitectEscalation, jev.KindOwnerObjection, jev.KindCancellation}
+	for _, kind := range jev.Kinds() {
+		want := false
+		for _, o := range owners {
+			want = want || o == kind
+		}
+		if kind.Owner() != want {
+			t.Fatalf("%s owner = %v", kind, kind.Owner())
+		}
+	}
+	for _, c := range []struct {
+		kind       jev.DecisionKind
+		confidence float64
+		want       jev.ResultStatus
+	}{
+		{jev.KindDeliveryApproval, 0.92, jev.Nonbinding},
+		{jev.KindDeliveryApproval, 0.96, jev.Binding},
+		{jev.KindRatification, 0.92, jev.Binding},
+		{jev.KindRatification, 0.89, jev.Nonbinding},
+	} {
+		f := newFixture(t)
+		settings := testSettings()
+		settings.DecisionThreshold, settings.OwnerThreshold = 0.9, 0.95
+		p := &jevtest.Provider{Results: []jevtest.Result{pick("approve", c.confidence, "other")}}
+		res := judge(&settings, p, "key").Decide(context.Background(), f.repo, decisionRequest(c.kind, "subject:1", "state", "approve", "other"))
+		if res.Status != c.want {
+			t.Fatalf("%s at %.2f: %+v", c.kind, c.confidence, res)
+		}
 	}
 }
 

@@ -57,16 +57,42 @@ func validRulingActor(v Ruling) bool {
 var (
 	ratificationPath      = regexp.MustCompile(`^shed/round-[0-9]+/ratification\.json$`)
 	amendmentDecisionPath = regexp.MustCompile(`^amendments/[^/]+/decision\.json$`)
+	charterDecisionPath   = regexp.MustCompile(`^questions/[^/]+/charter\.json$`)
 )
+
+// deliveryApprovalPath is the document of the approval to mark a pull request
+// ready for review.
+const deliveryApprovalPath = "final/delivery.json"
 
 // ValidDecisionActor reports whether the header actor of a document that
 // records an owner-gate decision agrees with the decider its content names: a
-// ratification names its decider in decided_by and an amendment decision in
-// actor, and Jev's decision is written by the Jev actor and nobody else's is.
+// ratification, a delivery approval and a charter proposal name their decider
+// in decided_by and an amendment decision in actor, and Jev's decision is
+// written by the Jev actor and nobody else's is. A charter proposal's later
+// revisions are the service's, so the Jev actor writes only one Jev decided.
 // Other documents are not decisions.
 func ValidDecisionActor(d Document) bool {
 	var by string
 	switch {
+	case d.Path == deliveryApprovalPath:
+		var c struct {
+			DecidedBy string `json:"decided_by"`
+		}
+		if json.Unmarshal([]byte(d.Content), &c) != nil {
+			return true
+		}
+		by = c.DecidedBy
+	case charterDecisionPath.MatchString(d.Path):
+		var c struct {
+			Decision  string `json:"decision"`
+			DecidedBy string `json:"decided_by"`
+		}
+		if json.Unmarshal([]byte(d.Content), &c) != nil {
+			return true
+		}
+		// The service's later revision that records the rule in the charter
+		// keeps the decision as it was decided.
+		return d.Actor != JevActor || c.Decision != "" && c.DecidedBy == DecidedByJev
 	case ratificationPath.MatchString(d.Path):
 		var c struct {
 			DecidedBy string `json:"decided_by"`

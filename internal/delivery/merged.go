@@ -117,7 +117,7 @@ func (s *Controller) MergedOutside(ctx context.Context, repository *trace.Reposi
 		txs = append(txs, trace.Transaction{ExpectedVersion: publication.Version,
 			Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: publication.Value, To: fmt.Sprintf("refused-%d", waiting), Reason: fmt.Sprintf("owner approval %d was not published: the owner merged the branch into upstream outside the factory", waiting)}})
 	}
-	res, err := routeDelivered(ctx, s.Router, repository, stream, TriggerMergeRecorded, []trace.Document{doc}, txs[0], txs[1:]...)
+	res, err := routeDelivered(ctx, s.Router, repository, stream, TriggerMergeRecorded, "", []trace.Document{doc}, txs[0], txs[1:]...)
 	switch {
 	case err != nil:
 		return MergeResponse{}, failed

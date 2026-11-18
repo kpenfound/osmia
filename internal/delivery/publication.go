@@ -760,8 +760,13 @@ func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreada
 // that outcome.
 func (p *Publisher) recordApplied(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string, docs []trace.Document, txs ...trace.Transaction) (coreadapter.OperationResult, error) {
 	// The first transaction is the workstream's move to delivered, which the
-	// owner's approval authorised; the router applies it as a pinned move.
-	res, err := routeDelivered(ctx, p.S.Router, p.Repository, stream, TriggerDeliveryApproved, docs, txs[0], txs[1:]...)
+	// approval authorised, the owner's or Jev's; the router applies it as a
+	// pinned move.
+	judgment := ""
+	if approval, err := ApprovalAt(p.Repository, stream, in.Approval); err == nil && approval.DecidedBy == trace.DecidedByJev {
+		judgment = approval.Judgment
+	}
+	res, err := routeDelivered(ctx, p.S.Router, p.Repository, stream, TriggerDeliveryApproved, judgment, docs, txs[0], txs[1:]...)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

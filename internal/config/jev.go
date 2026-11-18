@@ -24,6 +24,10 @@ const DefaultJevCheckThreshold = 0.5
 // is a decision.
 const DefaultJevDecisionThreshold = 0.9
 
+// DefaultJevOwnerThreshold is the confidence at or above which Jev's pick on
+// one of the owner's own decisions is the decision.
+const DefaultJevOwnerThreshold = 0.9
+
 // MaxJevTimeout bounds one Jev request, so a judgment never holds a turn for
 // long.
 const MaxJevTimeout = jev.MaxTimeout
@@ -46,13 +50,19 @@ type Jev struct {
 	// decision is binding, above 0 and at most 1. It applies to every
 	// decision kind and is recorded as each judgment's acceptance value.
 	DecisionThreshold float64 `toml:"decision_threshold" json:"decision_threshold"`
+	// OwnerThreshold is the confidence at or above which Jev's pick is binding
+	// on the owner's own decisions: delivery approval, charter proposals and
+	// conflicts, an architect's escalation, cancellation and the owner's own
+	// objections. It is above 0 and at most 1, independent of
+	// DecisionThreshold, and recorded as those judgments' acceptance value.
+	OwnerThreshold float64 `toml:"owner_threshold" json:"owner_threshold"`
 	// CheckFallbackPicks runs this many highest-scored candidates when none
 	// reaches the threshold. Zero runs every check instead.
 	CheckFallbackPicks int `toml:"check_fallback_picks" json:"check_fallback_picks"`
 }
 
 func defaultJev() Jev {
-	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout, CheckThreshold: DefaultJevCheckThreshold, DecisionThreshold: DefaultJevDecisionThreshold}
+	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout, CheckThreshold: DefaultJevCheckThreshold, DecisionThreshold: DefaultJevDecisionThreshold, OwnerThreshold: DefaultJevOwnerThreshold}
 }
 
 // Settings are j as a Jev judge reads them, with the timeout parsed.
@@ -80,6 +90,9 @@ func (j Jev) validate(path string) error {
 	}
 	if !(j.DecisionThreshold > 0 && j.DecisionThreshold <= 1) {
 		return fieldError(path, "jev.decision_threshold", "must be a probability above 0 and at most 1")
+	}
+	if !(j.OwnerThreshold > 0 && j.OwnerThreshold <= 1) {
+		return fieldError(path, "jev.owner_threshold", "must be a probability above 0 and at most 1")
 	}
 	if j.CheckFallbackPicks < 0 {
 		return fieldError(path, "jev.check_fallback_picks", "must be a non-negative integer")

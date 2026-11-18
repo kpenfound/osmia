@@ -100,6 +100,13 @@ type Dependencies struct {
 	// the exits Jev judges and routes the chief of staff's decision on a
 	// committee objection. A pass hands its exits to the router's worker.
 	Router router.Port
+
+	// DeliveryGate returns the gate of the workstream's open delivery card e,
+	// which Jev decides at the owner threshold, or nil.
+	DeliveryGate func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, e InboxEntry) (*Gate, error)
+	// CancellationGates returns the gates of the cancellations presented in the
+	// workstream's conversation, which Jev decides at the owner threshold.
+	CancellationGates func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) ([]Gate, error)
 }
 
 // ProjectCreation is the service's project creation as a design start uses

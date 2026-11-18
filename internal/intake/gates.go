@@ -350,19 +350,37 @@ func (s *Controller) ratificationGate(repository *trace.Repository, stream confi
 	return g, nil
 }
 
-// objectionIsJevs reports whether Jev may decide the objection at the
-// ratification gate: a committee objection the chief of staff escalated that
-// blocks ratification and that nobody disposed of. A conflict between member
-// charters and the owner's own objection are the owner's.
+// objectionIsJevs reports whether the objection is an escalated-objection gate
+// at the ratification gate: a committee objection the chief of staff escalated
+// that blocks ratification and that nobody disposed of.
 func objectionIsJevs(e shed.Entry) bool {
 	return e.Escalated && e.Blocking && e.Disposition == "" && e.Kind != shed.CharterConflict && e.Member != shed.OwnerMember
 }
 
-// objectionGates returns the gates of the workstream's escalated objections:
-// the committee objections the chief of staff put to the owner that block
-// ratification, while the ratification packet is open. A conflict between
-// member charters and the owner's own objections are the owner's, and Jev may
-// only dismiss or overrule, which need no owner-written text.
+// objectionKind returns the kind of decision Jev makes on an objection that
+// blocks ratification and that nobody disposed of: a conflict between member
+// charters and the owner's own objection are the owner's own decisions, at the
+// owner threshold, and a committee objection the chief of staff escalated is an
+// escalated objection. Any other objection is not Jev's.
+func objectionKind(e shed.Entry) (jev.DecisionKind, bool) {
+	switch {
+	case !e.Blocking || e.Disposition != "":
+		return "", false
+	case e.Kind == shed.CharterConflict:
+		return jev.KindCharterConflict, true
+	case e.Member == shed.OwnerMember:
+		return jev.KindOwnerObjection, true
+	case objectionIsJevs(e):
+		return jev.KindEscalatedObjection, true
+	}
+	return "", false
+}
+
+// objectionGates returns the gates of the workstream's objections that block
+// ratification and wait for the owner, while the ratification packet is open:
+// the committee objections the chief of staff escalated, conflicts between
+// member charters and the owner's own objections. Jev may only dismiss or
+// overrule, which need no owner-written text.
 func (s *Controller) objectionGates(repository *trace.Repository, stream config.WorkstreamID, e InboxEntry) ([]Gate, error) {
 	entries, err := Dissent(repository, stream)
 	if err != nil {
@@ -380,7 +398,8 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 	project := repository.Project()
 	var out []Gate
 	for _, entry := range entries {
-		if !objectionIsJevs(entry) {
+		kind, ok := objectionKind(entry)
+		if !ok || kind.Owner() && !s.ownerJudged() {
 			continue
 		}
 		if _, carried := s.CarriedJudgment(repository, stream, jev.KindObjection, jev.ObjectionKey(entry.ID)); carried {
@@ -391,21 +410,28 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 		}
 		entry := entry
 		reached := e.OpenedAt
-		if docs, err := trace.Read[trace.Document](repository, stream); err == nil {
+		if docs, err := trace.Read[trace.Document](repository, stream); err == nil && kind == jev.KindEscalatedObjection {
 			for _, d := range docs {
 				if d.Path == shed.ChiefPath(round) {
 					reached = d.At
 				}
 			}
 		}
-		g := Gate{Kind: jev.KindEscalatedObjection, Project: project, Stream: stream, Key: jev.ObjectionKey(entry.ID),
+		why := "the chief of staff escalated it to the owner"
+		switch kind {
+		case jev.KindCharterConflict:
+			why = "it reports a conflict between the charters of the projects the feature touches, which only the owner settles"
+		case jev.KindOwnerObjection:
+			why = "it is the owner's own objection"
+		}
+		g := Gate{Kind: kind, Project: project, Stream: stream, Key: jev.ObjectionKey(entry.ID),
 			Label: fmt.Sprintf("objection %s of workstream %s", entry.ID, stream), Cause: shed.ChiefDocumentID(round), Reached: reached,
 			Options: []jev.DecisionOption{
 				{Name: string(shed.Dismissed), Description: "Dismiss the objection: it is settled, blocks no longer and is kept as the recorded disposition."},
 				{Name: string(shed.Overruled), Description: "Overrule the objection: proceed in spite of it; it blocks no longer and is kept as the recorded disposition."}}}
 		g.State = func(ctx context.Context) (string, []jev.Source, error) {
 			var b strings.Builder
-			GateSection(&b, "Decision", fmt.Sprintf("Objection %s of workstream %s blocks ratification and the chief of staff escalated it to the owner. Choose how the owner disposes of it: dismiss it, or overrule it and proceed. Sustaining it needs the owner's own words and is not offered here.", entry.ID, stream), 0)
+			GateSection(&b, "Decision", fmt.Sprintf("Objection %s of workstream %s blocks ratification and %s. Choose how the owner disposes of it: dismiss it, or overrule it and proceed. Sustaining it needs the owner's own words and is not offered here.", entry.ID, stream, why), 0)
 			GateSection(&b, "The objection", dissentText([]shed.Entry{entry}), 0)
 			GateSection(&b, "Dissent that stands", dissentText(entries), 0)
 			if packet, doc, found, err := shed.LatestPacket(repository, stream); err == nil && found {
@@ -616,15 +642,45 @@ func (s *Controller) AmendmentGateOf(repository *trace.Repository, stream config
 	return s.amendmentGate(repository, stream, c, current, AmendmentDissent(records), e)
 }
 
-// escalationRoles are the roles whose escalated questions Jev may decide: the
-// workers that build a feature. An architect's question, such as the judgment
-// that a project needs no change, is the owner's.
+// escalationRoles are the roles whose escalated questions are ordinary
+// escalated-question gates: the workers that build a feature. An architect's
+// question, such as the judgment that a project needs no change, is one of the
+// owner's own decisions, which Jev decides at the owner threshold.
 var escalationRoles = questions.RoutingRoles
+
+// TextOptions returns the options of a decision whose every option is carried
+// out with text: one option for each distinct text the chief of staff wrote,
+// named option-<n> after its place. Jev never writes text, so an option whose
+// text the chief did not write is not offered.
+func TextOptions(texts []string) []jev.DecisionOption {
+	var options []jev.DecisionOption
+	seen := map[string]bool{}
+	for i, text := range texts {
+		text = strings.TrimSpace(text)
+		if text == "" || seen[text] {
+			continue
+		}
+		seen[text] = true
+		options = append(options, jev.DecisionOption{Name: fmt.Sprintf("option-%d", i+1), Description: text})
+	}
+	return options
+}
+
+// charterConflicts lists the charter citations the escalation's questions
+// report in conflict.
+func charterConflicts(e trace.InboxEntry) []string {
+	var out []string
+	for _, q := range e.Questions {
+		out = append(out, q.Asked.CharterConflict...)
+	}
+	return out
+}
 
 // escalationGate returns the gate of an escalation whose card is view, or, when
 // Jev may not decide it, nil and the binding Jev judgment it already carries.
-// Jev decides an escalation only from the options the chief of staff wrote, and
-// never one that reports a conflict between member charters.
+// Jev decides an escalation only from the options the chief of staff wrote. An
+// escalation that reports a conflict between member charters, or that an
+// architect raised, is one of the owner's own decisions, of its own kind.
 func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxEntry, view InboxEntry) (*Gate, *jev.Result, error) {
 	if e.Hold != "" || len(e.Questions) == 0 || e.Questions[0].Asked.ID == "" {
 		return nil, nil, nil
@@ -634,36 +690,38 @@ func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxE
 			return nil, &res, nil
 		}
 	}
+	kind := jev.KindEscalatedQuestion
 	for _, q := range e.Questions {
 		if len(q.Asked.CharterConflict) > 0 {
-			return nil, nil, nil
-		}
-		thread, err := repository.Thread(q.Asked.Workstream, q.Asked.AskedBy.ID)
-		if err != nil || !slices.Contains(escalationRoles, thread.Identity.Role) {
-			return nil, nil, nil
-		}
-	}
-	var options []jev.DecisionOption
-	seen := map[string]bool{}
-	for i, text := range e.Options {
-		text = strings.TrimSpace(text)
-		if text == "" || seen[text] {
+			kind = jev.KindCharterConflict
 			continue
 		}
-		seen[text] = true
-		options = append(options, jev.DecisionOption{Name: fmt.Sprintf("option-%d", i+1), Description: text})
+		thread, err := repository.Thread(q.Asked.Workstream, q.Asked.AskedBy.ID)
+		if err != nil {
+			return nil, nil, nil
+		}
+		if !slices.Contains(escalationRoles, thread.Identity.Role) && kind == jev.KindEscalatedQuestion {
+			kind = jev.KindArchitectEscalation
+		}
 	}
+	options := TextOptions(e.Options)
 	if len(options) == 0 {
 		return nil, nil, nil
 	}
 	first := e.Questions[0].Asked
 	project := repository.Project()
 	number := e.Number
-	g := &Gate{Kind: jev.KindEscalatedQuestion, Project: project, Stream: first.Workstream, Key: jev.QuestionKey(first.ID),
+	g := &Gate{Kind: kind, Project: project, Stream: first.Workstream, Key: jev.QuestionKey(first.ID),
 		Label: fmt.Sprintf("inbox entry %d of workstream %s", number, first.Workstream), Cause: fmt.Sprintf("escalation-%d", number), Reached: e.EscalatedAt, Options: options}
 	g.State = func(ctx context.Context) (string, []jev.Source, error) {
 		var b strings.Builder
 		GateSection(&b, "Decision", fmt.Sprintf("The chief of staff escalated inbox entry %d to the owner. Choose the option the owner would choose; the option is the owner's ruling.", number), 0)
+		switch kind {
+		case jev.KindCharterConflict:
+			GateSection(&b, "Charter conflict", "The question reports a conflict between the charters of the projects it touches: "+strings.Join(charterConflicts(e), "; "), 0)
+		case jev.KindArchitectEscalation:
+			GateSection(&b, "Asked by the architect", "The architect drafting the feature raised this question, such as the judgment that a selected project needs no change.", 0)
+		}
 		GateSection(&b, "Question", view.Question, 0)
 		GateSection(&b, "What waits", view.Blocked, 0)
 		GateSection(&b, "Section in tension", e.Section, 0)
@@ -752,10 +810,11 @@ func (s *Controller) RuleInboxBy(ctx context.Context, repository *trace.Reposito
 }
 
 // WorkstreamGates returns the gates the workstream has reached whose decision
-// Jev may make: its ratification and escalated objections, its presented
-// amendments that change intent, and its contested units the chief of staff
-// escalated. Whatever the owner already decided is included, for the gate's own
-// decision to say so.
+// Jev may make: its ratification and the objections that block it, its
+// presented amendments that change intent, its contested units the chief of
+// staff escalated, its delivery card, its charter proposals and the
+// cancellations presented in its conversation. Whatever the owner already
+// decided is included, for the gate's own decision to say so.
 func (s *Controller) WorkstreamGates(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]Gate, error) {
 	var out []Gate
 	if w.State == InShedState || w.State == SketchedState {
@@ -814,12 +873,17 @@ func (s *Controller) WorkstreamGates(ctx context.Context, repository *trace.Repo
 			}
 		}
 	}
-	return out, nil
+	owner, err := s.ownerGates(ctx, repository, w)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, owner...), nil
 }
 
 // ReachedGates returns the gates of the project's workstreams that Jev may
 // decide and that are still open: reached, and neither carrying a decision the
-// owner is to make nor already decided. It reads and writes nothing else.
+// owner is to make nor already decided. While Jev is unconfigured the owner's
+// own decisions are left out. It reads and writes nothing else.
 func (s *Controller) ReachedGates(ctx context.Context, p *Project) ([]Gate, error) {
 	repository := p.Repository
 	statuses, err := repository.Statuses()
@@ -856,6 +920,9 @@ func (s *Controller) ReachedGates(ctx context.Context, p *Project) ([]Gate, erro
 		if g != nil {
 			out = append(out, *g)
 		}
+	}
+	if !s.ownerJudged() {
+		out = slices.DeleteFunc(out, func(g Gate) bool { return g.Kind.Owner() })
 	}
 	return out, nil
 }
@@ -923,6 +990,14 @@ func (s *Controller) HeldGates(repository *trace.Repository, w trace.WorkstreamS
 				continue
 			}
 			if _, shown, err := s.ContestedCard(repository, w.Workstream, gate.Reference); err == nil && !shown {
+				held = append(held, gate)
+			}
+		case "charter":
+			p, found, err := FindCharterProposal(repository, w.Workstream, gate.Reference)
+			if err != nil || !found {
+				continue
+			}
+			if _, shown := s.CharterProposalCard(repository, p, RenderCharterProposalView(p, "")); !shown {
 				held = append(held, gate)
 			}
 		}

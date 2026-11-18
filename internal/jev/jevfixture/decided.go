@@ -19,7 +19,7 @@ import (
 )
 
 func settings() config.Jev {
-	return config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold}
+	return config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "1s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold, OwnerThreshold: config.DefaultJevOwnerThreshold}
 }
 
 // Unconfigured is Jev without its API key: every judgment falls back.

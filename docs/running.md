@@ -276,9 +276,12 @@ The member view is laid out like a chat client:
   had chosen it, and the entry never appears. The trace labels such a decision
   "decided by Jev"; Activity labels a state change that way only when Jev
   departed from the default next state. Otherwise the entry reaches you with Jev's
-  pick and confidence as its recommendation. Delivery approval, charter
-  proposals, "no change needed" escalations, cancellation and anything that
-  needs your own words are always yours. Without Jev's API key the service
+  pick and confidence as its recommendation. Your own decisions (delivery
+  approval, charter proposals and conflicts between charters, "no change
+  needed" escalations, cancellation and your own objections) are decided the
+  same way at `jev.owner_threshold` (0.9 by default). Jev never writes text, so
+  an option that needs words is offered only when the chief of staff already
+  wrote them. Without Jev's API key the service
   still runs and every entry reaches you; `osmia doctor` fails its Jev check.
   The Documents tab reads and edits the draft spec and plan before
   ratification, each save a new revision as with `osmia edit`, the dependency,
@@ -353,7 +356,10 @@ From the page you can:
   the label starts with **Accept findings and**, because approving accepts them
   as they are. The pull request is already open as a draft; approving puts the
   description on it, marks it ready for review and delivers the workstream. It
-  opens no pull request and pushes nothing, and Jev is never asked. While a
+  opens no pull request and pushes nothing. Jev decides the card first at
+  `jev.owner_threshold`: a confident approval is recorded as Jev's, pins the
+  same review and publishes the same text, and otherwise the card reaches you
+  with Jev's pick as its recommendation. While a
   merge-order dependency has not merged, approving is recorded and the pull
   request stays a draft until it has (see
   [Draft pull request and Cloud checks](#draft-pull-request-and-cloud-checks)).
