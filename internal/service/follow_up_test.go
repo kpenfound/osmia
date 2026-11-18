@@ -1,0 +1,304 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+// followUpKit is a project trace with one building workstream whose chief of
+// staff takes turns, and a clock the test moves.
+type followUpKit struct {
+	root    config.Root
+	project config.Project
+	repo    *trace.Repository
+	stream  config.WorkstreamID
+	at      time.Time
+	turns   int
+}
+
+func newFollowUpKit(t *testing.T) *followUpKit {
+	t.Helper()
+	ctx := context.Background()
+	base := t.TempDir()
+	root, err := config.ResolveRoot(filepath.Join(base, "osmia"), "")
+	must(t, err)
+	project := config.Project{ID: "p_00000000000000000000000000000031", Clone: filepath.Join(base, "clone")}
+	demoGit(t, base, "init", "-q", project.Clone)
+	k := &followUpKit{root: root, project: project, stream: "w_00000000000000000000000000000031", at: time.Now().UTC().Truncate(time.Second)}
+	k.repo, err = trace.Create(ctx, root, project, k.at, ownerActor)
+	must(t, err)
+	t.Cleanup(func() { _ = k.repo.Close() })
+	must(t, k.repo.CreateWorkstream(ctx, k.stream, k.at, ownerActor))
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project.ID, Workstream: k.stream, At: k.at, Actor: ownerActor, Cause: "ratification"}
+	_, err = k.repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: BuildingState, Reason: "Owner ratified intent"}})
+	must(t, err)
+	return k
+}
+
+func (k *followUpKit) now() time.Time { return k.at }
+
+// unit records the unit's state.
+func (k *followUpKit) unit(t *testing.T, unit, state string) {
+	t.Helper()
+	st, err := k.repo.Workflow(k.stream, trace.UnitSubject(unit))
+	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "unit-" + unit + "-" + state, Revision: 1, Project: k.project.ID, Workstream: k.stream, Unit: unit, At: k.at, Actor: ownerActor, Cause: "test"}
+	_, err = k.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: st.Value, To: state, Reason: "test"}})
+	must(t, err)
+}
+
+// turn claims a new chief-of-staff turn with prompt.
+func (k *followUpKit) turn(t *testing.T, id, prompt string) coreadapter.Scope {
+	t.Helper()
+	k.turns++
+	return intakefixture.ClaimChiefTurn(t, k.repo, k.project.ID, k.stream, k.now, intakefixture.ChiefTurnInput{
+		Turn: id, Prompt: prompt, Actor: serviceActor, Cause: "test", Token: "token-" + id, Directory: id,
+	})
+}
+
+func (k *followUpKit) finish(t *testing.T, id string) {
+	t.Helper()
+	fixturekit.AnswerChief(t, k.repo, k.stream, id, "Done.")
+}
+
+// tools returns follow_up and an action tool named move_unit whose result
+// is accepted, both reporting what they queued as a chief turn's tools do.
+func (k *followUpKit) tools(scope coreadapter.Scope) (schedule, action coreadapter.Tool) {
+	accepted := coreadapter.Tool{Name: moveUnitTool, Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"recorded":true,"outcome":"moved"}`), nil
+	}}
+	tools := (&runtimeControls{}).reportQueued(nil, k.repo, scope, k.now, []coreadapter.Tool{newFollowUpTool(k.repo, scope, k.now), accepted})
+	return tools[0], tools[1]
+}
+
+func (k *followUpKit) pass(t *testing.T) {
+	t.Helper()
+	f := followUps{now: k.now, window: config.DefaultStallAfter, profile: func() (coreadapter.Profile, error) {
+		return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
+	}}
+	must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
+}
+
+func (k *followUpKit) pending(t *testing.T) []followUp {
+	t.Helper()
+	recs, err := readFollowUps(k.repo, k.stream)
+	must(t, err)
+	return recs.pending()
+}
+
+// followUpTurns returns the chief's follow-up turns.
+func (k *followUpKit) followUpTurns(t *testing.T) []trace.QueuedTurn {
+	t.Helper()
+	th, err := k.repo.Thread(k.stream, trace.ChiefOfStaff)
+	must(t, err)
+	var out []trace.QueuedTurn
+	for _, q := range th.Turns {
+		if strings.HasPrefix(q.Request.TurnID, followUpTurnPrefix) {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+type queuedResult struct {
+	Recorded       bool         `json:"recorded"`
+	Queued         []queuedItem `json:"queued"`
+	NothingWillRun string       `json:"nothing_will_run"`
+	CheckBack      string       `json:"check_back"`
+}
+
+func decodeQueued(t *testing.T, raw string) queuedResult {
+	t.Helper()
+	var out queuedResult
+	must(t, json.Unmarshal([]byte(raw), &out))
+	return out
+}
+
+// A follow-up is recorded in the chief thread's own trace: it is still
+// pending after the trace is reopened, fires one turn when it comes due,
+// whose prompt says why and when it was scheduled and what changed since,
+// and fires no second turn on a later pass.
+func TestAFollowUpSurvivesARestartAndFiresOnce(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	scope := k.turn(t, "message_1", "Is the upload unit moving?")
+	tool, _ := k.tools(scope)
+	if got := intakefixture.Handle(t, tool, `{"after":"2m","reason":"too soon"}`); !strings.Contains(got, `"recorded":false`) {
+		t.Fatalf("a follow-up under five minutes was recorded: %s", got)
+	}
+	got := intakefixture.Handle(t, tool, `{"after":"30m","reason":"Check that the upload unit landed."}`)
+	if !strings.Contains(got, `"recorded":true`) {
+		t.Fatalf("follow_up: %s", got)
+	}
+	k.finish(t, "message_1")
+
+	must(t, k.repo.Close())
+	reopened, err := trace.Open(k.root, k.project)
+	must(t, err)
+	k.repo = reopened
+	t.Cleanup(func() { _ = reopened.Close() })
+	pending := k.pending(t)
+	if len(pending) != 1 || pending[0].Reason != "Check that the upload unit landed." || pending[0].By != "chief" || pending[0].Turn != "message_1" {
+		t.Fatalf("pending follow-ups after reopening: %+v", pending)
+	}
+	context, err := renderFollowUps(k.repo, k.stream)
+	must(t, err)
+	if !strings.Contains(context, "## Pending follow-ups") || !strings.Contains(context, "Check that the upload unit landed.") {
+		t.Fatalf("project context: %s", context)
+	}
+
+	k.at = k.at.Add(29 * time.Minute)
+	k.pass(t)
+	if turns := k.followUpTurns(t); len(turns) != 0 {
+		t.Fatalf("a follow-up fired before it was due: %+v", turns)
+	}
+	k.unit(t, "upload", UnitMerged)
+	k.at = k.at.Add(2 * time.Minute)
+	k.pass(t)
+	turns := k.followUpTurns(t)
+	if len(turns) != 1 {
+		t.Fatalf("follow-up turns: %d", len(turns))
+	}
+	prompt := turns[0].Request.Prompt
+	for _, part := range []string{"You scheduled this check-back", "Check that the upload unit landed.", "unit-upload", "-> merged", stallTurnRule} {
+		if !strings.Contains(prompt, part) {
+			t.Fatalf("follow-up prompt lacks %q:\n%s", part, prompt)
+		}
+	}
+	if turns[0].Request.Actor != followUpActor || turns[0].Request.Workstream != k.stream {
+		t.Fatalf("follow-up request %+v", turns[0].Request.Header)
+	}
+	if pending := k.pending(t); len(pending) != 0 {
+		t.Fatalf("a fired follow-up is still pending: %+v", pending)
+	}
+	k.at = k.at.Add(time.Hour)
+	k.pass(t)
+	if turns := k.followUpTurns(t); len(turns) != 1 {
+		t.Fatalf("a follow-up fired again: %d turns", len(turns))
+	}
+}
+
+// A newer follow-up of the same workstream replaces an unfired one, so only
+// the newer fires; one naming another workstream is kept beside it.
+func TestANewerFollowUpReplacesAnUnfiredOne(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	scope := k.turn(t, "message_1", "Check back on the upload work.")
+	tool, _ := k.tools(scope)
+	intakefixture.Handle(t, tool, `{"after":"10m","reason":"first"}`)
+	got := intakefixture.Handle(t, tool, `{"after":"1h","reason":"second"}`)
+	if !strings.Contains(got, `"replaced":"first"`) {
+		t.Fatalf("the replacing follow_up did not say what it replaced: %s", got)
+	}
+	intakefixture.Handle(t, tool, `{"after":"2h","reason":"named","workstream":"`+string(k.stream)+`"}`)
+	pending := k.pending(t)
+	if len(pending) != 2 || pending[0].Reason != "second" || pending[1].Reason != "named" {
+		t.Fatalf("pending follow-ups: %+v", pending)
+	}
+	k.finish(t, "message_1")
+	k.at = k.at.Add(15 * time.Minute)
+	k.pass(t)
+	if turns := k.followUpTurns(t); len(turns) != 0 {
+		t.Fatalf("the replaced follow-up fired: %+v", turns)
+	}
+	k.at = k.at.Add(50 * time.Minute)
+	k.pass(t)
+	turns := k.followUpTurns(t)
+	if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Reason: second") {
+		t.Fatalf("follow-up turns: %+v", turns)
+	}
+}
+
+// An action's result reports the work queued in its workstream, or why
+// nothing will run. An accepted action that queued nothing schedules the
+// service's check-back at the stall window once per turn; one that queued
+// work schedules none, and the chief's own follow_up withdraws the
+// service's.
+func TestAnActionResultReportsQueuedWorkAndAnInertOneSchedulesACheckBack(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	k.unit(t, "upload", UnitMerged)
+	scope := k.turn(t, "events_1", "Every unit merged.")
+	_, action := k.tools(scope)
+	inert := decodeQueued(t, intakefixture.Handle(t, action, `{"unit":"upload","to":"ready"}`))
+	if !inert.Recorded || len(inert.Queued) != 0 || !strings.Contains(inert.NothingWillRun, "Nothing will run until") || !strings.Contains(inert.NothingWillRun, "1 merged") || inert.CheckBack == "" {
+		t.Fatalf("inert action result: %+v", inert)
+	}
+	intakefixture.Handle(t, action, `{"unit":"upload","to":"ready"}`)
+	pending := k.pending(t)
+	if len(pending) != 1 || pending[0].By != "service" || pending[0].Reason != autoFollowUpReason || pending[0].Turn != "events_1" || !pending[0].Due.Equal(k.at.Add(config.DefaultStallAfter)) {
+		t.Fatalf("check-backs after two inert actions: %+v", pending)
+	}
+	k.finish(t, "events_1")
+
+	k.unit(t, "resume", UnitReady)
+	scope = k.turn(t, "events_2", "Unit resume is ready.")
+	_, action = k.tools(scope)
+	queued := decodeQueued(t, intakefixture.Handle(t, action, `{"unit":"resume","to":"ready"}`))
+	if len(queued.Queued) != 1 || queued.Queued[0].Role != masonRole || queued.Queued[0].Unit != "resume" || queued.NothingWillRun != "" || queued.CheckBack != "" {
+		t.Fatalf("queued action result: %+v", queued)
+	}
+	k.finish(t, "events_2")
+	recs, err := readFollowUps(k.repo, k.stream)
+	must(t, err)
+	if recs.turns["events_2"] {
+		t.Fatal("an action that queued work scheduled a check-back")
+	}
+
+	// The chief's own follow_up in the turn withdraws the service's.
+	other := newFollowUpKit(t)
+	other.unit(t, "upload", UnitMerged)
+	scope = other.turn(t, "events_1", "Every unit merged.")
+	schedule, action := other.tools(scope)
+	intakefixture.Handle(t, action, `{"unit":"upload","to":"ready"}`)
+	intakefixture.Handle(t, schedule, `{"after":"2h","reason":"Check the final review started.","workstream":"`+string(other.stream)+`"}`)
+	pending = other.pending(t)
+	if len(pending) != 1 || pending[0].By != "chief" {
+		t.Fatalf("pending after the chief's own follow_up: %+v", pending)
+	}
+}
+
+// A completed turn on a stall notice that ended without queuing work, a
+// follow-up or an attention item gets the service's check-back once; one
+// whose action queued work gets none.
+func TestAStallNoticeTurnThatEndsWithoutActionGetsACheckBack(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	k.unit(t, "upload", UnitContested)
+	k.turn(t, "events_1", "Unit upload has made no progress for 50 minutes. "+stallTurnRule)
+	k.finish(t, "events_1")
+	k.pass(t)
+	k.pass(t)
+	pending := k.pending(t)
+	if len(pending) != 1 || pending[0].Reason != stallFollowUpReason || pending[0].Turn != "events_1" || pending[0].By != "service" {
+		t.Fatalf("check-backs after a silent stall turn: %+v", pending)
+	}
+	recs, err := readFollowUps(k.repo, k.stream)
+	must(t, err)
+	if recs.revision[pending[0].ID] != 1 {
+		t.Fatalf("the check-back was recorded %d times", recs.revision[pending[0].ID])
+	}
+
+	acted := newFollowUpKit(t)
+	acted.unit(t, "upload", UnitReady)
+	scope := acted.turn(t, "events_1", "Unit upload has made no progress for 50 minutes. "+stallTurnRule)
+	_, action := acted.tools(scope)
+	if got := decodeQueued(t, intakefixture.Handle(t, action, `{"unit":"upload","to":"ready"}`)); len(got.Queued) == 0 {
+		t.Fatalf("the stall turn's action queued nothing: %+v", got)
+	}
+	acted.finish(t, "events_1")
+	acted.pass(t)
+	if pending := acted.pending(t); len(pending) != 0 {
+		t.Fatalf("a stall turn that queued work got a check-back: %+v", pending)
+	}
+}

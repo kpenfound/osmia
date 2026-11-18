@@ -392,7 +392,10 @@ are below the limit at which it is given up. A hold explains it only when its
 own cause is one of those. A router hold whose window passes is a stall. The
 same window is how long after its first failure a landing, rebase or
 publication that keeps failing is retried before it is ended; with `"0"` that
-window stays `45m`, so operations still end.
+window stays `45m`, so operations still end. It is also how long after an
+action of the chief of staff that started no work, or a turn on a stall notice
+that ended without one, the service gives the chief a follow-up turn to check
+back; with `"0"` that too stays `45m`.
 
 `workspaces` picks the backend of the workspaces the agents work in for each
 new workstream: its feature branch, units and drift resolution. The project's

@@ -11,8 +11,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefContext renders the bundle and the durable status and open escalations
-// that a fresh chief-of-staff session cannot recover from bounded replay.
+// chiefContext renders the bundle and the durable status, open escalations
+// and pending follow-ups that a fresh chief-of-staff session cannot recover
+// from bounded replay.
 // stream is the member the caller named; the chief of staff is shared by its
 // whole workgroup, so status and open escalations are shown for every
 // member, each naming the workstream it is about whenever that is not
@@ -35,6 +36,16 @@ func chiefContext(ctx context.Context, provider bundle.Provider, repository *tra
 	if err != nil {
 		closeRepository()
 		return "", fmt.Errorf("escalations of workstream %s: %w", stream, err)
+	}
+	host, err := repository.ChiefOfStaffHost(stream)
+	if err != nil {
+		closeRepository()
+		return "", fmt.Errorf("chief of staff of workstream %s: %w", stream, err)
+	}
+	followUps, err := renderFollowUps(repository, host)
+	if err != nil {
+		closeRepository()
+		return "", fmt.Errorf("follow-ups of workstream %s: %w", stream, err)
 	}
 	closeRepository()
 
@@ -93,6 +104,7 @@ func chiefContext(ctx context.Context, provider bundle.Provider, repository *tra
 	if count == 0 {
 		out.WriteString("None.\n")
 	}
+	out.WriteString(followUps)
 	return out.String(), nil
 }
 

@@ -266,7 +266,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "ask_owner_about_checks", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "drop_dependency", "escalate", "factory_context", "file_read", "flake_fix", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "pull_request_checks", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "retry_change", "route_amendment", "set_status", "triage_finding")
+		tools(ctx, req.Name, session, "answer", "ask_owner_about_checks", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "drop_dependency", "escalate", "factory_context", "file_read", "flake_fix", "follow_up", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "pull_request_checks", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "retry_change", "route_amendment", "set_status", "triage_finding")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// The chief of staff reads the workstream's documents in its view.
@@ -765,9 +765,9 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		"build":  {`{"recorded":true,"question":"1","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
 		"review": {`{"recorded":true,"question":"2","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
 		"chief": {
-			`{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}`,
+			`{"next":"The answer is delivered to the asker as its next turn.","question":"1","queued":[{"role":"mason","what":"the answer to question 1 is delivered as the asker's next turn"}],"recorded":true}`,
 			`{"recorded":true,"batch":"escalation_2","questions":["2"]}`,
-			`{"recorded":true,"questions":["2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}`,
+			`{"next":"The ruling is delivered to each asker as its next turn.","questions":["2"],"queued":[{"role":"reviewer","what":"the answer to question 2 is delivered as the asker's next turn"}],"recorded":true,"scope":"notify"}`,
 		},
 	}
 	if st := results["status"]; len(st) != 2 || st[0] != `{"stored":false,"reason":"agents[0] contains an Osmia or backend identifier (\"`+demoAgent+`\"); refer to the work or the agent in words"}` || st[1] != `{"stored":true,"revision":1}` {
