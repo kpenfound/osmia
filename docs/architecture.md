@@ -180,8 +180,10 @@ behaviour; this section locates it.
   caller.
 - **Stalls and the recovery card.** The stall watchdog
   ([stall_watchdog.go](../internal/service/stall_watchdog.go)) is code only and
-  raises a `stalled` exit for a subject quiet for `[loop] stall_after`. A stall
-  nobody clears, and a move that belongs to the owner, end on the recovery card
+  raises a `stalled` exit for a unit, workstream or workgroup change quiet for
+  `[loop] stall_after` ([stall_changes.go](../internal/service/stall_changes.go)
+  watches the changes). A stall nobody clears, and a move that belongs to the
+  owner, end on the recovery card
   ([recovery_card.go](../internal/service/recovery_card.go)), which pins the
   exact move and applies it as a pinned owner decision.
 - **Dependency exits and waivers.** An upstream that ended, or whose changes
@@ -192,7 +194,9 @@ behaviour; this section locates it.
   everywhere and is never reported as merged.
 - **Not routed.** Project registration and creation, the workgroup-change
   journal, publication operations, outbox delivery and turn admission only
-  recover from crashes. They never raise an exit and never call Jev.
+  recover from crashes. They never raise an exit and never call Jev; the stall
+  watchdog raises the stall of a workgroup change that sits too long, as it does
+  for any subject.
 
 The whole path is exercised by journeys that run the service, its scheduler and
 router, a fixture Jev, the trace, the telemetry sink, the feed, the command line,

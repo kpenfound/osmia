@@ -81,6 +81,9 @@ func (s *Service) requestChange(ctx context.Context, raw string, req ChangeReque
 func (s *Service) decideChange(ctx context.Context, raw, id string, d ChangeDecision) (WorkgroupChange, *APIError) {
 	return s.lifecycle().DecideChange(ctx, raw, id, d)
 }
+func (s *Service) endStalledChange(ctx context.Context, host config.WorkstreamID, id, state string, revision uint64, reason string) *APIError {
+	return s.lifecycle().EndStalledChange(ctx, host, id, state, revision, reason)
+}
 
 var changeHeld = lifecycle.ChangeHeld
 

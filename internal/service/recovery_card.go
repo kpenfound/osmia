@@ -184,7 +184,7 @@ func (s *Service) recoveryCards(repo *trace.Repository, stream config.Workstream
 			return nil
 		}
 		seen[move.Occurrence] = true
-		state, err := repo.RawWorkflow(stream, move.Subject)
+		state, err := recoverySubjectState(repo, stream, move.Subject)
 		if err != nil {
 			return err
 		}
@@ -256,6 +256,8 @@ func (s *Service) recoveryEntries(repo *trace.Repository, w trace.WorkstreamStat
 		what := "workstream " + string(w.Workstream)
 		if m.Unit != "" {
 			what = "unit " + m.Unit
+		} else if id, ok := changeOfSubject(m.Subject); ok {
+			what = "workgroup change " + id
 		}
 		e.Question = fmt.Sprintf("Approve this recovery move: %s goes from %s (version %d) to %s. %s.", what, m.From, m.Version, m.Target, strings.ToUpper(m.Reason[:1])+m.Reason[1:])
 		e.Blocked = strings.ToUpper(what[:1]) + what[1:] + "."
@@ -346,6 +348,15 @@ func (s *Service) approveRecovery(ctx context.Context, raw string, req RecoveryR
 // applyRecovery applies the pinned move through the owner's path for its
 // machine and reports what it did.
 func (s *Service) applyRecovery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repo *trace.Repository, m api.RecoveryMove, note string) (string, *APIError) {
+	if id, ok := changeOfSubject(m.Subject); ok {
+		if m.Target != changeStateTarget {
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the owner has no move for %s to %s", m.Subject, m.Target)}
+		}
+		if apiErr := s.lifecycle().EndStalledChange(ctx, stream, id, m.From, m.Version, note); apiErr != nil {
+			return "", apiErr
+		}
+		return fmt.Sprintf("Ended workgroup change %s as failed; a new change can be requested.", id), nil
+	}
 	switch m.Machine {
 	case execution.UnitMachine:
 		out, apiErr := s.execution().MoveUnit(ctx, repo, stream, m.Unit, UnitMoveRequest{To: m.Target, Note: note}, ownerActor, "")
@@ -391,16 +402,27 @@ func dependencyOf(subject string) (config.WorkstreamID, string, bool) {
 	return config.WorkstreamID(upstream), edge, true
 }
 
+// recoverySubjectState returns the state and version of the subject a recovery
+// move pins: a workgroup change's state and journal revision, or the subject's
+// workflow state.
+func recoverySubjectState(repo *trace.Repository, stream config.WorkstreamID, subject string) (trace.WorkflowState, error) {
+	if id, ok := changeOfSubject(subject); ok {
+		return changeState(repo, stream, id)
+	}
+	return repo.RawWorkflow(stream, subject)
+}
+
 // recoveryTarget returns the state a recovery card moves a stalled subject to:
 // the stage it is in again for a unit, a kick for a unit that has not started,
-// and a fresh final review for an assembled workstream. A subject with no way
-// to start again has no card.
-func recoveryTarget(unit string, state string) string {
+// a fresh final review for an assembled workstream, and assembled for a
+// building workstream that has nothing left to build. A subject with no way to
+// start again has no card.
+func (w stallWatch) recoveryTarget(stream config.WorkstreamID, unit string, state string) string {
 	if unit != "" {
 		return execution.RecoveryTarget(state)
 	}
-	if state == AssembledState {
-		return AssembledState
+	if t, ok := w.s.lifecycle().StalledRecovery(w.repository, stream, state); ok {
+		return t.Name
 	}
 	return ""
 }
@@ -421,7 +443,7 @@ func (w stallWatch) openRecovery(ctx context.Context, stream config.WorkstreamID
 	if now.Sub(decided) < after || rec.Version != state.Version || rec.From != state.Value {
 		return nil
 	}
-	target := recoveryTarget(unit, state.Value)
+	target := w.recoveryTarget(stream, unit, state.Value)
 	if target == "" {
 		return nil
 	}

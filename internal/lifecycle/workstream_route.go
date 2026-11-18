@@ -320,13 +320,13 @@ type StalledInput struct {
 // StalledExit returns the exit of a workstream that has not progressed for the
 // stall window with nothing to explain it. The default leaves the workstream
 // where it is and tells the chief of staff; an assembled workstream can instead
-// be sent to a fresh final review of its branch at the modest bar.
+// be sent to a fresh final review of its branch at the modest bar, and so can a
+// building workstream with nothing left to build: every unit merged and no
+// discovery or revision pending.
 func (s *Controller) StalledExit(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, in StalledInput) router.Exit {
 	targets := []router.Target{intake.ExitTarget(intake.TriggerStalled, router.Target{Name: intake.TargetWait, Stay: true, NoMove: true})}
-	if feature.Value == AssembledState {
-		t := workstreamMoveTargets[AssembledState]
-		t.NoMove = true
-		targets = append(targets, intake.ExitTarget(intake.TriggerStalled, t))
+	if t, ok := s.StalledRecovery(repo, stream, feature.Value); ok {
+		targets = append(targets, t)
 	}
 	id := fmt.Sprintf("ws-stalled-%d", feature.Version)
 	// The watchdog's own facts and records stay as they are; the workstream's
@@ -363,6 +363,31 @@ func (s *Controller) StalledExit(repo *trace.Repository, stream config.Workstrea
 			},
 		},
 	}
+}
+
+// StalledRecovery returns the move that starts a stalled workstream's stage
+// again, if its state has one: a fresh final review for an assembled
+// workstream, and the move to assembled for a building workstream every unit of
+// which has merged with no discovery or revision pending. Nothing is left to
+// build there, so the final review is the next stage.
+func (s *Controller) StalledRecovery(repo *trace.Repository, stream config.WorkstreamID, state string) (router.Target, bool) {
+	switch state {
+	case AssembledState:
+	case BuildingState:
+		if s.Assemblable(repo, stream) != nil {
+			return router.Target{}, false
+		}
+	default:
+		return router.Target{}, false
+	}
+	t := intake.ExitTarget(intake.TriggerStalled, workstreamMoveTargets[AssembledState])
+	// A fresh review of an assembled workstream records the move and changes no
+	// state; a building workstream moves to assembled.
+	t.NoMove = state == AssembledState
+	if state == BuildingState {
+		t.Description = "Move the workstream to assembled for a fresh final review: every unit has merged and no discovery or revision is pending, so nothing is left to build."
+	}
+	return t, true
 }
 
 // nextMove returns the number the workstream's next move will take.

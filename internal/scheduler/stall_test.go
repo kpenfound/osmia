@@ -47,7 +47,7 @@ func TestAssessSuppressesAStallWhenSomethingExplainsTheQuiet(t *testing.T) {
 	}{
 		{"open owner card", func(q *Quiet) { q.Card = true }, ExplainedByCard},
 		{"pause", func(q *Quiet) { q.Paused = true }, ExplainedByPause},
-		{"running or queued turn", func(q *Quiet) { q.Turn = true }, ExplainedByTurn},
+		{"running or queued turn", func(q *Quiet) { q.Turn = testNow.Add(-time.Minute) }, ExplainedByTurn},
 		{"live dependency wait", func(q *Quiet) { q.Waiting = true }, ExplainedByDependency},
 		{"operation in flight", func(q *Quiet) { q.Operations = []Operation{inFlight} }, ExplainedByOperation},
 		{"hold of a pause", func(q *Quiet) { q.Operations = []Operation{{Action: "land", Held: HeldByPause}} }, ExplainedByPause},
@@ -122,5 +122,20 @@ func TestAssessCountsTheQuietFromTheLastProgress(t *testing.T) {
 	}
 	if got := Assess(q, testNow.Add(testAfter/2), testAfter, testLimit); !got.Stalled {
 		t.Fatalf("a subject quiet for the whole window did not stall: %+v", got)
+	}
+}
+
+// A running or queued turn explains the quiet only while it is younger than the
+// window: a turn stuck in its queue, or running past the window, is a stall.
+func TestAssessDoesNotLetATurnOlderThanTheWindowExplainTheQuiet(t *testing.T) {
+	t.Parallel()
+	q := quietFor(2 * testAfter)
+	q.Turn = testNow.Add(-testAfter + time.Second)
+	if got := Assess(q, testNow, testAfter, testLimit); got.Stalled || got.Explanation != ExplainedByTurn {
+		t.Fatalf("a turn queued inside the window = %+v", got)
+	}
+	q.Turn = testNow.Add(-testAfter)
+	if got := Assess(q, testNow, testAfter, testLimit); !got.Stalled {
+		t.Fatalf("a turn queued a whole window ago explained the quiet: %+v", got)
 	}
 }

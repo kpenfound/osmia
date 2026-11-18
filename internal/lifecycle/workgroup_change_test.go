@@ -36,6 +36,47 @@ func currentChange(t *testing.T, s *Service, address config.WorkstreamID, id str
 	}
 	return WorkgroupChange{}
 }
+// A change that sits in its draft is ended from its recovery card only at the
+// state and revision the card pins; once ended as failed, a new change can be
+// requested.
+func TestAStalledChangeEndsOnlyAtThePinnedRevision(t *testing.T) {
+	t.Parallel()
+	f, stream, repo := newApprovedFixture(t, "stalled-change")
+	defer repo.Close()
+	f.s.setSole(runtimeFor(repo))
+	ctx := context.Background()
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
+	must(t, err)
+	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), serviceActor)
+	must(t, err)
+	c, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "stalled-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	c = currentChange(t, f.s, stream, c.ID)
+	if c.State != "drafting" {
+		t.Fatalf("the requested change is %s", c.State)
+	}
+	if api := f.s.endStalledChange(ctx, stream, c.ID, "debating", uint64(c.Revision), "stalled"); api == nil || api.Code != Conflict {
+		t.Fatalf("ending the change at another state = %+v", api)
+	}
+	if api := f.s.endStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision)+1, "stalled"); api == nil || api.Code != Conflict {
+		t.Fatalf("ending the change at another revision = %+v", api)
+	}
+	if got := currentChange(t, f.s, stream, c.ID); got.State != "drafting" || got.Revision != c.Revision {
+		t.Fatalf("a refused end changed the change: %+v", got)
+	}
+	if api := f.s.endStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision), "ended on its recovery card"); api != nil {
+		t.Fatal(api)
+	}
+	if got := currentChange(t, f.s, stream, c.ID); got.State != "failed" || got.Failure != "ended on its recovery card" {
+		t.Fatalf("the ended change is %+v", got)
+	}
+	if _, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "after-stall", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"}); api != nil {
+		t.Fatalf("a new change after the ended one: %+v", api)
+	}
+}
+
 func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := newApprovedFixture(t, "delta-runner")

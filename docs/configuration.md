@@ -379,11 +379,15 @@ without progress before the stall watchdog raises a `stalled` exit for it to
 the transition router, which asks Jev only what to do about it. The default is
 `45m`; `"0"` turns the watchdog off, and a negative value is refused. Progress
 is the same as the loop guard counts, except that nothing the chief of staff
-does counts. The watchdog raises nothing while something legitimate explains
-the quiet: an open owner card, a pause that covers the subject, a running or
-queued turn, an operation in flight, or a dependency wait on an upstream that is
-still alive. An operation in flight explains it only while its latest claim,
-observation or retry is younger than `stall_after` and its consecutive failures
+does counts and neither does a drift rebase. The watchdog raises nothing while
+something legitimate explains the quiet: an open owner card about the subject,
+a pause that covers the subject, a running or queued turn younger than
+`stall_after`, an operation in flight, or a dependency wait on an upstream that
+has itself progressed within `stall_after` or is explained. A card of a
+workstream explains a unit's quiet only when it holds the whole workstream's
+work. Workgroup changes being drafted, debated, presented or applied are
+watched the same way. An operation in flight explains it only while its latest
+claim, observation or retry is younger than `stall_after` and its consecutive failures
 are below the limit at which it is given up. A hold explains it only when its
 own cause is one of those. A router hold whose window passes is a stall. The
 same window is how long after its first failure a landing, rebase or

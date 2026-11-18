@@ -16,7 +16,8 @@ const (
 	ExplainedByCard Explanation = "owner_card"
 	// ExplainedByPause: a pause covers the subject.
 	ExplainedByPause Explanation = "pause"
-	// ExplainedByTurn: a turn of the subject is running or queued.
+	// ExplainedByTurn: a turn of the subject is running or queued, and younger
+	// than the window.
 	ExplainedByTurn Explanation = "turn"
 	// ExplainedByOperation: an operation of the subject is in flight and still
 	// can reach a result.
@@ -103,10 +104,13 @@ type Quiet struct {
 	Card bool
 	// Paused says a pause covers the subject.
 	Paused bool
-	// Turn says a turn of the subject, other than the chief of staff's, is
-	// running or queued.
-	Turn bool
-	// Waiting says the subject waits on an upstream that is alive.
+	// Turn is the latest time a turn of the subject, other than the chief of
+	// staff's, that is running or queued was queued, claimed or attempted; zero
+	// when none is. A turn explains the quiet only while that time is younger
+	// than the window, so a turn stuck in its queue is a stall.
+	Turn time.Time
+	// Waiting says the subject waits on an upstream that is itself progressing
+	// or explained.
 	Waiting bool
 	// Operations are the operations of the subject that have no result.
 	Operations []Operation
@@ -136,7 +140,7 @@ func Explain(q Quiet, now time.Time, after time.Duration, limit int) Explanation
 		return ExplainedByCard
 	case q.Paused:
 		return ExplainedByPause
-	case q.Turn:
+	case !q.Turn.IsZero() && now.Sub(q.Turn) < after:
 		return ExplainedByTurn
 	case q.Waiting:
 		return ExplainedByDependency

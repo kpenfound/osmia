@@ -772,3 +772,42 @@ func (s *Controller) MemberRemovalGate(ctx context.Context, raw string) *APIErro
 	}
 	return nil
 }
+
+// StalledChangeEndable reports whether a workgroup change in this state can be
+// ended from its recovery card: one the committee is still drafting, debating
+// or answering, so nothing of it has been presented or applied.
+func StalledChangeEndable(state string) bool {
+	return state == "drafting" || state == "debating" || state == "answering"
+}
+
+// EndStalledChange ends a workgroup change that sits in its draft or debate, as
+// the owner approved on its recovery card: the change is recorded failed with
+// the reason, and a new change can be requested. It is refused as a conflict
+// when the change has moved on from the state and revision the card pins.
+func (s *Controller) EndStalledChange(ctx context.Context, host config.WorkstreamID, id, state string, revision uint64, reason string) *APIError {
+	wt, g, _, close, err := s.ChangeContext(ctx, string(host))
+	if err != nil {
+		return &APIError{Code: Conflict, Message: err.Error()}
+	}
+	defer close()
+	lock := s.GroupApprovalLock(g.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	changes, err := ReadChanges(wt, g.Members[0])
+	if err != nil {
+		return &APIError{Code: Internal, Message: err.Error()}
+	}
+	i := slices.IndexFunc(changes, func(c WorkgroupChange) bool { return c.ID == id })
+	if i < 0 {
+		return &APIError{Code: NotFound, Message: "change not found"}
+	}
+	c := changes[i]
+	if c.State != state || uint64(c.Revision) != revision || !StalledChangeEndable(c.State) {
+		return &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup change %s is %s at revision %d, not %s at revision %d; read the inbox again", id, c.State, c.Revision, state, revision)}
+	}
+	c.State, c.Failure = "failed", reason
+	if err := s.SaveChange(ctx, wt, &c); err != nil {
+		return &APIError{Code: Internal, Message: err.Error()}
+	}
+	return nil
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -614,5 +615,280 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 		if got := recoveryEntriesOf(t, f.s, f.repo, stream); len(got) != 1 || recoveryDocuments(t, f.repo, stream) != 1 || held() != 2 {
 			t.Fatalf("later passes made %d cards and %d records and hold %d stalls", len(got), recoveryDocuments(t, f.repo, stream), held())
 		}
+	}
+}
+
+// transitionOn records a state change of a subject of any workstream of the
+// fixture's project.
+func (f *stallFixture) transitionOn(t *testing.T, ws config.WorkstreamID, id, subject, from, to, unit string, at time.Time) {
+	t.Helper()
+	state, err := f.repo.RawWorkflow(ws, subject)
+	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: ws, Unit: unit, At: at, Actor: stallSeeder, Cause: "seed"}
+	_, err = f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: from, To: to, Reason: "seeded"}})
+	must(t, err)
+}
+
+// exitsOf returns the exits the last pass raised for the subject of the
+// workstream.
+func (f *stallFixture) exitsOf(ws config.WorkstreamID, subject string) []router.Exit {
+	var out []router.Exit
+	for _, x := range f.log.occurrences() {
+		if x.Workstream == ws && x.Subject == subject {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// queueTurn queues a mason turn of the unit at the time, which nothing runs.
+func (f *stallFixture) queueTurn(t *testing.T, unit string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, Revision: 1, ID: "mason_stall", Project: f.repo.Project(), Workstream: stream, At: at, Actor: stallSeeder, Cause: "seed"}
+	must(t, f.repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: "mason_stall_thread"}))
+	h.Schema, h.ID, h.Unit = "osmia.trace.turn-request", "request_stall", unit
+	_, err := f.repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "mason_stall", ThreadID: "mason_stall_thread", TurnID: "stall-turn", Profile: coreadapter.Profile{Name: "mason-default", Backend: "fake", Model: "test"}, Prompt: "Build it"})
+	must(t, err)
+}
+
+// A building workstream whose every unit has merged, with no discovery or
+// revision pending, has nothing left to build: its stalled exit offers the move
+// to assembled for a fresh final review at the modest bar, and a stall nobody
+// clears ends on the recovery card that pins that move.
+func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newStallFixture(t, "", nil)
+	f.sealWorkstream(t, "# Spec\n", "")
+	f.transition(t, "stall-unit-merged", trace.UnitSubject(stallUnit), UnitImplementing, UnitMerged, stallUnit, stallSeeder, demoStart)
+
+	feature, err := f.repo.Workflow(stream, trace.FeatureSubject)
+	must(t, err)
+	x := f.s.lifecycle().StalledExit(f.repo, stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"})
+	if len(x.Targets) != 2 || x.Targets[1].Name != AssembledState || x.Targets[1].NoMove || x.Targets[1].Bar != router.BarModest || x.Targets[1].Gate || x.Targets[1].Approval || x.Default != intake.TargetWait {
+		t.Fatalf("the stalled exit of a building workstream with nothing left to build: default %q targets %+v", x.Default, x.Targets)
+	}
+
+	w := f.watch("45m")
+	f.quietFor(46 * time.Minute)
+	got := f.pass(t, w)
+	ws := got[intake.TriggerStalled]
+	if len(got) != 1 || ws.Subject != trace.FeatureSubject || ws.From != BuildingState {
+		t.Fatalf("the quiet workstream raised %+v", got)
+	}
+	if res, err := f.s.RouteExit(ctx, ws); err != nil || !res.Committed || res.Target != intake.TargetWait {
+		t.Fatalf("the stalled exit = %+v, %v", res, err)
+	}
+
+	// A further window later nobody has moved it: the card pins assembled.
+	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.pass(t, w)
+	cards := recoveryEntriesOf(t, f.s, f.repo, stream)
+	if len(cards) != 1 {
+		t.Fatalf("the stalled workstream has %d recovery cards, want 1", len(cards))
+	}
+	m := cards[0].Recovery
+	if m == nil || m.Unit != "" || m.Subject != trace.FeatureSubject || m.From != BuildingState || m.Target != AssembledState || m.Origin != api.RecoveryStall {
+		t.Fatalf("the card pins %+v", m)
+	}
+	// The move the card pins is one the owner's move to assembled makes.
+	if fail := f.s.lifecycle().Assemblable(f.repo, stream); fail != nil {
+		t.Fatalf("the workstream the card moves to assembled cannot be assembled: %+v", fail)
+	}
+	if req := recoveryRequestOf(t, cards[0]); req.Target != AssembledState || req.From != BuildingState || req.Subject != trace.FeatureSubject {
+		t.Fatalf("the card's answer pins %+v", req)
+	}
+
+	// A building workstream with a unit still open has no such way out.
+	open := newStallFixture(t, "", nil)
+	open.sealWorkstream(t, "# Spec\n", "")
+	feature, err = open.repo.Workflow(stream, trace.FeatureSubject)
+	must(t, err)
+	if x := open.s.lifecycle().StalledExit(open.repo, stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"}); len(x.Targets) != 1 {
+		t.Fatalf("a building workstream with an open unit can go to %+v", x.Targets)
+	}
+}
+
+// A queued turn explains the quiet only while it is younger than the window: a
+// turn that sits in its queue for the window is a stall.
+func TestAQueuedTurnOlderThanTheWindowDoesNotExplainTheQuiet(t *testing.T) {
+	t.Parallel()
+	f := newStallFixture(t, "", nil)
+	w := f.watch("45m")
+	f.quietFor(2 * time.Hour)
+	f.queueTurn(t, stallUnit, f.clock.Now())
+	if got := f.pass(t, w); len(got) != 0 {
+		t.Fatalf("a turn queued a moment ago did not explain the quiet: %+v", got)
+	}
+	f.quietFor(2*time.Hour + 50*time.Minute)
+	got := f.pass(t, w)
+	if len(got) != 2 || got[execution.TriggerStalled].Subject != trace.UnitSubject(stallUnit) {
+		t.Fatalf("a turn queued 50 minutes ago explained the quiet: %+v", got)
+	}
+}
+
+// A card of the workstream that does not hold its units, such as a recovery
+// card of the workstream itself, explains the workstream's quiet but not a
+// unit's.
+func TestAWorkstreamCardDoesNotExplainTheQuietOfItsUnits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newStallFixture(t, "", nil)
+	feature, err := f.repo.RawWorkflow(stream, trace.FeatureSubject)
+	must(t, err)
+	move := api.RecoveryMove{Occurrence: "stall-test-occurrence", Machine: intake.WorkstreamMachine, Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version, Target: AssembledState, Origin: api.RecoveryOwner, Reason: "the owner's move"}
+	must(t, writeRecoveryRecord(ctx, f.repo, stream, recoveryRecord{RecoveryMove: move, State: recoveryOpen, Opened: demoStart}, 0, stallSeeder, demoStart))
+	if cards := recoveryEntriesOf(t, f.s, f.repo, stream); len(cards) != 1 {
+		t.Fatalf("the workstream has %d open cards, want 1", len(cards))
+	}
+	f.quietFor(46 * time.Minute)
+	got := f.pass(t, f.watch("45m"))
+	if len(got) != 1 || got[execution.TriggerStalled].Subject != trace.UnitSubject(stallUnit) {
+		t.Fatalf("with a card of the workstream open, the pass raised %+v, want the unit's stall alone", got)
+	}
+}
+
+// A drift rebase is no progress for the watchdog: a branch rebased onto
+// upstream on its cadence does not start the window over.
+func TestADriftRebaseIsNoProgressForTheStallWatchdog(t *testing.T) {
+	t.Parallel()
+	f := newStallFixture(t, "", nil)
+	f.quietFor(30 * time.Minute)
+	f.transition(t, "stall-drift-rebased", driftSubject, "", driftRebased+"-1", "", stallSeeder, f.clock.Now())
+	f.quietFor(46 * time.Minute)
+	got := f.pass(t, f.watch("45m"))
+	ws := got[intake.TriggerStalled]
+	if len(got) != 2 || ws.Evidence.Facts["last_progress"] != demoStart.UTC().Format(time.RFC3339) {
+		t.Fatalf("a drift rebase reset the window: %+v", got)
+	}
+}
+
+// An upstream explains the quiet of a workstream waiting on it only while it
+// progresses within the window or is explained itself; an upstream that is
+// alive but stalled explains nothing.
+func TestAnUpstreamExplainsItsDependentsOnlyWhileItIsNotStalled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newStallFixture(t, "", nil)
+	upstream := config.WorkstreamID("w_00000000000000000000000000000b01")
+	must(t, f.repo.CreateWorkstream(ctx, upstream, demoStart, ownerActor))
+	f.transitionOn(t, upstream, "stall-upstream-building", trace.FeatureSubject, "", BuildingState, "", demoStart)
+	f.transitionOn(t, upstream, "stall-upstream-unit", trace.UnitSubject("u9"), "", UnitImplementing, "u9", demoStart.Add(40*time.Minute))
+	judge := func() bool {
+		t.Helper()
+		statuses, err := f.repo.Statuses()
+		must(t, err)
+		w := f.watch("45m")
+		p := &stallPass{statuses: statuses, after: w.cfg.StallWindow(), now: f.clock.Now(), limit: f.s.GiveUpLimit().Failures, upstreams: map[config.WorkstreamID]*bool{}}
+		explains, err := w.upstreamExplains(ctx, p, upstream)
+		must(t, err)
+		return explains
+	}
+
+	f.quietFor(46 * time.Minute)
+	if !judge() {
+		t.Fatal("an upstream that progressed 6 minutes ago did not explain its dependents")
+	}
+	f.quietFor(90 * time.Minute)
+	if judge() {
+		t.Fatal("an upstream quiet for 50 minutes with nothing to explain it explained its dependents")
+	}
+	// An upstream that is itself explained, here by a pause, still explains them.
+	cfg := f.s.current()
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, upstream}}})
+	must(t, err)
+	t.Cleanup(func() { store.Close() })
+	f.s.store = store
+	must(t, store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: upstream}, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: demoStart}))
+	if !judge() {
+		t.Fatal("a paused upstream did not explain its dependents")
+	}
+}
+
+// seedChange records the host's workgroup change journal at the revision.
+func (f *stallFixture) seedChange(t *testing.T, c lifecycle.WorkgroupChange, revision int, at time.Time) {
+	t.Helper()
+	data, err := json.Marshal(c)
+	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.repo.Project(), Workstream: stream, At: at, Actor: stallSeeder, Cause: "seed"}
+	must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
+}
+
+// A workgroup change that sits in its draft for the window is a stall: the
+// chief of staff is told, with the state, how long and why it is held, and a
+// stall nobody clears ends on the recovery card that ends the change. A change
+// that moves on makes the card stale.
+func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newStallFixture(t, "", nil)
+	change := lifecycle.WorkgroupChange{ID: "c1", Workgroup: "wg", Host: stream, Request: lifecycle.ChangeRequest{Key: "c1", Kind: "amend", Scope: "workgroup", Change: "Rename the field"}, State: "drafting", Failure: "member history is unavailable"}
+	f.seedChange(t, change, 1, demoStart)
+	subject := lifecycle.WorkgroupChangeDocument("c1")
+	w := f.watch("45m")
+
+	f.quietFor(44 * time.Minute)
+	f.pass(t, w)
+	if got := f.exitsOf(stream, subject); len(got) != 0 {
+		t.Fatalf("a change drafted for 44 minutes raised %+v", got)
+	}
+	f.quietFor(46 * time.Minute)
+	f.pass(t, w)
+	got := f.exitsOf(stream, subject)
+	if len(got) != 1 || got[0].Trigger != intake.TriggerStalled || got[0].Default != intake.TargetWait || len(got[0].Targets) != 1 {
+		t.Fatalf("a change drafted for 46 minutes raised %+v", got)
+	}
+	x := got[0]
+	if x.Evidence.Facts["state"] != "drafting" || x.Evidence.Facts["held"] != change.Failure || x.Evidence.Facts["minutes_quiet"] != 46 {
+		t.Fatalf("the change's evidence %+v", x.Evidence.Facts)
+	}
+	if res, err := f.s.RouteExit(ctx, x); err != nil || !res.Committed || res.Target != intake.TargetWait {
+		t.Fatalf("the change's stalled exit = %+v, %v", res, err)
+	}
+	outbox, err := f.repo.Outbox(stream)
+	must(t, err)
+	told := 0
+	for _, e := range outbox {
+		if strings.Contains(e.Event.Body, "Workgroup change c1 has sat drafting for 46 minutes") && strings.Contains(e.Event.Body, change.Failure) {
+			told++
+		}
+	}
+	if told != 1 {
+		t.Fatalf("the chief of staff was told of the change %d times, want 1", told)
+	}
+
+	// A further window later, the card ends the change.
+	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.pass(t, w)
+	if again := f.exitsOf(stream, subject); len(again) != 0 {
+		t.Fatalf("a decided stall of the change was raised again: %+v", again)
+	}
+	var card *api.RecoveryMove
+	for _, e := range recoveryEntriesOf(t, f.s, f.repo, stream) {
+		if e.Recovery != nil && e.Recovery.Subject == subject {
+			card = e.Recovery
+		}
+	}
+	if card == nil || card.From != "drafting" || card.Version != 1 || card.Target != "failed" || card.Origin != api.RecoveryStall {
+		t.Fatalf("the change's card pins %+v", card)
+	}
+
+	// The change moving on makes the card stale.
+	change.State = "debating"
+	f.seedChange(t, change, 2, f.clock.Now())
+	for _, e := range recoveryEntriesOf(t, f.s, f.repo, stream) {
+		if e.Recovery != nil && e.Recovery.Subject == subject {
+			t.Fatalf("a change that moved on still has its card: %+v", e.Recovery)
+		}
+	}
+
+	// A change presented to the owner waits on the owner and is not watched.
+	presented := newStallFixture(t, "", nil)
+	presented.seedChange(t, lifecycle.WorkgroupChange{ID: "c2", Workgroup: "wg", Host: stream, State: "presented"}, 1, demoStart)
+	presented.quietFor(3 * time.Hour)
+	presented.pass(t, presented.watch("45m"))
+	if got := presented.exitsOf(stream, lifecycle.WorkgroupChangeDocument("c2")); len(got) != 0 {
+		t.Fatalf("a presented change raised %+v", got)
 	}
 }

@@ -128,6 +128,7 @@ func (w stallWatch) Pass(ctx context.Context) error {
 		return err
 	}
 	librarian := librarianWorkstream(w.repository.Project())
+	p := &stallPass{statuses: statuses, escalations: escalations, after: after, now: w.s.now(), limit: w.s.GiveUpLimit().Failures, upstreams: map[config.WorkstreamID]*bool{}}
 	var failed []error
 	for _, stream := range streams {
 		if stream == librarian {
@@ -141,11 +142,34 @@ func (w stallWatch) Pass(ctx context.Context) error {
 			continue
 		}
 		// One workstream that cannot be read leaves the others watched.
-		if err := w.workstream(ctx, statuses[i], escalations, after); err != nil {
+		if err := w.workstream(ctx, p, statuses[i]); err != nil {
 			failed = append(failed, fmt.Errorf("workstream %s: %w", stream, err))
+		}
+		if err := w.changes(ctx, p, stream); err != nil {
+			failed = append(failed, fmt.Errorf("workgroup changes of %s: %w", stream, err))
 		}
 	}
 	return errors.Join(failed...)
+}
+
+// stallPass is what one pass of the watchdog shares between the workstreams it
+// judges: the records it read once, its clock and limits, and the judgment of
+// each upstream a dependency wait names.
+type stallPass struct {
+	statuses    []trace.WorkstreamStatus
+	escalations []trace.InboxEntry
+	after       time.Duration
+	now         time.Time
+	limit       int
+	// upstreams says, for each upstream judged in the pass, whether it explains
+	// the quiet of the workstreams that wait on it; nil while it is being judged.
+	upstreams map[config.WorkstreamID]*bool
+}
+
+// stallKey names a subject in the watchdog's clocks: a unit, or the workstream
+// when unit is empty.
+func stallKey(project config.ProjectID, stream config.WorkstreamID, unit string) string {
+	return fmt.Sprintf("%s/%s/%s", project, stream, unit)
 }
 
 // stallReading is everything a pass reads about one workstream and its units.
@@ -157,17 +181,25 @@ type stallReading struct {
 	progress stallProgress
 	// holds are when the router last held each subject.
 	holds map[string]time.Time
-	// turns are the non-chief turns running or queued, by unit; the empty unit
-	// holds all of them. done is when the latest finished.
-	live map[string]bool
+	// live is the latest time a non-chief turn running or queued was queued,
+	// claimed or attempted, by unit; the empty unit holds all of them. done is
+	// when the latest finished.
+	live map[string]time.Time
 	done map[string]time.Time
-	// card is whether an owner card is open for the workstream, and for each unit
-	// that has its own.
+	// card is whether an owner card is open for the workstream. unitsHeld is
+	// whether one of those holds its units too, and unitCards whether each unit
+	// has a card of its own.
 	card      bool
+	unitsHeld bool
 	unitCards map[string]bool
+	// groupCard is whether the owner's approval of the shared workgroup explains
+	// the quiet: the workgroup is not approved and the workstream is not
+	// ratified yet.
+	groupCard bool
 	// paused is whether a pause covers the workstream.
 	paused bool
-	// waiting is whether the workstream waits on a live upstream.
+	// waiting is whether the workstream waits on an upstream that is itself
+	// progressing or explained.
 	waiting bool
 	// operations are the operations without a result, by unit; the empty unit
 	// holds all of them.
@@ -175,18 +207,56 @@ type stallReading struct {
 }
 
 // workstreamHold is when the router last held a subject of the workstream
-// itself, not one of its units.
+// itself, not one of its units or the stall of one of its workgroup changes.
 func (r stallReading) workstreamHold() time.Time {
 	var out time.Time
 	for subject, at := range r.holds {
-		if !strings.HasPrefix(subject, "unit-") && !strings.HasPrefix(subject, "unit_") && at.After(out) {
+		if !strings.HasPrefix(subject, "unit-") && !strings.HasPrefix(subject, "unit_") && !isChangeSubject(subject) && at.After(out) {
 			out = at
 		}
 	}
 	return out
 }
 
-func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatus, escalations []trace.InboxEntry, after time.Duration) error {
+// streamQuiet is the quiet of the workstream itself: quiet since the later of
+// its own progress, a hold of the router and the end of the latest turn of its
+// workers.
+func (r stallReading) streamQuiet() scheduler.Quiet {
+	since := latest(r.created, r.progress.stream, r.workstreamHold(), latestOf(r.done))
+	return scheduler.Quiet{Since: since, Card: r.card, Paused: r.paused, Turn: r.live[""], Waiting: r.waiting, Operations: r.operations[""]}
+}
+
+// read reads everything the watchdog judges a workstream and its units by.
+func (w stallWatch) read(ctx context.Context, p *stallPass, status trace.WorkstreamStatus, feature trace.WorkflowState) (stallReading, error) {
+	stream := status.Workstream
+	r := stallReading{feature: feature, created: status.CreatedAt}
+	var err error
+	if r.progress, err = readStallProgress(w.repository, stream); err != nil {
+		return r, err
+	}
+	if err := w.readHolds(&r, stream); err != nil {
+		return r, err
+	}
+	if err := w.readTurns(&r, stream); err != nil {
+		return r, err
+	}
+	if err := w.readCards(ctx, &r, status, p.escalations); err != nil {
+		return r, err
+	}
+	if err := w.readWaits(ctx, &r, p, stream); err != nil {
+		return r, err
+	}
+	if err := w.readOperations(&r, stream); err != nil {
+		return r, err
+	}
+	if w.s.store != nil {
+		st, _ := w.s.effective()
+		_, r.paused = scheduler.Pausing(st.Pauses, w.repository.Project(), stream)
+	}
+	return r, nil
+}
+
+func (w stallWatch) workstream(ctx context.Context, p *stallPass, status trace.WorkstreamStatus) error {
 	stream := status.Workstream
 	feature, err := w.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -195,41 +265,18 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 	if feature.Value == "" || feature.Value == DeliveredState || feature.Value == AbandonedState {
 		return nil
 	}
-	r := stallReading{feature: feature, created: status.CreatedAt}
-	if r.progress, err = readStallProgress(w.repository, stream); err != nil {
+	r, err := w.read(ctx, p, status, feature)
+	if err != nil {
 		return err
 	}
-	if err := w.readHolds(&r, stream); err != nil {
-		return err
-	}
-	if err := w.readTurns(&r, stream); err != nil {
-		return err
-	}
-	if err := w.readCards(ctx, &r, status, escalations); err != nil {
-		return err
-	}
-	if err := w.readWaits(&r, stream); err != nil {
-		return err
-	}
-	if err := w.readOperations(&r, stream); err != nil {
-		return err
-	}
-	if w.s.store != nil {
-		st, _ := w.s.effective()
-		_, r.paused = scheduler.Pausing(st.Pauses, w.repository.Project(), stream)
-	}
-	now := w.s.now()
-	limit := w.s.GiveUpLimit().Failures
+	now, after, limit := p.now, p.after, p.limit
 
-	// The workstream: quiet since the later of its own progress, a hold of the
-	// router and the end of the latest turn of its workers.
-	since := latest(r.created, r.progress.stream, r.workstreamHold(), latestOf(r.done))
-	q := scheduler.Quiet{Since: since, Card: r.card, Paused: r.paused, Turn: len(r.live) > 0, Waiting: r.waiting, Operations: r.operations[""]}
+	q := r.streamQuiet()
 	raw, err := w.repository.RawWorkflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return err
 	}
-	if err := w.assess(ctx, stream, "", raw, q, since, r, now, after, limit); err != nil {
+	if err := w.assess(ctx, stream, "", raw, q, q.Since, r, now, after, limit); err != nil {
 		return err
 	}
 
@@ -270,9 +317,11 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 		}
 		turn := r.live[unit]
 		if state.Value == UnitReady {
-			turn = turn || len(r.live) > 0
+			turn = latest(turn, r.live[""])
 		}
-		q := scheduler.Quiet{Since: since, Card: r.card || r.unitCards[unit], Paused: r.paused, Turn: turn, Waiting: waiting, Operations: r.operations[unit]}
+		// Only a card about the unit, or one of the workstream's that holds its
+		// units, explains the unit's quiet.
+		q := scheduler.Quiet{Since: since, Card: r.unitsHeld || r.unitCards[unit], Paused: r.paused, Turn: turn, Waiting: waiting, Operations: r.operations[unit]}
 		if err := w.assess(ctx, stream, unit, state, q, since, r, now, after, limit); err != nil {
 			return err
 		}
@@ -284,7 +333,7 @@ func (w stallWatch) workstream(ctx context.Context, status trace.WorkstreamStatu
 // explained notes the time; a subject that is stalled is raised once for the
 // stall, which is identified by the progress it has been quiet since.
 func (w stallWatch) assess(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, q scheduler.Quiet, identity time.Time, r stallReading, now time.Time, after time.Duration, limit int) error {
-	key := fmt.Sprintf("%s/%s/%s", w.repository.Project(), stream, unit)
+	key := stallKey(w.repository.Project(), stream, unit)
 	// The quiet is counted from the last time something explained it too, so a
 	// lifted pause or an answered card starts the window over.
 	if scheduler.Explain(q, now, after, limit) != scheduler.NotExplained {
@@ -379,7 +428,7 @@ func (w stallWatch) exit(stream config.WorkstreamID, unit string, state trace.Wo
 		}
 		records = append(records, router.Entry{Kind: "operation", Text: text})
 	}
-	body := fmt.Sprintf("%s has made no progress for %d minutes (since %s, %s) and nothing explains the quiet: no owner card, pause, running or queued turn, operation in flight or live dependency wait.", strings.ToUpper(name[:1])+name[1:], minutes, last.UTC().Format(time.RFC3339), what)
+	body := fmt.Sprintf("%s has made no progress for %d minutes (since %s, %s) and nothing explains the quiet: no owner card about it, pause, running or queued turn younger than the window, operation in flight or wait on an upstream that is progressing.", strings.ToUpper(name[:1])+name[1:], minutes, last.UTC().Format(time.RFC3339), what)
 	if len(failures) > 0 {
 		body += " Last failure: " + strings.Join(failures, "; ") + "."
 	}
@@ -452,7 +501,8 @@ func (p stallProgress) unitOf(subject string) (string, bool) {
 
 // readStallProgress reads when the workstream and its units last progressed, by
 // the rules of the loop guard's progress, except that nothing the chief of staff
-// did counts.
+// did counts and neither does a drift rebase: a branch rebased onto upstream on
+// its cadence moves no work of the workstream on.
 func readStallProgress(repository *trace.Repository, stream config.WorkstreamID) (stallProgress, error) {
 	records, err := trace.Read[trace.Record](repository, stream)
 	if err != nil {
@@ -494,8 +544,6 @@ func readStallProgress(repository *trace.Repository, stream config.WorkstreamID)
 				}
 			case r.Subject == shedSubject, strings.HasPrefix(r.Subject, amendmentSubject("")), r.Subject == finalReviewSubject, r.Subject == publicationSubject:
 				mark(r.At, fmt.Sprintf("%s moving to %s", r.Subject, r.To))
-			case r.Subject == driftSubject && strings.HasPrefix(r.To, driftRebased+"-"):
-				mark(r.At, "a drift rebase")
 			case r.Subject == loopGuardSubject && strings.HasPrefix(r.To, "released-"):
 				mark(r.At, "the owner resuming it")
 			}
@@ -542,23 +590,26 @@ func (w stallWatch) readHolds(r *stallReading, stream config.WorkstreamID) error
 }
 
 // readTurns reads the turns of the workstream's workers that are running or
-// queued, and when the latest of them finished. A turn of the chief of staff
-// explains nothing and is no progress.
+// queued, with the latest time each was queued, claimed or attempted, and when
+// the latest of them finished. A turn of the chief of staff explains nothing
+// and is no progress.
 func (w stallWatch) readTurns(r *stallReading, stream config.WorkstreamID) error {
 	threads, err := w.repository.Threads(stream)
 	if err != nil {
 		return err
 	}
-	r.live, r.done = map[string]bool{}, map[string]time.Time{}
+	r.live, r.done = map[string]time.Time{}, map[string]time.Time{}
 	for _, t := range threads {
 		if t.Identity.Role == trace.ChiefOfStaff {
 			continue
 		}
 		for _, q := range t.Turns {
 			if q.CompletedAt.IsZero() {
-				r.live[q.Request.Unit] = true
-				if q.Request.Unit != "" {
-					r.live[""] = true
+				at := turnActivity(q)
+				for _, unit := range []string{q.Request.Unit, ""} {
+					if at.After(r.live[unit]) {
+						r.live[unit] = at
+					}
 				}
 			} else if q.CompletedAt.After(r.done[q.Request.Unit]) {
 				r.done[q.Request.Unit] = q.CompletedAt
@@ -574,6 +625,39 @@ func (w stallWatch) readTurns(r *stallReading, stream config.WorkstreamID) error
 	return nil
 }
 
+// turnActivity is the latest time a turn was queued, claimed or attempted.
+func turnActivity(q trace.QueuedTurn) time.Time {
+	at := q.Request.At
+	if q.Claim != nil {
+		at = latest(at, q.Claim.At)
+	}
+	for _, a := range q.Attempts {
+		at = latest(at, a.At)
+	}
+	return at
+}
+
+// cardHoldsUnits reports whether a workstream's card of this kind holds its
+// units as well: a card that stops the work of the whole workstream until the
+// owner answers it. Any other card of the workstream explains only the
+// workstream's own quiet.
+func cardHoldsUnits(kind string) bool {
+	switch kind {
+	case InboxRatification, InboxDrift, InboxBase, InboxLoop, "project-selection":
+		return true
+	}
+	return false
+}
+
+// ratifiedOrLater reports whether a workstream in this state has been ratified.
+func ratifiedOrLater(state string) bool {
+	switch state {
+	case RatifiedState, BuildingState, AssembledState, DeliveredState:
+		return true
+	}
+	return false
+}
+
 // readCards reads the owner cards open for the workstream and its units.
 func (w stallWatch) readCards(ctx context.Context, r *stallReading, status trace.WorkstreamStatus, escalations []trace.InboxEntry) error {
 	r.unitCards = map[string]bool{}
@@ -584,8 +668,11 @@ func (w stallWatch) readCards(ctx context.Context, r *stallReading, status trace
 	for _, e := range entries {
 		if e.Unit != "" {
 			r.unitCards[e.Unit] = true
-		} else {
-			r.card = true
+			continue
+		}
+		r.card = true
+		if cardHoldsUnits(e.Kind) {
+			r.unitsHeld = true
 		}
 	}
 	for _, e := range escalations {
@@ -604,22 +691,81 @@ func (w stallWatch) readCards(ctx context.Context, r *stallReading, status trace
 		}
 	}
 	// A shared workgroup that the owner has not approved is the owner's to
-	// decide.
+	// decide while the workstream is not ratified yet; after that it explains
+	// nothing.
 	if approved, err := w.repository.GroupApproved(status.Workstream); err != nil {
 		return err
-	} else if !approved {
-		r.card = true
+	} else if !approved && !ratifiedOrLater(r.feature.Value) {
+		r.card, r.groupCard = true, true
 	}
 	return nil
 }
 
-// readWaits reads whether the workstream waits on an upstream that is alive: its
-// same-repo base, or an incoming dependency edge, neither of which has ended or
-// is already integrated.
-func (w stallWatch) readWaits(r *stallReading, stream config.WorkstreamID) error {
-	waiting, err := liveDependencyWait(w.repository, stream)
-	r.waiting = waiting
-	return err
+// readWaits reads whether the workstream waits on an upstream that explains its
+// quiet: a live upstream (its same-repo base, or the source of an incoming
+// dependency edge, that has not ended and is not already integrated) that has
+// itself progressed within the window or is explained.
+func (w stallWatch) readWaits(ctx context.Context, r *stallReading, p *stallPass, stream config.WorkstreamID) error {
+	upstreams, err := liveDependencyUpstreams(w.repository, stream)
+	if err != nil {
+		return err
+	}
+	for _, upstream := range upstreams {
+		explains, err := w.upstreamExplains(ctx, p, upstream)
+		if err != nil {
+			return err
+		}
+		if explains {
+			r.waiting = true
+			return nil
+		}
+	}
+	return nil
+}
+
+// upstreamExplains reports whether an upstream a workstream waits on explains
+// that workstream's quiet: it has progressed within the window, or something
+// explains its own quiet. An upstream that is alive but stalled explains
+// nothing, so the workstreams that wait on it stall too, and so does one that
+// waits, through a cycle, on itself. A delivered upstream waits on its pull
+// request, and one this project's records do not hold is not judged; both
+// explain it.
+func (w stallWatch) upstreamExplains(ctx context.Context, p *stallPass, upstream config.WorkstreamID) (bool, error) {
+	if v, ok := p.upstreams[upstream]; ok {
+		return v != nil && *v, nil
+	}
+	p.upstreams[upstream] = nil
+	explains, err := w.judgeUpstream(ctx, p, upstream)
+	if err != nil {
+		delete(p.upstreams, upstream)
+		return false, err
+	}
+	p.upstreams[upstream] = &explains
+	return explains, nil
+}
+
+func (w stallWatch) judgeUpstream(ctx context.Context, p *stallPass, upstream config.WorkstreamID) (bool, error) {
+	i := slices.IndexFunc(p.statuses, func(s trace.WorkstreamStatus) bool { return s.Workstream == upstream })
+	if i < 0 {
+		return true, nil
+	}
+	feature, err := w.repository.Workflow(upstream, trace.FeatureSubject)
+	if err != nil {
+		return false, err
+	}
+	switch feature.Value {
+	case "", DeliveredState:
+		return true, nil
+	case AbandonedState:
+		return false, nil
+	}
+	r, err := w.read(ctx, p, p.statuses[i], feature)
+	if err != nil {
+		return false, err
+	}
+	q := r.streamQuiet()
+	q.Since = latest(q.Since, w.s.stalls.last(stallKey(w.repository.Project(), upstream, "")))
+	return !scheduler.Assess(q, p.now, p.after, p.limit).Stalled, nil
 }
 
 // liveDependencyWait reports whether stream is held by a dependency wait whose
@@ -627,47 +773,57 @@ func (w stallWatch) readWaits(r *stallReading, stream config.WorkstreamID) error
 // its project's base branch no longer explains the wait: the dependency exit
 // decides it.
 func liveDependencyWait(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	upstreams, err := liveDependencyUpstreams(repository, stream)
+	return len(upstreams) > 0, err
+}
+
+// liveDependencyUpstreams returns the upstreams of the dependency wait stream is
+// held by, while they are alive: its same-repo base while the workstream is
+// parked on it and it is not abandoned, and the sources of its unmerged
+// hard-block edges while none of them has ended or is already integrated.
+func liveDependencyUpstreams(repository *trace.Repository, stream config.WorkstreamID) ([]config.WorkstreamID, error) {
+	var out []config.WorkstreamID
 	if waiting, err := baseWaiting(repository, stream); err != nil {
-		return false, err
+		return nil, err
 	} else if waiting {
 		dependency, err := repository.WorkstreamBase(stream)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if dependency.Base != "" {
 			parent, err := repository.Workflow(dependency.Base, trace.FeatureSubject)
 			if err != nil {
-				return false, err
+				return nil, err
 			}
 			if parent.Value != AbandonedState {
-				return true, nil
+				out = append(out, dependency.Base)
 			}
 		}
 	}
 	waiting, err := edgeWaiting(repository, stream)
 	if err != nil || !waiting {
-		return false, err
+		return out, err
 	}
 	edges, err := lifecycle.IncomingMergeEdges(repository, stream)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	observed, _, _, err := lifecycle.EdgeObservationAt(repository, stream)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	live := false
+	var live []config.WorkstreamID
 	for _, e := range lifecycle.EdgesOfType(edges, trace.EdgeHardBlock) {
 		i := slices.IndexFunc(observed.Edges, func(m lifecycle.EdgeMergeStatus) bool { return m.Upstream == e.From && m.Type == e.Type })
 		if i >= 0 && observed.Edges[i].Merged {
 			continue
 		}
 		if i >= 0 && (observed.Edges[i].Ended != "" || observed.Edges[i].Integrated != "") {
-			return false, nil
+			return out, nil
 		}
-		live = true
+		live = append(live, e.From)
 	}
-	return live, nil
+	return append(out, live...), nil
 }
 
 // readOperations reads the operations of the workstream that have no result,
@@ -688,7 +844,15 @@ func (w stallWatch) readOperations(r *stallReading, stream config.WorkstreamID) 
 		if _, err := thread.DecodeTurn(rec.Operation); err == nil {
 			continue
 		}
-		op := operationFacts(rec, cause(stream, rec.Operation))
+		held := cause(stream, rec.Operation)
+		// A hold explains the quiet only as far as its cause does here: a
+		// dependency wait while its upstream explains it, and the owner's
+		// approval of the workgroup while that explains it.
+		switch {
+		case held == scheduler.HeldByDependency && !r.waiting, held == scheduler.HeldByCard && !r.groupCard:
+			held = scheduler.HeldByOther
+		}
+		op := operationFacts(rec, held)
 		r.operations[""] = append(r.operations[""], op)
 		if unit := operationUnitOf(rec.Operation); unit != "" {
 			r.operations[unit] = append(r.operations[unit], op)
