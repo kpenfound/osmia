@@ -126,6 +126,10 @@ type FinalCheckAttempt struct {
 	Commit    string          `json:"commit"`
 	Selection *CheckSelection `json:"selection,omitempty"`
 	StartedAt time.Time       `json:"started_at"`
+
+	// TraceURL is the Dagger Cloud trace link the attempt printed, when the
+	// start record carries one.
+	TraceURL string `json:"trace_url,omitempty"`
 }
 
 func FinalCheckAttemptDocument(review, attempt int) string {

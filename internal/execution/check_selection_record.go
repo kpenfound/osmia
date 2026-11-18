@@ -22,6 +22,10 @@ type UnitCheckSelection struct {
 	Report     int            `json:"report"`
 	Selection  CheckSelection `json:"selection"`
 	StartedAt  time.Time      `json:"started_at"`
+
+	// TraceURL is the Dagger Cloud trace link the run printed, when the start
+	// record carries one.
+	TraceURL string `json:"trace_url,omitempty"`
 }
 
 func checkSelectionDocument(unit string, run int) string {

@@ -54,13 +54,13 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &start); err != nil {
 				return nil, err
 			}
-			put(checkDocumentID(start.Unit, start.Run), FeedEntry{Kind: "unit_checks", At: d.At, UnitChecks: &FeedUnitChecks{Unit: start.Unit, Run: start.Run, State: "running", Selection: feedSelection(&start.Selection), StartedAt: start.StartedAt}})
+			put(checkDocumentID(start.Unit, start.Run), FeedEntry{Kind: "unit_checks", At: d.At, UnitChecks: &FeedUnitChecks{TraceURL: start.TraceURL, Unit: start.Unit, Run: start.Run, State: "running", Selection: feedSelection(&start.Selection), StartedAt: start.StartedAt}})
 		case finalCheckStartPathPattern.MatchString(d.Path):
 			var start FinalCheckAttempt
 			if err := decode(d, &start); err != nil {
 				return nil, err
 			}
-			put(finalCheckAttemptDocument(start.Review, start.Attempt), FeedEntry{Kind: "final_checks", At: start.StartedAt, FinalChecks: &FeedFinalChecks{Review: start.Review, Attempt: start.Attempt, State: "running", Selection: feedSelection(start.Selection), StartedAt: &start.StartedAt}})
+			put(finalCheckAttemptDocument(start.Review, start.Attempt), FeedEntry{Kind: "final_checks", At: start.StartedAt, FinalChecks: &FeedFinalChecks{TraceURL: start.TraceURL, Review: start.Review, Attempt: start.Attempt, State: "running", Selection: feedSelection(start.Selection), StartedAt: &start.StartedAt}})
 		}
 	}
 	for _, d := range docs {
@@ -75,6 +75,9 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if i, ok := indexes[key]; ok {
 				entry.At = out[i].At
 				entry.UnitChecks.StartedAt = out[i].UnitChecks.StartedAt
+				if entry.UnitChecks.TraceURL == "" {
+					entry.UnitChecks.TraceURL = out[i].UnitChecks.TraceURL
+				}
 				if entry.UnitChecks.Selection == nil {
 					entry.UnitChecks.Selection = out[i].UnitChecks.Selection
 				}
@@ -93,6 +96,9 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 				entry.At = out[i].At
 				entry.FinalChecks.Attempt = run.Attempt
 				entry.FinalChecks.StartedAt = out[i].FinalChecks.StartedAt
+				if entry.FinalChecks.TraceURL == "" {
+					entry.FinalChecks.TraceURL = out[i].FinalChecks.TraceURL
+				}
 				if entry.FinalChecks.Selection == nil {
 					entry.FinalChecks.Selection = out[i].FinalChecks.Selection
 				}

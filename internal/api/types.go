@@ -1356,7 +1356,7 @@ type FeedCheckSelection struct {
 // FeedUnitChecks is one run, observable once its selection is recorded.
 // Only a recorded result can change running to a terminal state.
 type FeedUnitChecks struct {
-	TraceURL   string              `json:"trace_url,omitempty"`
+	TraceURL   string              `json:"trace_url,omitempty" description:"Dagger Cloud trace link of the run; taken from the result record, otherwise from the run's start record."`
 	Unit       string              `json:"unit"`
 	Run        int                 `json:"run"`
 	State      string              `json:"state" enum:"running,passed,failed,incomplete,superseded"`
@@ -1456,7 +1456,7 @@ type ChecksChoiceResponse struct {
 // checks with their trace ids and the reruns; Failed then lists the failed
 // check names. Results of local runs have none of these.
 type FeedFinalChecks struct {
-	TraceURL     string              `json:"trace_url,omitempty"`
+	TraceURL     string              `json:"trace_url,omitempty" description:"Dagger Cloud trace link of the run; taken from the result record, otherwise from the run's start record."`
 	Selection    *FeedCheckSelection `json:"selection,omitempty" description:"Absent for historical runs and failures before selection."`
 	Review       int                 `json:"review"`
 	Attempt      int                 `json:"attempt,omitempty"`
@@ -1485,7 +1485,7 @@ type FeedSessionChecks struct {
 	Failed     []string            `json:"failed,omitempty"`
 	Flaky      []string            `json:"flaky,omitempty" description:"Links of checks that failed and then passed on their rerun."`
 	Error      string              `json:"error,omitempty"`
-	TraceURL   string              `json:"trace_url,omitempty"`
+	TraceURL   string              `json:"trace_url,omitempty" description:"Dagger Cloud trace link recorded on the run's result."`
 	StartedAt  time.Time           `json:"started_at"`
 	FinishedAt time.Time           `json:"finished_at"`
 }
