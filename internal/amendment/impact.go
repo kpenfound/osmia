@@ -2,6 +2,7 @@ package amendment
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -25,12 +26,20 @@ const (
 
 // Member captures concrete workflow evidence used to classify a proposed delta.
 // Merged means the workstream's pull request merged, rather than a unit landing.
+// Retired means the owner archived the member: its evidence comes from the
+// archive record, its slice is frozen and it receives no effect.
 type Member struct {
 	Workstream  config.WorkstreamID `json:"workstream"`
 	State       string              `json:"state"`
 	Merged      bool                `json:"merged"`
+	Retired     bool                `json:"retired,omitempty"`
 	PullRequest int                 `json:"pull_request,omitempty"`
 	Units       map[string]string   `json:"units"`
+}
+
+// FrozenSliceProblem names the archived member whose slice a proposal changes.
+func FrozenSliceProblem(stream config.WorkstreamID) string {
+	return fmt.Sprintf("member %s is archived and its slice is frozen; leave its slice unchanged and change only the live members' slices", stream)
 }
 
 type UnitImpact struct {
@@ -108,6 +117,7 @@ func changedContracts(before, after trace.ProjectSpec) []string {
 // ClassifyImpact includes unchanged units and streams explicitly, preserving
 // their evidence. Contract changes re-evaluate the transitive edge closure;
 // only each dependent's contract criteria are reworked in an unchanged slice.
+// A retired member's slice must stay unchanged; its row and units are left.
 func ClassifyImpact(id string, before, after trace.ProjectSpec, members []Member) (Impact, error) {
 	out := Impact{Contracts: changedContracts(before, after)}
 	ids := make([]config.WorkstreamID, 0, len(members))
@@ -119,7 +129,10 @@ func ClassifyImpact(id string, before, after trace.ProjectSpec, members []Member
 		if !aok || !bok {
 			return out, fmt.Errorf("amendment must cover member %s", m.Workstream)
 		}
-		affected[m.Workstream] = !reflect.DeepEqual(a, b)
+		if m.Retired && !reflect.DeepEqual(a, b) {
+			return out, errors.New(FrozenSliceProblem(m.Workstream))
+		}
+		affected[m.Workstream] = !m.Retired && !reflect.DeepEqual(a, b)
 	}
 	if len(after.Slices) != len(members) {
 		return out, fmt.Errorf("amendment must cover exactly the workgroup's members")
@@ -155,6 +168,16 @@ func ClassifyImpact(id string, before, after trace.ProjectSpec, members []Member
 	for _, m := range members {
 		a, _ := trace.SliceFor(before, m.Workstream)
 		b, _ := trace.SliceFor(after, m.Workstream)
+		if m.Retired {
+			row := StreamImpact{Workstream: m.Workstream, Action: Leave, Units: []UnitImpact{}}
+			if p, err := plan.Parse([]byte(a.Plan)); err == nil {
+				for _, u := range p.Units {
+					row.Units = append(row.Units, UnitImpact{Unit: u.ID, Action: Leave})
+				}
+			}
+			out.Streams = append(out.Streams, row)
+			continue
+		}
 		old, err := plan.Parse([]byte(a.Plan))
 		if err != nil {
 			return out, err
@@ -220,7 +243,8 @@ func RevisionID(amendment, unit string) string {
 }
 
 // CancelImpact cancels the requested members and all transitive dependents.
-// Merged work remains intact, including merged dependents in that closure.
+// Merged work remains intact, including merged dependents in that closure. A
+// retired member is already terminal and is left.
 func CancelImpact(target []config.WorkstreamID, graph []trace.Edge, members []Member) Impact {
 	selected := map[config.WorkstreamID]bool{}
 	for _, id := range target {
@@ -237,7 +261,7 @@ func CancelImpact(target []config.WorkstreamID, graph []trace.Edge, members []Me
 	out := Impact{Contracts: []string{}}
 	for _, m := range members {
 		row := StreamImpact{Workstream: m.Workstream, Action: Leave, Units: []UnitImpact{}}
-		if selected[m.Workstream] && !m.Merged && m.State != "abandoned" {
+		if selected[m.Workstream] && !m.Retired && !m.Merged && m.State != "abandoned" {
 			row.Action = Cancel
 			row.Pause = true
 			row.Cascade = !slices.Contains(target, m.Workstream)

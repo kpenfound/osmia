@@ -1849,9 +1849,15 @@ absence or an arbitrary API failure does not prove retirement or resolution.
 
 Approved amend/cancel journals keep their exact original approval and document
 pins. Survivor effects reconcile once through the original group authority.
-If a remaining effect requires unavailable retired history, the journal and
-pending effect stay recorded with an explicit recoverable diagnostic; they
-are never discarded, declared applied or retargeted to newer revisions.
+A change is requested, drafted, decided and applied while some members are
+archived: each archived member is read from its archive record, its slice is
+frozen and it receives no effect. A delta that changes an archived member's
+slice is refused with a reason naming that member. A member archived after
+approval is recorded on the change as receiving no effect, and the change
+applies to the survivors without retargeting to newer revisions. An effect
+that still requires unavailable retired history, such as a ruling for a
+retired requester, keeps an explicit recoverable diagnostic, and no survivor
+waits on it.
 Shared inbox questions retain their original ordered origins and ruling links;
 sufficient recorded evidence resumes eligible survivors once, while genuinely
 unavailable ruling or relay effects remain pending.

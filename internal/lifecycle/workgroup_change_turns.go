@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -207,12 +206,6 @@ func (d DeltaRunner) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	ctx, release := d.S.Stoppable(ctx, wt.Project(), c.Host)
 	defer release()
 	if err := d.S.RunChangeTurn(ctx, wt, c, in.Role, in.Agent, in.Tool); err != nil {
-		if retired && in.Tool == DeltaDraftTool && errors.Is(err, trace.ErrMemberRetired) {
-			// The shared response is captured, but its draft needs unavailable
-			// member history. The live controller owns that hold; this retired
-			// dispatch must not keep its member's archive cleanup pending.
-			return coreadapter.OperationResult{Outcome: "completed", Evidence: "shared delta response retained; " + err.Error()}, nil
-		}
 		return coreadapter.OperationResult{}, err
 	}
 	changes, err := ReadChanges(wt, c.Host)
@@ -514,10 +507,6 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 			break
 		}
 		before, members, err := s.SnapshotChange(g, wt)
-		if errors.Is(err, trace.ErrMemberRetired) {
-			s.Log().Warn("project amendment remains held", "workgroup", g.ID, "request", r.ID, "error", err.Error())
-			break
-		}
 		if err != nil {
 			return err
 		}
@@ -646,7 +635,7 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 		if err != nil {
 			return err
 		}
-		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read charters.md and check shared behaviour and contracts against every member charter. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
+		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read charters.md and check shared behaviour and contracts against every member charter. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. A member marked retired in change.json is archived: its slice is frozen and stays exactly as approved. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
 		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: DeltaSystemPrompt(role), Prompt: prompt + acceptanceDraftInstructions})
 		if err != nil {
 			return err
@@ -682,18 +671,6 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 		}
 		if NameRecorded(latest, agent, tool) {
 			return nil
-		}
-		if tool == DeltaDraftTool {
-			for _, member := range latest.Members {
-				if a, retired := s.ArchivedWorkstream(string(member.Workstream)); retired {
-					if a.Workgroup != c.Workgroup {
-						return errors.New("retired delta member identity differs from its workgroup")
-					}
-					// A captured turn without a draft cannot validate unavailable
-					// member history. Keep its response and shared decision pending.
-					return fmt.Errorf("%w: workgroup %s delta draft remains pending; member %s has unavailable validation history", trace.ErrMemberRetired, c.Workgroup, member.Workstream)
-				}
-			}
 		}
 		t, err := wt.Thread(c.Host, agent)
 		if err != nil {
@@ -760,10 +737,39 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 			if err := DecodeToolInput(raw, &after); err != nil {
 				return nil, err
 			}
+			members := slices.Clone(c.Members)
+			for n := range members {
+				if members[n].Retired {
+					continue
+				}
+				if a, retired := s.ArchivedWorkstream(string(members[n].Workstream)); retired {
+					if a.Workgroup != c.Workgroup {
+						return nil, errors.New("retired delta member identity differs from its workgroup")
+					}
+					// A member archived since the request is frozen too.
+					members[n].Retired = true
+				}
+			}
+			// A retired member's slice is frozen: an omitted slice carries its
+			// ratified text forward, and a changed one is refused.
+			carried := false
+			for _, m := range members {
+				if _, found := trace.SliceFor(after, m.Workstream); !found && m.Retired {
+					if sl, ok := trace.SliceFor(c.Before, m.Workstream); ok {
+						after.Slices, carried = append(after.Slices, sl), true
+					}
+				}
+			}
+			if carried {
+				order := func(sl trace.Slice) int {
+					return slices.IndexFunc(c.Before.Slices, func(b trace.Slice) bool { return b.Workstream == sl.Workstream })
+				}
+				slices.SortStableFunc(after.Slices, func(x, y trace.Slice) int { return order(x) - order(y) })
+			}
 			if problems := SharedCharterProblems(ctx, wt, c.Origin, after); len(problems) > 0 {
 				return priorityRefusal(strings.Join(problems, "; "))
 			}
-			impact, err := amendment.ClassifyImpact(c.ID, c.Before, after, c.Members)
+			impact, err := amendment.ClassifyImpact(c.ID, c.Before, after, members)
 			if err != nil {
 				return priorityRefusal(err.Error())
 			}
@@ -771,17 +777,10 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 				return priorityRefusal("the proposal changes no approved text")
 			}
 			for _, sl := range after.Slices {
-				if a, retired := s.ArchivedWorkstream(string(sl.Workstream)); retired {
-					if a.Workgroup != c.Workgroup {
-						return nil, errors.New("retired delta slice identity differs from its workgroup")
-					}
-					// The original ratified slice already passed validation. Its
-					// exact pinned text grants no access or effects on retired history.
-					before, found := trace.SliceFor(c.Before, sl.Workstream)
-					if found && reflect.DeepEqual(before, sl) {
-						continue
-					}
-					return nil, fmt.Errorf("%w: workgroup %s delta requires unavailable validation history for member %s", trace.ErrMemberRetired, c.Workgroup, sl.Workstream)
+				if slices.ContainsFunc(members, func(m amendment.Member) bool { return m.Workstream == sl.Workstream && m.Retired }) {
+					// ClassifyImpact refused any change; the ratified slice
+					// already passed validation and needs no retired history.
+					continue
 				}
 				_, _, repo, api := s.ConversationTrace(string(sl.Workstream))
 				if api != nil {

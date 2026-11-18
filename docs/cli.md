@@ -230,7 +230,9 @@ includes dependent cancellation or re-planning, and at cancel time asks whether
 open PRs are closed or left as drafts. Merged work is never reverted; undoing it
 is a new request. Stops occur at whole-unit boundaries, with unlanded work kept
 on unit branches. Pending approved operations retain their exact pins through
-archive and restart; unavailable retired-history effects stay explicitly held.
+archive and restart. An archived member never holds up a change for the
+others: its slice is frozen, a delta that changes it is refused with a reason
+naming it, and it receives no effect while the survivors' change applies.
 These conversation controls do not introduce a separate `cancel` command.
 
 ## Migration

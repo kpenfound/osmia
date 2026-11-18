@@ -198,13 +198,14 @@ The owner can discuss a feature in a design session first. Its brief starts with
 
 The project set stays fixed from hand-in or design start until ratification. No owner or agent control can add or drop a member in that interval; to choose a different set, abandon the work and hand it in again. After ratification, amend and cancel keep their existing rules. `--base` must name a workstream in a selected project and applies only to that project's member. `--skip-debate` applies to all members. Pause, capacity caps and `git_operations` stay per project: one project's held member does not hold the others beyond their graph edges.
 
-The original conversation continues as the single shared chief thread. For design intake it stays at the session's project even if that project is absent from the brief's list. The original address and every member's conversation and feed reach that thread. After a resolved member is owner-archived, surviving members retain the same authority and active workgroup spec across cleanup and restart. Reading the shared thread needs no live member: once every member is archived the original address still reads it, while sending to it needs a live member to supply context. Archive records preserve verified resolution and group identity; missing history alone proves neither resolution nor merge. Consolidated inbox entries retain their original question and ruling links. An effect needing unavailable retired history stays pending with a recoverable diagnostic.
+The original conversation continues as the single shared chief thread. For design intake it stays at the session's project even if that project is absent from the brief's list. The original address and every member's conversation and feed reach that thread. After a resolved member is owner-archived, surviving members retain the same authority and active workgroup spec across cleanup and restart. Reading the shared thread needs no live member: once every member is archived the original address still reads it, while sending to it needs a live member to supply context. Archive records preserve verified resolution and group identity; missing history alone proves neither resolution nor merge. Consolidated inbox entries retain their original question and ruling links. An effect needing unavailable retired history stays pending with a recoverable diagnostic, and no surviving member waits on it.
+
+An archived member never holds up the survivors' workgroup changes (§5.4). An amend or cancel is requested, drafted, debated, decided and applied while some members are archived. The change reads each archived member from its archive record: its terminal state, merge evidence and pull request, with its slice taken from the approved workgroup spec. An archived member's slice is frozen. A delta that changes it is refused with a reason naming the member, and a delta that omits it carries the approved slice forward. An archived member gets no turns, rework units or cancellation, and only live members need effects. A member archived after the owner approved a change is recorded on that change as receiving no effect. Its slice stays as ratified, and the change applies to the survivors.
 
 Retirement cancels an unclaimed member delta dispatch while preserving the
 shared decision. A running shared turn retains its claim and captured response.
-After capture, the retired dispatch settles even when the surviving member's
-shared decision remains held for unavailable validation history, allowing the
-retired member's archive cleanup to finish.
+After capture, the retired dispatch settles through the ordinary outcome of the
+shared turn, allowing the retired member's archive cleanup to finish.
 
 For several selected projects, one ratification approves the workgroup spec, graph and every slice. A durable group decision pins every revision; seal preparation resumes after interruption without another approval. Until all pinned seals complete, the whole group stays pending and no member builds or releases a contract edge. Each member retains its own final-review acceptance, delivery approval and owner signing.
 
@@ -314,7 +315,9 @@ members stop at a safe unit boundary before rework. An open, unmerged pull
 request retains its feature branch and is updated on the same pull request
 only after fresh review and that member's own delivery approval. Changed
 sections of a merged member become a new follow-up member in the same
-workgroup; merged branches and historical decisions remain intact.
+workgroup; merged branches and historical decisions remain intact. An archived
+member's slice is frozen and the delta leaves it unchanged; the impact summary
+shows that member unchanged.
 
 The owner can also cancel a workgroup or a member in that conversation. One
 impact summary includes cancellation of its transitive dependents and asks
@@ -750,7 +753,7 @@ The Osmia server, role-scoped:
 | `read_remote_file` | chief of staff, architect | Retrieve a GitHub repository file at a resolved commit and record its provenance and content. |
 | `record_discovery` | chief of staff, mason, unit reviewer, drift mason, drift reviewer | Record necessary discovered work; the chief assigns, declines or retains suggestions with reasons, for any member of its workgroup. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
-| `request_change`, `decide_change` | chief of staff in an owner-message turn | Record the owner's workgroup amend/cancel request or impact decision; no publication or merge authority. |
+| `request_change`, `decide_change` | chief of staff in an owner-message turn | Record the owner's workgroup amend/cancel request or impact decision; a pending change with a recorded hold reports state `held` with its reason; no publication or merge authority. |
 | `decide_amendment` | chief of staff | Decide a plan-only engineering revision or relay an explicit owner decision on intent. |
 | `resolve_contested` | chief of staff | Rule review or revise on a contested unit on your behalf, escalate it to you, or record the ruling you gave in a message. |
 | `flake_fix` | chief of staff | Act on one recorded flake occurrence a flake notice listed: `open` it as a flake-fix workstream, with optional notes of the chief's own, or `decline` it with a required reason. It hands in no content of the chief's own: the service writes the hand-in from the recorded evidence. It refuses when the project has `flake_fixes` off, for an unknown occurrence and for an occurrence recorded by a flake-fix workstream's own run, and returns an occurrence's recorded decision without acting again (section 6.9). |
