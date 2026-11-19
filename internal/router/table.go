@@ -168,3 +168,5 @@ func describe(a jev.TransitionAnswers, v Verdict) string {
 	return fmt.Sprintf("default fits %.2f, picks %s (%.2f) and %s (%.2f), stuck %.2f, would change intent %.2f; table %s rule %s",
 		a.Fit, a.PickA.Choice, a.PickA.Confidence, a.PickB.Choice, a.PickB.Confidence, a.Stuck, a.Intent, TableVersion, v.Rule)
 }
+
+// router note 5a734c5e
