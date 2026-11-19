@@ -523,7 +523,7 @@ func TestFinalChecksKeepACheckFailedThatFailsItsFreshRerun(t *testing.T) {
 	if run.Status != "failed" || len(run.Failed) != 1 || run.Failed[0] != "test:b" || run.FailedChecks[0].TraceID != "trace-b2" || len(run.Reruns) != 1 || len(run.Reruns[0].Flakes) != 1 || run.Reruns[0].Flakes[0] != "test:a" || len(run.Flaky) != 1 {
 		t.Fatalf("run %+v", run)
 	}
-	if !strings.Contains(FinalCheckEvidence(run), "test:b (dagger trace trace-b2)") {
+	if !strings.Contains(FinalCheckEvidence(run), "- test:b: `dagger trace trace-b2`") {
 		t.Fatalf("evidence:\n%s", FinalCheckEvidence(run))
 	}
 }

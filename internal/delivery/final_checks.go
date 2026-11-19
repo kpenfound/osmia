@@ -417,8 +417,8 @@ func (w *finalWatch) record(ctx context.Context, result checkrun.CloudResult, re
 	default:
 		run.ExitCode = 1
 	}
-	for _, f := range result.Failed {
-		run.FailedChecks = append(run.FailedChecks, api.CheckFailure{Name: f.Name, TraceID: f.TraceID, StatusID: f.Status.ID})
+	run.FailedChecks = checkrun.CloudFailures(result)
+	for _, f := range run.FailedChecks {
 		run.Failed = append(run.Failed, f.Name)
 	}
 	if w.rerun != nil {
@@ -571,9 +571,7 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 	if result.Counts != nil {
 		record.Counts = &api.CheckCounts{Total: result.Counts.Total, Passed: result.Counts.Passed, Failed: result.Counts.Failed, Cancelled: result.Counts.Cancelled}
 	}
-	for _, f := range result.Failed {
-		record.Failed = append(record.Failed, api.CheckFailure{Name: f.Name, TraceID: f.TraceID, StatusID: f.Status.ID})
-	}
+	record.Failed = checkrun.CloudFailures(result)
 	if err := w.writeRerun(ctx, record); err != nil {
 		return err
 	}
@@ -710,6 +708,21 @@ func FinalCheckEvidence(run FinalCheckRun) string {
 	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }
 
+// FailedChecksNotice is what the chief of staff hears of a final review whose
+// recorded check result is a failed Dagger Cloud run: each failed check with
+// the `dagger trace` command that reads it, or the statement that none was
+// found. It is empty for any other record.
+func FailedChecksNotice(run FinalCheckRun) string {
+	if run.Source != api.CheckSourcePullRequest || run.Status != "failed" {
+		return ""
+	}
+	out := fmt.Sprintf("The Dagger Cloud checks of pull request #%d, push %d, commit %s failed, recorded in %s.", run.PullRequest, run.Push, run.PushedCommit, FinalChecksPath(run.Review))
+	if failed := checkrun.DescribeFailedChecks(run.FailedChecks, run.Counts, run.StatusURL, true); failed != "" {
+		out += "\n" + failed
+	}
+	return out
+}
+
 func pullRequestEvidence(run FinalCheckRun) string {
 	if run.Status == ChecksContinued {
 		return fmt.Sprintf("No check results exist for this commit. Dagger Cloud's checks on pull request #%d, push %d, commit %s produced no result the service could read, and the owner chose to continue the final review without check results for this push, recorded in %s. You do not run checks, and nothing here says the checks passed or failed.", run.PullRequest, run.Push, run.PushedCommit, FinalChecksPath(run.Review))
@@ -722,16 +735,8 @@ func pullRequestEvidence(run FinalCheckRun) string {
 	if run.StatusURL != "" {
 		out += "\nStatus: " + run.StatusURL
 	}
-	if len(run.FailedChecks) > 0 {
-		var failed []string
-		for _, f := range run.FailedChecks {
-			if f.TraceID != "" {
-				failed = append(failed, fmt.Sprintf("%s (dagger trace %s)", f.Name, f.TraceID))
-			} else {
-				failed = append(failed, f.Name)
-			}
-		}
-		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(failed, ", "), 2048)
+	if failed := checkrun.DescribeFailedChecks(run.FailedChecks, run.Counts, run.StatusURL, run.Status == "failed"); failed != "" {
+		out += "\n" + failed
 	}
 	for _, rerun := range run.Reruns {
 		out += fmt.Sprintf("\nThe failed checks were rerun once, requested at %s.", rerun.RequestedAt.UTC().Format(time.RFC3339))
