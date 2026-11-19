@@ -15,6 +15,7 @@ import (
 // The states of an occurrence's route journal. The journal is the workflow
 // subject route-<digest> and the document routes/<digest>.json, which one
 // commit writes together: the document says what was decided, the subject's
+// THIS IS JUST A CHANGE TO A GO FILE
 // value says how far it was carried out, and the subject's transitions carry
 // the notices to the chief of staff.
 const (
