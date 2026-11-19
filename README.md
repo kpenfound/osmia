@@ -10,6 +10,8 @@ its configuration in `~/.config/osmia` and factory state in
 `~/.local/share/osmia` by default, outside the repositories it works on. Agents receive scoped files and tools; the service
 owns version control and delivery credentials.
 
+JUST A README CHANGE
+
 ## Start here
 
 The [getting started guide](docs/getting-started.md) covers installation,
