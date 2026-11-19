@@ -5669,7 +5669,7 @@
             "type": "string"
           },
           "outcome": {
-            "description": "landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so the workstream is rebased and checked again. pending: the push outcome is unknown and is settled against the fetched base branch.",
+            "description": "landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so nothing landed; the workstream is rebased, checked and reviewed again and the service lands the new commit on its own under the same decision, with no second approval. pending: the push outcome is unknown and is settled against the fetched base branch.",
             "enum": [
               "landed",
               "held",

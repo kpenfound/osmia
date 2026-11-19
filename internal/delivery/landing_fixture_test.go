@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/router"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -62,6 +63,8 @@ type landFixture struct {
 	hooks   map[string]func() error
 	rebases int
 	moved   func() string
+	// findings are the findings the next recorded final review reports.
+	findings []FinalFinding
 }
 
 type landOptions struct {
@@ -136,7 +139,18 @@ func (f *landFixture) controller() *Controller {
 			}
 			return nil
 		},
-		About: func(*trace.Repository) *config.Config { return f.cfg },
+		About:      func(*trace.Repository) *config.Config { return f.cfg },
+		Effective:  func() (runtime.State, []runtime.Diagnostic) { return runtime.State{}, nil },
+		ChangeHeld: func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
+		// The fixture holds no sealed plan, so the final review is current when it
+		// is the latest one recorded.
+		FinalGate: func(_ context.Context, repo *trace.Repository, stream config.WorkstreamID) (FinalReport, string, error) {
+			report, found, err := LatestFinalReport(repo, stream)
+			if err != nil || !found {
+				return report, "no final review is recorded", err
+			}
+			return report, "", nil
+		},
 		ConversationTrace: func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *api.APIError) {
 			return f.repo.Project(), stream, f.repo, nil
 		},
@@ -252,7 +266,7 @@ func (f *landFixture) record(k int, reviewed, base, signed, checks string) {
 	f.t.Helper()
 	ctx := context.Background()
 	report := FinalReport{Review: k, Operation: fmt.Sprintf("review-%d", k), Outcome: FinalReviewed, Branch: f.branch, Before: reviewed, Commit: reviewed, Upstream: &seal.Base{Remote: "upstream", Branch: "main", Commit: base},
-		Seal: 1, SpecHash: "spec-hash", Spec: 1, Plan: 1, Summary: "Add the units", Criteria: []FinalCriterion{}}
+		Seal: 1, SpecHash: "spec-hash", Spec: 1, Plan: 1, Summary: "Add the units", Criteria: []FinalCriterion{}, Findings: f.findings}
 	content, err := json.Marshal(report)
 	fixturekit.Must(f.t, err)
 	revision, err := nextRevision(f.repo, stream, FinalReportDocument)
@@ -282,6 +296,12 @@ func (f *landFixture) record(k int, reviewed, base, signed, checks string) {
 // units replayed on it, signed and pushed as push k with passed checks.
 func (f *landFixture) rebased(k int, onto string) (reviewed, signed string) {
 	f.t.Helper()
+	return f.rebasedWith(k, onto, "passed")
+}
+
+// rebasedWith is rebased with the check result recorded for the new push.
+func (f *landFixture) rebasedWith(k int, onto, checks string) (reviewed, signed string) {
+	f.t.Helper()
 	clone := f.cfg.Project.Clone
 	f.git("-C", clone, "fetch", "--quiet", "upstream", "main")
 	f.git("-C", clone, "checkout", "--quiet", "--detach", onto)
@@ -291,7 +311,7 @@ func (f *landFixture) rebased(k int, onto string) (reviewed, signed string) {
 	f.git("-C", clone, "update-ref", "refs/heads/"+f.branch, signed)
 	f.git("-C", clone, "checkout", "--quiet", "main")
 	f.git("-C", clone, "push", "--quiet", "--force", "upstream", signed+":refs/heads/"+f.branch)
-	f.record(k, reviewed, onto, signed, "passed")
+	f.record(k, reviewed, onto, signed, checks)
 	f.pulls.Mu.Lock()
 	f.pulls.Prs[0].HeadCommit = signed
 	f.pulls.Mu.Unlock()
@@ -317,6 +337,13 @@ func (f *landFixture) land(decider LandDecider) LandingResult {
 	result, err := c.landPush(context.Background(), f.repo, stream, LandRequest{Decider: decider, AcceptBlocking: true}, f.target(c))
 	fixturekit.Must(f.t, err)
 	return result
+}
+
+// retry runs the service's own pass that lands again the workstreams whose base
+// moved.
+func (f *landFixture) retry() {
+	f.t.Helper()
+	fixturekit.Must(f.t, f.lander().RetryPass(context.Background()))
 }
 
 func (f *landFixture) feature() string {
@@ -416,4 +443,12 @@ func (f *landFixture) finishBusy() {
 		}
 		fixturekit.Must(f.t, a.Record(ctx, action))
 	}
+}
+
+// landingAttempts is how many landing operations the workstream has.
+func (f *landFixture) landingAttempts() int {
+	f.t.Helper()
+	ops, err := f.repo.Operations(stream)
+	fixturekit.Must(f.t, err)
+	return len(landingOperationsOf(ops))
 }

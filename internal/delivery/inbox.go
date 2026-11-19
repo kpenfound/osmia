@@ -114,6 +114,11 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	if p.Brief != nil && p.Brief.State == BriefWaiting {
 		return InboxEntry{}, false, nil
 	}
+	// A decision to land that waits to be retried on the rebased commit is the
+	// delivery's decision: nobody is asked until the retry lands or drops it.
+	if _, retrying, err := PendingLandingRoute(repository, stream); err != nil || retrying {
+		return InboxEntry{}, false, err
+	}
 	blocking := ReportBlocking(p.Report)
 	review, prior, _, err := DeliveryDocuments(repository, stream)
 	if err != nil {

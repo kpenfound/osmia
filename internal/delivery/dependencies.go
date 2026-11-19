@@ -65,6 +65,10 @@ type Dependencies struct {
 	ChangeRepositoryHeld    func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
 	UpstreamDeliveryPending func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)
 	UnresolvedWork          func(*trace.Repository, config.WorkstreamID) (bool, error)
+	// FinalGate, when set, answers whether the workstream's final review
+	// authorises delivery now, in place of the final reviewer's own read of the
+	// records it was governed by.
+	FinalGate func(context.Context, *trace.Repository, config.WorkstreamID) (FinalReport, string, error)
 	// RequestRebase asks for the existing rebase of the workstream's feature
 	// branch onto its upstream's base branch now, as the owner's request does.
 	// It is nil when none can be asked for.
@@ -91,6 +95,15 @@ type Dependencies struct {
 type Controller struct{ Dependencies }
 
 func New(d Dependencies) *Controller { return &Controller{d} }
+
+// finalGate returns the workstream's latest final report and why it does not
+// authorise delivery now, or "".
+func (s *Controller) finalGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (FinalReport, string, error) {
+	if s.FinalGate != nil {
+		return s.FinalGate(ctx, repository, stream)
+	}
+	return (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
+}
 
 // postPushWait is how long after a push its statuses are not read.
 func (s *Controller) postPushWait() time.Duration {

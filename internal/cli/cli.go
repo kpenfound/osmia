@@ -2183,7 +2183,7 @@ func showLanding(w io.Writer, id config.WorkstreamID, landed wire.DeliveryLandRe
 	case wire.LandOutcomeFellBack:
 		fmt.Fprintf(w, "The upstream refused the push of %s, so it did not land. The draft pull request was marked ready for review and workstream %s is delivered: %s\n", landed.Commit, id, landed.Reason)
 	case wire.LandOutcomeBaseMoved:
-		fmt.Fprintf(w, "The base branch moved, so %s did not land. Workstream %s is rebased onto it and checked again: %s\n", landed.Commit, id, landed.Reason)
+		fmt.Fprintf(w, "The base branch moved, so %s did not land. Workstream %s is rebased onto it and checked and reviewed again, and lands on the new commit by itself under your approval: %s\n", landed.Commit, id, landed.Reason)
 	default:
 		fmt.Fprintf(w, "The outcome of landing %s for workstream %s is not known yet; the service settles it against the base branch: %s\n", landed.Commit, id, landed.Reason)
 	}

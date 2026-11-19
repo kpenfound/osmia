@@ -53,6 +53,8 @@ type routeOptions struct {
 	delivery string
 	// boundary is the service's fault point.
 	boundary func(context.Context, string) error
+	// later are the findings the final reviews after the first report.
+	later []any
 }
 
 // downstreamStream is the workstream that waits for the landing workstream.
@@ -132,6 +134,17 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
 	})
+	// The final reviews that follow a rebase read the rebased branch.
+	for k := 2; k <= 4; k++ {
+		later := o.later
+		if later == nil {
+			later = []any{}
+		}
+		f.finalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+			_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume again.", "findings": later})
+			return err
+		})
+	}
 	assembleBoth(t, f, repository, a, w.stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})

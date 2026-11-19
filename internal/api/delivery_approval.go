@@ -224,7 +224,8 @@ const (
 	// request was marked ready and the workstream delivered.
 	LandOutcomeFellBack = "fell-back"
 	// LandOutcomeBaseMoved: the upstream base branch moved, so nothing landed.
-	// The workstream is rebased and checked again.
+	// The workstream is rebased, checked and reviewed again, and the service
+	// lands the new commit under the same decision.
 	LandOutcomeBaseMoved = "base-moved"
 	// LandOutcomePending: the outcome of the push is not known yet. The service
 	// settles it against the fetched base branch.
@@ -237,7 +238,7 @@ const (
 // commit the landing moves the base branch to.
 type DeliveryLandResponse struct {
 	Approval DeliveryApproval `json:"approval"`
-	Outcome  string           `json:"outcome" enum:"landed,held,fell-back,base-moved,pending" description:"landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so the workstream is rebased and checked again. pending: the push outcome is unknown and is settled against the fetched base branch."`
+	Outcome  string           `json:"outcome" enum:"landed,held,fell-back,base-moved,pending" description:"landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so nothing landed; the workstream is rebased, checked and reviewed again and the service lands the new commit on its own under the same decision, with no second approval. pending: the push outcome is unknown and is settled against the fetched base branch."`
 	Reason   string           `json:"reason,omitempty" description:"Why the workstream did not land, when it did not."`
 	Commit   string           `json:"commit,omitempty" description:"The signed commit the landing moves the base branch to."`
 }

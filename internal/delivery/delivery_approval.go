@@ -323,7 +323,7 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	} else if wait != "" {
 		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: wait}
 	}
-	report, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
+	report, reason, err := s.finalGate(ctx, repository, stream)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read final review"}
 	}
@@ -350,7 +350,16 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot draft the title and description from trace records"}
 	}
-	if approval != nil && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || PublishedTitle(*approval, stream) != title) {
+	// An owner's approval to land stands while the landing it started waits to be
+	// retried on the rebased commit: it is not stale, it is the decision the retry
+	// carries out.
+	retrying := false
+	if approval != nil && approval.Route == DeliveryRouteLand {
+		if _, retrying, err = PendingLandingRoute(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read landing records"}
+		}
+	}
+	if approval != nil && !retrying && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || PublishedTitle(*approval, stream) != title) {
 		approval = nil
 	}
 	style := s.About(repository).Project.Landing
@@ -430,7 +439,7 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	} else if landing {
 		return DeliveryApproval{}, &APIError{Code: Conflict, Message: "a landing of the workstream is under way; it delivers the workstream, or says why it did not, before the pull request is marked ready"}
 	}
-	if _, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream); err != nil {
+	if _, reason, err := s.finalGate(ctx, repository, stream); err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot validate final review"}
 	} else if reason != "" {
 		return DeliveryApproval{}, &APIError{Code: Conflict, Message: reason}
@@ -547,7 +556,7 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 		return DeliveryApproval{}, "necessary discovered work or a plan revision remains unresolved", nil
 	}
 
-	report, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
+	report, reason, err := s.finalGate(ctx, repository, stream)
 	if err != nil || reason != "" {
 		return DeliveryApproval{}, reason, err
 	}

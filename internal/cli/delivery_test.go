@@ -121,7 +121,7 @@ func TestLandReportsWhatLandingDid(t *testing.T) {
 	for outcome, want := range map[string]string{
 		wire.LandOutcomeHeld:      "is held for now and nothing was pushed",
 		wire.LandOutcomeFellBack:  "was marked ready for review",
-		wire.LandOutcomeBaseMoved: "rebased onto it and checked again",
+		wire.LandOutcomeBaseMoved: "lands on the new commit by itself",
 		wire.LandOutcomePending:   "is not known yet",
 	} {
 		var out strings.Builder

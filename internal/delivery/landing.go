@@ -338,7 +338,7 @@ func (s *Controller) landingTarget(ctx context.Context, repository *trace.Reposi
 		}
 		return target, fmt.Sprintf("%s has not merged yet", reference), err
 	}
-	if _, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream); err != nil || reason != "" {
+	if _, reason, err := s.finalGate(ctx, repository, stream); err != nil || reason != "" {
 		return target, reason, err
 	}
 	if blocking := ReportBlocking(report); len(blocking) > 0 && !acceptBlocking {
@@ -886,9 +886,9 @@ func (r *landingRun) header(outcome string) trace.Header {
 }
 
 // finish records the landing's outcome on its subject, with a notice for the
-// chief of staff, and returns it as the operation's result. An outcome already
-// recorded stands.
-func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string) (coreadapter.OperationResult, error) {
+// chief of staff and the documents that belong with it, and returns it as the
+// operation's result. An outcome already recorded stands.
+func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string, docs ...trace.Document) (coreadapter.OperationResult, error) {
 	subject, err := r.Repository.Workflow(r.stream, LandingSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -897,13 +897,19 @@ func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string)
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: LandingSubject, From: subject.Value, To: fmt.Sprintf("%s-%d", outcome, r.in.Landing), Reason: reason},
 		Events:     []trace.Event{trace.Notice(h.ID, "chief", notice)}}
-	if _, err := r.Repository.Transact(ctx, tx); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
+	var recordErr error
+	if len(docs) > 0 {
+		_, recordErr = r.Repository.RecordDocumentsWith(ctx, docs, tx)
+	} else {
+		_, recordErr = r.Repository.Transact(ctx, tx)
+	}
+	if recordErr != nil {
+		if errors.Is(recordErr, trace.ErrConflict) {
 			if result, outErr := r.Outcome(r.stream, r.in.Landing); outErr == nil && result != nil {
 				return *result, nil
 			}
 		}
-		return coreadapter.OperationResult{}, err
+		return coreadapter.OperationResult{}, recordErr
 	}
 	return coreadapter.OperationResult{Outcome: outcome, Evidence: reason}, nil
 }
@@ -917,7 +923,9 @@ func (r *landingRun) fail(ctx context.Context, why string) (coreadapter.Operatio
 
 // moved ends the attempt because the base branch moved: the existing rebase of
 // the workstream onto it is asked for first, so a restart asks again, and then
-// the outcome is recorded. No pull request is marked ready.
+// the outcome is recorded together with the decision to land, which the
+// workstream keeps until it is landed again on the rebased commit or the
+// decision is dropped. No pull request is marked ready.
 func (r *landingRun) moved(ctx context.Context, why string) (coreadapter.OperationResult, error) {
 	if r.S.RequestRebase != nil {
 		if err := r.S.RequestRebase(ctx, r.Repository, r.stream); err != nil {
@@ -925,7 +933,12 @@ func (r *landingRun) moved(ctx context.Context, why string) (coreadapter.Operati
 		}
 	}
 	reason := fmt.Sprintf("the base branch moved, so %s did not land: %s", r.in.Commit, why)
-	return r.finish(ctx, LandOutcomeBaseMoved, reason, fmt.Sprintf("%s. The workstream was rebased onto the new base branch and checked again before it lands.", reason))
+	route := LandingRoute{Landing: r.in.Landing, Push: r.in.Push, Review: r.in.Review, Commit: r.in.Commit, Decider: r.in.Decider, Status: LandingRoutePending, At: r.S.Now()}
+	doc, err := r.routeDocument(r.stream, route, r.op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return r.finish(ctx, LandOutcomeBaseMoved, reason, fmt.Sprintf("%s. The workstream is rebased onto the new base branch and checked and reviewed again, and %s's decision to land is kept: it lands on the new commit once they pass.", reason, r.in.Decider.name()), doc)
 }
 
 // complete records a landing the fetched base branch confirms: in one commit

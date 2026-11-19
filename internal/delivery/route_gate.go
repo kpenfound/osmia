@@ -81,6 +81,11 @@ func (s *Controller) DeliveryRouteGate(ctx context.Context, repository *trace.Re
 	if err != nil || !found {
 		return nil, err
 	}
+	// A decision to land that waits to be retried on the rebased commit stands as
+	// it is: the new push is not a delivery occurrence Jev judges again.
+	if _, retrying, err := PendingLandingRoute(repository, stream); err != nil || retrying {
+		return nil, err
+	}
 	key := deliveryRouteKey(stream, push)
 	recorded, err := jev.Recorded(repository, stream, jev.KindDeliveryRoute, key)
 	if err != nil {
@@ -144,6 +149,13 @@ func (s *Controller) deliveryRouteDecision(repository *trace.Repository, stream 
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return intake.GateDecision{}, err
+	}
+	// The decision to land that a moved base kept is the delivery's decision until
+	// the retry lands it or drops it.
+	if route, retrying, err := PendingLandingRoute(repository, stream); err != nil {
+		return intake.GateDecision{}, err
+	} else if retrying {
+		return intake.GateDecision{Recorded: true, ByJev: route.Decider.By == trace.DecidedByJev}, nil
 	}
 	l := &Lander{Repository: repository}
 	_, input, outcome, landing, err := l.latest(stream)
@@ -339,6 +351,13 @@ func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.R
 		return &APIError{Code: Internal, Message: "cannot read pushes"}
 	}
 	if !found || deliveryRouteKey(stream, push) != key {
+		// A landing this decision started stands for it though a moved base and the
+		// rebase since changed the occurrence: the retry carries the decision on.
+		if started, err := landingDecidedBy(repository, stream, decider); err != nil {
+			return &APIError{Code: Internal, Message: "cannot read landing records"}
+		} else if started {
+			return nil
+		}
 		return &APIError{Code: Conflict, Message: "the delivery this decision was made for is no longer the workstream's current delivery"}
 	}
 	// A landing this decision started is its own record: it settles the pick
@@ -359,6 +378,21 @@ func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.R
 		return s.applyLand(ctx, repository, stream, decider)
 	}
 	return s.applyPullRequest(ctx, repository, cfg, stream, decider)
+}
+
+// landingDecidedBy reports whether any landing attempt of the workstream was
+// asked for by the decider.
+func landingDecidedBy(repository *trace.Repository, stream config.WorkstreamID, decider LandDecider) (bool, error) {
+	records, err := repository.Operations(stream)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range records {
+		if in, err := DecodeLand(r.Operation); err == nil && in.Decider == decider {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // applyLand lands the workstream through LandWorkstream as Jev's decision.

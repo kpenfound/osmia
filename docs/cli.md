@@ -754,8 +754,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   pushed and it lands once the hold clears), fell back (the upstream refused the
   push, so the draft pull request was marked ready for review and the workstream
   delivered, with a notice saying why it did not land), base moved (the
-  workstream is rebased and checked again, and its card comes back for the new
-  commit) or not yet known (the service settles it against the fetched base
+  workstream is rebased, checked and reviewed again, and the service lands the
+  new commit on its own under your approval, with no second approval and no new
+  card unless the new review leaves blocking findings to you or a landing gate
+  no longer holds) or not yet known (the service settles it against the fetched base
   branch). None of them raises another delivery card. A project that delivers by
   pull request, a presentation that changed, blocking findings without
   `--accept`, checks that did not pass on the pushed commit and a hard-block or

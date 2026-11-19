@@ -236,21 +236,41 @@ func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t 
 				t.Fatalf("the landing is %s", f.subject(LandingSubject))
 			}
 
-			// The rebase and the checks on its commit have run: the landing is
-			// asked for again on the new push and lands the new commit.
-			_, signed := f.rebased(2, moved)
-			again := f.land(byOwner())
-			if again.Outcome != Landed || again.Commit != signed {
-				t.Fatalf("the retried landing is %+v", again)
+			// The decision to land is kept, and nothing is pushed while the rebased
+			// branch is not pushed and checked.
+			route, pending, err := PendingLandingRoute(f.repo, stream)
+			fixturekit.Must(t, err)
+			if !pending || route.Landing != 1 || route.Push != 1 || route.Commit != f.signed || !route.Decider.Owner() {
+				t.Fatalf("the pending route is %+v (pending %v)", route, pending)
 			}
+			f.retry()
+			if got := f.upstreamMain(); got != moved || f.subject(LandingSubject) != "base-moved-1" || f.landingAttempts() != 1 {
+				t.Fatalf("the retry acted before the rebased branch was pushed and checked: %s, %s, %d attempts", got, f.subject(LandingSubject), f.landingAttempts())
+			}
+
+			// The rebase and the checks on its commit have run: the service's own
+			// pass asks for the landing again on the new push and lands the new
+			// commit, with no second approval.
+			_, signed := f.rebased(2, moved)
+			f.retry()
 			if got := f.upstreamMain(); got != signed {
 				t.Fatalf("the base branch is at %s, want the rebased commit %s", got, signed)
 			}
 			if merges := f.git("-C", f.upstream, "rev-list", "--merges", moved+".."+signed); merges != "" {
 				t.Fatalf("merge commits reached the base branch: %s", merges)
 			}
-			if f.subject(LandingSubject) != "landed-2" || f.pulls.Readies != 0 {
-				t.Fatalf("the landing is %s with %d pull requests marked ready", f.subject(LandingSubject), f.pulls.Readies)
+			if f.subject(LandingSubject) != "landed-2" || f.pulls.Readies != 0 || f.feature() != DeliveredState {
+				t.Fatalf("the landing is %s with %d pull requests marked ready, the workstream %s", f.subject(LandingSubject), f.pulls.Readies, f.feature())
+			}
+			landing, found, err := ReadDeliveryLanding(f.repo, stream)
+			fixturekit.Must(t, err)
+			if !found || landing.Commit != signed || landing.DecidedBy != trace.DecidedByOwner || landing.Push != 2 {
+				t.Fatalf("the landing record is %+v", landing)
+			}
+			// Later passes land nothing more.
+			f.retry()
+			if f.landingAttempts() != 2 || f.upstreamMain() != signed || f.rebases != 1 {
+				t.Fatalf("%d attempts, base at %s, %d rebases", f.landingAttempts(), f.upstreamMain(), f.rebases)
 			}
 		})
 	}
