@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	projectID config.ProjectID    = "p_00000000000000000000000000000001"
-	streamID  config.WorkstreamID = "w_00000000000000000000000000000001"
+	projectID config.ProjectID    = "p_00000000050000000000000000000001"
+	streamID  config.WorkstreamID = "w_00000000050000000000000000000001"
 	unitID                        = "u1"
 )
 
@@ -137,8 +137,6 @@ func (f *fx) exit() router.Exit {
 			{Name: "implementing", Description: "Send the unit back to its mason with the failures.", Bar: router.BarModest},
 			{Name: "checking", Description: "Run the checks again on the same candidate.", Bar: router.BarModest, NeedsCandidate: true,
 				Corroborate: []router.Condition{{Question: "environment", AtLeast: router.LevelModest}}},
-			{Name: "contested", Description: "Hold the unit for the owner.", Bar: router.BarModest},
-			{Name: "redrafted", Description: "Redraft the unit from the plan.", Bar: router.BarStrict},
 			{Name: "approved", Description: "Approve the candidate.", Approval: true, NeedsCandidate: true},
 			{Name: "abandoned", Description: "Abandon the unit.", Gate: true},
 		},
