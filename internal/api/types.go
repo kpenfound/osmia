@@ -1387,11 +1387,13 @@ type CheckCounts struct {
 
 // CheckFailure is one check a Dagger Cloud run reported failed. TraceID is the
 // `dagger trace` id its status names, when it names one, and StatusID the id
-// of the failing commit status.
+// of the failing commit status. TargetURL is the Dagger Cloud link that status
+// carries, when it carries one.
 type CheckFailure struct {
-	Name     string `json:"name"`
-	TraceID  string `json:"trace_id,omitempty"`
-	StatusID int64  `json:"status_id,omitempty"`
+	Name      string `json:"name"`
+	TraceID   string `json:"trace_id,omitempty"`
+	StatusID  int64  `json:"status_id,omitempty"`
+	TargetURL string `json:"target_url,omitempty"`
 }
 
 // CheckStatusRef identifies one posting of a commit status. Two postings of

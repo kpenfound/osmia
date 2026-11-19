@@ -1209,10 +1209,21 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 		if len(blocking) > 0 && !report.Maintenance {
 			rounds++
 		}
-		body = FinalReviewNotice(report, blocking, rounds, edgePending) + "\n" + BriefNotice(report, revision)
+		body = FinalReviewNotice(report, blocking, rounds, edgePending)
+		if failed, err := a.failedChecksNotice(stream, report); err != nil {
+			return coreadapter.OperationResult{}, err
+		} else if failed != "" {
+			body += "\n" + failed
+		}
+		body += "\n" + BriefNotice(report, revision)
 	} else {
 		reason = fmt.Sprintf("final review %d failed: %s; report %s revision %d", report.Review, report.Failure, FinalReportPath, revision)
 		body = fmt.Sprintf("The final review of the assembled branch failed: %s. The failed review authorises nothing; a new review runs once the branch or its governing documents change, or once the workstream is moved to assembled with %s.", report.Failure, moveWorkstreamTool)
+		if failed, err := a.failedChecksNotice(stream, report); err != nil {
+			return coreadapter.OperationResult{}, err
+		} else if failed != "" {
+			body += "\n" + failed
+		}
 	}
 	outcome.Evidence = reason
 	state, err := a.Repository.Workflow(stream, FinalReviewSubject)
@@ -1257,6 +1268,22 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	}
 	return a.routeFinal(ctx, finalExitInput{Stream: stream, State: state, Report: report, ID: id, Reason: reason, Body: body, Blocking: blocking, Rounds: rounds,
 		Documents: documents, Followups: followups, Plain: plain, At: at}, outcome)
+}
+
+// failedChecksNotice reads the check result recorded for the review and
+// returns the notice lines of its failed checks, empty when it did not fail.
+func (a *FinalReviewer) failedChecksNotice(stream config.WorkstreamID, report FinalReport) (string, error) {
+	if report.Maintenance {
+		return "", nil
+	}
+	_, latest, err := a.IncompleteChecks(stream, report.Review, report.Commit)
+	if err != nil {
+		return "", err
+	}
+	if latest.Commit != report.Commit {
+		return "", nil
+	}
+	return FailedChecksNotice(latest), nil
 }
 
 func CountSeverity(findings []FinalFinding, severity string) int {

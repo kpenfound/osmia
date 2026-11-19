@@ -228,10 +228,15 @@ func pushNamed(repository *trace.Repository, stream config.WorkstreamID, named i
 }
 
 // ChecksPollResult is what an immediate read of a push's statuses found.
+//
+// Failed holds the failed checks of a failed result, each with its trace id,
+// and Detail describes them with their `dagger trace` commands, or says that
+// no failing check status was found.
 type ChecksPollResult struct {
 	Push    Push
 	Outcome string
 	Detail  string
+	Failed  []api.CheckFailure
 }
 
 // PollChecksNow reads the combined statuses of the current push's commit at
@@ -254,13 +259,21 @@ func (s *Controller) PollChecksNow(ctx context.Context, repository *trace.Reposi
 		return ChecksPollResult{}, "", ctx.Err()
 	}
 	if err != nil {
-		return ChecksPollResult{Push: push, Outcome: "unreadable", Detail: err.Error()}, "", nil
+		return ChecksPollResult{Push: push, Outcome: "unreadable", Detail: checkrun.SafeText(err.Error())}, "", nil
 	}
-	detail := result.Detail
+	detail := checkrun.SafeText(result.Detail)
 	if detail == "" {
 		detail = describeOutcome(result)
 	}
-	return ChecksPollResult{Push: push, Outcome: string(result.Outcome), Detail: detail}, "", nil
+	failed := checkrun.CloudFailures(result)
+	if result.IsFailure() {
+		var counts *api.CheckCounts
+		if result.Counts != nil {
+			counts = &api.CheckCounts{Total: result.Counts.Total, Passed: result.Counts.Passed, Failed: result.Counts.Failed, Cancelled: result.Counts.Cancelled}
+		}
+		detail += "\n" + checkrun.DescribeFailedChecks(failed, counts, result.StatusURL, true)
+	}
+	return ChecksPollResult{Push: push, Outcome: string(result.Outcome), Detail: detail, Failed: failed}, "", nil
 }
 
 func describeOutcome(result checkrun.CloudResult) string {
@@ -603,6 +616,15 @@ func chiefChecksTarget(load func() *Controller, repository *trace.Repository, sc
 	return s, target, stream, nil, nil
 }
 
+// pollFailedCheck is one failed check in the result of a pull_request_checks
+// poll. Command is empty when the check's status named no trace id.
+type pollFailedCheck struct {
+	Name      string `json:"name"`
+	TraceID   string `json:"trace_id,omitempty"`
+	Command   string `json:"command,omitempty"`
+	StatusURL string `json:"status_url,omitempty"`
+}
+
 // ChecksToolOf returns the pull_request_checks tool of one claimed
 // chief-of-staff turn, over the controller load returns when the tool is
 // called. It asks the watch of the workstream's current push to read the
@@ -633,14 +655,19 @@ func ChecksToolOf(load func() *Controller, repository *trace.Repository, scope c
 			if reason != "" {
 				return refusal(reason)
 			}
+			failed := make([]pollFailedCheck, 0, len(result.Failed))
+			for _, f := range result.Failed {
+				failed = append(failed, pollFailedCheck{Name: checkrun.SafeText(f.Name), TraceID: f.TraceID, Command: checkrun.TraceCommand(f.TraceID), StatusURL: checkrun.SafeLink(f.TargetURL)})
+			}
 			return json.Marshal(struct {
-				Done        bool   `json:"done"`
-				Push        int    `json:"push"`
-				PullRequest int    `json:"pull_request"`
-				Commit      string `json:"commit"`
-				Outcome     string `json:"outcome"`
-				Detail      string `json:"detail"`
-			}{true, result.Push.Number, result.Push.PullRequest, result.Push.Commit, result.Outcome, result.Detail})
+				Done         bool              `json:"done"`
+				Push         int               `json:"push"`
+				PullRequest  int               `json:"pull_request"`
+				Commit       string            `json:"commit"`
+				Outcome      string            `json:"outcome"`
+				Detail       string            `json:"detail"`
+				FailedChecks []pollFailedCheck `json:"failed_checks,omitempty"`
+			}{true, result.Push.Number, result.Push.PullRequest, result.Push.Commit, result.Outcome, result.Detail, failed})
 		case "rerun":
 			record, reason, err := s.RerunChecksNow(ctx, target, stream, in.Push)
 			if err != nil {

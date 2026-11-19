@@ -4344,6 +4344,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "target_url": {
+            "type": "string"
+          },
           "trace_id": {
             "type": "string"
           }
