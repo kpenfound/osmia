@@ -330,5 +330,4 @@ func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 			t.Fatalf("the request was too large to answer: %+v", records)
 		}
 	})
-
 }

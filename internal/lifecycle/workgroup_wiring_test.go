@@ -467,23 +467,23 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 
 	// While that turn is blocked inside reconciler.Apply, holding the
 	// workgroup's own trace open, a second owner message to member2 and a
-	// conversation read of member1 must each still answer within the
-	// service's own read-latency bound.
+	// conversation read of member1 must each still answer within the service's
+	// read-latency bound. The turn stays held until the test ends, so a request
+	// queued behind it would never return.
 	begin := time.Now()
 	if _, err := c.Send(ctx, f.stream2, "Second message, to the other member"); err != nil {
-		t.Fatalf("send second message: %v", err)
+		t.Fatalf("second owner message while the chief turn was held: %v", err)
 	}
 	if elapsed := time.Since(begin); elapsed > coreReadBound {
-		t.Errorf("owner message to the other member took %s, want within %s", elapsed, coreReadBound)
+		t.Fatalf("owner message to the other member took %s while the chief turn was held", elapsed)
 	}
-
 	begin = time.Now()
 	conv, err := c.Conversation(ctx, f.stream1)
 	if err != nil {
-		t.Fatalf("conversation read: %v", err)
+		t.Fatalf("conversation read while the chief turn was held: %v", err)
 	}
 	if elapsed := time.Since(begin); elapsed > coreReadBound {
-		t.Errorf("conversation read took %s, want within %s", elapsed, coreReadBound)
+		t.Fatalf("conversation read took %s while the chief turn was held", elapsed)
 	}
 	if len(conv.Entries) == 0 || conv.Entries[0].Text != "First message" {
 		t.Fatalf("conversation does not show the first message: %+v", conv.Entries)
