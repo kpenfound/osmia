@@ -11,6 +11,7 @@ import (
 const (
 	ArchivePoll = "archive"
 	DraftPoll   = "draft"
+	LandedPoll  = "landed"
 	EdgePoll    = "edge"
 )
 

@@ -374,6 +374,56 @@ func (g GitHub) Close(ctx context.Context, repository string, number int) (PullR
 	return result.pull(), err
 }
 
+// LandedClient closes a pull request whose changes the service landed on the
+// base branch itself, saying so in a comment. The service calls it only for a
+// workstream's own pull request that is still open after its landing.
+type LandedClient interface {
+	// CloseWithComment posts comment on the pull request and closes it. It
+	// leaves a pull request that is already merged or closed alone, and posts
+	// a comment only once: a comment with the same text already on the pull
+	// request is not posted again, so a retry after a lost response or a
+	// restart adds nothing.
+	CloseWithComment(ctx context.Context, repository string, number int, comment string) (PullRequest, error)
+}
+
+type githubComment struct {
+	Body string `json:"body"`
+}
+
+// CloseWithComment comments on and closes an open pull request.
+func (g GitHub) CloseWithComment(ctx context.Context, repository string, number int, comment string) (PullRequest, error) {
+	current, err := g.get(ctx, repository, number)
+	if err != nil {
+		return PullRequest{}, fmt.Errorf("read pull request %s#%d: %w", repository, number, err)
+	}
+	if current.MergedAt != nil || current.State == "closed" {
+		return current.pull(), nil
+	}
+	query := url.Values{"per_page": {"100"}}
+	var existing []githubComment
+	path := fmt.Sprintf("/repos/%s/issues/%d/comments", repository, number)
+	if err := g.do(ctx, "issues.comments", ghlog.Read, repository, http.MethodGet, path+"?"+query.Encode(), nil, http.StatusOK, &existing); err != nil {
+		return PullRequest{}, fmt.Errorf("read the comments of pull request %s#%d: %w", repository, number, err)
+	}
+	posted := false
+	for _, c := range existing {
+		if c.Body == comment {
+			posted = true
+		}
+	}
+	if !posted {
+		var created githubComment
+		if err := g.do(ctx, "issues.comment", ghlog.Write, repository, http.MethodPost, path, map[string]any{"body": comment}, http.StatusCreated, &created); err != nil {
+			return PullRequest{}, fmt.Errorf("comment on pull request %s#%d: %w", repository, number, err)
+		}
+	}
+	var closed githubPull
+	if err := g.do(ctx, "pulls.close", ghlog.Write, repository, http.MethodPatch, fmt.Sprintf("/repos/%s/pulls/%d", repository, number), map[string]any{"state": "closed"}, http.StatusOK, &closed); err != nil {
+		return PullRequest{}, fmt.Errorf("close pull request %s#%d: %w", repository, number, err)
+	}
+	return closed.pull(), nil
+}
+
 func (g GitHub) Draft(ctx context.Context, repository string, number int) (PullRequest, error) {
 	current, err := g.get(ctx, repository, number)
 	if err != nil {

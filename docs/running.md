@@ -715,6 +715,22 @@ Clears: <next local midnight, RFC 3339>
 Open: http://<tailnet-name>/
 ```
 
+The webhook also receives one post when the service lands a workstream on the
+base branch of a project whose `delivery` is `jev`:
+
+```text
+Osmia landed a workstream on its base branch.
+Project: <project-id>
+Workstream: <workstream-id>
+Landed commit: <the signed commit now on the base branch>
+Base branch: <branch> of <upstream repository>
+Decided by: <owner or jev>
+Open: http://<tailnet-name>/
+```
+
+A landing is posted once, including across restarts and when a restart
+completed the landing. It is not an inbox entry, so it asks for no decision.
+
 The `Open` line appears only with `listen.tailnet` set. When tailnet HTTPS is
 up it uses the full `https://<host>.<tailnet>.ts.net/` address; otherwise it uses
 the HTTP address shown above. Any `2xx` response

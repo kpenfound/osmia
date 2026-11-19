@@ -988,7 +988,8 @@ func (r *landingRun) complete(ctx context.Context, intent LandingIntent, recorde
 	done := coreadapter.OperationResult{Outcome: LandOutcomeLanded, Evidence: reason}
 	if feature.Value != AssembledState {
 		// Delivered another way while the landing was under way: the landing is
-		// recorded, and the workstream stays as it is.
+		// recorded, with its notice, and the workstream stays as it is.
+		landed.Events = []trace.Event{trace.Notice(landedHeader.ID, "state", fmt.Sprintf("Workstream landed: %s landed on %s of %s at %s by a fast-forward, decided by %s, although the workstream was already delivered another way.", r.in.Commit, r.branch, r.cfg.Project.Upstream, confirmed, by))}
 		if _, err := r.Repository.RecordDocumentsWith(ctx, docs, landed); err != nil {
 			if errors.Is(err, trace.ErrConflict) {
 				if result, outErr := r.Outcome(r.stream, r.in.Landing); outErr == nil && result != nil {

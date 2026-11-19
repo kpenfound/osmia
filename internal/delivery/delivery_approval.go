@@ -289,12 +289,20 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		}
 		var merge *DeliveryMerge
+		var landing *DeliveryLanding
+		if l, landed, err := ReadDeliveryLanding(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
+		} else if landed {
+			landing = &l
+		}
+		// A landing writes the merge record the dependency edges read; the
+		// presentation shows it as the landing it is, not as the owner's merge.
 		if m, merged, err := ReadDeliveryMerge(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
-		} else if merged {
+		} else if merged && landing == nil {
 			merge = &m
 		}
-		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}
+		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Landing: landing, Delivered: true}
 		if ready, recorded, err := ReadyAt(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		} else if recorded {

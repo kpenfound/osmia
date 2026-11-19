@@ -26,11 +26,14 @@ type DeliveryPresentation struct {
 	// Publication is the latest record of the push that put the branch on
 	// the pull request, Ready the record of the pull request being marked
 	// ready for review, Merge the owner's own merge of the branch into
-	// upstream that delivered it instead, and Delivered whether the
+	// upstream that delivered it instead, Landing the service's own landing of
+	// the signed commit on the base branch that delivered it instead of a pull
+	// request merge (Merge is then not set), and Delivered whether the
 	// workstream is delivered.
 	Publication *DeliveryPublication `json:"publication,omitempty"`
 	Ready       *DeliveryReady       `json:"ready,omitempty"`
 	Merge       *DeliveryMerge       `json:"merge,omitempty"`
+	Landing     *DeliveryLanding     `json:"landing,omitempty"`
 	Delivered   bool                 `json:"delivered,omitempty"`
 	Maintenance bool                 `json:"maintenance,omitempty"`
 	// DraftPullRequest is true when approving leaves the pull request a

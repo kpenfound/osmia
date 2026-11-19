@@ -5587,6 +5587,51 @@
         },
         "type": "object"
       },
+      "DeliveryLanding": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "base_before": {
+            "type": "string"
+          },
+          "base_branch": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "judgment": {
+            "type": "string"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "reviewed": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryMerge": {
         "properties": {
           "branch": {
@@ -5623,6 +5668,9 @@
           },
           "draft_pull_request": {
             "type": "boolean"
+          },
+          "landing": {
+            "$ref": "#/components/schemas/DeliveryLanding"
           },
           "maintenance": {
             "type": "boolean"

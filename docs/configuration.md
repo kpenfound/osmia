@@ -474,7 +474,8 @@ set.
 `notify.webhook` is an absolute `http` or `https` URL with a host, such as an
 [ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other
 scheme are errors that name `notify.webhook` without quoting the URL. With it
-set, every entry that opens in the inbox is posted to it once
+set, every entry that opens in the inbox, the daily budget pause and every
+landing of a workstream on its base branch are posted to it once
 ([notifications](running.md#notifications)). The URL is shown in
 `/v1/config`, so treat a URL that embeds a token like any other value there.
 

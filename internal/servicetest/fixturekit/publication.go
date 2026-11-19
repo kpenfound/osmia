@@ -29,7 +29,11 @@ type FakePulls struct {
 	Updates int
 	Creates int
 	Readies int
-	Lose    bool
+	// Closes counts the calls that closed a pull request with a comment, and
+	// Comments holds the comments they posted, as {pull request number, text}.
+	Closes   int
+	Comments []PullComment
+	Lose     bool
 	Fork    func() string
 	// Branches, when set, answers the tip of the named feature branch of the
 	// fork in place of Fork, for a host that holds several workstreams' pull
@@ -116,6 +120,44 @@ func (c *FakePulls) Ready(_ context.Context, repository string, number int) (pul
 	return pulls.PullRequest{}, errors.New("pull request not found")
 }
 
+// PullComment is one comment posted on a pull request of the fake host.
+type PullComment struct {
+	Number int
+	Text   string
+}
+
+// CloseWithComment closes an open pull request with a comment, as the host's
+// comment and close calls together do. It leaves a merged or closed pull
+// request alone and posts a comment text only once per pull request.
+func (c *FakePulls) CloseWithComment(_ context.Context, repository string, number int, comment string) (pulls.PullRequest, error) {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	for i := range c.Prs {
+		pr := &c.Prs[i]
+		if pr.Number != number {
+			continue
+		}
+		if pr.State != "open" || pr.Merged {
+			return *pr, nil
+		}
+		posted := false
+		for _, existing := range c.Comments {
+			posted = posted || existing.Number == number && existing.Text == comment
+		}
+		if !posted {
+			c.Comments = append(c.Comments, PullComment{Number: number, Text: comment})
+		}
+		pr.State = "closed"
+		c.Closes++
+		if c.Lose {
+			c.Lose = false
+			return pulls.PullRequest{}, errors.New("connection reset")
+		}
+		return *pr, nil
+	}
+	return pulls.PullRequest{}, errors.New("pull request not found")
+}
+
 func ConfigureDeliverySigner(t *testing.T, clone string) string {
 	t.Helper()
 	signer := filepath.Join(t.TempDir(), "fake-gpg")
@@ -155,6 +197,10 @@ func (r RepositoryPulls) Create(ctx context.Context, repository string, n pulls.
 
 func (r RepositoryPulls) Ready(ctx context.Context, repository string, number int) (pulls.PullRequest, error) {
 	return r[repository].Ready(ctx, repository, number)
+}
+
+func (r RepositoryPulls) CloseWithComment(ctx context.Context, repository string, number int, comment string) (pulls.PullRequest, error) {
+	return r[repository].CloseWithComment(ctx, repository, number, comment)
 }
 
 func (r RepositoryPulls) Update(ctx context.Context, repository string, number int, change pulls.Update) (pulls.PullRequest, error) {

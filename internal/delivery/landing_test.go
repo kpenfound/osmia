@@ -64,8 +64,9 @@ func TestLandingFastForwardsTheBaseToTheSignedCommitAndRecordsIt(t *testing.T) {
 	if merge, merged, err := ReadDeliveryMerge(f.repo, stream); err != nil || !merged || merge.Upstream.Commit != f.signed || merge.Upstream.Branch != "main" {
 		t.Fatalf("the merge evidence is %+v %v %v", merge, merged, err)
 	}
-	if finished, err := OwnPullRequestFinished(f.repo, stream); err != nil || finished {
-		t.Fatalf("a pull request merge was reported: %v %v", finished, err)
+	// No pull request outcome is recorded: the landing is not a pull request merge.
+	if _, revision, err := OwnPullRequestOutcomeAt(f.repo, stream); err != nil || revision != 0 {
+		t.Fatalf("a pull request outcome was recorded: revision %d %v", revision, err)
 	}
 	delivered := f.transitions(DeliveredState)
 	if len(delivered) != 1 || delivered[0].DecidedBy != trace.DecidedByOwner || delivered[0].Subject != trace.FeatureSubject {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/runtime"
 )
 
@@ -184,6 +185,11 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 	if pause != nil {
 		occurrences = append(occurrences, *pause)
 	}
+	landed, landedFault := n.landings(link)
+	occurrences = append(occurrences, landed...)
+	if fault == "" {
+		fault = landedFault
+	}
 	now := n.s.now()
 	open := map[string]bool{}
 	n.mu.Lock()
@@ -249,6 +255,50 @@ func (n *notifier) budgetPause(cfg *config.Config, link string) (pause *occurren
 
 // NotifyBudgetPause is the kind of the notification for a daily budget pause.
 const NotifyBudgetPause = "budget_pause"
+
+// NotifyLanded is the kind of the notification for a workstream the service
+// landed on its base branch.
+const NotifyLanded = "landed"
+
+// landings returns one occurrence for every workstream of an active project
+// that the service landed on its base branch, kept for as long as its landing
+// record is: the ledger posts each once. fault is set when a project's landings
+// cannot be read, in which case pending notifications are kept rather than
+// dropped.
+func (n *notifier) landings(link string) (landed []occurrence, fault string) {
+	cfg, projects := n.s.runtimes()
+	for _, p := range projects {
+		if p.repository == nil || !cfg.Active(p.id) {
+			continue
+		}
+		streams, err := p.repository.Workstreams()
+		if err != nil {
+			return landed, "cannot read the landings of project " + string(p.id) + "; landing notifications wait until they can be read"
+		}
+		for _, stream := range streams {
+			landing, found, err := delivery.ReadDeliveryLanding(p.repository, stream)
+			if err != nil {
+				return landed, "cannot read the landing of workstream " + string(stream) + "; landing notifications wait until it can be read"
+			}
+			if !found {
+				continue
+			}
+			key := strings.Join([]string{string(p.id), NotifyLanded, string(stream), landing.Commit, landing.At.UTC().Format(time.RFC3339Nano)}, "/")
+			landed = append(landed, occurrence{key: key, kind: NotifyLanded, workstream: string(stream), body: landedBody(p.id, stream, landing, link)})
+		}
+	}
+	return landed, ""
+}
+
+// landedBody is the plain-text post for a landing.
+func landedBody(project config.ProjectID, stream config.WorkstreamID, landing delivery.DeliveryLanding, link string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Osmia landed a workstream on its base branch.\nProject: %s\nWorkstream: %s\nLanded commit: %s\nBase branch: %s of %s\nDecided by: %s\n", project, stream, landing.Commit, landing.BaseBranch, landing.Upstream, landing.DecidedBy)
+	if link != "" {
+		fmt.Fprintf(&b, "Open: %s\n", link)
+	}
+	return b.String()
+}
 
 // budgetPauseBody is the plain-text post for a daily budget pause.
 func budgetPauseBody(project config.ProjectID, status *DailyBudgetStatus, clears time.Time, link string) string {
@@ -507,8 +557,11 @@ func (n *notifier) diagnostics() []Diagnostic {
 	}
 	f := n.ledger.Failure
 	what := fmt.Sprintf("the %s decision in workstream %s", f.Kind, f.Workstream)
-	if f.Kind == NotifyBudgetPause {
+	switch f.Kind {
+	case NotifyBudgetPause:
 		what = "the daily budget pause"
+	case NotifyLanded:
+		what = "the landing of workstream " + f.Workstream
 	}
 	message := fmt.Sprintf("notifying the owner of %s failed at %s (attempt %d of %d): %s; retrying", what, f.At.Format(time.RFC3339), f.Attempts, notifyAttempts, f.Reason)
 	if f.GaveUp {

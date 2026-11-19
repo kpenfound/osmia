@@ -388,3 +388,66 @@ func TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation(t *testing.T) {
 		t.Fatalf("gets %d mutations %d, want 3 and 1", gets, mutations)
 	}
 }
+
+func TestGitHubCloseWithCommentCommentsOnceAndClosesOnlyAnOpenPullRequest(t *testing.T) {
+	t.Parallel()
+	state, comments := "open", []string{}
+	var posts, patches int
+	// server stands in for the real GitHub REST API, whose responses and rate
+	// limits this fake does not reproduce.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pull := fmt.Sprintf(`{"number": 7, "html_url": "https://github.com/acme/widgets/pull/7", "state": %q, "title": "T", "head": {"ref": "osmia/w", "sha": "abc", "repo": {"full_name": "acme/widgets"}}, "base": {"ref": "main"}}`, state)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/7":
+			io.WriteString(w, pull)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues/7/comments":
+			out, _ := json.Marshal(func() []map[string]string {
+				var list []map[string]string
+				for _, c := range comments {
+					list = append(list, map[string]string{"body": c})
+				}
+				return list
+			}())
+			w.Write(out)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues/7/comments":
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Error(err)
+			}
+			posts++
+			comments = append(comments, in["body"])
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"body": "x"}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/widgets/pulls/7":
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in["state"] != "closed" {
+				t.Errorf("close body %v %v", in, err)
+			}
+			patches++
+			state = "closed"
+			io.WriteString(w, `{"number": 7, "html_url": "https://github.com/acme/widgets/pull/7", "state": "closed", "title": "T", "head": {"ref": "osmia/w", "sha": "abc", "repo": {"full_name": "acme/widgets"}}, "base": {"ref": "main"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "secret", HTTP: server.Client()}
+	ctx := context.Background()
+	var _ LandedClient = g
+
+	// A comment already on the pull request, as a lost response leaves it, is
+	// not posted again.
+	comments = append(comments, "landed abc")
+	pr, err := g.CloseWithComment(ctx, "acme/widgets", 7, "landed abc")
+	if err != nil || pr.State != "closed" || posts != 0 || patches != 1 {
+		t.Fatalf("closed %+v: %v after %d comments and %d closes", pr, err, posts, patches)
+	}
+	// A pull request that is already closed is left alone.
+	if _, err := g.CloseWithComment(ctx, "acme/widgets", 7, "landed abc"); err != nil || posts != 0 || patches != 1 {
+		t.Fatalf("a closed pull request was written: %v after %d comments and %d closes", err, posts, patches)
+	}
+	state, comments = "open", nil
+	if _, err := g.CloseWithComment(ctx, "acme/widgets", 7, "landed abc"); err != nil || posts != 1 || patches != 2 || len(comments) != 1 || comments[0] != "landed abc" {
+		t.Fatalf("%v after %d comments and %d closes: %v", err, posts, patches, comments)
+	}
+}

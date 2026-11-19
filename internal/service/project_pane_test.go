@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/runtime"
 )
 
@@ -56,5 +57,15 @@ func TestArchivedProjectPaneRequiresPinnedResolution(t *testing.T) {
 				t.Fatalf("archive hold lacks its diagnostic: %+v", w)
 			}
 		})
+	}
+}
+
+// A workstream the service landed shows as landed with its commit, not as a
+// merged pull request.
+func TestLandedWorkstreamsShowTheirLandingInTheProjectPane(t *testing.T) {
+	t.Parallel()
+	got := landedState(delivery.DeliveryLanding{Commit: "0123456789abcdef0123456789abcdef01234567"})
+	if want := "delivered (landed 0123456789ab)"; got != want {
+		t.Fatalf("the label is %q, want %q", got, want)
 	}
 }

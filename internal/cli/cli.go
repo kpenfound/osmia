@@ -982,6 +982,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if m := presentation.Merge; m != nil {
 				fmt.Fprintf(stdout, "\nMerged by you outside the factory: %s/%s at %s holds %s at %s\n", m.Upstream.Remote, m.Upstream.Branch, m.Upstream.Commit, m.Branch, m.Commit)
 			}
+			if l := presentation.Landing; l != nil {
+				fmt.Fprintf(stdout, "\nLanded on %s of %s, decided by %s: it was fast-forwarded from %s to %s, which holds %s. No pull request was merged.\n", l.BaseBranch, l.Upstream, l.DecidedBy, l.BaseBefore, l.Confirmed, l.Commit)
+			}
 			if p := presentation.Publication; p != nil {
 				if p.Status == "opened" {
 					fmt.Fprintf(stdout, "\nPushed %s of %s at %s (%s) to pull request #%d: %s\n", p.Branch, p.Fork, p.Commit, p.Style, p.PullRequest, p.URL)

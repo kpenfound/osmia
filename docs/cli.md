@@ -720,7 +720,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   marked ready for review, that it stays a draft until its merge-order
   dependency merges, or that you marked it ready on GitHub yourself. For a
   delivered workstream it shows the report, the approved description and the
-  pull request it was delivered as, or the merge you recorded with `merged`.
+  pull request it was delivered as, the merge you recorded with `merged`, or,
+  for a workstream the service landed on the project's base branch, the landing
+  (the base branch, the commit it was fast-forwarded from and to, and who
+  decided; `landing` in `--json`) instead of a merge or a ready pull request.
 - `approve <workstream-id> [description-file] [--accept]` approves marking the
   draft pull request ready for review for the presented final report, with the
   drafted description, or the file's text instead. The service puts that
