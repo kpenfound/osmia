@@ -160,6 +160,9 @@ func readRecord(repo *trace.Repository, stream config.WorkstreamID, name string)
 			latest = d
 		}
 	}
+	if latest == nil {
+		return nil, 0, state, nil
+	}
 	if latest.Revision == 0 {
 		return nil, 0, state, nil
 	}
