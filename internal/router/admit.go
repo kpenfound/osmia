@@ -61,3 +61,5 @@ func (r *Router) Admit(ctx context.Context, x Exit) (Admission, error) {
 	}
 	return Admission{Admitted: true}, nil
 }
+
+// router note 8e10f0e4
