@@ -218,3 +218,5 @@ func (r *Router) span(x Exit, rec Record, chosen string) {
 		Start: rec.Raised, End: rec.Decided,
 	})
 }
+
+// router note 228adfcf
