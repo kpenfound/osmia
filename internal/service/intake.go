@@ -475,6 +475,7 @@ func (s *Service) intake() *intake.Controller {
 		DeliveryDocuments:        deliveryDocuments,
 		DeliveryEntry:            s.deliveryEntry,
 		DeliveryGate:             s.deliveryGate,
+		DeliveryRouteGate:        s.deliveryRouteGate,
 		CancellationGates:        s.cancellationGates,
 		DriftEntry:               driftEntry,
 		Effective:                s.effective,

@@ -1859,6 +1859,31 @@ threshold the card reaches the owner with Jev's pick as its recommendation.
 Jev never writes text: an option carried out with text is offered only when
 the chief of staff already wrote it.
 
+The delivery of a workstream on a project whose `delivery` is `jev` is a gate
+Jev may decide in place of that delivery approval: the `delivery-route`
+decision, keyed by the workstream, the final review round and the pushed
+commit, with the options `land`, `pull-request` and `defer`. Jev is asked only when the delivery is clean: the
+project delivers through its upstream (not a fork), the final review left no
+blocking findings, checks passed on the exact pushed commit, and no hard-block
+or merge-order dependency still waits to merge. Its state holds only the spec
+summary, the final review report, the check results, and the number of files and
+lines changed with the names of the entities they touch; it holds no code and no
+diff. A pick at or above `[jev] decision_threshold` is binding. A `land` pick
+lands the workstream through the same service entry point as the owner's
+"Approve and land", with Jev's judgment named as the deciding authority: a
+refused push is delivered as the draft pull request marked ready, and a landing
+the router holds is applied once the hold clears, both with no owner card. A
+`pull-request` pick marks the existing draft ready for review. A pick below the
+threshold, a deferral or a fallback leaves the draft a draft: the delivery card
+shows "Mark ready for review" with "Approve and land" beside it and, when Jev
+picked, its pick as the recommendation. When the service refuses to apply a
+binding pick before anything is pushed (the delivery it was made for is no
+longer the current one, or a precondition no longer holds), the refusal is
+recorded on the judgment, Jev is not asked about that delivery again, and the
+card goes to the owner with Jev's judgment shown. When the delivery is not
+clean, or the project has not opted in, the delivery card is the one Jev
+approves at `[jev] owner_threshold`.
+
 Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
 and its usage is a ledger cost under the `jev` role. A judgment asked again

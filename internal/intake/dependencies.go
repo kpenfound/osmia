@@ -45,15 +45,18 @@ type Dependencies struct {
 	// ContestedGate returns the gate of the contested unit's open card when Jev
 	// may decide it, or nil. A card whose unit carries a binding Jev judgment
 	// the service could not carry out returns that judgment instead.
-	ContestedGate            func(repository *trace.Repository, stream config.WorkstreamID, unit string) (*Gate, *jev.Result, error)
-	ContextFor               func(repo *trace.Repository) bundle.Provider
-	ContinueStopped          func(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error)
-	ContractGuardRefusal     func(wt *trace.Repository, g trace.Workgroup, spec trace.ProjectSpec) (string, error)
-	ConversationTrace        func(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError)
-	CrossRepoMemberRepos     func(ctx context.Context, g trace.Workgroup) ([]trace.CrossRepoMember, error)
-	Current                  func() *config.Config
-	DeliveryDocuments        func(repository *trace.Repository, stream config.WorkstreamID) (trace.Document, trace.Document, *DeliveryApproval, error)
-	DeliveryEntry            func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error)
+	ContestedGate        func(repository *trace.Repository, stream config.WorkstreamID, unit string) (*Gate, *jev.Result, error)
+	ContextFor           func(repo *trace.Repository) bundle.Provider
+	ContinueStopped      func(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error)
+	ContractGuardRefusal func(wt *trace.Repository, g trace.Workgroup, spec trace.ProjectSpec) (string, error)
+	ConversationTrace    func(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError)
+	CrossRepoMemberRepos func(ctx context.Context, g trace.Workgroup) ([]trace.CrossRepoMember, error)
+	Current              func() *config.Config
+	DeliveryDocuments    func(repository *trace.Repository, stream config.WorkstreamID) (trace.Document, trace.Document, *DeliveryApproval, error)
+	DeliveryEntry        func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error)
+	// DeliveryRouteGate returns the gate of the assembled workstream's delivery
+	// when Jev may decide how it is delivered, or nil.
+	DeliveryRouteGate        func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*Gate, error)
 	DriftEntry               func(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error)
 	Effective                func() (runtime.State, []runtime.Diagnostic)
 	FactoryContext           func(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool

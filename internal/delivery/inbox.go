@@ -126,6 +126,10 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 		if pending, err := landingPending(repository, stream); err != nil || pending {
 			return InboxEntry{}, false, err
 		}
+	} else if pending, err := landingPending(repository, stream); err != nil || pending {
+		// Jev's decision to land is under way: it delivers the workstream, or is
+		// refused, before the owner is asked.
+		return InboxEntry{}, false, err
 	} else if p.Approval != nil {
 		if refused, err := PublicationRefused(repository, stream, prior.Revision); err != nil || !refused {
 			return InboxEntry{}, false, err
@@ -168,6 +172,8 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 		e.Question += fmt.Sprintf(" Approve and land moves %s of %s to the checked commit instead.", cfg.Project.BaseBranch, cfg.Project.Upstream)
 		e.Blocked = "Marking the pull request ready for review, or landing it on " + cfg.Project.BaseBranch + "."
 	}
-	e.Recommendation = p.Recommendation
+	if p.Recommendation != "" {
+		e.Recommendation = fmt.Sprintf("Jev recommends %s.", routeLabel(p.Recommendation))
+	}
 	return e, true, nil
 }

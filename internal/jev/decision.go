@@ -35,6 +35,7 @@ const (
 	KindPlanAmendment      DecisionKind = "plan-amendment"
 	KindDiscovery          DecisionKind = "discovery-disposition"
 	KindTriage             DecisionKind = "final-review-triage"
+	KindDeliveryRoute      DecisionKind = "delivery-route"
 
 	KindDeliveryApproval    DecisionKind = "delivery-approval"
 	KindCharterProposal     DecisionKind = "charter-proposal"
@@ -68,6 +69,9 @@ var kinds = map[DecisionKind]kindSpec{
 	KindPlanAmendment:      {1, "The state is an amendment request that leaves the approved intent unchanged, with the debate about it. Choose whether to approve or decline it.", false},
 	KindDiscovery:          {1, "The state is a piece of work a worker discovered during a feature. Choose its disposition: assign it to a unit, decline it, or retain it as a suggestion.", false},
 	KindTriage:             {1, "The state is one blocking finding of a final review, with the chief of staff's evidence. Choose whether it needs code in the revision or is left to the owner.", false},
+	KindDeliveryRoute: {1, "The state is a finished workstream of a project that may land directly: its spec summary, the final review report, the check results, and the size of the change and the areas it touches. No code is shown. " +
+		"Choose how the workstream is delivered: land it, so the base branch is fast-forwarded to the checked commit, or deliver it as the draft pull request that already exists, marked ready for review. " +
+		"Choose land only when the review found nothing that needs a person's eyes and the change is small and contained enough to go straight to the base branch. Choose pull-request when a person should see the change first. Defer when neither is clearly right.", false},
 
 	KindDeliveryApproval: {1, "The state is the owner's delivery card for an assembled feature: the final review's findings, the check result, the chief of staff's delivery brief and the pull request text the service will publish. " +
 		"Should the owner mark the pull request ready for review with exactly that text? Choose approve only when nothing on the card needs the owner's attention.", true},
@@ -77,6 +81,11 @@ var kinds = map[DecisionKind]kindSpec{
 	KindOwnerObjection:      {1, "The state is an objection the owner raised to the spec or plan, standing at the ratification gate, with the debate about it. Choose how the owner disposes of it now: dismiss it, or overrule it and proceed.", true},
 	KindCancellation:        {1, "The state is the impact summary of cancelling a workgroup or one of its member workstreams: what happens to each workstream and to its open pull requests. Choose the option the owner would choose.", true},
 }
+
+// alwaysDefers are the kinds whose requests offer Defer however many options
+// the caller gives: the decision is one Jev may decline to make even when both
+// of its options are the caller's.
+var alwaysDefers = map[DecisionKind]bool{KindDeliveryRoute: true}
 
 // Kinds returns the decision kinds in a fixed order.
 func Kinds() []DecisionKind {
@@ -138,6 +147,12 @@ func DeliveryKey(review, revision int, commit, draft string) string {
 // revision it was presented.
 func CancellationKey(change string, revision int) string {
 	return fmt.Sprintf("cancellation:%s:revision-%d", change, revision)
+}
+
+// DeliveryRouteKey is the occurrence key of a workstream's delivery: the final
+// review round and the pushed commit the delivery is of.
+func DeliveryRouteKey(stream config.WorkstreamID, review int, commit string) string {
+	return fmt.Sprintf("delivery:%s:review-%d:%s", stream, review, commit)
 }
 
 // maxOccurrenceKey bounds an occurrence key.
@@ -463,7 +478,7 @@ func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req Decision
 		}
 	}
 	threshold := j.Threshold(req.Kind)
-	options, err := decisionOptions(req.Options)
+	options, err := decisionOptions(req.Options, alwaysDefers[req.Kind])
 	if err != nil {
 		return fallback(ReasonRejected, err.Error())
 	}
@@ -523,8 +538,9 @@ func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req Decision
 }
 
 // decisionOptions returns the options of a request, adding Defer when the
-// caller offers fewer than two, since a choice needs two.
-func decisionOptions(in []DecisionOption) ([]systemone.Option, error) {
+// caller offers fewer than two, since a choice needs two, or when the kind
+// always offers it.
+func decisionOptions(in []DecisionOption, withDefer bool) ([]systemone.Option, error) {
 	if len(in) == 0 {
 		return nil, errors.New("a decision needs an option")
 	}
@@ -537,7 +553,7 @@ func decisionOptions(in []DecisionOption) ([]systemone.Option, error) {
 		seen[o.Name] = true
 		out = append(out, systemone.Option{Name: o.Name, Description: o.Description})
 	}
-	if len(out) < 2 {
+	if len(out) < 2 || withDefer {
 		out = append(out, systemone.Option{Name: Defer, Description: "Do not decide: the owner should look at this first."})
 	}
 	return out, nil

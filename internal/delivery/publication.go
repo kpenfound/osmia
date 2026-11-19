@@ -229,9 +229,9 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 		if in.Retarget != nil {
 			requestAction = fmt.Sprintf("updates pull request #%d", in.Retarget.Number)
 		}
-		reason = fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
+		reason = fmt.Sprintf("%s approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", approver(*approval), in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
 	} else {
-		reason = fmt.Sprintf("the owner approved description %s for %s at %s; the pull request against %s of %s gets it and is marked ready for review", in.DescriptionHash, featureBranch(stream), in.Commit, in.Base, in.Upstream)
+		reason = fmt.Sprintf("%s approved description %s for %s at %s; the pull request against %s of %s gets it and is marked ready for review", approver(*approval), in.DescriptionHash, featureBranch(stream), in.Commit, in.Base, in.Upstream)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: decision.Cause}
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
@@ -241,6 +241,15 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 		return err
 	}
 	return nil
+}
+
+// approver names who approved: Jev when its delivery decision recorded the
+// approval, the owner otherwise.
+func approver(a DeliveryApproval) string {
+	if a.DecidedBy == trace.DecidedByJev {
+		return "Jev"
+	}
+	return "the owner"
 }
 
 func DecodePublish(op coreadapter.Operation) (PublishInput, error) {

@@ -111,12 +111,18 @@ func (s *Controller) ownerGates(ctx context.Context, repository *trace.Repositor
 			return nil, err
 		}
 		if open {
-			g, err := s.DeliveryGate(ctx, repository, w.Workstream, e)
+			route, err := s.deliveryRouteGate(ctx, repository, w.Workstream)
 			if err != nil {
 				return nil, err
 			}
-			if g != nil {
-				out = append(out, *g)
+			if route == nil {
+				g, err := s.DeliveryGate(ctx, repository, w.Workstream, e)
+				if err != nil {
+					return nil, err
+				}
+				if g != nil {
+					out = append(out, *g)
+				}
 			}
 		}
 	}

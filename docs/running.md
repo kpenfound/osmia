@@ -280,7 +280,10 @@ The member view is laid out like a chat client:
   pick and confidence as its recommendation. Your own decisions (delivery
   approval, charter proposals and conflicts between charters, "no change
   needed" escalations, cancellation and your own objections) are decided the
-  same way at `jev.owner_threshold` (0.9 by default). Jev never writes text, so
+  same way at `jev.owner_threshold` (0.9 by default). On a project that opted in
+  to landing (`delivery = "jev"`), Jev instead picks how a clean delivery goes
+  out, by landing it or by marking its draft pull request ready, when its
+  confidence reaches `jev.decision_threshold`. Jev never writes text, so
   an option that needs words is offered only when the chief of staff already
   wrote them. Without Jev's API key the service
   still runs and every entry reaches you; `osmia doctor` fails its Jev check.

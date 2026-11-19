@@ -5,6 +5,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -110,6 +111,10 @@ var checksChoiceEntry = delivery.ChecksChoiceEntry
 
 func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	return s.delivery().DeliveryEntry(ctx, repository, stream)
+}
+
+func (s *Service) deliveryRouteGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*intake.Gate, error) {
+	return s.delivery().DeliveryRouteGate(ctx, repository, stream)
 }
 
 const FinalReportTool = delivery.FinalReportTool

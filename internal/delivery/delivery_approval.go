@@ -367,7 +367,19 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read check result"}
 	}
 	canLand := feature.Value == AssembledState && s.About(repository).Project.Lands()
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief, CanLand: canLand}, nil
+	recommendation := ""
+	if canLand {
+		// Jev's pick for this delivery that it had no authority to apply: the card
+		// shows it beside the owner's own routes.
+		if push, found, err := CurrentPush(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read pushes"}
+		} else if found {
+			if recommendation, err = recommendedRoute(repository, stream, push); err != nil {
+				return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read Jev's judgment of the delivery"}
+			}
+		}
+	}
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief, CanLand: canLand, Recommendation: recommendation}, nil
 }
 
 // draftHash identifies the title, description, style and commit messages a

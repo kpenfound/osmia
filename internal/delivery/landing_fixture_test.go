@@ -141,9 +141,11 @@ func (f *landFixture) controller() *Controller {
 			return f.repo.Project(), stream, f.repo, nil
 		},
 		Router: landPort{f.router}, PullRequests: f.pulls,
-		UnresolvedWork:              func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
-		EdgePublicationWait:         func(*trace.Repository, config.WorkstreamID) (string, error) { return f.options.edgeWait, nil },
-		UnresolvedMergeOrderEdge:    func(*trace.Repository, config.WorkstreamID) (string, bool, error) { return f.options.mergeOrder, f.options.mergeOrder != "", nil },
+		UnresolvedWork:      func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
+		EdgePublicationWait: func(*trace.Repository, config.WorkstreamID) (string, error) { return f.options.edgeWait, nil },
+		UnresolvedMergeOrderEdge: func(*trace.Repository, config.WorkstreamID) (string, bool, error) {
+			return f.options.mergeOrder, f.options.mergeOrder != "", nil
+		},
 		PendingMergeOrderReferences: func(*trace.Repository, config.WorkstreamID) ([]string, error) { return nil, nil },
 		RequestRebase: func(context.Context, *trace.Repository, config.WorkstreamID) error {
 			f.mu.Lock()

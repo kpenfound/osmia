@@ -98,7 +98,7 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 			t.Fatalf("%s: %+v", kind, res)
 		}
 	}
-	if len(tasks) != 17 || len(jev.Kinds()) != 17 {
+	if len(tasks) != 18 || len(jev.Kinds()) != 18 {
 		t.Fatalf("tasks = %v", tasks)
 	}
 	records := f.judgmentRecords(t)
@@ -116,7 +116,7 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 			t.Fatalf("record = %+v", r)
 		}
 	}
-	if len(seen) != 17 {
+	if len(seen) != 18 {
 		t.Fatalf("recorded tasks = %v", seen)
 	}
 }
@@ -384,5 +384,53 @@ func TestADecisionUsesTheDefaultThresholdWhenNoneIsConfigured(t *testing.T) {
 	res := judge(&settings, p, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindObjection, jev.ObjectionKey("o"), "s", "a", "b"))
 	if res.Status != jev.Nonbinding || res.Threshold != config.DefaultJevDecisionThreshold {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+// A delivery's occurrence key tells its workstream, final review round and
+// pushed commit apart, and its request offers land, pull-request and defer.
+func TestDeliveryRouteIsKeyedByWorkstreamReviewAndCommitAndOffersDefer(t *testing.T) {
+	keys := map[string]bool{}
+	for _, k := range []string{
+		jev.DeliveryRouteKey("w_1", 1, "abc"), jev.DeliveryRouteKey("w_1", 2, "abc"), jev.DeliveryRouteKey("w_1", 1, "def"), jev.DeliveryRouteKey("w_2", 1, "abc"),
+	} {
+		if jev.ValidOccurrence(jev.KindDeliveryRoute, k) != "" {
+			t.Fatalf("%q is not a valid occurrence key", k)
+		}
+		keys[k] = true
+	}
+	if len(keys) != 4 {
+		t.Fatalf("the keys are %v, want 4 different ones", keys)
+	}
+	if !jev.KindDeliveryRoute.Valid() || jev.KindDeliveryRoute.Task() != "decide-delivery-route" || jev.KindDeliveryRoute.Version() != 1 {
+		t.Fatalf("the kind is %s, version %d", jev.KindDeliveryRoute.Task(), jev.KindDeliveryRoute.Version())
+	}
+
+	f := newFixture(t)
+	settings := testSettings()
+	p := &jevtest.Provider{Results: []jevtest.Result{pick("land", 0.95, "pull-request", "defer")}}
+	key := jev.DeliveryRouteKey("w_1", 1, "abc")
+	first := judge(&settings, p, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindDeliveryRoute, key, "state", "land", "pull-request"))
+	if first.Status != jev.Binding || first.Pick != "land" {
+		t.Fatalf("first = %+v", first)
+	}
+	var offered []string
+	for _, o := range p.Requests()[0].Questions["decision"].Options {
+		offered = append(offered, o.Name)
+	}
+	if strings.Join(offered, ",") != "land,pull-request,defer" {
+		t.Fatalf("Jev was offered %v", offered)
+	}
+
+	// The recorded result is reused after a restart, and a deferral is
+	// recorded as a nonbinding result.
+	f.reopen(t)
+	again := judge(&settings, &jevtest.Provider{}, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindDeliveryRoute, key, "other state", "land", "pull-request"))
+	if again.Status != jev.Binding || again.Pick != "land" || !again.Recorded || again.Judgment != first.Judgment {
+		t.Fatalf("again = %+v", again)
+	}
+	deferred := judge(&settings, &jevtest.Provider{Results: []jevtest.Result{pick("defer", 0.99, "land", "pull-request")}}, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindDeliveryRoute, jev.DeliveryRouteKey("w_1", 2, "abc"), "state", "land", "pull-request"))
+	if deferred.Status != jev.Nonbinding || !deferred.Deferred {
+		t.Fatalf("deferred = %+v", deferred)
 	}
 }

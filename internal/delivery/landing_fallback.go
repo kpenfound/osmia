@@ -188,17 +188,38 @@ func (r *landingRun) fallbackApproval(ctx context.Context, report FinalReport) (
 			return *approval, decision.Revision, nil
 		}
 	}
-	title, body, _, err := r.S.draftDelivery(r.cfg, r.Repository, r.stream, report)
+	recorded, next, err := r.S.recordDecidedApproval(ctx, r.Repository, r.cfg, r.stream, report, r.in.Decider, "the upstream refused the landing push")
+	if err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return DeliveryApproval{}, 0, fmt.Errorf("the delivery approval changed while the fallback recorded its own: %w", err)
+		}
+		return DeliveryApproval{}, 0, err
+	}
+	return recorded, next, nil
+}
+
+// recordDecidedApproval records, for the decider, an approval of the drafted
+// title and description of the report's delivery, with the delivery subject's
+// transition, and returns it with its revision. The service records it where
+// the owner has not: because says why. The publication applies it as it applies
+// the owner's approval.
+func (s *Controller) recordDecidedApproval(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, report FinalReport, decider LandDecider, because string) (DeliveryApproval, int, error) {
+	review, decision, _, err := DeliveryDocuments(repository, stream)
 	if err != nil {
 		return DeliveryApproval{}, 0, err
 	}
-	style := r.cfg.Project.Landing
-	messages, err := DeliveryMessages(ctx, r.cfg, report, style)
+	blocking := ReportBlocking(report)
+	title, body, _, err := s.draftDelivery(cfg, repository, stream, report)
 	if err != nil {
 		return DeliveryApproval{}, 0, err
 	}
-	at := r.S.Now()
-	by, judgment := r.in.Decider.approval()
+	style := cfg.Project.Landing
+	messages, err := DeliveryMessages(ctx, cfg, report, style)
+	if err != nil {
+		return DeliveryApproval{}, 0, err
+	}
+	at := s.Now()
+	by, judgment := decider.approval()
 	next := decision.Revision + 1
 	recorded := DeliveryApproval{Review: report.Review, ReviewRevision: review.Revision, Commit: report.Commit, Seal: report.Seal, SpecHash: report.SpecHash, Spec: report.Spec, Plan: report.Plan, Charter: report.Charter,
 		DraftHash: draftHash(title, body, style, messages), Title: title, Description: body, DescriptionHash: DescriptionHash(body), Messages: messages, Style: style, At: at, AcceptedBlocking: blocking, DecidedBy: by, Judgment: judgment}
@@ -207,22 +228,19 @@ func (r *landingRun) fallbackApproval(ctx context.Context, report FinalReport) (
 		return DeliveryApproval{}, 0, err
 	}
 	actor := foremanActor
-	if r.in.Decider.By == trace.DecidedByJev {
+	if decider.By == trace.DecidedByJev {
 		actor = trace.JevActor
 	}
 	id := fmt.Sprintf("delivery-owner-%d", next)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DeliveryDocument, Revision: next, Project: r.Repository.Project(), Workstream: r.stream, At: at, Actor: actor, Cause: id}, Path: DeliveryPath, Content: content}
-	state, err := r.Repository.Workflow(r.stream, DeliverySubject)
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DeliveryDocument, Revision: next, Project: repository.Project(), Workstream: stream, At: at, Actor: actor, Cause: id}, Path: DeliveryPath, Content: content}
+	state, err := repository.Workflow(stream, DeliverySubject)
 	if err != nil {
 		return DeliveryApproval{}, 0, err
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.Repository.Project(), Workstream: r.stream, At: at, Actor: actor, Cause: "delivery-approval"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: actor, Cause: "delivery-approval"}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: DeliverySubject, From: state.Value, To: fmt.Sprintf("approved-%d", next),
-		Reason: fmt.Sprintf("the service recorded the drafted description %s for final review %d at %s as %s's approval, because the upstream refused the landing push", recorded.DescriptionHash, report.Review, report.Commit, r.in.Decider.name())}}
-	if _, err := r.Repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return DeliveryApproval{}, 0, fmt.Errorf("the delivery approval changed while the fallback recorded its own: %w", err)
-		}
+		Reason: fmt.Sprintf("the service recorded the drafted description %s for final review %d at %s as %s's approval, because %s", recorded.DescriptionHash, report.Review, report.Commit, decider.name(), because)}}
+	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		return DeliveryApproval{}, 0, err
 	}
 	return recorded, next, nil
