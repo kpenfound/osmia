@@ -50,6 +50,10 @@ type DeliveryApproval = api.DeliveryApproval
 
 type DeliveryDecision = api.DeliveryDecision
 
+type DeliveryLandDecision = api.DeliveryLandDecision
+
+type DeliveryLandResponse = api.DeliveryLandResponse
+
 type UnitDispatch = api.UnitDispatch
 
 type DraftEdit = api.DraftEdit

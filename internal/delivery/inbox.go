@@ -119,7 +119,14 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	if err != nil {
 		return InboxEntry{}, false, err
 	}
-	if p.Approval != nil {
+	if p.Approval != nil && p.Approval.Route == DeliveryRouteLand {
+		// An approval to land stands until the landing delivers the workstream:
+		// while a landing is held, being reconciled or falling back, the card
+		// stays away. It comes back if the landing ended without delivering.
+		if pending, err := landingPending(repository, stream); err != nil || pending {
+			return InboxEntry{}, false, err
+		}
+	} else if p.Approval != nil {
 		if refused, err := PublicationRefused(repository, stream, prior.Revision); err != nil || !refused {
 			return InboxEntry{}, false, err
 		}
@@ -153,5 +160,14 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	}
 	e.Blocked = "Marking the pull request ready for review."
 	e.Options = []string{"approve"}
+	// A project that lands offers the same decision as a second answer, which
+	// moves its base branch to the checked commit instead.
+	if cfg := s.About(repository); p.CanLand {
+		e.Options = append(e.Options, "land")
+		e.Land = &InboxAnswer{Method: http.MethodPost, Path: e.Answer.Path + "/land", Body: body}
+		e.Question += fmt.Sprintf(" Approve and land moves %s of %s to the checked commit instead.", cfg.Project.BaseBranch, cfg.Project.Upstream)
+		e.Blocked = "Marking the pull request ready for review, or landing it on " + cfg.Project.BaseBranch + "."
+	}
+	e.Recommendation = p.Recommendation
 	return e, true, nil
 }

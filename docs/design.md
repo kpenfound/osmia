@@ -1023,6 +1023,7 @@ osmia trace <workstream> [unit|criterion|commit]
 osmia packet <workstream> [--json]   read the packet and workgroup spec, including revision pins
 osmia ratify <workstream> [--project-spec-revision N --spec-revision N --plan-revision N]   use the pins displayed by packet for cross-repo work
 osmia merged <workstream>            an assembled branch you merged into upstream yourself, recorded delivered
+osmia land <workstream>              approve and land an assembled workstream on a project whose delivery is "jev"
 osmia session open <repo-id> --profile default   a session for exploratory work; chat happens on the web page or the API
 osmia session commit <session> "..."          commit every worktree change onto the session's branch
 osmia session check <session>                 check the session's head commit

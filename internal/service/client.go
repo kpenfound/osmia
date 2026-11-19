@@ -520,6 +520,14 @@ func (c *Client) ApproveDelivery(ctx context.Context, id config.WorkstreamID, de
 	return v, err
 }
 
+// ApproveAndLand records the owner's approval to land a reviewed commit on the
+// base branch and lands it.
+func (c *Client) ApproveAndLand(ctx context.Context, id config.WorkstreamID, decision api.DeliveryLandDecision) (api.DeliveryLandResponse, error) {
+	var v api.DeliveryLandResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/delivery/"+url.PathEscape(string(id))+"/land", decision, &v)
+	return v, err
+}
+
 // ChecksChoice answers the question whether the final review of a push keeps
 // waiting for its check results or continues without them.
 func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req api.ChecksChoiceRequest) (api.ChecksChoiceResponse, error) {

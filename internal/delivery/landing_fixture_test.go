@@ -55,6 +55,8 @@ type landFixture struct {
 	base, reviewed, signed string
 	branch                 string
 
+	options landOptions
+
 	mu      sync.Mutex
 	steps   []string
 	hooks   map[string]func() error
@@ -68,6 +70,9 @@ type landOptions struct {
 	checks string
 	// delivery overrides the project's delivery setting.
 	delivery string
+	// edgeWait is what a hard-block dependency waiting to merge says, and
+	// mergeOrder the reference of a merge-order dependency still waiting.
+	edgeWait, mergeOrder string
 }
 
 func newLandFixture(t *testing.T, opts ...landOptions) *landFixture {
@@ -78,7 +83,7 @@ func newLandFixture(t *testing.T, opts ...landOptions) *landFixture {
 	}
 	cfg, repo := deliveryTrace(t)
 	home := filepath.Dir(cfg.Project.Clone)
-	f := &landFixture{t: t, cfg: cfg, repo: repo, home: home, clock: &watchClock{at: fixturekit.DemoStart.Add(time.Hour)}, hooks: map[string]func() error{}, branch: featureBranch(stream)}
+	f := &landFixture{t: t, cfg: cfg, repo: repo, home: home, clock: &watchClock{at: fixturekit.DemoStart.Add(time.Hour)}, hooks: map[string]func() error{}, branch: featureBranch(stream), options: o}
 	cfg.Project.Delivery = config.DeliveryJev
 	if o.delivery != "" {
 		cfg.Project.Delivery = o.delivery
@@ -137,8 +142,8 @@ func (f *landFixture) controller() *Controller {
 		},
 		Router: landPort{f.router}, PullRequests: f.pulls,
 		UnresolvedWork:              func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
-		EdgePublicationWait:         func(*trace.Repository, config.WorkstreamID) (string, error) { return "", nil },
-		UnresolvedMergeOrderEdge:    func(*trace.Repository, config.WorkstreamID) (string, bool, error) { return "", false, nil },
+		EdgePublicationWait:         func(*trace.Repository, config.WorkstreamID) (string, error) { return f.options.edgeWait, nil },
+		UnresolvedMergeOrderEdge:    func(*trace.Repository, config.WorkstreamID) (string, bool, error) { return f.options.mergeOrder, f.options.mergeOrder != "", nil },
 		PendingMergeOrderReferences: func(*trace.Repository, config.WorkstreamID) ([]string, error) { return nil, nil },
 		RequestRebase: func(context.Context, *trace.Repository, config.WorkstreamID) error {
 			f.mu.Lock()

@@ -360,7 +360,8 @@ From the page you can:
   opens no pull request and pushes nothing. Jev decides the card first at
   `jev.owner_threshold`: a confident approval is recorded as Jev's, pins the
   same review and publishes the same text, and otherwise the card reaches you
-  with Jev's pick as its recommendation. While a
+  with Jev's pick as its recommendation. On a project that lands,
+  **Approve and land** sits beside it (described below). While a
   merge-order dependency has not merged, approving is recorded and the pull
   request stays a draft until it has (see
   [Draft pull request and Cloud checks](#draft-pull-request-and-cloud-checks)).
@@ -512,6 +513,26 @@ the draft ready on GitHub yourself, the next `pull_request_poll` notices it and
 records the workstream delivered by you. If a merge-order dependency has not
 merged, the approval is recorded and the pull request stays a draft until it
 has; you approve again once the dependency update has been reviewed.
+
+**Approve and land.** On a project whose
+[`delivery`](configuration.md#project-configtoml) is `jev`, the delivery card also
+offers **Approve and land** beside **Mark ready for review** (**Accept findings
+and land** when the final review has blocking findings). It is pinned to the
+same review, commit and description, and works whether or not Jev is configured.
+Instead of marking the pull request ready, the service fast-forwards the base
+branch to the signed commit of the current push, once checks passed on that
+commit. The feature branch stays, no merge commit is made and no pull request is
+merged. It is refused for the same reasons as **Mark ready for review**,
+including a hard-block or merge-order dependency that has not merged, and when
+checks did not pass on the pushed commit; nothing is pushed then. After you
+approve, the card does not come back for what happens next: the landing waits
+while the router holds it, a push the upstream refuses (branch protection, for
+example) marks the draft ready for review instead and delivers the workstream
+with a notice saying why it did not land, and a push whose outcome is unknown is
+settled against the fetched base branch. If the base branch moved, the
+workstream is rebased and checked again, and its card comes back for the new
+commit. A project that delivers by pull request has no such button. When Jev
+recommends a route, the card shows it and makes that button the primary one.
 
 Osmia has not verified that Cloud Checks run on draft pull requests, or that
 statuses land on the upstream head commit of a pull request opened from a

@@ -896,6 +896,55 @@
         }
       }
     },
+    "/v1/delivery/{workstream}/land": {
+      "post": {
+        "summary": "Approve and land: record the owner's approval and land an assembled workstream of a project whose delivery is \"jev\" by a fast-forward of its base branch to the pushed commit; refused as a conflict, with nothing pushed, for a project that delivers by pull request, a stale presentation, unaccepted blocking findings, checks that did not pass on the pushed commit, or a dependency still waiting to merge",
+        "operationId": "postDeliveryByWorkstreamLand",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryLandDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryLandResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/delivery/{workstream}/merged": {
       "post": {
         "summary": "Record an assembled workstream delivered by the owner's own merge into upstream",
@@ -5476,6 +5525,9 @@
           "review_revision": {
             "type": "integer"
           },
+          "route": {
+            "type": "string"
+          },
           "seal": {
             "type": "integer"
           },
@@ -5587,6 +5639,43 @@
         },
         "type": "object"
       },
+      "DeliveryLandDecision": {
+        "properties": {
+          "accept_blocking": {
+            "type": "boolean"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "draft_hash": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryLandResponse": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/DeliveryApproval"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryLanding": {
         "properties": {
           "at": {
@@ -5654,6 +5743,9 @@
           "brief": {
             "$ref": "#/components/schemas/DeliveryBrief"
           },
+          "can_land": {
+            "type": "boolean"
+          },
           "checks": {
             "$ref": "#/components/schemas/DeliveryChecks"
           },
@@ -5695,6 +5787,9 @@
           },
           "ready": {
             "$ref": "#/components/schemas/DeliveryReady"
+          },
+          "recommendation": {
+            "type": "string"
           },
           "report": {
             "$ref": "#/components/schemas/FinalReport"
@@ -6905,6 +7000,9 @@
           },
           "kind": {
             "type": "string"
+          },
+          "land": {
+            "$ref": "#/components/schemas/InboxAnswer"
           },
           "number": {
             "type": "integer"

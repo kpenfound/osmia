@@ -366,7 +366,8 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read check result"}
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
+	canLand := feature.Value == AssembledState && s.About(repository).Project.Lands()
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief, CanLand: canLand}, nil
 }
 
 // draftHash identifies the title, description, style and commit messages a
@@ -409,6 +410,13 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	project, stream, repository, api := s.ConversationTrace(raw)
 	if api != nil {
 		return DeliveryApproval{}, api
+	}
+	// Landing and marking the pull request ready are two ways to deliver; a
+	// landing under way decides which one this workstream takes.
+	if landing, err := LandingInFlight(repository, stream); err != nil {
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read landing records"}
+	} else if landing {
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: "a landing of the workstream is under way; it delivers the workstream, or says why it did not, before the pull request is marked ready"}
 	}
 	if _, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream); err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot validate final review"}
@@ -462,6 +470,11 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 		if refused {
 			existing = nil
 		}
+	}
+	// An approval to land is not the approval to mark ready; this one replaces
+	// it.
+	if existing != nil && existing.Route == DeliveryRouteLand {
+		existing = nil
 	}
 	if existing != nil && req.Description == nil && req.Messages == nil && existing.Style == presented.Style && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.DraftHash == req.DraftHash {
 		return *existing, nil
@@ -532,6 +545,9 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 	}
 	if approval == nil {
 		return DeliveryApproval{}, "the owner has not marked the pull request ready for review", nil
+	}
+	if approval.Route == DeliveryRouteLand {
+		return *approval, "the owner approved landing the workstream on its base branch, not marking the pull request ready for review", nil
 	}
 	if privateCheckTrace(PublishedTitle(*approval, stream)) {
 		return *approval, "pull request titles must not include private Dagger Cloud trace links", nil

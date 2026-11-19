@@ -270,6 +270,9 @@ func (a TestAccess) Feed(raw string) (FeedResponse, *APIError) { return a.s.feed
 func (a TestAccess) Delivery(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return a.s.deliveryPresentation(ctx, raw)
 }
+func (a TestAccess) ApproveAndLand(ctx context.Context, raw string, r DeliveryLandDecision) (DeliveryLandResponse, *APIError) {
+	return a.s.approveAndLand(ctx, raw, r)
+}
 func (a TestAccess) ApproveDelivery(ctx context.Context, raw string, r DeliveryDecision) (DeliveryApproval, *APIError) {
 	return a.s.approveDelivery(ctx, raw, r)
 }
