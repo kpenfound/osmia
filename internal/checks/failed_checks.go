@@ -47,6 +47,22 @@ func SafeLink(link string) string {
 	return u.String()
 }
 
+var linkInText = regexp.MustCompile(`(?i)https?://[^\s<>"'`+"`"+`)\]]+`)
+
+// SafeText returns text with every http or https link in it as SafeLink gives
+// it: a link that carries a credential keeps no part of it, and a link that
+// cannot be given as it stands is replaced by "[link withheld]".
+func SafeText(text string) string {
+	return linkInText.ReplaceAllStringFunc(text, func(link string) string {
+		trimmed := strings.TrimRight(link, ".,;:!?")
+		tail := link[len(trimmed):]
+		if safe := SafeLink(trimmed); safe != "" {
+			return safe + tail
+		}
+		return "[link withheld]" + tail
+	})
+}
+
 // CloudFailures lists the failed checks of the result as the records that keep
 // them: name, trace id, the failing status and its link.
 func CloudFailures(result CloudResult) []api.CheckFailure {
@@ -62,9 +78,9 @@ func CloudFailures(result CloudResult) []api.CheckFailure {
 // status link when it has one.
 func DescribeFailedCheck(f api.CheckFailure) string {
 	if command := TraceCommand(f.TraceID); command != "" {
-		return fmt.Sprintf("%s: `%s`", f.Name, command)
+		return fmt.Sprintf("%s: `%s`", SafeText(f.Name), command)
 	}
-	out := f.Name + ": Dagger Cloud posted no trace id for this check"
+	out := SafeText(f.Name) + ": Dagger Cloud posted no trace id for this check"
 	if link := SafeLink(f.TargetURL); link != "" {
 		out += "; status: " + link
 	}

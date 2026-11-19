@@ -1,11 +1,13 @@
 package delivery
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/pulls"
 )
 
@@ -184,5 +186,88 @@ func TestPassedAndIncompleteRunsGiveNoFailedChecks(t *testing.T) {
 	runs := f.runs()
 	if len(runs) != 1 || runs[0].Status != ChecksIncomplete || len(runs[0].FailedChecks) != 0 || strings.Contains(FinalCheckEvidence(runs[0]), "no failing check status") || f.noticeOf() != "" {
 		t.Fatalf("incomplete runs %+v", runs)
+	}
+}
+
+// TestFailedRunLinksCarryNoCredentialOnAnySurface drives a failed run whose
+// status links carry credentials through the watch, the reader's evidence,
+// the chief's notice and the poll tool.
+func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t)
+	f.assemble()
+	const secret = "s3cretvalue"
+	runURL := "https://dagger.cloud/run.json?token=" + secret
+	post := func(id int64, at time.Duration) {
+		done := pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: "failure", CreatedAt: f.at(at), TargetURL: runURL}
+		f.api.mu.Lock()
+		f.api.docs[runURL] = counts(92, 88, 4, 0)
+		f.api.mu.Unlock()
+		withTrace := cloudFailedStatus(f, id+100, "test:a", traceA, at)
+		withTrace.TargetURL += "&access_token=" + secret
+		userinfo := cloudFailedStatus(f, id+101, "build", "", at)
+		userinfo.TargetURL = "https://user:" + secret + "@dagger.cloud/acme/checks?check=build"
+		queried := cloudFailedStatus(f, id+102, "lint", "", at)
+		queried.TargetURL += "&sig=" + secret
+		withKey := cloudFailedStatus(f, id+103, "docs", traceB, at)
+		f.api.set(f.loaded(), done, withTrace, userinfo, queried, withKey)
+	}
+	f.afterWait()
+	post(10, 100*time.Second)
+	f.mustWait()
+	f.clock.Advance(10 * time.Minute)
+	post(20, f.clock.Now().Sub(f.pushedAt))
+	run := f.mustComplete()
+	if run.Status != "failed" || len(run.FailedChecks) != 4 || run.StatusURL != runURL {
+		t.Fatalf("run %+v", run)
+	}
+
+	poll := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	pollText, err := json.Marshal(poll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	surfaces := map[string]string{
+		"reader evidence": FinalCheckEvidence(run),
+		"chief notice":    f.noticeOf(),
+		"poll result":     string(pollText),
+	}
+	for name, text := range surfaces {
+		if strings.Contains(text, secret) || strings.Contains(text, "user:") {
+			t.Errorf("%s carries a credential:\n%s", name, text)
+		}
+		for _, want := range []string{"dagger trace " + traceA, "dagger trace " + traceB, "build", "lint"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, text)
+			}
+		}
+	}
+	if evidence := surfaces["reader evidence"]; !strings.Contains(evidence, "\nStatus: https://dagger.cloud/run.json\n") {
+		t.Errorf("reader evidence lacks the run's status link without its credential:\n%s", evidence)
+	}
+	if strings.Contains(surfaces["chief notice"], "run status:") || !strings.Contains(surfaces["chief notice"], "lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@"+pushedCommit+"?check=lint") {
+		t.Errorf("chief notice:\n%s", surfaces["chief notice"])
+	}
+
+	// The durable record is unchanged by what is shown.
+	recorded := f.runs()
+	if last := recorded[len(recorded)-1]; last.StatusURL != runURL || len(last.FailedChecks) != 4 {
+		t.Errorf("recorded run %+v", last)
+	}
+}
+
+func TestStatusURLWithUserinfoIsNotShownToAnyReader(t *testing.T) {
+	t.Parallel()
+	run := FinalCheckRun{Source: api.CheckSourcePullRequest, Status: "failed", Review: 1, PullRequest: 7, Push: 1, PushedCommit: pushedCommit,
+		StatusURL: "https://user:s3cretvalue@dagger.cloud/run.json", Error: "read https://dagger.cloud/run.json?token=s3cretvalue failed",
+		Counts:       &api.CheckCounts{Total: 3, Passed: 2, Failed: 1},
+		FailedChecks: []api.CheckFailure{{Name: "lint", TraceID: traceA}}}
+	for name, text := range map[string]string{"evidence": FinalCheckEvidence(run), "notice": FailedChecksNotice(run)} {
+		if strings.Contains(text, "s3cretvalue") || strings.Contains(text, "user:") || !strings.Contains(text, "dagger trace "+traceA) {
+			t.Errorf("%s:\n%s", name, text)
+		}
+	}
+	if evidence := FinalCheckEvidence(run); strings.Contains(evidence, "Status:") || !strings.Contains(evidence, "Note: read https://dagger.cloud/run.json failed") {
+		t.Errorf("evidence:\n%s", evidence)
 	}
 }

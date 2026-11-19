@@ -259,9 +259,9 @@ func (s *Controller) PollChecksNow(ctx context.Context, repository *trace.Reposi
 		return ChecksPollResult{}, "", ctx.Err()
 	}
 	if err != nil {
-		return ChecksPollResult{Push: push, Outcome: "unreadable", Detail: err.Error()}, "", nil
+		return ChecksPollResult{Push: push, Outcome: "unreadable", Detail: checkrun.SafeText(err.Error())}, "", nil
 	}
-	detail := result.Detail
+	detail := checkrun.SafeText(result.Detail)
 	if detail == "" {
 		detail = describeOutcome(result)
 	}
@@ -657,7 +657,7 @@ func ChecksToolOf(load func() *Controller, repository *trace.Repository, scope c
 			}
 			failed := make([]pollFailedCheck, 0, len(result.Failed))
 			for _, f := range result.Failed {
-				failed = append(failed, pollFailedCheck{Name: f.Name, TraceID: f.TraceID, Command: checkrun.TraceCommand(f.TraceID), StatusURL: checkrun.SafeLink(f.TargetURL)})
+				failed = append(failed, pollFailedCheck{Name: checkrun.SafeText(f.Name), TraceID: f.TraceID, Command: checkrun.TraceCommand(f.TraceID), StatusURL: checkrun.SafeLink(f.TargetURL)})
 			}
 			return json.Marshal(struct {
 				Done         bool              `json:"done"`

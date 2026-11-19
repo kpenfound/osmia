@@ -732,8 +732,8 @@ func pullRequestEvidence(run FinalCheckRun) string {
 		c := run.Counts
 		out += fmt.Sprintf("\nCounts: %d checks, %d passed, %d failed, %d cancelled.", c.Total, c.Passed, c.Failed, c.Cancelled)
 	}
-	if run.StatusURL != "" {
-		out += "\nStatus: " + run.StatusURL
+	if link := checkrun.SafeLink(run.StatusURL); link != "" {
+		out += "\nStatus: " + link
 	}
 	if failed := checkrun.DescribeFailedChecks(run.FailedChecks, run.Counts, run.StatusURL, run.Status == "failed"); failed != "" {
 		out += "\n" + failed
@@ -745,7 +745,7 @@ func pullRequestEvidence(run FinalCheckRun) string {
 		}
 	}
 	if run.Error != "" {
-		out += "\nNote: " + run.Error
+		out += "\nNote: " + checkrun.SafeText(run.Error)
 	}
 	return out
 }

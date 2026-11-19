@@ -41,6 +41,18 @@ func TestSafeLinkCarriesNoCredential(t *testing.T) {
 	}
 }
 
+func TestSafeTextCarriesNoCredentialInAnyLink(t *testing.T) {
+	t.Parallel()
+	got := SafeText("read https://dagger.cloud/run.json?token=s3cret&x=1, then https://u:s3cret@dagger.cloud/y. and (https://dagger.cloud/z?api_key=s3cret) done")
+	want := "read https://dagger.cloud/run.json?x=1, then [link withheld]. and (https://dagger.cloud/z) done"
+	if got != want {
+		t.Errorf("SafeText = %q, want %q", got, want)
+	}
+	if plain := "the module did not load"; SafeText(plain) != plain {
+		t.Errorf("text without a link changed: %q", SafeText(plain))
+	}
+}
+
 func TestDescribeFailedChecks(t *testing.T) {
 	t.Parallel()
 	failed := []api.CheckFailure{
