@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/status"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -145,10 +146,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	// Handed and not-yet-started workstreams are both planning; the CLI's
 	// text output retains their underlying recorded states.
 	handed := "handed"
-	full := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
+	full := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(stream).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(stream).String(), Status: &wire.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
+	none := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(quiet).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(quiet).String()}
 	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)

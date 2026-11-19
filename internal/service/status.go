@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/readview"
+	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -160,6 +161,8 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 	})
 	statuses := []WorkstreamStatus{}
 	for _, w := range out {
+		w.status.TelemetryTraceID = telemetry.WorkstreamTrace(w.status.Workstream).String()
+		w.status.TelemetryRootSpanID = telemetry.WorkstreamRoot(w.status.Workstream).String()
 		statuses = append(statuses, w.status)
 	}
 	return statuses, unreadable, nil
