@@ -273,14 +273,6 @@ func TestAnIntentChangingDropOfADependencyGoesToTheOwnerAndNothingIsDropped(t *t
 	}
 }
 
-func recordMove(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, n int, move api.WorkstreamMove) {
-	t.Helper()
-	data, err := json.Marshal(move)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkstreamMoveDocument(n), Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"}
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkstreamMovePath(n), Content: string(data) + "\n"}}))
-}
-
 // With large records, the requests of both exits stay within 72 KiB, carry no
 // code, count what the records hold and say what was cut.
 func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T) {

@@ -878,6 +878,10 @@ type WorkstreamStatus struct {
 	// nothing is waited on. A wait is status only: it never creates an
 	// inbox entry or a notification (spec#15).
 	Wait string `json:"wait,omitempty"`
+	// TelemetryTraceID and TelemetryRootSpanID are the workstream's
+	// OpenTelemetry identity, derived from the workstream ID alone.
+	TelemetryTraceID    string `json:"telemetry_trace_id" description:"OpenTelemetry trace ID of every span Osmia sends about the workstream, as 32 lowercase hexadecimal characters. It depends only on the workstream ID, so it is present whether or not telemetry export is configured and is the same after a restart. It is not the durable trace record store read through /v1/trace."`
+	TelemetryRootSpanID string `json:"telemetry_root_span_id" description:"Span ID of the workstream's osmia.workstream root span, the parent of its state, turn and check spans, as 16 lowercase hexadecimal characters. With telemetry_trace_id it names a span context an API client can link to."`
 }
 
 // WorkgroupView presents recorded membership and the workstream graph. It

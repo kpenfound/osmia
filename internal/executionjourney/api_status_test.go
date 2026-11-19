@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	status "github.com/kpenfound/osmia/internal/status"
+	telemetry "github.com/kpenfound/osmia/internal/telemetry"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -155,7 +156,8 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		if !ok {
 			t.Fatalf("workstream %s has no recorded workgroup", w)
 		}
-		return WorkstreamStatus{DisplayState: "planning", Workgroup: &WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}, Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit}
+		return WorkstreamStatus{DisplayState: "planning", Workgroup: &WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}, Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit,
+			TelemetryTraceID: telemetry.WorkstreamTrace(w).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(w).String()}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)

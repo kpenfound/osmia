@@ -323,6 +323,24 @@ parts `slot`, kind, source, pool, project, work and start.
 A record that is rewritten has a new revision and so a new span, while the span
 of one revision is always the same.
 
+### Reading a workstream's trace from the API
+
+Every workstream in the workstream status (`GET /v1/status`) carries its
+telemetry identity, derived from the workstream ID with the rules above:
+
+| Field | Value |
+| --- | --- |
+| `telemetry_trace_id` | the trace ID of every span about the workstream, as 32 lowercase hexadecimal characters |
+| `telemetry_root_span_id` | the span ID of the workstream's `osmia.workstream` root span, the parent of its state, turn and check spans, as 16 lowercase hexadecimal characters |
+
+An API client such as Kern links its own span to a workstream's trace by using
+the two values as the linked span context, without deriving IDs itself. Both
+fields are present on every row, archived rows whose durable trace was deleted
+included, whether or not telemetry export is configured, and they are the same
+after a restart. They are identities, not a claim that spans were exported. The
+workstream's durable record store, read through `trace` and `trace_deleted` and
+`/v1/trace/<workstream>`, is a different thing.
+
 ## Restarts
 
 Because starts come from the trace and IDs are derived, a restart loses
