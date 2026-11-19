@@ -108,6 +108,8 @@ func settingValue(p config.Project, name string) any {
 		return p.BaseBranch
 	case "landing":
 		return p.Landing
+	case "delivery":
+		return p.Delivery
 	case "upstream_rebase":
 		return p.UpstreamRebase
 	case "pull_request_poll":
@@ -223,7 +225,7 @@ func (s *Service) notApplied(cfg *config.Config, id config.ProjectID, path strin
 // projectEdit translates a request into the settings the file edit changes.
 func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
 	out := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Bools: map[string]bool{}, Entities: e.Set.HearsayEntities, Clear: e.Clear, ClearEntities: e.ClearHearsayEntities}
-	for name, value := range map[string]*string{"name": e.Set.Name, "upstream": e.Set.Upstream, "fork": e.Set.Fork, "clone": e.Set.Clone, "base_branch": e.Set.BaseBranch, "landing": e.Set.Landing, "upstream_rebase": e.Set.UpstreamRebase, "pull_request_poll": e.Set.PullRequestPoll, "checks_timeout": e.Set.ChecksTimeout, "hearsay_scope": e.Set.HearsayScope} {
+	for name, value := range map[string]*string{"name": e.Set.Name, "upstream": e.Set.Upstream, "fork": e.Set.Fork, "clone": e.Set.Clone, "base_branch": e.Set.BaseBranch, "landing": e.Set.Landing, "delivery": e.Set.Delivery, "upstream_rebase": e.Set.UpstreamRebase, "pull_request_poll": e.Set.PullRequestPoll, "checks_timeout": e.Set.ChecksTimeout, "hearsay_scope": e.Set.HearsayScope} {
 		if value != nil {
 			out.Strings[name] = *value
 		}

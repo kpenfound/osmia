@@ -1120,6 +1120,7 @@ fork = "my-account/repository"      # optional; omit to push feature branches to
 clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
+delivery = "pull-request"           # default; "jev" lets a clean workstream land on base_branch
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
@@ -1135,7 +1136,32 @@ ASCII letters, digits, `.`, `_` and `-`, beginning with a letter or digit, witho
 a `.git` suffix. Fork and upstream must differ ignoring case. `base_branch` follows
 Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
-published with each unit's commit or as one commit. Repo `capacity.per_workstream` is a positive integer overriding the
+published with each unit's commit or as one commit.
+
+`delivery` chooses how a finished workstream leaves the project. It accepts two
+values:
+
+- `pull-request` (the default when the key is unset): the workstream goes out as
+  the draft pull request that publication opens, and is delivered when the owner
+  marks it ready, marks it ready on GitHub, or records its merge. The service
+  never pushes to the base branch.
+- `jev`: the project opts in to landing. A clean workstream can land directly,
+  with the service fast-forwarding `base_branch` to the signed, checked commit
+  of its push, either through the owner's "Approve and land" or through a
+  confident Jev `delivery-route` decision. When a landing does not happen, the
+  existing draft pull request is the fallback.
+
+Any other value fails validation with an error naming `delivery`. `jev` is
+refused on a project that delivers through a fork, that is, one whose push
+repository (`fork`) is not its `upstream`; the error names `delivery`, and the
+same project loads with `pull-request`. A `fork` that names the upstream is not
+a fork. Whether the account has push access to the upstream is not checked when
+the configuration loads: a refused push is handled when it happens. Saving the
+setting through project settings, the API or the web applies the same
+validation, and a project created by Osmia is written with
+`delivery = "pull-request"`.
+
+Repo `capacity.per_workstream` is a positive integer overriding the
 global default.
 
 Repo `capacity.git_operations` is a positive integer, default 4. Seal, build,
@@ -1230,7 +1256,7 @@ request needs a `Host` naming the listener.
 
 **Read.** The editable snapshot is the file on disk. The read decodes the
 current bytes once and returns, for each effective setting (`name`, `upstream`,
-`fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`,
+`fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
 `flake_fixes`, `hearsay_entities`):

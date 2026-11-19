@@ -9,7 +9,7 @@ import "github.com/kpenfound/osmia/internal/config"
 // Pending says the file's value is not yet applied. When the file does not
 // load, only Name and Effective are present.
 type ProjectConfigSetting struct {
-	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities."`
+	Name      string `json:"name" description:"Setting name: name, upstream, fork, clone, base_branch, landing, delivery, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities."`
 	Value     any    `json:"value,omitempty" description:"The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo and flake_fixes, or for hearsay_entities an object of local entity ID to Hearsay entity id."`
 	Default   *bool  `json:"default,omitempty" description:"True when the file leaves the setting out and Value is its default or inherited value."`
 	Effective any    `json:"effective" description:"The value in the loaded configuration."`
@@ -44,6 +44,7 @@ type ProjectConfigValues struct {
 	Clone                 *string           `json:"clone,omitempty"`
 	BaseBranch            *string           `json:"base_branch,omitempty"`
 	Landing               *string           `json:"landing,omitempty"`
+	Delivery              *string           `json:"delivery,omitempty" description:"pull-request (the default) delivers workstreams as pull requests; jev opts the project in to landing on its base branch and is refused on a project that delivers through a fork."`
 	UpstreamRebase        *string           `json:"upstream_rebase,omitempty"`
 	PullRequestPoll       *string           `json:"pull_request_poll,omitempty"`
 	ChecksTimeout         *string           `json:"checks_timeout,omitempty"`

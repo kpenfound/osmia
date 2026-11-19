@@ -208,8 +208,15 @@ func WriteProjectConfig(path string, p Project) error {
 	if !ValidRepository(p.Upstream) || (p.Fork != "" && !ValidRepository(p.Fork)) || !filepath.IsAbs(p.Clone) || !ValidBranch(p.BaseBranch) {
 		return errors.New("invalid project configuration")
 	}
-	text := fmt.Sprintf("version = 1\nname = %s\nupstream = %s\nfork = %s\nclone = %s\nbase_branch = %s\nlanding = \"commit-per-unit\"\n",
-		tomlString(p.Name), tomlString(p.Upstream), tomlString(p.Fork), tomlString(p.Clone), tomlString(p.BaseBranch))
+	delivery := p.Delivery
+	if delivery == "" {
+		delivery = DeliveryPullRequest
+	}
+	if !slices.Contains([]string{DeliveryPullRequest, DeliveryJev}, delivery) || delivery == DeliveryJev && !strings.EqualFold(p.PushRepository(), p.Upstream) {
+		return errors.New("invalid project configuration: delivery")
+	}
+	text := fmt.Sprintf("version = 1\nname = %s\nupstream = %s\nfork = %s\nclone = %s\nbase_branch = %s\nlanding = \"commit-per-unit\"\ndelivery = %s\n",
+		tomlString(p.Name), tomlString(p.Upstream), tomlString(p.Fork), tomlString(p.Clone), tomlString(p.BaseBranch), tomlString(delivery))
 	if p.Fork == "" || strings.EqualFold(p.Upstream, p.Fork) {
 		text = strings.Replace(text, "fork = "+tomlString(p.Fork)+"\n", "", 1)
 	}

@@ -5040,6 +5040,9 @@
           "clone": {
             "type": "string"
           },
+          "delivery": {
+            "type": "string"
+          },
           "flake_fixes": {
             "type": "boolean"
           },
@@ -7288,7 +7291,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, delivery, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -7328,6 +7331,13 @@
             ]
           },
           "clone": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "delivery": {
+            "description": "pull-request (the default) delivers workstreams as pull requests; jev opts the project in to landing on its base branch and is refused on a project that delivers through a fork.",
             "type": [
               "null",
               "string"
