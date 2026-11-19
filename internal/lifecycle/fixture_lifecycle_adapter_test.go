@@ -208,6 +208,7 @@ func (s *Service) edgeWaitPass(ctx context.Context, repo *trace.Repository) erro
 
 const baseRefreshAction = lifecycle.BaseRefreshAction
 const deliveryReviewAction = lifecycle.DeliveryReviewAction
+const ownPullRequestOpenReason = lifecycle.OwnPullRequestOpenReason
 const publishUpstreamAction = lifecycle.PublishUpstreamAction
 
 type baseRefreshInput = lifecycle.BaseRefreshInput

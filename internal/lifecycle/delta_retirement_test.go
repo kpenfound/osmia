@@ -99,6 +99,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 		t.Fatalf("delta was not queued before execution: %+v", intent)
 	}
 	before := currentChange(t, f.s, f.origin, c.ID)
+	awaitMemberBuilt(t, f, owner, address)
 	_, err := f.c.Abandon(ctx, address, "Owner cancelled the member before its queued delta ran.")
 	must(t, err)
 	_, err = f.c.Archive(ctx, address)
@@ -337,6 +338,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		}
 		allowedAddress.Store(config.WorkstreamID(""))
 	}
+	awaitMemberBuilt(t, f, owner, address)
 	_, err := f.c.Abandon(ctx, address, "Owner cancelled the shared delta dispatch's member.")
 	must(t, err)
 	_, err = f.c.Archive(ctx, address)
@@ -520,4 +522,17 @@ func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor
 	}) {
 		t.Fatalf("draft changing archived member %s was not refused with its reason", archived)
 	}
+}
+
+// awaitMemberBuilt waits until the member's own build has recorded its result.
+// Abandonment pins the workstream's state, and the build moves it.
+func awaitMemberBuilt(t *testing.T, f *productionDesignFixture, owner *trace.Repository, address config.WorkstreamID) {
+	t.Helper()
+	lifecycleAwait(t, f, "member build recorded", func() bool {
+		ops, err := owner.Operations(address)
+		must(t, err)
+		return slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
+			return op.Operation.Action == BuildAction && op.Result != nil
+		})
+	})
 }

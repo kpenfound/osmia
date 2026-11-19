@@ -70,6 +70,9 @@ type ProductionDesign struct {
 	Scheduled         func() (*config.Config, []ScheduledProject)
 	LastEdgePoll      func(config.ProjectID, config.WorkstreamID) (time.Time, bool)
 	EdgeObservationAt func(*trace.Repository, config.WorkstreamID) (int, time.Time, error)
+	// IdleRefresh reports whether a base refresh found nothing that the passing
+	// of time could change, so its next cadence is not a deadline to advance to.
+	IdleRefresh func(trace.Transition) bool
 
 	ContextMode              func(config.ProjectID) bundle.Mode
 	Project, Project2        *config.ProjectID
@@ -193,6 +196,12 @@ func (f *ProductionDesign) Timeout(t *testing.T, phase string) {
 			t.Logf("member=%s operations error=%v", member, err)
 		}
 		for _, op := range ops {
+			// A finished base refresh repeats on every cadence of the fixture
+			// clock, thousands of times by the end of a stalled wait, and would
+			// push the operations that explain the stall out of the log.
+			if op.Operation.Action == "base-refresh" && op.Acknowledged {
+				continue
+			}
 			failure := ""
 			for _, h := range op.History {
 				if h.Failure != "" {
@@ -892,7 +901,12 @@ func (f *ProductionDesign) LifecycleAdvanceScheduled(t *testing.T) {
 			if err == nil {
 				for _, transition := range slices.Backward(transitions) {
 					if transition.Subject == "base-refresh" {
-						record(transition.At.Add(interval))
+						// An idle refresh has no next deadline: its cadence would
+						// only wake the service to find the same thing, and each
+						// refresh is itself a change that wakes this loop.
+						if f.IdleRefresh == nil || !f.IdleRefresh(transition) {
+							record(transition.At.Add(interval))
+						}
 						break
 					}
 				}

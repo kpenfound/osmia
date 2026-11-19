@@ -2,6 +2,9 @@ package fixturekit
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,8 +19,25 @@ import (
 // PublicationForkBranch returns the fork's delivery commit and whether it exists.
 func PublicationForkBranch(t *testing.T, fork, branch string) (string, bool) {
 	t.Helper()
-	out := strings.TrimSpace(DemoGit(t, filepath.Dir(fork), "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+branch))
-	return out, out != ""
+	tip, err := PublicationForkTip(fork, branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tip, tip != ""
+}
+
+// PublicationForkTip returns the commit the fork's branch is at, empty when the
+// branch does not exist. It takes no test, so a fake host that a running
+// service reads from its own goroutines can use it: a fork that can no longer
+// be read is an error to report, not a failure of a test that may have ended.
+func PublicationForkTip(fork, branch string) (string, error) {
+	cmd := exec.Command("git", "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+branch)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Dir(fork), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git -C %s for-each-ref refs/heads/%s: %w\n%s", fork, branch, err, out)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // ApprovePublication records approval of the presented draft or the given description.

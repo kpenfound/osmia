@@ -18,6 +18,12 @@ const DeliveryReviewAction = "delivery-review"
 const PublishUpstreamAction = "publish-upstream"
 const BaseObservationDocument = "base-observation"
 
+// OwnPullRequestOpenReason is the recorded reason of an own-only observation
+// that found nothing to record: the pull request is still open or could not be
+// read. Only a change on the host, not the passing of time, gives the next
+// observation anything new.
+const OwnPullRequestOpenReason = "Own pull request remains open or unavailable; retry on the next cadence"
+
 // BaseObservation pins an integration check without changing the declared
 // dependency. Unavailable observations never authorize switching bases.
 type BaseObservation struct {
@@ -213,7 +219,7 @@ func (b *BaseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return coreadapter.OperationResult{}, lookupErr
 	}
 	if in.OwnOnly && !done {
-		reason := "Own pull request remains open or unavailable; retry on the next cadence"
+		reason := OwnPullRequestOpenReason
 		if err := ctx.Err(); err != nil {
 			return coreadapter.OperationResult{}, err
 		}

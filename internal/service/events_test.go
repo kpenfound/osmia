@@ -108,6 +108,9 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		s.Close()
 		t.Fatal("event turn did not run in the pass that queued it")
 	}
+	// The next tick is received once that pass has recorded the turn, so the
+	// service is not stopped halfway through it.
+	pass(s)
 	must(t, s.Close())
 
 	s, err = Start(ctx, opts)

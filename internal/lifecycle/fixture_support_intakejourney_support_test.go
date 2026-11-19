@@ -53,10 +53,11 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 var noticeOf = intakefixture.NoticeOf
 
 type productionDesignConfiguration struct {
-	options    func(*Options)
-	wait       func(*testing.T, *productionDesignFixture, string, func() bool)
-	checkpoint func(context.Context, string) error
-	handIn     bool
+	options              func(*Options)
+	wait                 func(*testing.T, *productionDesignFixture, string, func() bool)
+	checkpoint           func(context.Context, string) error
+	handIn               bool
+	openPullRequestsStay bool // the test changes its own pull requests and advances the clock itself
 }
 
 var providerOf = intakefixture.ProviderOf
@@ -186,6 +187,9 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			return intakefixture.TryLanding(ctx, r, m, event, LandAction, landInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
 		LeastWorkstream: leastWorkstream, NextReadyTurn: nextReadyTurn, LibrarianWorkstream: librarianWorkstream,
+	}
+	if f.configuration.openPullRequestsStay {
+		shared.IdleRefresh = func(t trace.Transition) bool { return t.Reason == ownPullRequestOpenReason }
 	}
 	if f.configuration.wait != nil {
 		shared.WaitMode = func(t *testing.T, phase string, done func() bool) { f.configuration.wait(t, f, phase, done) }

@@ -273,8 +273,9 @@ func TestAnIntentChangingDropOfADependencyGoesToTheOwnerAndNothingIsDropped(t *t
 	}
 }
 
-// With large records, the requests of both exits stay within 72 KiB, carry no
-// code, count what the records hold and say what was cut.
+// With large records, the request for a dependency exit stays within 72 KiB,
+// carries no code, counts what the records hold and says what was cut. The exit
+// from a cleared edge wait has its own large-records test.
 func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T) {
 	t.Parallel()
 	const code = "CODE-MARKER-FUNC"

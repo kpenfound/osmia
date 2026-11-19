@@ -1235,7 +1235,8 @@ func (g *Git) own(entry listed, name string) bool {
 }
 
 // Workspace returns the worktree named name when the clone has one. One
-// whose directory is gone is forgotten first, so it can be made again. A
+// whose directory is gone, or whose addition was stopped before it reached
+// its branch, is forgotten first, so it can be made again. A
 // worktree a replay in progress holds detached is on the branch the replay
 // returns to.
 func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error) {
@@ -1264,6 +1265,17 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 		if branch == "" {
 			if branch, err = g.detachedBranch(ctx, g.path(name)); err != nil {
 				return Worktree{}, false, err
+			}
+			if branch == "" && unfinishedWorktree(entry.path) {
+				if !holdsClone(ctx, cloneKey(g.Clone)) {
+					local, unlock, err := lockClone(ctx, g.Clone)
+					if err != nil {
+						return Worktree{}, false, err
+					}
+					defer unlock()
+					return g.Workspace(local, name)
+				}
+				return Worktree{}, false, g.discard(ctx, entry)
 			}
 		}
 		return Worktree{Path: g.path(name), Branch: branch, mounts: []string{filepath.Join(g.Clone, ".git")}}, true, nil
@@ -1325,6 +1337,44 @@ func (g *Git) forget(ctx context.Context, entry listed) error {
 		if err := os.RemoveAll(entry.path); err != nil {
 			return err
 		}
+	}
+	_, err = g.run(ctx, "worktree", "remove", "--force", entry.path)
+	return err
+}
+
+// unfinishedWorktree reports whether the worktree at dir was stopped while it
+// was being added. Git gives a worktree a HEAD that names no commit until it
+// has put the worktree on its branch, and checks the files out only after
+// that, so such a worktree never held a file of anyone's.
+func unfinishedWorktree(dir string) bool {
+	link, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return false
+	}
+	admin, ok := strings.CutPrefix(strings.TrimSpace(string(link)), "gitdir: ")
+	if !ok {
+		return false
+	}
+	head, err := os.ReadFile(filepath.Join(admin, "HEAD"))
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	return strings.Trim(strings.TrimSpace(string(head)), "0") == ""
+}
+
+// discard removes a worktree that was stopped while it was being added, with
+// its registration, so the next request makes it again. The branch stays.
+func (g *Git) discard(ctx context.Context, entry listed) error {
+	ctx, unlock, err := lockClone(ctx, g.Clone)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := os.RemoveAll(entry.path); err != nil {
+		return err
 	}
 	_, err = g.run(ctx, "worktree", "remove", "--force", entry.path)
 	return err

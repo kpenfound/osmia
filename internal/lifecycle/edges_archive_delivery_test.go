@@ -29,16 +29,26 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	t.Cleanup(cleanup.release)
 	var interrupt, observed atomic.Bool
 	interrupt.Store(true)
+	var fixture atomic.Pointer[productionDesignFixture]
 	var passes atomic.Int64
 	host := &fakePulls{SyncHead: true}
 	hook := newFakeWebhook(t)
 	configuration := productionDesignConfiguration{
-		wait: lifecycleAwait,
+		wait:                 lifecycleAwait,
+		openPullRequestsStay: true,
 		checkpoint: func(ctx context.Context, step string) error {
 			if step == "edge-merge-observed" && interrupt.Load() {
 				observed.Store(true)
 				<-ctx.Done()
 				return ctx.Err()
+			}
+			if step == "final-review-governed" && !interrupt.Load() {
+				// A review whose inputs were read before the dependency's merge was
+				// observed is held until the observation is recorded, which is the
+				// order the service must still keep the review waiting through.
+				if err := awaitDependentEdgeMerged(ctx, fixture.Load()); err != nil {
+					return err
+				}
 			}
 			return cleanup.checkpoint(ctx, step)
 		},
@@ -64,6 +74,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		},
 	}
 	f := resolutionApprovedFixture(t, configuration, trace.EdgeMergeOrder, host, func(f *productionDesignFixture) {
+		fixture.Store(f)
 		clone := f.repos[1].Clone
 		home := filepath.Dir(clone)
 		// The configured upstream is a local bare remote, so publication never
@@ -174,10 +185,18 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 					state, stateErr := down.Workflow(f.stream2, trace.UnitSubject(unit.Unit.ID))
 					t.Logf("follow-up %s workflow=%+v error=%v", unit.Unit.ID, state, stateErr)
 				}
+				// The order of the dependent's reviews against its units' landings.
+				transitions, readErr := trace.Read[trace.Transition](down, f.stream2)
+				t.Logf("dependent transitions: %v", readErr)
+				for _, tr := range transitions {
+					if tr.Subject != "base-refresh" && !strings.HasPrefix(tr.ID, "route-") {
+						t.Logf("transition %s at=%s %s: %s -> %s", tr.ID, tr.At.Format(time.RFC3339), tr.Subject, tr.From, tr.To)
+					}
+				}
 				ops, readErr := down.Operations(f.stream2)
 				t.Logf("delivery review operations: %v", readErr)
 				for _, op := range ops {
-					if op.Operation.Action == deliveryReviewAction {
+					if op.Operation.Action == deliveryReviewAction || op.Operation.Action == FinalReviewAction {
 						t.Logf("delivery review operation=%s input=%s result=%+v acknowledged=%v", op.Operation.ID, op.Operation.Input, op.Result, op.Acknowledged)
 					}
 				}
@@ -262,6 +281,8 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	down, err = f.s.repository(f.project2)
 	must(t, err)
 	fresh := awaitReview(3)
+	assertBaseRefreshesBounded(t, down, f.stream2)
+	assertMergedEdgeReviewsFollowTheUpdate(t, down, f.stream2)
 	if fresh.Report.Commit == first.Report.Commit || fresh.Report.EdgeResolved == "" {
 		t.Fatalf("missing dependency repair or re-review: report=%+v", fresh.Report)
 	}
@@ -375,4 +396,98 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		t.Fatalf("repair created another workstream: %v", streams)
 	}
 	assertPrompts()
+}
+
+// A dependent that waits on real work must not turn the wait into a stream of
+// base refreshes: the fixture clock moves only to deadlines something is due at.
+func assertBaseRefreshesBounded(t *testing.T, r *trace.Repository, w config.WorkstreamID) {
+	t.Helper()
+	const bound = 200
+	transitions, err := trace.Read[trace.Transition](r, w)
+	must(t, err)
+	n := 0
+	for _, tr := range transitions {
+		if tr.Subject == "base-refresh" {
+			n++
+		}
+	}
+	if n > bound {
+		t.Fatalf("%d base-refresh transitions recorded; want at most %d", n, bound)
+	}
+}
+
+// awaitDependentEdgeMerged returns once the dependent's edge observation
+// records its dependency merged, or when the service lifetime ends.
+func awaitDependentEdgeMerged(ctx context.Context, f *productionDesignFixture) error {
+	if f == nil {
+		return nil
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if down, err := f.s.repository(f.project2); err == nil {
+			if observed, _, _, err := edgeObservationAt(down, f.stream2); err == nil && len(observed.Edges) == 1 && observed.Edges[0].Merged {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// A final review that pins a merged dependency is requested only after the unit
+// that updates the branch to that dependency has merged: its reader would
+// otherwise read a branch without the update.
+func assertMergedEdgeReviewsFollowTheUpdate(t *testing.T, r *trace.Repository, w config.WorkstreamID) {
+	t.Helper()
+	transitions, err := trace.Read[trace.Transition](r, w)
+	must(t, err)
+	units, err := followup.Read(r, w)
+	must(t, err)
+	var update string
+	for _, unit := range units {
+		if strings.HasPrefix(unit.Unit.ID, "dependency-update-") {
+			update = unit.Unit.ID
+		}
+	}
+	if update == "" {
+		t.Fatalf("the dependent recorded no dependency update: %+v", units)
+	}
+	updated := -1
+	for i, tr := range transitions {
+		if tr.Subject == trace.UnitSubject(update) && tr.To == UnitMerged {
+			updated = i
+		}
+	}
+	if updated < 0 {
+		t.Fatalf("the dependency update %s never merged", update)
+	}
+	operations, err := r.Operations(w)
+	must(t, err)
+	pinned := 0
+	for _, op := range operations {
+		if op.Operation.Action != FinalReviewAction && op.Operation.Action != deliveryReviewAction {
+			continue
+		}
+		var input struct {
+			Review       int    `json:"review"`
+			EdgeResolved string `json:"edge_resolved"`
+		}
+		must(t, json.Unmarshal(op.Operation.Input, &input))
+		if input.EdgeResolved == "" {
+			continue
+		}
+		pinned++
+		for i, tr := range transitions {
+			if tr.Subject == "final-review" && tr.To == fmt.Sprintf("requested-%d", input.Review) && i < updated {
+				t.Fatalf("final review %d pins the merged dependency but was requested before the update %s merged", input.Review, update)
+			}
+		}
+	}
+	if pinned == 0 {
+		t.Fatal("no final review pinned the merged dependency")
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -252,8 +253,25 @@ func (s *Controller) DeliveryPresentation(ctx context.Context, raw string) (Deli
 	return s.PresentDelivery(ctx, project, stream, repository)
 }
 
-// presentDelivery builds the presentation of one workstream of the project.
+// PresentDelivery builds the presentation of one workstream of the project.
+// It reads the workstream's state, its final review and the review's inputs
+// separately, so a record that lands between those reads (the delivery of the
+// workstream, for one) would make it judge the review stale against a state
+// it did not start from; the presentation is read again until no record
+// lands during a read.
 func (s *Controller) PresentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
+	type presented struct {
+		presentation DeliveryPresentation
+		api          *APIError
+	}
+	out, _ := readview.Consistent(func() (presented, error) {
+		p, api := s.presentDelivery(ctx, project, stream, repository)
+		return presented{p, api}, nil
+	}, repository.Generation)
+	return out.presentation, out.api
+}
+
+func (s *Controller) presentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
 	if pending, err := s.UnresolvedWork(repository, stream); err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read discovered work"}
 	} else if pending {

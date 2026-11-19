@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,13 +61,18 @@ type routeOptions struct {
 // downstreamStream is the workstream that waits for the landing workstream.
 const downstreamStream = config.WorkstreamID("w_00000000000000000000000000000c02")
 
-// confident is a Jev that picks option whenever it is offered, at confidence.
+// confident is a Jev that picks option at confidence whenever it is offered
+// and defers every decision that does not offer it, such as a delivery
+// approval, so that card stays the owner's.
 func confident(option string, confidence float64) *jevfixture.Provider {
 	return &jevfixture.Provider{Confidence: confidence, Pick: func(options []string) string {
 		for _, o := range options {
 			if o == option {
 				return o
 			}
+		}
+		if slices.Contains(options, "defer") {
+			return "defer"
 		}
 		return options[0]
 	}}
@@ -118,8 +124,10 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	home := filepath.Dir(f.clone)
 	w.upstream = strings.TrimSpace(demoGit(t, home, "-C", f.clone, "remote", "get-url", "upstream"))
 	w.pulls.Mu.Lock()
+	// The running service reads this from its own goroutines, so it must not
+	// fail the test.
 	w.pulls.Branches = func(branch string) string {
-		tip, _ := fixturekit.PublicationForkBranch(t, w.upstream, branch)
+		tip, _ := fixturekit.PublicationForkTip(w.upstream, branch)
 		return tip
 	}
 	w.pulls.Mu.Unlock()
@@ -170,6 +178,8 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 			close(w.stopCard)
 		}
 		<-w.cardDone
+		// The service stops before the test's directories go.
+		w.f.stop(t)
 	})
 	return w
 }
@@ -600,7 +610,8 @@ func TestAnUnsureJevLeavesTheMarkReadyCardWithItsRecommendation(t *testing.T) {
 
 // A project that delivers by pull request behaves as it always has even when
 // Jev is configured and would pick landing: no landing, no delivery-route
-// judgment and no "Approve and land", and the existing "Mark ready" card
+// judgment and no "Approve and land". Jev is asked the ordinary delivery
+// approval alone, its deferral is on the card, and the owner's "Mark ready"
 // delivers the workstream by marking the draft ready.
 func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 	t.Parallel()
@@ -609,12 +620,12 @@ func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 	w := newRouteWorld(t, routeOptions{jev: p, delivery: config.DeliveryPullRequest})
 	w.awaitDraft()
 	card := w.awaitCard()
-	if strings.Join(card.Options, ",") != "approve" || card.Land != nil || card.Jev != nil || card.Recommendation != "" {
+	if strings.Join(card.Options, ",") != "approve" || card.Land != nil || card.Jev == nil || !card.Jev.Deferred || card.Jev.Binding || strings.Contains(card.Recommendation, "land") {
 		t.Fatalf("the delivery card is %+v", card)
 	}
 	presented, err := w.f.c.Delivery(ctx, w.stream)
 	must(t, err)
-	if presented.CanLand || presented.Recommendation != "" {
+	if presented.CanLand || strings.Contains(presented.Recommendation, "land") {
 		t.Fatalf("the presentation %+v", presented)
 	}
 	decision := api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}
@@ -643,8 +654,13 @@ func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 	if _, found := w.landed(); found || w.landings() != 0 {
 		t.Fatal("a landing was recorded")
 	}
-	if n := routeDecisions(p); n != 0 || len(p.Decisions()) != 0 {
-		t.Fatalf("Jev was asked %d delivery-route and %d decisions", n, len(p.Decisions()))
+	if n := routeDecisions(p); n != 0 {
+		t.Fatalf("Jev was asked %d delivery-route decisions", n)
+	}
+	for _, r := range p.Decisions() {
+		if names := jevfixture.Options(r); strings.Join(names, ",") != "approve,defer" {
+			t.Fatalf("Jev was asked to choose among %v", names)
+		}
 	}
 	if d := w.delivered(); d.DecidedBy != trace.DecidedByOwner {
 		t.Fatalf("the workstream was delivered by %+v", d)

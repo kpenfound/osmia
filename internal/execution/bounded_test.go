@@ -23,6 +23,7 @@ type boundedLanding struct {
 	stream     config.WorkstreamID
 	repository *trace.Repository
 	lands      *foreman
+	options    reconcile.Options
 	controller *reconcile.Controller
 }
 
@@ -37,7 +38,18 @@ func newBoundedLanding(t *testing.T, key string, options reconcile.Options) *bou
 	options.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != LandAction }
 	controller, err := reconcile.New(repository, options)
 	must(t, err)
-	return &boundedLanding{f, stream, repository, lands, controller}
+	return &boundedLanding{f, stream, repository, lands, options, controller}
+}
+
+// withDeadlines replaces the controller with one whose attempts and
+// reconciliations are bounded by the given deadlines, zero meaning the ones
+// it has in service. The operation's history stays in the trace.
+func (b *boundedLanding) withDeadlines(t *testing.T, attempt, reconciliation time.Duration) {
+	t.Helper()
+	b.options.AttemptDeadline, b.options.ReconcileDeadline = attempt, reconciliation
+	controller, err := reconcile.New(b.repository, b.options)
+	must(t, err)
+	b.controller = controller
 }
 
 // pass makes the given number of passes a minute apart.
@@ -333,7 +345,7 @@ func TestLandingIsRecordedOnceWhenAHeldCloneIsReleased(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			b := newBoundedLanding(t, "released-"+strings.ReplaceAll(tc.name, " ", "-"), reconcile.Options{GiveUpWindow: 10 * time.Minute, AttemptDeadline: 100 * time.Millisecond, ReconcileDeadline: 100 * time.Millisecond})
+			b := newBoundedLanding(t, "released-"+strings.ReplaceAll(tc.name, " ", "-"), reconcile.Options{GiveUpWindow: 10 * time.Minute})
 			crashed := false
 			b.f.s.Step = func(name string) error {
 				if tc.committed && !crashed && name == "land-advanced" {
@@ -351,6 +363,10 @@ func TestLandingIsRecordedOnceWhenAHeldCloneIsReleased(t *testing.T) {
 					t.Fatalf("the first attempt: %+v, commits %v", op, b.landedCommits(t))
 				}
 			}
+			// An attempt on the held clone only waits for it, so it gets a short
+			// deadline; one that does the landing gets the deadline it has in
+			// service.
+			b.withDeadlines(t, 100*time.Millisecond, 100*time.Millisecond)
 			holding, release := make(chan struct{}), make(chan struct{})
 			finished := make(chan error, 1)
 			go func() {
@@ -375,6 +391,7 @@ func TestLandingIsRecordedOnceWhenAHeldCloneIsReleased(t *testing.T) {
 			close(release)
 			released = true
 			must(t, <-finished)
+			b.withDeadlines(t, 0, 0)
 			b.pass(t, 6)
 			op = b.operation(t)
 			if op.Result == nil || !op.Acknowledged {

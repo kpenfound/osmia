@@ -268,9 +268,16 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	}
 	down, err := g.s.repository(g.project2)
 	must(t, err)
-	observed, _, _, err := edgeObservationAt(down, g.stream2)
-	must(t, err)
-	if len(observed.Edges) != 1 || !observed.Edges[0].Merged || observed.Edges[0].Commit != "upstream-merge" {
+	// The dependent's edge is observed by a poll of its own, so the
+	// observation is awaited rather than read once.
+	var observed edgeObservation
+	lifecycleAwait(t, g.productionDesignFixture, "the dependent's edge observed merged", func() bool {
+		var err error
+		observed, _, _, err = edgeObservationAt(down, g.stream2)
+		must(t, err)
+		return len(observed.Edges) == 1 && observed.Edges[0].Merged
+	})
+	if observed.Edges[0].Commit != "upstream-merge" {
 		t.Fatalf("dependency edge=%+v", observed)
 	}
 	if _, archived := archiveRecord(t, g.s.store, g.stream2); archived {
