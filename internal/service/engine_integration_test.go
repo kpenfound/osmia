@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -331,6 +332,64 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 	}
 }
 
+// armedDeadline is a context that is done with context.DeadlineExceeded once
+// its delay has passed since the armed channel closed. It has a done channel of
+// its own, so contexts derived from it observe its error.
+type armedDeadline struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+	mu   sync.Mutex
+	err  error
+}
+
+func (c *armedDeadline) Done() <-chan struct{} { return c.done }
+
+func (c *armedDeadline) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *armedDeadline) finish(err error) {
+	c.once.Do(func() {
+		c.mu.Lock()
+		c.err = err
+		c.mu.Unlock()
+		close(c.done)
+	})
+}
+
+// deadlineAfter returns a context that is not done until the delay has passed
+// since armed closed, whichever the parent or the returned cancel function
+// ends it first.
+func deadlineAfter(parent context.Context, armed <-chan struct{}, delay time.Duration) (context.Context, context.CancelFunc) {
+	c := &armedDeadline{Context: parent, done: make(chan struct{})}
+	stop := make(chan struct{})
+	go func() {
+		var expired <-chan time.Time
+		for {
+			select {
+			case <-armed:
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				expired, armed = timer.C, nil
+			case <-expired:
+				c.finish(context.DeadlineExceeded)
+				return
+			case <-parent.Done():
+				c.finish(parent.Err())
+				return
+			case <-stop:
+				c.finish(context.Canceled)
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return c, func() { once.Do(func() { close(stop) }) }
+}
+
 // Serial: the API invokes fake Docker through the process PATH.
 func TestCreatingEngineAPIRespondsAtDeadline(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
@@ -351,14 +410,16 @@ case "$1" in
 esac
 `, entered)
 	must(t, os.WriteFile(filepath.Join(fake.Directory, "docker"), []byte(script), 0700))
+	// The action bound runs from the moment creation is entered, so the time the
+	// fake engine spends on its earlier commands never counts against it.
+	creating := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+		ctx, cancel := deadlineAfter(r.Context(), creating, 500*time.Millisecond)
 		defer cancel()
 		s.engineHTTP(w, r.WithContext(ctx))
 	}))
 	defer server.Close()
 	completed := make(chan error, 1)
-	started := time.Now()
 	go func() {
 		response, err := http.Post(server.URL+Prefix+"/engine/restart", "application/json", nil)
 		if err == nil {
@@ -382,6 +443,8 @@ esac
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+	started := time.Now()
+	close(creating)
 	next := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Unit: "waiting-for-creation"})
 	must(t, awaitCheck(t, completed))
 	if time.Since(started) > 2*time.Second {

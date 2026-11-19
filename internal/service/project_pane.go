@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -73,7 +74,28 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 	open := evidence.Published && !(evidence.Outcome.PullRequest == evidence.Publication.PullRequest && evidence.Outcome.Outcome != "")
 	_, paused := s.pausing(w.Project, w.Workstream)
 	w.DisplayState = paneState(w.State, w.Wait, paused, open, merged)
+	if merged {
+		// A workstream the service landed on its base branch is delivered by that
+		// landing, not by a merged pull request.
+		landing, landed, err := delivery.ReadDeliveryLanding(repo, w.Workstream)
+		if err != nil {
+			return err
+		}
+		if landed {
+			w.DisplayState = landedState(landing)
+		}
+	}
 	return nil
+}
+
+// landedState is the project pane label of a workstream delivered by its
+// landing, with the landed commit.
+func landedState(landing delivery.DeliveryLanding) string {
+	commit := landing.Commit
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	return fmt.Sprintf("delivered (landed %s)", commit)
 }
 
 // markDroppedEdges names the edges of the workgroup that their dependent

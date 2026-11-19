@@ -255,7 +255,7 @@ exit:
 | Machine | Triggers |
 | --- | --- |
 | Unit | `unit.created`, `unit.deps_merged`, `unit.mason_start`, `unit.question_follow`, `unit.question_wait_broken`, `unit.mason_done`, `unit.mason_ended_clean`, `unit.markers_left`, `unit.turn_failed`, `unit.checks_passed`, `unit.checks_failed`, `unit.checks_incomplete`, `unit.review_approved`, `unit.review_rejected`, `unit.review_no_verdict`, `unit.review_refused`, `unit.review_needs_checks`, `unit.rebased`, `unit.rebase_conflicted`, `unit.landed`, `unit.landing_refused`, `unit.move_owner`, `unit.move_proposal`, `unit.stalled` |
-| Workstream | `ws.handed`, `ws.draft_accepted`, `ws.shed_entered`, `ws.build_started`, `ws.units_merged`, `ws.draft_exhausted`, `ws.shed_concluded`, `ws.ratified`, `ws.seal_failed`, `ws.delivery_approved`, `ws.ready_on_host`, `ws.merge_recorded`, `ws.abandon`, `ws.move_owner`, `ws.move_proposal`, `ws.stalled` |
+| Workstream | `ws.handed`, `ws.draft_accepted`, `ws.shed_entered`, `ws.build_started`, `ws.units_merged`, `ws.draft_exhausted`, `ws.shed_concluded`, `ws.ratified`, `ws.seal_failed`, `ws.delivery_approved`, `ws.ready_on_host`, `ws.merge_recorded`, `ws.landed`, `ws.abandon`, `ws.move_owner`, `ws.move_proposal`, `ws.stalled` |
 | Final review | `final.requested`, `final.reviewed_clean`, `final.reviewed_blocking`, `final.failed`, `final.checks_missing` |
 | Contests and objections | `contest.owner_ruling`, `contest.jev_ruling`, `contest.chief_ruling`, `objection.chief_decision` |
 | Dependency waits | `dep.edge_wait`, `dep.edge_resolved`, `dep.upstream_terminal`, `dep.upstream_integrated`, `dep.base_unavailable`, `dep.base_available`, `dep.base_integrated` |

@@ -359,7 +359,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   revision, or the final review, report revision and commit) and the command
   that answers it: `answer`, with `answer <number> --accept` when there is a
   quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
-  `approve`. A marking ready that the service holds because it was started
+  `approve` (or `land` on a project that lands). A marking ready that the service holds because it was started
   without `GITHUB_TOKEN` is listed as soon as it is asked for: nothing is
   pushed or asked of GitHub until you restart `serve` with the token, you mark
   the pull request ready on GitHub yourself, or you merge the branch into
@@ -720,7 +720,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   marked ready for review, that it stays a draft until its merge-order
   dependency merges, or that you marked it ready on GitHub yourself. For a
   delivered workstream it shows the report, the approved description and the
-  pull request it was delivered as, or the merge you recorded with `merged`.
+  pull request it was delivered as, the merge you recorded with `merged`, or,
+  for a workstream the service landed on the project's base branch, the landing
+  (the base branch, the commit it was fast-forwarded from and to, and who
+  decided; `landing` in `--json`) instead of a merge or a ready pull request.
 - `approve <workstream-id> [description-file] [--accept]` approves marking the
   draft pull request ready for review for the presented final report, with the
   drafted description, or the file's text instead. The service puts that
@@ -738,6 +741,29 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   marking was refused, approving again asks for another. While a merge-order
   dependency has not merged the approval is recorded and the pull request stays a
   draft.
+- `land <workstream-id> [--accept]` is **Approve and land** for a project whose
+  `delivery` is `jev`: it approves the presented final report and lands the
+  workstream, with the same pinned review, report revision, commit and draft
+  hash as `approve`, whether or not Jev is configured. Where `approve` marks the
+  draft pull request ready, `land` has the service fast-forward the project's
+  base branch to the signed commit of the current push, which checks must have
+  passed on. It makes no merge commit, calls no merge API and keeps the feature
+  branch. `--accept` accepts blocking findings as they are, as for `approve`.
+  The output says what happened: landed (the base branch is at the commit and
+  the workstream is delivered), held (the router holds the landing, nothing was
+  pushed and it lands once the hold clears), fell back (the upstream refused the
+  push, so the draft pull request was marked ready for review and the workstream
+  delivered, with a notice saying why it did not land), base moved (the
+  workstream is rebased, checked and reviewed again, and the service lands the
+  new commit on its own under your approval, with no second approval and no new
+  card unless the new review leaves blocking findings to you or a landing gate
+  no longer holds) or not yet known (the service settles it against the fetched base
+  branch). None of them raises another delivery card. A project that delivers by
+  pull request, a presentation that changed, blocking findings without
+  `--accept`, checks that did not pass on the pushed commit and a hard-block or
+  merge-order dependency that has not merged fail with `conflict` (exit 5)
+  and push nothing. `delivery` shows `Landing:` when the project offers it, and
+  `Jev recommends:` when Jev recommended a route.
 - `merged <workstream-id>` records an assembled workstream delivered because
   you merged its feature branch into upstream yourself, outside the factory.
   The service fetches the project's base branch and checks that it already

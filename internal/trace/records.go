@@ -473,8 +473,9 @@ func unitPath(parts []string) bool {
 // finalPath reports whether parts name a final review record of a
 // workstream, including its rebase, check runs, check reruns, the choice about a push's missing check results, review, the delivery brief
 // recorded for each review (brief-<review>.json), follow-ups, delivery
-// decision, publication, the marking of the pull request ready for review and the
-// owner's own merge into upstream.
+// decision, publication, the marking of the pull request ready for review, the
+// owner's own merge into upstream, and a landing's records: the landing itself, its
+// intent and the decision to land that a moved base kept.
 func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
@@ -489,7 +490,7 @@ func finalPath(parts []string) bool {
 	if brief, ok := strings.CutPrefix(parts[1], "brief-"); ok && strings.HasSuffix(brief, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(brief, ".json")) {
 		return true
 	}
-	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "ready.json" || parts[1] == "merge.json"
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "ready.json" || parts[1] == "merge.json" || parts[1] == "landing.json" || parts[1] == "landing-intent.json" || parts[1] == "landing-route.json"
 }
 
 func checkSelectionName(name string) bool {

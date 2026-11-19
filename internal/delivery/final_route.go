@@ -154,6 +154,9 @@ func (a *FinalReviewer) workstreamMovable(stream config.WorkstreamID) (string, e
 		if r.Result == nil && (r.Operation.Action == PublishAction || r.Operation.Action == publishUpstreamAction) {
 			return "the workstream's publication is in flight", nil
 		}
+		if r.Result == nil && r.Operation.Action == LandDeliveryAction {
+			return "the workstream's landing is in flight", nil
+		}
 	}
 	return "", nil
 }
@@ -194,6 +197,7 @@ const (
 	TriggerDeliveryApproved = intake.TriggerDeliveryApproved
 	TriggerReadyOnHost      = intake.TriggerReadyOnHost
 	TriggerMergeRecorded    = intake.TriggerMergeRecorded
+	TriggerLanded           = intake.TriggerLanded
 	TargetDelivered         = intake.TargetDelivered
 )
 
@@ -206,14 +210,35 @@ const (
 // records the owner as its authority, or Jev when judgment names the Jev
 // judgment the approval comes from, and asks Jev nothing.
 func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger, judgment string, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
+	by := LandDecider{}
+	if judgment != "" {
+		by = LandDecider{By: trace.DecidedByJev, Judgment: judgment}
+	}
+	return routeDeliveredBy(ctx, rt, repo, stream, trigger, by, docs, feature, with...)
+}
+
+// routeDeliveredBy is routeDelivered for a delivery decided by by: the owner
+// when by names nobody, or Jev's delivery gate decision, which the router
+// records as such with its judgment.
+func routeDeliveredBy(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger string, by LandDecider, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
 	if rt == nil {
 		return router.Result{}, errors.New("routing the delivery of a workstream is unavailable")
 	}
+	return rt.Route(ctx, deliveredMove(repo, stream, trigger, by, docs, feature, with...).Exit())
+}
+
+// deliveredMove is the pinned move of the workstream to delivered that feature
+// records.
+func deliveredMove(repo *trace.Repository, stream config.WorkstreamID, trigger string, by LandDecider, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) intake.PinnedMove {
 	t := feature.Transition
-	return rt.Route(ctx, intake.PinnedMove{
+	m := intake.PinnedMove{
 		Repo: repo, Stream: stream, Subject: trace.FeatureSubject, State: trace.WorkflowState{Version: feature.ExpectedVersion, Value: t.From},
 		Trigger: trigger, Cause: t.ID, Target: TargetDelivered, Description: "Record the workstream delivered.", Gate: true,
 		Ref: t.Cause, ID: t.ID, HeaderCause: t.Cause, Reason: t.Reason, Actor: t.Actor, At: t.At,
-		Events: feature.Events, Documents: docs, With: with, Jev: judgment,
-	}.Exit())
+		Events: feature.Events, Documents: docs, With: with,
+	}
+	if by.By == trace.DecidedByJev {
+		m.Jev = by.Judgment
+	}
+	return m
 }

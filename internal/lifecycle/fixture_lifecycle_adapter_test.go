@@ -208,6 +208,7 @@ func (s *Service) edgeWaitPass(ctx context.Context, repo *trace.Repository) erro
 
 const baseRefreshAction = lifecycle.BaseRefreshAction
 const deliveryReviewAction = lifecycle.DeliveryReviewAction
+const ownPullRequestOpenReason = lifecycle.OwnPullRequestOpenReason
 const publishUpstreamAction = lifecycle.PublishUpstreamAction
 
 type baseRefreshInput = lifecycle.BaseRefreshInput
@@ -308,6 +309,10 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 
 func (b *baseRefresher) ObserveDraftPullRequests(ctx context.Context) error {
 	return (&lifecycle.BaseRefresher{S: b.s.lifecycle(), Repository: b.repository}).ObserveDraftPullRequests(ctx)
+}
+
+func (b *baseRefresher) ObserveLandedPullRequests(ctx context.Context) error {
+	return (&lifecycle.BaseRefresher{S: b.s.lifecycle(), Repository: b.repository}).ObserveLandedPullRequests(ctx)
 }
 
 func (b *baseRefresher) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {

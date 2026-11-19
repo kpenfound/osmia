@@ -764,7 +764,7 @@ func (st *publishStream) changedAt() time.Time {
 	}
 	for _, d := range st.documents {
 		switch d.ID {
-		case intake.HandedDocument, "final-publication", "own-pull-request-outcome", "final-merge", seal.DocumentID:
+		case intake.HandedDocument, "final-publication", "own-pull-request-outcome", "final-merge", "final-landing", seal.DocumentID:
 			if d.At.After(at) {
 				at = d.At
 			}

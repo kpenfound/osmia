@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -252,8 +253,25 @@ func (s *Controller) DeliveryPresentation(ctx context.Context, raw string) (Deli
 	return s.PresentDelivery(ctx, project, stream, repository)
 }
 
-// presentDelivery builds the presentation of one workstream of the project.
+// PresentDelivery builds the presentation of one workstream of the project.
+// It reads the workstream's state, its final review and the review's inputs
+// separately, so a record that lands between those reads (the delivery of the
+// workstream, for one) would make it judge the review stale against a state
+// it did not start from; the presentation is read again until no record
+// lands during a read.
 func (s *Controller) PresentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
+	type presented struct {
+		presentation DeliveryPresentation
+		api          *APIError
+	}
+	out, _ := readview.Consistent(func() (presented, error) {
+		p, api := s.presentDelivery(ctx, project, stream, repository)
+		return presented{p, api}, nil
+	}, repository.Generation)
+	return out.presentation, out.api
+}
+
+func (s *Controller) presentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
 	if pending, err := s.UnresolvedWork(repository, stream); err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read discovered work"}
 	} else if pending {
@@ -289,12 +307,20 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		}
 		var merge *DeliveryMerge
+		var landing *DeliveryLanding
+		if l, landed, err := ReadDeliveryLanding(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
+		} else if landed {
+			landing = &l
+		}
+		// A landing writes the merge record the dependency edges read; the
+		// presentation shows it as the landing it is, not as the owner's merge.
 		if m, merged, err := ReadDeliveryMerge(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
-		} else if merged {
+		} else if merged && landing == nil {
 			merge = &m
 		}
-		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}
+		presented := DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Landing: landing, Delivered: true}
 		if ready, recorded, err := ReadyAt(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		} else if recorded {
@@ -315,7 +341,7 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	} else if wait != "" {
 		return DeliveryPresentation{}, &APIError{Code: Conflict, Message: wait}
 	}
-	report, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
+	report, reason, err := s.finalGate(ctx, repository, stream)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read final review"}
 	}
@@ -342,7 +368,16 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot draft the title and description from trace records"}
 	}
-	if approval != nil && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || PublishedTitle(*approval, stream) != title) {
+	// An owner's approval to land stands while the landing it started waits to be
+	// retried on the rebased commit: it is not stale, it is the decision the retry
+	// carries out.
+	retrying := false
+	if approval != nil && approval.Route == DeliveryRouteLand {
+		if _, retrying, err = PendingLandingRoute(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read landing records"}
+		}
+	}
+	if approval != nil && !retrying && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || PublishedTitle(*approval, stream) != title) {
 		approval = nil
 	}
 	style := s.About(repository).Project.Landing
@@ -350,12 +385,6 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery commit messages"}
 	}
-	pinned, _ := json.Marshal(struct {
-		Title       string
-		Description string
-		Style       string
-		Messages    []workspace.DeliveryMessage
-	}{title, draft, style, messages})
 	brief, err := s.presentBrief(ctx, repository, stream, report, review.Revision, approval != nil)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
@@ -364,7 +393,32 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read check result"}
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
+	canLand := feature.Value == AssembledState && s.About(repository).Project.Lands()
+	recommendation := ""
+	if canLand {
+		// Jev's pick for this delivery that it had no authority to apply: the card
+		// shows it beside the owner's own routes.
+		if push, found, err := CurrentPush(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read pushes"}
+		} else if found {
+			if recommendation, err = recommendedRoute(repository, stream, push); err != nil {
+				return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read Jev's judgment of the delivery"}
+			}
+		}
+	}
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief, CanLand: canLand, Recommendation: recommendation}, nil
+}
+
+// draftHash identifies the title, description, style and commit messages a
+// presentation drafts, so a decision can name exactly what it read.
+func draftHash(title, description, style string, messages []workspace.DeliveryMessage) string {
+	pinned, _ := json.Marshal(struct {
+		Title       string
+		Description string
+		Style       string
+		Messages    []workspace.DeliveryMessage
+	}{title, description, style, messages})
+	return DescriptionHash(string(pinned))
 }
 
 // ApproveDelivery records the owner's approval to mark the pull request ready
@@ -396,7 +450,14 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	if api != nil {
 		return DeliveryApproval{}, api
 	}
-	if _, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream); err != nil {
+	// Landing and marking the pull request ready are two ways to deliver; a
+	// landing under way decides which one this workstream takes.
+	if landing, err := LandingInFlight(repository, stream); err != nil {
+		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read landing records"}
+	} else if landing {
+		return DeliveryApproval{}, &APIError{Code: Conflict, Message: "a landing of the workstream is under way; it delivers the workstream, or says why it did not, before the pull request is marked ready"}
+	}
+	if _, reason, err := s.finalGate(ctx, repository, stream); err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot validate final review"}
 	} else if reason != "" {
 		return DeliveryApproval{}, &APIError{Code: Conflict, Message: reason}
@@ -448,6 +509,11 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 		if refused {
 			existing = nil
 		}
+	}
+	// An approval to land is not the approval to mark ready; this one replaces
+	// it.
+	if existing != nil && existing.Route == DeliveryRouteLand {
+		existing = nil
 	}
 	if existing != nil && req.Description == nil && req.Messages == nil && existing.Style == presented.Style && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.DraftHash == req.DraftHash {
 		return *existing, nil
@@ -508,7 +574,7 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 		return DeliveryApproval{}, "necessary discovered work or a plan revision remains unresolved", nil
 	}
 
-	report, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
+	report, reason, err := s.finalGate(ctx, repository, stream)
 	if err != nil || reason != "" {
 		return DeliveryApproval{}, reason, err
 	}
@@ -518,6 +584,9 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 	}
 	if approval == nil {
 		return DeliveryApproval{}, "the owner has not marked the pull request ready for review", nil
+	}
+	if approval.Route == DeliveryRouteLand {
+		return *approval, "the owner approved landing the workstream on its base branch, not marking the pull request ready for review", nil
 	}
 	if privateCheckTrace(PublishedTitle(*approval, stream)) {
 		return *approval, "pull request titles must not include private Dagger Cloud trace links", nil

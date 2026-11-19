@@ -525,6 +525,32 @@ func (s *Controller) EdgeResolverPass(ctx context.Context, repo *trace.Repositor
 	}
 	return nil
 }
+
+// dependencyUpdateID names the follow-up unit that updates a dependent to the
+// merged upstream commits summarised by resolved.
+func dependencyUpdateID(resolved string) string {
+	digest := sha256.Sum256([]byte(resolved))
+	return fmt.Sprintf("dependency-update-%x", digest[:6])
+}
+
+// DependencyUpdateDue reports whether a merge-order edge of the workstream has
+// merged but the follow-up unit that updates the dependent to the merged
+// commits is not yet recorded. The observation of a merge and that unit are
+// recorded one after the other, so work that reads the workstream's branch
+// must wait for the unit rather than read the branch without the update.
+func DependencyUpdateDue(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	resolved, err := WorkgroupMergeOrderResolved(repo, stream)
+	if err != nil || resolved == "" {
+		return false, err
+	}
+	added, err := followup.Read(repo, stream)
+	if err != nil {
+		return false, err
+	}
+	id := dependencyUpdateID(resolved)
+	return !slices.ContainsFunc(added, func(unit followup.Unit) bool { return unit.Unit.ID == id }), nil
+}
+
 func (s *Controller) EdgeUpdatePass(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) error {
 	resolved, err := WorkgroupMergeOrderResolved(repo, stream)
 	if err != nil || resolved == "" {
@@ -534,8 +560,7 @@ func (s *Controller) EdgeUpdatePass(ctx context.Context, repo *trace.Repository,
 	if err != nil || !found {
 		return err
 	}
-	digest := sha256.Sum256([]byte(resolved))
-	id := fmt.Sprintf("dependency-update-%x", digest[:6])
+	id := dependencyUpdateID(resolved)
 	added, err := followup.Read(repo, stream)
 	if err != nil || slices.ContainsFunc(added, func(unit followup.Unit) bool {
 		return unit.Unit.ID == id

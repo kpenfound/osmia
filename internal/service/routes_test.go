@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -109,4 +111,76 @@ func TestRoutesListEveryPath(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestApproveAndLandRouteMatchesItsHandler checks that Approve and land is
+// listed in Routes with the request and response types the OpenAPI description
+// is generated from, and that its handler takes exactly that request: every
+// field of DeliveryLandDecision is accepted, an unknown field is malformed, and
+// only POST is served.
+func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
+	t.Parallel()
+	path := Prefix + "/delivery/{workstream}/land"
+	var route *Route
+	for i := range Routes {
+		if Routes[i].Path == path {
+			route = &Routes[i]
+		}
+	}
+	if route == nil || route.Method != http.MethodPost || reflect.TypeOf(route.Request) != reflect.TypeOf(DeliveryLandDecision{}) || reflect.TypeOf(route.Response) != reflect.TypeOf(DeliveryLandResponse{}) {
+		t.Fatalf("Routes lists %+v for %s", route, path)
+	}
+	// The presentation and the inbox entry the owner reads the offer in carry
+	// the fields the web page and the CLI read it from.
+	for _, c := range []struct {
+		value  any
+		fields []string
+	}{
+		{DeliveryPresentation{}, []string{"can_land", "recommendation"}},
+		{DeliveryApproval{}, []string{"route"}},
+		{InboxEntry{}, []string{"land"}},
+		{DeliveryLandDecision{}, []string{"review", "review_revision", "commit", "draft_hash", "accept_blocking"}},
+		{DeliveryLandResponse{}, []string{"approval", "outcome", "reason", "commit"}},
+	} {
+		tags := jsonFieldNames(reflect.TypeOf(c.value))
+		for _, name := range c.fields {
+			if !slices.Contains(tags, name) {
+				t.Errorf("%T has no JSON field %q", c.value, name)
+			}
+		}
+	}
+
+	s, _ := start(t, fixture(t))
+	target := strings.NewReplacer("{workstream}", string(stream)).Replace(path)
+	send := func(method, body string) ErrorResponse {
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.handle(rec, req)
+		var failure ErrorResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &failure)
+		return failure
+	}
+	all := `{"review":1,"review_revision":1,"commit":"c","draft_hash":"h","accept_blocking":true}`
+	if got := send(http.MethodPost, all).Error.Code; got == Malformed || got == Unsupported {
+		t.Errorf("a request holding every field of DeliveryLandDecision is %q", got)
+	}
+	if got := send(http.MethodPost, `{"review":1,"description":"x"}`).Error.Code; got != Malformed {
+		t.Errorf("a request with an unknown field is %q, want %q", got, Malformed)
+	}
+	if got := send(http.MethodGet, "").Error.Code; got != Unsupported {
+		t.Errorf("GET is %q, want %q", got, Unsupported)
+	}
+}
+
+// jsonFieldNames returns the JSON names of a struct type's exported fields.
+func jsonFieldNames(t reflect.Type) []string {
+	var names []string
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			names = append(names, name)
+		}
+	}
+	return names
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
+	lifecycle "github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -59,8 +60,12 @@ func discoveries(r *trace.Repository, stream config.WorkstreamID) (map[string]wo
 	return out, nil
 }
 
-// unresolvedWork includes necessary discoveries and revisions still being prepared.
+// unresolvedWork includes necessary discoveries, revisions still being
+// prepared and a merged dependency whose update is not yet planned.
 func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	if due, err := lifecycle.DependencyUpdateDue(r, stream); err != nil || due {
+		return due, err
+	}
 	ds, err := discoveries(r, stream)
 	if err != nil {
 		return false, err

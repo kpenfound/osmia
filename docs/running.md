@@ -173,7 +173,7 @@ loads the latest text.
 
 Project management shows the project's settings and the actions that affect that project. **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and configuration saves arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
-**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
+**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
 
 If you hand-edited the file and the service has not reloaded it, the setting shows the file's value marked **Not yet applied** beside the value in effect. Saving another setting keeps that edit in the file and puts it into effect. If the file does not load, the view shows the loader's error and offers no save until the file is fixed by hand; the loaded values stay in effect.
 
@@ -280,7 +280,10 @@ The member view is laid out like a chat client:
   pick and confidence as its recommendation. Your own decisions (delivery
   approval, charter proposals and conflicts between charters, "no change
   needed" escalations, cancellation and your own objections) are decided the
-  same way at `jev.owner_threshold` (0.9 by default). Jev never writes text, so
+  same way at `jev.owner_threshold` (0.9 by default). On a project that opted in
+  to landing (`delivery = "jev"`), Jev instead picks how a clean delivery goes
+  out, by landing it or by marking its draft pull request ready, when its
+  confidence reaches `jev.decision_threshold`. Jev never writes text, so
   an option that needs words is offered only when the chief of staff already
   wrote them. Without Jev's API key the service
   still runs and every entry reaches you; `osmia doctor` fails its Jev check.
@@ -360,7 +363,8 @@ From the page you can:
   opens no pull request and pushes nothing. Jev decides the card first at
   `jev.owner_threshold`: a confident approval is recorded as Jev's, pins the
   same review and publishes the same text, and otherwise the card reaches you
-  with Jev's pick as its recommendation. While a
+  with Jev's pick as its recommendation. On a project that lands,
+  **Approve and land** sits beside it (described below). While a
   merge-order dependency has not merged, approving is recorded and the pull
   request stays a draft until it has (see
   [Draft pull request and Cloud checks](#draft-pull-request-and-cloud-checks)).
@@ -512,6 +516,26 @@ the draft ready on GitHub yourself, the next `pull_request_poll` notices it and
 records the workstream delivered by you. If a merge-order dependency has not
 merged, the approval is recorded and the pull request stays a draft until it
 has; you approve again once the dependency update has been reviewed.
+
+**Approve and land.** On a project whose
+[`delivery`](configuration.md#project-configtoml) is `jev`, the delivery card also
+offers **Approve and land** beside **Mark ready for review** (**Accept findings
+and land** when the final review has blocking findings). It is pinned to the
+same review, commit and description, and works whether or not Jev is configured.
+Instead of marking the pull request ready, the service fast-forwards the base
+branch to the signed commit of the current push, once checks passed on that
+commit. The feature branch stays, no merge commit is made and no pull request is
+merged. It is refused for the same reasons as **Mark ready for review**,
+including a hard-block or merge-order dependency that has not merged, and when
+checks did not pass on the pushed commit; nothing is pushed then. After you
+approve, the card does not come back for what happens next: the landing waits
+while the router holds it, a push the upstream refuses (branch protection, for
+example) marks the draft ready for review instead and delivers the workstream
+with a notice saying why it did not land, and a push whose outcome is unknown is
+settled against the fetched base branch. If the base branch moved, the
+workstream is rebased and checked again, and its card comes back for the new
+commit. A project that delivers by pull request has no such button. When Jev
+recommends a route, the card shows it and makes that button the primary one.
 
 Osmia has not verified that Cloud Checks run on draft pull requests, or that
 statuses land on the upstream head commit of a pull request opened from a
@@ -714,6 +738,22 @@ Limit: USD <budget.per_day>
 Clears: <next local midnight, RFC 3339>
 Open: http://<tailnet-name>/
 ```
+
+The webhook also receives one post when the service lands a workstream on the
+base branch of a project whose `delivery` is `jev`:
+
+```text
+Osmia landed a workstream on its base branch.
+Project: <project-id>
+Workstream: <workstream-id>
+Landed commit: <the signed commit now on the base branch>
+Base branch: <branch> of <upstream repository>
+Decided by: <owner or jev>
+Open: http://<tailnet-name>/
+```
+
+A landing is posted once, including across restarts and when a restart
+completed the landing. It is not an inbox entry, so it asks for no decision.
 
 The `Open` line appears only with `listen.tailnet` set. When tailnet HTTPS is
 up it uses the full `https://<host>.<tailnet>.ts.net/` address; otherwise it uses

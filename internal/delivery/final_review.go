@@ -341,6 +341,19 @@ func ReportInput(r FinalReport) FinalReviewInput {
 	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, EdgeWaived: r.EdgeWaived, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
+// holdsForWork reports whether a final review must wait: a unit of the sealed
+// plan or a follow-up unit has not merged, or work remains unresolved.
+func (a *FinalReviewer) holdsForWork(stream config.WorkstreamID) (bool, error) {
+	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
+	if err != nil || !found {
+		return true, err
+	}
+	if !AllMerged(b) {
+		return true, nil
+	}
+	return a.S.UnresolvedWork(a.Repository, stream)
+}
+
 // request asks for the next final review of an assembled workstream unless
 // one has no result yet, the workstream is paused, the service has no
 // committee runner, or a review was already asked for, or a report already
@@ -360,14 +373,7 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	if scheduler.Paused(state.Pauses, a.Repository.Project(), stream) {
 		return nil
 	}
-	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
-	if err != nil || !found {
-		return err
-	}
-	if !AllMerged(b) {
-		return nil
-	}
-	if pending, err := a.S.UnresolvedWork(a.Repository, stream); err != nil || pending {
+	if held, err := a.holdsForWork(stream); err != nil || held {
 		return err
 	}
 	ops, err := a.Repository.Operations(stream)
@@ -396,6 +402,17 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := a.S.Step("final-review-governed"); err != nil {
+		return err
+	}
+	// The governing inputs name the merge-order edges observed merged. The work
+	// that follows such a merge is recorded after the observation, so the
+	// review waits for it here, after the inputs are read, rather than only
+	// before: an edge observed in between would otherwise be pinned by a review
+	// of a branch that does not yet hold the update.
+	if held, err := a.holdsForWork(stream); err != nil || held {
 		return err
 	}
 	// The feature can be delivered after the caller read it assembled; a

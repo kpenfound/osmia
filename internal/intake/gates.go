@@ -851,6 +851,15 @@ func (s *Controller) WorkstreamGates(ctx context.Context, repository *trace.Repo
 			}
 		}
 	}
+	if w.State == AssembledState {
+		g, err := s.deliveryRouteGate(ctx, repository, w.Workstream)
+		if err != nil {
+			return nil, err
+		}
+		if g != nil {
+			out = append(out, *g)
+		}
+	}
 	if w.State == BuildingState || w.State == AssembledState {
 		for subject, state := range w.Subjects {
 			id, ok := strings.CutPrefix(subject, AmendmentSubject(""))
@@ -947,6 +956,39 @@ func (s *Controller) ContestedCard(repository *trace.Repository, stream config.W
 		return InboxEntry{}, false, nil
 	}
 	return e, true, nil
+}
+
+// DeliveryCard is a delivery's "Mark ready for review" card as the owner sees
+// it: the service's DeliveryEntry, held back while Jev's judgment of the
+// delivery route is pending or its pick is not applied, and with Jev's result
+// as its recommendation when the delivery came to the owner after it. A
+// delivery with no route to judge is the card Jev approves at the owner
+// threshold.
+func (s *Controller) DeliveryCard(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
+	e, open, err := s.DeliveryEntry(ctx, repository, stream)
+	if err != nil || !open || s.Jev == nil {
+		return e, open, err
+	}
+	g, err := s.deliveryRouteGate(ctx, repository, stream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	if g == nil {
+		return s.deliveryCard(ctx, repository, stream)
+	}
+	if !s.guardedCard(repository, &e, g) {
+		return InboxEntry{}, false, nil
+	}
+	return e, true, nil
+}
+
+// deliveryRouteGate returns the gate of the assembled workstream's delivery
+// route, or nil when there is none to judge.
+func (s *Controller) deliveryRouteGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*Gate, error) {
+	if s.DeliveryRouteGate == nil {
+		return nil, nil
+	}
+	return s.DeliveryRouteGate(ctx, repository, stream)
 }
 
 // HeldGates returns the gates among the workstream's open owner gates that are

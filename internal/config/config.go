@@ -274,6 +274,7 @@ type Project struct {
 	Clone           string            `toml:"clone" json:"clone"`
 	BaseBranch      string            `toml:"base_branch" json:"base_branch"`
 	Landing         string            `toml:"landing" json:"landing"`
+	Delivery        string            `toml:"delivery" json:"delivery"`
 	HearsayScope    string            `toml:"hearsay_scope" json:"hearsay_scope,omitempty"`
 	HearsayEntities map[string]string `toml:"hearsay_entities" json:"hearsay_entities,omitempty"`
 	// HearsayDeclareRepo posts the project to Hearsay with its GitHub repo
@@ -676,7 +677,7 @@ func loadProjectBytes(root Root, id ProjectID, home string, perWorkstream int, d
 	if err != nil {
 		return Project{}, toml.MetaData{}, err
 	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{PerWorkstream: perWorkstream, GitOperations: DefaultGitOperations}}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", Delivery: DeliveryPullRequest, UpstreamRebase: "6h", PullRequestPoll: DefaultPullRequestPoll, ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{PerWorkstream: perWorkstream, GitOperations: DefaultGitOperations}}
 	md, err := decodeBytes(projectPath, data, &p, true)
 	if err != nil {
 		return Project{}, md, err
@@ -724,6 +725,12 @@ func (p *Project) validate(root Root, id ProjectID, home, projectPath string) er
 	}
 	if !slices.Contains([]string{"commit-per-unit", "squash"}, p.Landing) {
 		return fieldError(projectPath, "landing", "expected commit-per-unit or squash")
+	}
+	if !slices.Contains([]string{DeliveryPullRequest, DeliveryJev}, p.Delivery) {
+		return fieldError(projectPath, "delivery", "expected "+DeliveryPullRequest+" or "+DeliveryJev)
+	}
+	if p.Delivery == DeliveryJev && !strings.EqualFold(p.PushRepository(), p.Upstream) {
+		return fieldError(projectPath, "delivery", DeliveryJev+" needs the project to push to its upstream: remove fork, or use "+DeliveryPullRequest)
 	}
 	if d, err := time.ParseDuration(p.UpstreamRebase); err != nil || d < 0 || d > 0 && d < time.Minute {
 		return fieldError(projectPath, "upstream_rebase", "must be a Go duration of at least 1m, or 0 to disable scheduled drift rebases")
@@ -868,7 +875,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
 		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env", "check_fallback", "organization"}, key[1])
@@ -1192,6 +1199,20 @@ func ValidBranch(s string) bool {
 	}
 	return true
 }
+
+// The values of a project's delivery setting, which says how a clean
+// workstream leaves the project.
+const (
+	// DeliveryPullRequest delivers a workstream as a pull request.
+	DeliveryPullRequest = "pull-request"
+	// DeliveryJev opts the project in to landing a workstream directly on its
+	// base branch.
+	DeliveryJev = "jev"
+)
+
+// Lands reports whether the project has opted in to landing workstreams on
+// its base branch rather than delivering only pull requests.
+func (p Project) Lands() bool { return p.Delivery == DeliveryJev }
 
 // PushRepository names the repository receiving feature branches.
 func (p Project) PushRepository() string {

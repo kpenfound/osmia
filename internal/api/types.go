@@ -1117,10 +1117,15 @@ type InboxEntry struct {
 	OpenedAt       time.Time           `json:"opened_at"`
 	Asked          []InboxQuestion     `json:"asked"`
 	Answer         InboxAnswer         `json:"answer"`
+	// Land is the answer that approves a delivery entry and lands the
+	// workstream on its base branch, with the same Body as Answer. It is
+	// present only on a delivery entry of a project that lands, whose Options
+	// then also hold "land".
+	Land *InboxAnswer `json:"land,omitempty" description:"The answer that approves a delivery entry and lands the workstream. Present only on a delivery entry of a project whose delivery is jev, beside the Mark ready answer."`
 	// Jev is what Jev decided about the entry when the decision came to the
 	// owner after all: an answer below the threshold, a deferral, or a pick
 	// the service refused. Recommendation then says it in words.
-	Jev *InboxJev `json:"jev,omitempty"`
+	Jev *InboxJev `json:"jev,omitempty" description:"What Jev decided about the entry when the decision came to the owner after all: an answer below the threshold, a deferral, or a pick the service refused to apply. On a delivery entry it is Jev's delivery-route decision."`
 	// Recovery is the exact move a recovery card pins; the answer body carries
 	// the same pin.
 	Recovery *RecoveryMove `json:"recovery,omitempty"`

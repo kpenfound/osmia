@@ -119,7 +119,7 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 				continue
 			}
 			switch o.Operation.Action {
-			case LandAction, DriftAction, FinalReviewAction, DeliveryReviewAction, PublishAction, PublishUpstreamAction:
+			case LandAction, DriftAction, FinalReviewAction, DeliveryReviewAction, PublishAction, PublishUpstreamAction, LandDeliveryAction:
 				reviewing[stream] = true
 			}
 		}

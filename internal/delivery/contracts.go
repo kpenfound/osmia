@@ -30,6 +30,14 @@ const BriefWaiting = api.BriefWaiting
 
 type DeliveryApproval = api.DeliveryApproval
 
+// DeliveryRouteLand is the route of an approval to land the workstream on the
+// base branch.
+const DeliveryRouteLand = api.DeliveryRouteLand
+
+type DeliveryLandDecision = api.DeliveryLandDecision
+
+type DeliveryLandResponse = api.DeliveryLandResponse
+
 type DeliveryChecks = api.DeliveryChecks
 
 type DeliveryReady = api.DeliveryReady
@@ -55,6 +63,8 @@ type FinalReport = api.FinalReport
 const InboxDelivery = api.InboxDelivery
 
 type InboxEntry = api.InboxEntry
+
+type InboxAnswer = api.InboxAnswer
 
 const InboxFinalChecks = api.InboxFinalChecks
 

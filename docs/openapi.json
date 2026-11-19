@@ -896,6 +896,55 @@
         }
       }
     },
+    "/v1/delivery/{workstream}/land": {
+      "post": {
+        "summary": "Approve and land: record the owner's approval and land an assembled workstream of a project whose delivery is \"jev\" by a fast-forward of its base branch to the pushed commit, through the same service entry point as a confident Jev delivery-route pick; it works with Jev unconfigured, and a held move, a refused push (the draft is marked ready, with no further card) and an unknown push outcome are reported in the response and settled without another card; refused as a conflict, with nothing pushed, for a project that delivers by pull request, a stale presentation, unaccepted blocking findings, checks that did not pass on the pushed commit, or a dependency still waiting to merge",
+        "operationId": "postDeliveryByWorkstreamLand",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryLandDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryLandResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/delivery/{workstream}/merged": {
       "post": {
         "summary": "Record an assembled workstream delivered by the owner's own merge into upstream",
@@ -5043,6 +5092,9 @@
           "clone": {
             "type": "string"
           },
+          "delivery": {
+            "type": "string"
+          },
           "flake_fixes": {
             "type": "boolean"
           },
@@ -5476,6 +5528,9 @@
           "review_revision": {
             "type": "integer"
           },
+          "route": {
+            "type": "string"
+          },
           "seal": {
             "type": "integer"
           },
@@ -5587,6 +5642,98 @@
         },
         "type": "object"
       },
+      "DeliveryLandDecision": {
+        "properties": {
+          "accept_blocking": {
+            "type": "boolean"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "draft_hash": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryLandResponse": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/DeliveryApproval"
+          },
+          "commit": {
+            "description": "The signed commit the landing moves the base branch to.",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so nothing landed; the workstream is rebased, checked and reviewed again and the service lands the new commit on its own under the same decision, with no second approval. pending: the push outcome is unknown and is settled against the fetched base branch.",
+            "enum": [
+              "landed",
+              "held",
+              "fell-back",
+              "base-moved",
+              "pending"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the workstream did not land, when it did not.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryLanding": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "base_before": {
+            "type": "string"
+          },
+          "base_branch": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "judgment": {
+            "type": "string"
+          },
+          "push": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "reviewed": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryMerge": {
         "properties": {
           "branch": {
@@ -5609,6 +5756,10 @@
           "brief": {
             "$ref": "#/components/schemas/DeliveryBrief"
           },
+          "can_land": {
+            "description": "True when the owner may approve and land the workstream: its project's delivery is jev and the workstream is assembled. Landing is still refused when checks did not pass on the pushed commit. Absent for a project that delivers by pull request or a delivered workstream.",
+            "type": "boolean"
+          },
           "checks": {
             "$ref": "#/components/schemas/DeliveryChecks"
           },
@@ -5623,6 +5774,9 @@
           },
           "draft_pull_request": {
             "type": "boolean"
+          },
+          "landing": {
+            "$ref": "#/components/schemas/DeliveryLanding"
           },
           "maintenance": {
             "type": "boolean"
@@ -5647,6 +5801,10 @@
           },
           "ready": {
             "$ref": "#/components/schemas/DeliveryReady"
+          },
+          "recommendation": {
+            "description": "The route land or pull-request that Jev picked below the decision threshold or without applying it, from its delivery-route decision. Empty when Jev made no pick.",
+            "type": "string"
           },
           "report": {
             "$ref": "#/components/schemas/FinalReport"
@@ -6853,10 +7011,15 @@
             "type": "string"
           },
           "jev": {
-            "$ref": "#/components/schemas/InboxJev"
+            "$ref": "#/components/schemas/InboxJev",
+            "description": "What Jev decided about the entry when the decision came to the owner after all: an answer below the threshold, a deferral, or a pick the service refused to apply. On a delivery entry it is Jev's delivery-route decision."
           },
           "kind": {
             "type": "string"
+          },
+          "land": {
+            "$ref": "#/components/schemas/InboxAnswer",
+            "description": "The answer that approves a delivery entry and lands the workstream. Present only on a delivery entry of a project whose delivery is jev, beside the Mark ready answer."
           },
           "number": {
             "type": "integer"
@@ -7291,7 +7454,7 @@
             "description": "The value in the loaded configuration."
           },
           "name": {
-            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities.",
+            "description": "Setting name: name, upstream, fork, clone, base_branch, landing, delivery, upstream_rebase, pull_request_poll, checks_timeout, capacity.per_workstream, capacity.git_operations, hearsay_scope, hearsay_declare_repo, flake_fixes or hearsay_entities.",
             "type": "string"
           },
           "pending": {
@@ -7331,6 +7494,13 @@
             ]
           },
           "clone": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "delivery": {
+            "description": "pull-request (the default) delivers workstreams as pull requests; jev opts the project in to landing on its base branch and is refused on a project that delivers through a fork.",
             "type": [
               "null",
               "string"

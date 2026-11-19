@@ -306,7 +306,7 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		}
 	}
 	if w.State == AssembledState || w.State == DeliveredState {
-		if err := add(s.deliveryCard(ctx, repository, w.Workstream)); err != nil {
+		if err := add(s.DeliveryCard(ctx, repository, w.Workstream)); err != nil {
 			return nil, err
 		}
 		if err := add(s.PublicationEntry(repository, w)); err != nil {

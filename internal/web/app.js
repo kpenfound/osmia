@@ -4217,6 +4217,35 @@
     return entry.answer.path.slice(api.length);
   }
 
+  // landMessages is what the page says once Approve and land is accepted, for
+  // each outcome the service reports: the owner is told what the landing did,
+  // and that no further decision is needed.
+  const landMessages = {
+    landed: (name) => 'Landed ' + name + ' on its base branch.',
+    held: (name) => 'The landing of ' + name + ' is held for now; nothing was pushed, and it lands once the hold clears.',
+    'fell-back': (name) => 'The upstream refused the landing push of ' + name + '; its draft pull request was marked ready for review instead.',
+    'base-moved': (name) => 'The base branch moved, so ' + name + ' is rebased and checked again before it lands.',
+    pending: (name) => 'The landing of ' + name + ' is being settled against the base branch.',
+  };
+
+  // land approves the delivery and lands the workstream, through the answer
+  // the entry offers for it, with the same pins as marking ready.
+  function land(d) {
+    const entry = d.entry;
+    if (d.pending || !entry.land || !presented(entry, detailOf(entry))) return;
+    d.pending = true;
+    block(d.submit, true);
+    block(d.land, true);
+    submit(d.form, d.land, entry.land.method, entry.land.path.slice(api.length), { ...entry.land.body },
+      (out) => (landMessages[out.outcome] || landMessages.pending)(workstreamName(entry.workstream)),
+      undefined, decisionKey(entry)).finally(() => {
+      d.pending = false;
+      const view = presented(d.entry, detailOf(d.entry));
+      block(d.submit, !view);
+      block(d.land, !view);
+    });
+  }
+
   function accept(d) {
     const entry = d.entry;
     submit(d.form, d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
@@ -4248,11 +4277,13 @@
       // puts the text the card previews on the pull request.
       d.pending = true;
       block(d.submit, true);
+      block(d.land, true);
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), body,
         (out) => 'Approved marking final review ' + out.review + ' of ' + workstreamName(entry.workstream) + ' ready for review.',
         undefined, decisionKey(entry)).finally(() => {
         d.pending = false;
         block(d.submit, !presented(d.entry, detailOf(d.entry)));
+        block(d.land, !presented(d.entry, detailOf(d.entry)));
       });
       return;
     }
@@ -4365,7 +4396,12 @@
       // collapsed as the owner left it.
       d.preview = el('details', { 'data-field': 'preview' }, el('summary', {}, 'What will be published'));
       fields.push(d.preview);
-      fields.push(el('p', { class: 'meta', 'data-field': 'authorization' }, 'Approving puts the description above on the draft pull request, with the brief\'s "Before you ship" items, and marks the pull request ready for review.'));
+      d.authorization = el('p', { class: 'meta', 'data-field': 'authorization' }, 'Approving puts the description above on the draft pull request, with the brief\'s "Before you ship" items, and marks the pull request ready for review.');
+      fields.push(d.authorization);
+      // The landing button belongs to a project that lands, which the entry
+      // says by offering the landing as an answer.
+      d.land = el('button', { type: 'button', class: 'secondary', 'data-field': 'land' }, 'Approve and land');
+      d.land.addEventListener('click', () => land(d));
     } else {
       d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
       fields.push(el('label', {}, 'Note', d.note));
@@ -4450,6 +4486,7 @@
   function renderDelivery(d, name) {
     const view = presented(d.entry, name);
     block(d.submit, !view || !!d.pending);
+    block(d.land, !view || !!d.pending);
     d.preview.hidden = !view;
     if (!view) {
       d.detail.replaceChildren(el('div', { 'data-field': 'reading' }, readState(name, 'Reading the final report…', 'The final report is unavailable.')));
@@ -4492,6 +4529,14 @@
         el('div', { class: 'meta' }, 'Commit message' + (messages.length > 1 ? ' ' + (i + 1) : '')),
         el('pre', { 'data-field': 'commit-message' }, m.message)]));
     d.submit.textContent = deliveryLabel(d.entry, view);
+    d.land.textContent = d.entry.answer.body.accept_blocking ? 'Accept findings and land' : 'Approve and land';
+    // Jev's recommendation, when it made one without the authority to apply
+    // it, marks the route it favours as the primary action.
+    const landFirst = view.recommendation === 'land';
+    d.land.className = landFirst ? 'primary' : 'secondary';
+    d.submit.className = landFirst ? 'secondary' : 'primary';
+    d.authorization.textContent = 'Approving puts the description above on the draft pull request, with the brief\'s "Before you ship" items, and marks the pull request ready for review.' +
+      (d.entry.land ? ' Approve and land moves the base branch to the checked commit instead, and opens no pull request.' : '');
   }
 
   // renderPullRequest names the draft pull request the decision is about: the
@@ -4622,7 +4667,7 @@
       case 'delivery':
         renderDelivery(d, name);
         d.actions.setAttribute('data-field', 'options');
-        place(d.actions, [d.submit]);
+        place(d.actions, entry.land ? [d.submit, d.land] : [d.submit]);
         break;
       case 'publication':
       case 'checks':

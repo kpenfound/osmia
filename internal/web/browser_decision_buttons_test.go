@@ -58,6 +58,10 @@ func newDecisionButtonFixture(t *testing.T, entry string, delivery ...string) *d
 				// An approved delivery answers with the final review it published.
 				ok = fmt.Sprintf(`{"review":%d,"commit":%q}`, testPins.review, testPins.commit)
 			}
+			if strings.HasSuffix(r.URL.Path, "/land") {
+				// Approve and land answers with what landing did.
+				ok = fmt.Sprintf(`{"approval":{"review":%d,"commit":%q},"outcome":"landed","commit":%q}`, testPins.review, testPins.commit, testPins.commit)
+			}
 			f.action.serve(w, r, ok)
 		} else if strings.HasPrefix(r.URL.Path, "/v1/delivery/") {
 			f.mu.Lock()

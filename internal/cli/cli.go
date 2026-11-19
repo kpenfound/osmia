@@ -62,6 +62,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   rebase <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--accept] [--json]
+  land <workstream-id> [--accept] [--json]  approve and land on the base branch
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   feed <workstream-id|workgroup-id> [--json]
@@ -286,6 +287,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
+	case "land":
+		valid = len(a) == 1
 	case "conversation", "feed":
 		valid = len(a) == 1
 	case "inbox", "reload", "config":
@@ -331,7 +334,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -372,7 +375,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "land" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -960,6 +963,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if checks := presentation.Checks; checks != nil {
 				fmt.Fprintf(stdout, "Checks: %s\n", checks.Summary)
 			}
+			if presentation.CanLand {
+				fmt.Fprintf(stdout, "Landing: osmia land %s moves the base branch to the checked commit instead of marking the pull request ready\n", id)
+			}
+			if presentation.Recommendation != "" {
+				fmt.Fprintf(stdout, "Jev recommends: %s\n", presentation.Recommendation)
+			}
 			for _, criterion := range presentation.Report.Criteria {
 				if criterion.Gap != "" {
 					fmt.Fprintf(stdout, "Unshown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Gap)
@@ -981,6 +990,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			if m := presentation.Merge; m != nil {
 				fmt.Fprintf(stdout, "\nMerged by you outside the factory: %s/%s at %s holds %s at %s\n", m.Upstream.Remote, m.Upstream.Branch, m.Upstream.Commit, m.Branch, m.Commit)
+			}
+			if l := presentation.Landing; l != nil {
+				fmt.Fprintf(stdout, "\nLanded on %s of %s, decided by %s: it was fast-forwarded from %s to %s, which holds %s. No pull request was merged.\n", l.BaseBranch, l.Upstream, l.DecidedBy, l.BaseBefore, l.Confirmed, l.Commit)
 			}
 			if p := presentation.Publication; p != nil {
 				if p.Status == "opened" {
@@ -1025,6 +1037,25 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, approved)
 		}
 		fmt.Fprintf(stdout, "Approved marking final review %d at %s ready for review with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
+		return 0
+	}
+	if cmd == "land" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		presentation, err := c.Delivery(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		landed, err := c.ApproveAndLand(ctx, id, wire.DeliveryLandDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash, AcceptBlocking: o.accept})
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, landed)
+		}
+		showLanding(stdout, id, landed)
 		return 0
 	}
 	if cmd == "trace" {
@@ -2105,7 +2136,11 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			block("Answer", fmt.Sprintf("osmia amendment %s %s <%s> [note]", stream, e.Amendment, strings.Join(e.Options, "|")))
 		case wire.InboxDelivery:
 			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
-			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
+			answer := fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream)
+			if e.Land != nil {
+				answer += fmt.Sprintf("; or osmia land %s to approve and land it on the base branch", stream)
+			}
+			block("Answer", answer)
 		case wire.InboxChecksChoice:
 			block("Decided on", fmt.Sprintf("push %v (pull request #%v, commit %v)", e.Answer.Body["push"], e.Answer.Body["pull_request"], e.Answer.Body["pushed_commit"]))
 			block("Answer", fmt.Sprintf("osmia checks %s keep-waiting, or osmia checks %s continue to continue the final review without check results for this push only", stream, stream))
@@ -2135,6 +2170,22 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 		case wire.InboxDiscovery:
 			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the chief of staff records it", stream))
 		}
+	}
+}
+
+// showLanding says what approving the landing of a workstream did.
+func showLanding(w io.Writer, id config.WorkstreamID, landed wire.DeliveryLandResponse) {
+	switch landed.Outcome {
+	case wire.LandOutcomeLanded:
+		fmt.Fprintf(w, "Landed workstream %s: the base branch was fast-forwarded to %s and the workstream is delivered\n", id, landed.Commit)
+	case wire.LandOutcomeHeld:
+		fmt.Fprintf(w, "The landing of workstream %s is held for now and nothing was pushed; it lands once the hold clears: %s\n", id, landed.Reason)
+	case wire.LandOutcomeFellBack:
+		fmt.Fprintf(w, "The upstream refused the push of %s, so it did not land. The draft pull request was marked ready for review and workstream %s is delivered: %s\n", landed.Commit, id, landed.Reason)
+	case wire.LandOutcomeBaseMoved:
+		fmt.Fprintf(w, "The base branch moved, so %s did not land. Workstream %s is rebased onto it and checked and reviewed again, and lands on the new commit by itself under your approval: %s\n", landed.Commit, id, landed.Reason)
+	default:
+		fmt.Fprintf(w, "The outcome of landing %s for workstream %s is not known yet; the service settles it against the base branch: %s\n", landed.Commit, id, landed.Reason)
 	}
 }
 

@@ -179,6 +179,8 @@ type WorkstreamMoveRequest = api.WorkstreamMoveRequest
 
 const PublishAction = delivery.PublishAction
 
+const LandDeliveryAction = delivery.LandDeliveryAction
+
 var ownPullRequestOutcomeAt = delivery.OwnPullRequestOutcomeAt
 var latestPin = intake.LatestPin
 

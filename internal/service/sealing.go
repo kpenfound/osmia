@@ -19,6 +19,7 @@ type repositoryAdapter struct {
 	builds    *builder
 	lands     *foreman
 	publishes coreadapter.Reconciler
+	landings  coreadapter.Reconciler
 }
 
 func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
@@ -37,6 +38,8 @@ func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation
 		return (&baseRefresher{S: a.lands.s.lifecycle(), Repository: a.seals.Repository}).Inspect(ctx, op)
 	case PublishAction, publishUpstreamAction:
 		return a.publishes.Inspect(ctx, op)
+	case landDeliveryAction:
+		return a.landings.Inspect(ctx, op)
 	}
 	if a.other == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -60,6 +63,8 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return (&baseRefresher{S: a.lands.s.lifecycle(), Repository: a.seals.Repository}).Apply(ctx, op)
 	case PublishAction, publishUpstreamAction:
 		return a.publishes.Apply(ctx, op)
+	case landDeliveryAction:
+		return a.landings.Apply(ctx, op)
 	}
 	if a.other == nil {
 		return coreadapter.OperationResult{}, errors.New("no repository adapter is configured")
@@ -79,6 +84,11 @@ func (a repositoryAdapter) boundedBy(op coreadapter.Operation) (reconcile.Bounde
 	case PublishAction, publishUpstreamAction:
 		var ok bool
 		if b, ok = a.publishes.(reconcile.Bounded); !ok {
+			return nil, false
+		}
+	case landDeliveryAction:
+		var ok bool
+		if b, ok = a.landings.(reconcile.Bounded); !ok {
 			return nil, false
 		}
 	default:

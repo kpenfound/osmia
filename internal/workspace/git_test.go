@@ -309,6 +309,42 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	}
 }
 
+// A worktree stopped while it was being added has a HEAD that names no
+// commit. It is made again on its branch rather than reported as on no branch.
+func TestAcquireMakesAgainAWorktreeWhoseAdditionWasStopped(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	ws, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1", Ref: base, Branch: "osmia/w1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := git(t, "-C", ws.Directory(), "rev-parse", "--absolute-git-dir")
+	if err := os.WriteFile(filepath.Join(admin, "HEAD"), []byte(strings.Repeat("0", 40)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ws.Directory(), "README")); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := f.provider.Workspace(ctx, "w1"); err != nil || found {
+		t.Fatalf("a worktree stopped while it was added: %v %v", found, err)
+	}
+	again, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1", Ref: base, Branch: "osmia/w1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, "-C", again.Directory(), "rev-parse", "--abbrev-ref", "HEAD"); got != "osmia/w1" {
+		t.Fatalf("the worktree is on %s", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(again.Directory(), "README")); err != nil || string(data) != "widgets\n" {
+		t.Fatalf("the worktree's files: %q %v", data, err)
+	}
+	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 2 {
+		t.Fatalf("worktrees:\n%s", out)
+	}
+}
+
 func TestAncestorAndRelease(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

@@ -255,6 +255,7 @@ func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	var ctl string
 	j.JJ, ctl = hangingJJ(t)
+	productionCleanup := cleanupDeadline
 	setDuration(t, &cleanupDeadline, 400*time.Millisecond)
 	setDuration(t, &killWait, 5*time.Second)
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
@@ -308,10 +309,13 @@ func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 		t.Fatalf("the refusal cleared the mark: %+v", q)
 	}
 
-	// Once Recover can succeed the step runs on the restored checkout.
+	// Once Recover can succeed the step runs on the restored checkout. The short
+	// bound only made the hang return quickly; a restoration that works gets the
+	// bound it has in service.
 	if err := os.Remove(filepath.Join(ctl, "hang-restore")); err != nil {
 		t.Fatal(err)
 	}
+	setDuration(t, &cleanupDeadline, productionCleanup)
 	err = LocalStep(context.Background(), "after", time.Now(), []Provider{j}, func(local context.Context) error {
 		if _, found, err := j.Workspace(local, "made"); err != nil || found {
 			return fmt.Errorf("the step began on a dirty checkout: %t %v", found, err)
@@ -478,6 +482,7 @@ func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T
 	f, j := newJujutsuFixture(t)
 	var ctl string
 	j.JJ, ctl = hangingJJ(t)
+	productionCleanup := cleanupDeadline
 	setDuration(t, &cleanupDeadline, 400*time.Millisecond)
 	setDuration(t, &killWait, 5*time.Second)
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
@@ -508,10 +513,12 @@ func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T
 	}
 
 	// Once recovery can succeed it runs first, and the read sees a clone that
-	// needs none.
+	// needs none. The short bound only made the hang return quickly; a recovery
+	// that works gets the bound it has in service.
 	if err := os.Remove(filepath.Join(ctl, "hang-restore")); err != nil {
 		t.Fatal(err)
 	}
+	setDuration(t, &cleanupDeadline, productionCleanup)
 	err = Quiesced(context.Background(), []Provider{j}, func(context.Context) error {
 		ran = true
 		if got := checkpointFiles(t, j); len(got) != 0 {

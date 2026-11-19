@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -38,6 +39,17 @@ func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 		DependentBaseChanged: dependentBaseChanged, BranchBase: branchBase, DriftRebaseNotes: driftRebaseNotes,
 		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: pendingMergeOrderReferences,
 		EdgePublicationWait: edgePublicationWait, UnresolvedMergeOrderEdge: unresolvedMergeOrderEdge,
-		CanonicalPublication: canonicalPublication, ChiefThread: s.chiefThread,
+		CanonicalPublication: canonicalPublication, ChiefThread: s.chiefThread, RequestRebase: s.requestRebase,
 	})
+}
+
+// requestRebase asks for the drift rebase of the workstream's branch onto its
+// upstream's base branch now. A workstream that takes none (it is paused,
+// held or has one in flight) is left to the schedule.
+func (s *Service) requestRebase(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) error {
+	_, api := s.lifecycle().RebaseWorkstream(ctx, string(stream))
+	if api != nil && api.Code != delivery.Conflict {
+		return errors.New(api.Message)
+	}
+	return nil
 }

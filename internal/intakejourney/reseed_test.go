@@ -352,6 +352,8 @@ func TestEditAndRatificationValidateAgainstTheRecordedMapWhenTheFetchFails(t *te
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
+	// The skip is accepted once the round is recorded, not while it runs.
+	f.awaitShed(t, stream, "concluded-1")
 	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
 		t.Fatal(err)
 	}
@@ -401,6 +403,11 @@ func TestRunningServiceSealsAFootprintNamingADirectoryThatLandedAfterDrafting(t 
 		opts.WriteTimeout = time.Minute
 	})
 	ctx := context.Background()
+	// The draft's debate is skipped, so no committee runs until the amendment.
+	committee := f.opts.Committee
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
 	repo := f.repository()
 	librarian := intake.LibrarianWorkstream(f.project)
 	noLibrarian := func(when string) {
@@ -591,6 +598,10 @@ func TestRunningServiceSealsAFootprintNamingADirectoryThatLandedAfterDrafting(t 
 		t.Fatalf("the clone already has %s", later)
 	}
 	amended := strings.Replace(named, `"footprint": ["internal.late"]`, `"footprint": ["internal.later"]`, 1)
+	f.stop(t)
+	f.opts.Committee = committee
+	f.start(t)
+	repo = f.repository()
 	f.script("amend-1-1", map[string]string{plan.PlanPath: amended}, nil)
 	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
 	f.script("amend-1-reply-1", nil, nil)

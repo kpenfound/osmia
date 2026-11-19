@@ -49,6 +49,10 @@ const (
 	HoldPaused = "paused"
 	// HoldStale: the subject moved on since the exit was raised.
 	HoldStale = "stale"
+	// HoldBusy: a hard prerequisite holds the target for now: another operation
+	// of the workstream is in flight, or a budget or loop limit stops work.
+	// Nothing is recorded: the exit is offered again once the hold clears.
+	HoldBusy = "busy"
 )
 
 // Verdict is the table's result for one set of answers.

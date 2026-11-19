@@ -29,6 +29,7 @@ type Provider interface {
 	// Branches and history.
 	Branch(ctx context.Context, name string) (string, bool, error)
 	Ancestor(ctx context.Context, commit, tip string) (bool, error)
+	Known(ctx context.Context, commit string) (bool, error)
 	MergeBase(ctx context.Context, a, b string) (string, error)
 	Integrated(ctx context.Context, head, onto string) (bool, error)
 	Commit(ctx context.Context, revision string) (Commit, error)
@@ -71,6 +72,7 @@ type Provider interface {
 	Fetch(ctx context.Context, remote, branch string) (string, error)
 	RemoteBranch(ctx context.Context, remote, branch string) (string, bool, error)
 	Push(ctx context.Context, remote, commit, branch, expected string) error
+	FastForward(ctx context.Context, remote, commit, branch string) (FastForwardResult, error)
 
 	// Restoring the backend's own state after an interrupted operation.
 	// Jujutsu Checkpoint requires the ownership context supplied by LocalStep;

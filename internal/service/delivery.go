@@ -5,6 +5,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -58,6 +59,10 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	return s.delivery().ApproveDelivery(ctx, raw, req)
 }
 
+func (s *Service) approveAndLand(ctx context.Context, raw string, req DeliveryLandDecision) (DeliveryLandResponse, *APIError) {
+	return s.delivery().ApproveAndLand(ctx, raw, req)
+}
+
 func (s *Service) answerChecksChoice(ctx context.Context, raw string, req ChecksChoiceRequest) (ChecksChoiceResponse, *APIError) {
 	return s.delivery().AnswerChecksChoice(ctx, raw, req)
 }
@@ -65,6 +70,10 @@ func (s *Service) answerChecksChoice(ctx context.Context, raw string, req Checks
 var publicationAction = delivery.PublicationAction
 
 const PublishAction = delivery.PublishAction
+
+const landDeliveryAction = delivery.LandDeliveryAction
+
+var landingBusy = delivery.LandingBusy
 
 const publicationSubject = delivery.PublicationSubject
 
@@ -102,6 +111,10 @@ var checksChoiceEntry = delivery.ChecksChoiceEntry
 
 func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	return s.delivery().DeliveryEntry(ctx, repository, stream)
+}
+
+func (s *Service) deliveryRouteGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*intake.Gate, error) {
+	return s.delivery().DeliveryRouteGate(ctx, repository, stream)
 }
 
 const FinalReportTool = delivery.FinalReportTool

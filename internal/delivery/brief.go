@@ -225,7 +225,7 @@ func (s *Controller) briefTarget(ctx context.Context, repository *trace.Reposito
 			return briefTarget{}, "no reviewed final review awaits delivery approval: the workstream is " + feature.Value, nil
 		}
 	}
-	if _, reason, err := (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream); err != nil || reason != "" {
+	if _, reason, err := s.finalGate(ctx, repository, stream); err != nil || reason != "" {
 		if reason != "" {
 			reason = "no reviewed final review awaits delivery approval: " + reason
 		}

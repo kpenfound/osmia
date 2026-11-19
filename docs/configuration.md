@@ -474,7 +474,8 @@ set.
 `notify.webhook` is an absolute `http` or `https` URL with a host, such as an
 [ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other
 scheme are errors that name `notify.webhook` without quoting the URL. With it
-set, every entry that opens in the inbox is posted to it once
+set, every entry that opens in the inbox, the daily budget pause and every
+landing of a workstream on its base branch are posted to it once
 ([notifications](running.md#notifications)). The URL is shown in
 `/v1/config`, so treat a URL that embeds a token like any other value there.
 
@@ -1120,6 +1121,7 @@ fork = "my-account/repository"      # optional; omit to push feature branches to
 clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
+delivery = "pull-request"           # default; "jev" lets a clean workstream land on base_branch
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 pull_request_poll = "10m"           # default; minimum 5m between pull request checks
 checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
@@ -1135,7 +1137,32 @@ ASCII letters, digits, `.`, `_` and `-`, beginning with a letter or digit, witho
 a `.git` suffix. Fork and upstream must differ ignoring case. `base_branch` follows
 Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
-published with each unit's commit or as one commit. Repo `capacity.per_workstream` is a positive integer overriding the
+published with each unit's commit or as one commit.
+
+`delivery` chooses how a finished workstream leaves the project. It accepts two
+values:
+
+- `pull-request` (the default when the key is unset): the workstream goes out as
+  the draft pull request that publication opens, and is delivered when the owner
+  marks it ready, marks it ready on GitHub, or records its merge. The service
+  never pushes to the base branch.
+- `jev`: the project opts in to landing. A clean workstream can land directly,
+  with the service fast-forwarding `base_branch` to the signed, checked commit
+  of its push, either through the owner's "Approve and land" or through a
+  confident Jev `delivery-route` decision. When a landing does not happen, the
+  existing draft pull request is the fallback.
+
+Any other value fails validation with an error naming `delivery`. `jev` is
+refused on a project that delivers through a fork, that is, one whose push
+repository (`fork`) is not its `upstream`; the error names `delivery`, and the
+same project loads with `pull-request`. A `fork` that names the upstream is not
+a fork. Whether the account has push access to the upstream is not checked when
+the configuration loads: a refused push is handled when it happens. Saving the
+setting through project settings, the API or the web applies the same
+validation, and a project created by Osmia is written with
+`delivery = "pull-request"`.
+
+Repo `capacity.per_workstream` is a positive integer overriding the
 global default.
 
 Repo `capacity.git_operations` is a positive integer, default 4. Seal, build,
@@ -1230,7 +1257,7 @@ request needs a `Host` naming the listener.
 
 **Read.** The editable snapshot is the file on disk. The read decodes the
 current bytes once and returns, for each effective setting (`name`, `upstream`,
-`fork`, `clone`, `base_branch`, `landing`, `upstream_rebase`,
+`fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
 `flake_fixes`, `hearsay_entities`):
@@ -1831,6 +1858,31 @@ same review identity and publishes the same text as the owner's. Below the
 threshold the card reaches the owner with Jev's pick as its recommendation.
 Jev never writes text: an option carried out with text is offered only when
 the chief of staff already wrote it.
+
+The delivery of a workstream on a project whose `delivery` is `jev` is a gate
+Jev may decide in place of that delivery approval: the `delivery-route`
+decision, keyed by the workstream, the final review round and the pushed
+commit, with the options `land`, `pull-request` and `defer`. Jev is asked only when the delivery is clean: the
+project delivers through its upstream (not a fork), the final review left no
+blocking findings, checks passed on the exact pushed commit, and no hard-block
+or merge-order dependency still waits to merge. Its state holds only the spec
+summary, the final review report, the check results, and the number of files and
+lines changed with the names of the entities they touch; it holds no code and no
+diff. A pick at or above `[jev] decision_threshold` is binding. A `land` pick
+lands the workstream through the same service entry point as the owner's
+"Approve and land", with Jev's judgment named as the deciding authority: a
+refused push is delivered as the draft pull request marked ready, and a landing
+the router holds is applied once the hold clears, both with no owner card. A
+`pull-request` pick marks the existing draft ready for review. A pick below the
+threshold, a deferral or a fallback leaves the draft a draft: the delivery card
+shows "Mark ready for review" with "Approve and land" beside it and, when Jev
+picked, its pick as the recommendation. When the service refuses to apply a
+binding pick before anything is pushed (the delivery it was made for is no
+longer the current one, or a precondition no longer holds), the refusal is
+recorded on the judgment, Jev is not asked about that delivery again, and the
+card goes to the owner with Jev's judgment shown. When the delivery is not
+clean, or the project has not opted in, the delivery card is the one Jev
+approves at `[jev] owner_threshold`.
 
 Each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,

@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
 
@@ -74,13 +75,17 @@ func CurrentOwnPublication(repo *trace.Repository, stream config.WorkstreamID) (
 }
 
 // OwnPullRequestFinished reports whether stream's current publication's
-// pull request is durably recorded merged or closed. It is false when the
-// recorded outcome names an earlier pull request than the current
-// publication's, or the workstream has no pull request of its own.
+// pull request is durably recorded merged or closed, or the workstream landed
+// on its base branch, which leaves the pull request nothing to deliver. It is
+// false when the recorded outcome names an earlier pull request than the
+// current publication's, or the workstream has no pull request of its own.
 func OwnPullRequestFinished(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	current, found, err := CurrentOwnPublication(repo, stream)
 	if err != nil || !found {
 		return false, err
+	}
+	if _, landed, err := ReadDeliveryLanding(repo, stream); err != nil || landed {
+		return landed, err
 	}
 	outcome, revision, err := OwnPullRequestOutcomeAt(repo, stream)
 	if err != nil || revision == 0 {
@@ -176,4 +181,102 @@ func RecordOwnPullRequestOutcomeFromFind(ctx context.Context, repo *trace.Reposi
 		return nil
 	}
 	return nil
+}
+
+// LandedPullRequestCause is the cause of the own-PR outcome recorded for a
+// landed workstream's pull request.
+const LandedPullRequestCause = "landed-pull-request"
+
+// LandedPullRequest returns the own pull request of a landed workstream whose
+// outcome is not recorded yet, with the landing it is left over from, and
+// whether there is one.
+func LandedPullRequest(repo *trace.Repository, stream config.WorkstreamID) (DeliveryPublication, DeliveryLanding, bool, error) {
+	landing, landed, err := ReadDeliveryLanding(repo, stream)
+	if err != nil || !landed {
+		return DeliveryPublication{}, DeliveryLanding{}, false, err
+	}
+	publication, found, err := CurrentOwnPublication(repo, stream)
+	if err != nil || !found {
+		return DeliveryPublication{}, DeliveryLanding{}, false, err
+	}
+	outcome, revision, err := OwnPullRequestOutcomeAt(repo, stream)
+	if err != nil {
+		return DeliveryPublication{}, DeliveryLanding{}, false, err
+	}
+	if revision > 0 && outcome.PullRequest == publication.PullRequest && (outcome.Outcome == OwnPullRequestOutcomeMerged || outcome.Outcome == OwnPullRequestOutcomeClosed) {
+		return DeliveryPublication{}, DeliveryLanding{}, false, nil
+	}
+	return publication, landing, true, nil
+}
+
+// LandedPullRequestComment is the comment that closes a landed workstream's
+// pull request: it names the landed commit and the base branch it landed on.
+func LandedPullRequestComment(landing DeliveryLanding) string {
+	return fmt.Sprintf("Osmia landed this change directly on the base branch: commit %s is now at %s of %s by a fast-forward, so there is nothing left to merge here. Closing this pull request; the branch %s is kept.", landing.Commit, landing.BaseBranch, landing.Upstream, landing.Branch)
+}
+
+// SettleLandedPullRequest looks up the own pull request of a landed workstream
+// and closes it with a comment naming the landed commit and base branch while it
+// is still open, then records the outcome so that no later poll or restart
+// looks at it or comments again. A pull request the host already shows merged
+// or closed is left alone and only its outcome is recorded: the landing's
+// delivered and resolved state stands either way. It reports whether it closed
+// the pull request. A lookup that fails supplies no evidence and is retried on
+// the next poll. step is a fault-injection point called before and after the
+// close.
+func SettleLandedPullRequest(ctx context.Context, client pulls.Client, repo *trace.Repository, at time.Time, stream config.WorkstreamID, step func(string) error) (bool, error) {
+	publication, landing, pending, err := LandedPullRequest(repo, stream)
+	if err != nil || !pending {
+		return false, err
+	}
+	if step == nil {
+		step = func(string) error { return nil }
+	}
+	found, err := client.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
+	if err != nil {
+		return false, ctx.Err()
+	}
+	for _, pr := range found {
+		if pr.Number != publication.PullRequest {
+			continue
+		}
+		if outcome, finished := PullRequestOutcomeOf(pr); finished {
+			return false, recordLandedOutcome(ctx, repo, at, stream, pr.Number, outcome, pr.MergeCommit)
+		}
+		closer, ok := client.(pulls.LandedClient)
+		if !ok {
+			return false, nil
+		}
+		if err := step("landed-pr-found"); err != nil {
+			return false, err
+		}
+		if _, err := closer.CloseWithComment(ctx, publication.Upstream, pr.Number, LandedPullRequestComment(landing)); err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			// The close may have reached the host before the response was lost: the
+			// next poll finds it closed and records that.
+			return false, nil
+		}
+		if err := step("landed-pr-closed"); err != nil {
+			return false, err
+		}
+		return true, recordLandedOutcome(ctx, repo, at, stream, pr.Number, OwnPullRequestOutcomeClosed, "")
+	}
+	return false, nil
+}
+
+func recordLandedOutcome(ctx context.Context, repo *trace.Repository, at time.Time, stream config.WorkstreamID, number int, outcome, mergeCommit string) error {
+	var doc trace.Document
+	var ok bool
+	var err error
+	if mergeCommit != "" {
+		doc, ok, err = OwnPullRequestOutcomeDocumentFor(repo, stream, at, LandedPullRequestCause, number, outcome, mergeCommit)
+	} else {
+		doc, ok, err = OwnPullRequestOutcomeDocumentFor(repo, stream, at, LandedPullRequestCause, number, outcome)
+	}
+	if err != nil || !ok {
+		return err
+	}
+	return repo.RecordDocuments(ctx, []trace.Document{doc})
 }

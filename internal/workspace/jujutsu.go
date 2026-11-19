@@ -1232,6 +1232,18 @@ func (j *Jujutsu) Push(ctx context.Context, remote, commit, branch, expected str
 	return j.git().Push(ctx, remote, commit, branch, expected)
 }
 
+// Known reports whether commit's object exists in the clone, as Git's Known
+// does.
+func (j *Jujutsu) Known(ctx context.Context, commit string) (bool, error) {
+	return j.git().Known(ctx, commit)
+}
+
+// FastForward moves a remote's branch to commit with a plain push, as Git's
+// FastForward does.
+func (j *Jujutsu) FastForward(ctx context.Context, remote, commit, branch string) (FastForwardResult, error) {
+	return j.git().FastForward(ctx, remote, commit, branch)
+}
+
 // readMetadata reads what the provider recorded about the workspace at path.
 func readMetadata(path string) (metadata, error) {
 	data, err := os.ReadFile(filepath.Join(path, ".jj", metadataName))

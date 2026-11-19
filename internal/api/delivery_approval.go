@@ -26,11 +26,14 @@ type DeliveryPresentation struct {
 	// Publication is the latest record of the push that put the branch on
 	// the pull request, Ready the record of the pull request being marked
 	// ready for review, Merge the owner's own merge of the branch into
-	// upstream that delivered it instead, and Delivered whether the
+	// upstream that delivered it instead, Landing the service's own landing of
+	// the signed commit on the base branch that delivered it instead of a pull
+	// request merge (Merge is then not set), and Delivered whether the
 	// workstream is delivered.
 	Publication *DeliveryPublication `json:"publication,omitempty"`
 	Ready       *DeliveryReady       `json:"ready,omitempty"`
 	Merge       *DeliveryMerge       `json:"merge,omitempty"`
+	Landing     *DeliveryLanding     `json:"landing,omitempty"`
 	Delivered   bool                 `json:"delivered,omitempty"`
 	Maintenance bool                 `json:"maintenance,omitempty"`
 	// DraftPullRequest is true when approving leaves the pull request a
@@ -45,7 +48,24 @@ type DeliveryPresentation struct {
 	// that review: a brief recorded for an earlier review is never shown. It
 	// is omitted for a delivered workstream with no brief recorded.
 	Brief *DeliveryBrief `json:"brief,omitempty"`
+	// CanLand is true when the owner may approve and land the workstream: its
+	// project's delivery setting is "jev", so the service can fast-forward the
+	// base branch to the pushed commit. It is omitted for a project that
+	// delivers by pull request and for a delivered workstream.
+	CanLand bool `json:"can_land,omitempty" description:"True when the owner may approve and land the workstream: its project's delivery is jev and the workstream is assembled. Landing is still refused when checks did not pass on the pushed commit. Absent for a project that delivers by pull request or a delivered workstream."`
+	// Recommendation is the route Jev recommends when it picked one without
+	// the authority to apply it: DeliveryRouteLand or DeliveryRoutePullRequest.
+	// It is empty when Jev made no pick.
+	Recommendation string `json:"recommendation,omitempty" description:"The route land or pull-request that Jev picked below the decision threshold or without applying it, from its delivery-route decision. Empty when Jev made no pick."`
 }
+
+// The routes a delivery approval takes. An approval with no route marks the
+// draft pull request ready for review, as DeliveryRoutePullRequest does;
+// DeliveryRouteLand lands the workstream on the project's base branch.
+const (
+	DeliveryRoutePullRequest = "pull-request"
+	DeliveryRouteLand        = "land"
+)
 
 // The states of the check result a delivery presentation shows.
 const (
@@ -148,10 +168,18 @@ type DeliveryApproval struct {
 	// AcceptedBlocking is what the final report found blocking that the
 	// owner accepted as it is by approving.
 	AcceptedBlocking []string `json:"accepted_blocking,omitempty"`
-	// DecidedBy is "jev" for an approval Jev decided at the owner threshold,
-	// with Judgment naming the judgment record, and empty for the owner's.
+	// DecidedBy names who the approval's authority is when it is not the owner
+	// who marked the pull request ready: "jev", with Judgment naming the
+	// judgment it rests on, when Jev decided the delivery at the owner
+	// threshold or by a gate decision. The service records such an approval of
+	// the drafted title and description, and the publication it asks for reads
+	// the authority here. Empty is the owner.
 	DecidedBy string `json:"decided_by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`
+	// Route is what the approval authorises: DeliveryRouteLand when the owner
+	// approved landing the workstream on the base branch, and empty or
+	// DeliveryRoutePullRequest when it marks the draft pull request ready.
+	Route string `json:"route,omitempty"`
 }
 
 // DeliveryDecision marks the draft pull request ready as shown, or supplies the
@@ -169,4 +197,48 @@ type DeliveryDecision struct {
 	// AcceptBlocking accepts what the final report found blocking as it is;
 	// a report with blocking findings is approved only with it.
 	AcceptBlocking bool `json:"accept_blocking,omitempty"`
+}
+
+// DeliveryLandDecision approves landing the presented workstream on its base
+// branch. The review identity and draft hash pin what the owner read, as a
+// DeliveryDecision does.
+type DeliveryLandDecision struct {
+	Review         int    `json:"review"`
+	ReviewRevision int    `json:"review_revision"`
+	Commit         string `json:"commit"`
+	DraftHash      string `json:"draft_hash"`
+	// AcceptBlocking accepts what the final report found blocking as it is;
+	// a report with blocking findings lands only with it.
+	AcceptBlocking bool `json:"accept_blocking,omitempty"`
+}
+
+// The outcomes DeliveryLandResponse reports.
+const (
+	// LandOutcomeLanded: the base branch is at the pushed commit and the
+	// workstream is delivered.
+	LandOutcomeLanded = "landed"
+	// LandOutcomeHeld: the router holds the landing for now. Nothing was
+	// pushed, and the landing is applied once the hold clears.
+	LandOutcomeHeld = "held"
+	// LandOutcomeFellBack: the upstream refused the push, so the draft pull
+	// request was marked ready and the workstream delivered.
+	LandOutcomeFellBack = "fell-back"
+	// LandOutcomeBaseMoved: the upstream base branch moved, so nothing landed.
+	// The workstream is rebased, checked and reviewed again, and the service
+	// lands the new commit under the same decision.
+	LandOutcomeBaseMoved = "base-moved"
+	// LandOutcomePending: the outcome of the push is not known yet. The service
+	// settles it against the fetched base branch.
+	LandOutcomePending = "pending"
+)
+
+// DeliveryLandResponse reports what approving the landing did. Approval is
+// the owner approval recorded for it, Outcome one of the LandOutcome values and
+// Reason says why when the workstream did not land. Commit is the signed
+// commit the landing moves the base branch to.
+type DeliveryLandResponse struct {
+	Approval DeliveryApproval `json:"approval"`
+	Outcome  string           `json:"outcome" enum:"landed,held,fell-back,base-moved,pending" description:"landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so nothing landed; the workstream is rebased, checked and reviewed again and the service lands the new commit on its own under the same decision, with no second approval. pending: the push outcome is unknown and is settled against the fetched base branch."`
+	Reason   string           `json:"reason,omitempty" description:"Why the workstream did not land, when it did not."`
+	Commit   string           `json:"commit,omitempty" description:"The signed commit the landing moves the base branch to."`
 }

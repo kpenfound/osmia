@@ -79,7 +79,7 @@ var RouteTriggers = []string{
 	"unit.move_owner", "unit.move_proposal", "unit.stalled",
 	"ws.handed", "ws.draft_accepted", "ws.shed_entered", "ws.build_started", "ws.units_merged",
 	"ws.draft_exhausted", "ws.shed_concluded", "ws.ratified", "ws.seal_failed",
-	"ws.delivery_approved", "ws.ready_on_host", "ws.merge_recorded", "ws.abandon",
+	"ws.delivery_approved", "ws.ready_on_host", "ws.merge_recorded", "ws.landed", "ws.abandon",
 	"ws.move_owner", "ws.move_proposal", "ws.stalled",
 	"final.requested", "final.reviewed_clean", "final.reviewed_blocking", "final.failed", "final.checks_missing",
 	"contest.owner_ruling", "contest.jev_ruling", "contest.chief_ruling", "objection.chief_decision",
