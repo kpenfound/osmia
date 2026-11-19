@@ -399,3 +399,27 @@ func TestSbxCreateReceivesTheSandboxSize(t *testing.T) {
 		}
 	}
 }
+
+// Docker Hub refusing a sandbox's kit for its pull rate limit is the machine's
+// account limit, not a failure of the turn: the result says so, so the
+// service stops creating sandboxes until the limit has had time to roll.
+func TestARateLimitedSandboxCreateIsARegistryLimit(t *testing.T) {
+	turn := toolTurn(t, "sbx")
+	turn.Profile.Timeout = time.Minute
+	turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
+	runner := sbxRunner(t, agenttest.Session(t, agent.AgentClaude, agenttest.Turn{ResultText: "boxed"}).Bin)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(runner.SbxBin), "rate-limit-create"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
+	if !errors.Is(err, agent.ErrRegistryRateLimited) {
+		t.Fatalf("Run() = %v, want the registry's rate limit", err)
+	}
+	if result.Limit == nil || !result.Limit.Blocking() || result.Limit.Kind != a.RegistryLimitKind || result.ErrorSubtype != "registry_rate_limit" {
+		t.Fatalf("result limit %+v, subtype %q; want a blocking registry limit", result.Limit, result.ErrorSubtype)
+	}
+	if reset := result.Limit.ResetsAt.Sub(started); reset < a.RegistryRateLimitWait || reset > a.RegistryRateLimitWait+time.Minute {
+		t.Fatalf("limit resets %s after the turn, want %s", reset, a.RegistryRateLimitWait)
+	}
+}

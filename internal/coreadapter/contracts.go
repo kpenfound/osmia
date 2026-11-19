@@ -224,6 +224,17 @@ type ProviderLimit struct {
 	ResetsAt     time.Time
 }
 
+// RegistryLimitKind is the Kind of the limit a turn reports when its sandbox
+// could not be created because the registry its kit comes from (Docker Hub)
+// refused it for the pull rate limit. It is the machine's account, not a
+// provider's, so it holds every sbx turn whatever its backend.
+const RegistryLimitKind = "registry"
+
+// RegistryRateLimitWait is how long a registry limit lasts. Docker Hub says
+// nothing of when its window rolls, and every sandbox create inside it is
+// another request against the limit.
+const RegistryRateLimitWait = 10 * time.Minute
+
 // Blocking reports whether the provider says new sessions cannot proceed.
 func (l ProviderLimit) Blocking() bool {
 	return l.Status != "" && l.Status != "allowed" && l.Status != "allowed_warning"

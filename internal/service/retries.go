@@ -49,7 +49,11 @@ func (s *Service) admitRole(role string) bool {
 }
 
 func (s *Service) recordProviderLimit(profile coreadapter.Profile, limit coreadapter.ProviderLimit) error {
-	return s.store.SetProviderLimit(runtime.ProviderLimit{Backend: profile.Backend, Status: limit.Status, Kind: limit.Kind, SetAt: s.now(), ResetsAt: limit.ResetsAt})
+	backend := profile.Backend
+	if limit.Kind == coreadapter.RegistryLimitKind {
+		backend = runtime.SandboxRegistryLimit
+	}
+	return s.store.SetProviderLimit(runtime.ProviderLimit{Backend: backend, Status: limit.Status, Kind: limit.Kind, SetAt: s.now(), ResetsAt: limit.ResetsAt})
 }
 
 func (s *Service) effective() (runtime.State, []runtime.Diagnostic) {

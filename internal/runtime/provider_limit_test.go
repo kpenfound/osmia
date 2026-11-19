@@ -60,3 +60,50 @@ func TestProviderLimitsFallbackPauseOverrideResetAndRestart(t *testing.T) {
 		t.Fatalf("owner clear: %+v", state)
 	}
 }
+
+// Every backend's sandbox kit comes through the machine's one Docker account,
+// so Docker Hub's pull rate limit pauses every sbx role, fallbacks or not, and
+// no other role, until it resets or the owner clears it.
+func TestTheRegistryLimitPausesEverySbxRoleUntilItResets(t *testing.T) {
+	in := fixture(t)
+	defaultProfile := in.Config.Profiles["default"]
+	defaultProfile.Fallback = "other"
+	in.Config.Profiles["default"] = defaultProfile
+	mason := in.Config.Roles["mason"]
+	mason.Sandbox = "sbx"
+	in.Config.Roles["mason"] = mason
+	var host string
+	for role, binding := range in.Config.Roles {
+		if binding.Sandbox != "sbx" {
+			host = role
+			break
+		}
+	}
+	if host == "" {
+		t.Fatal("the fixture has no role outside sbx")
+	}
+	at := time.Date(2026, 11, 18, 21, 30, 0, 0, time.UTC)
+	s := open(t, in)
+	must(t, s.SetProviderLimit(ProviderLimit{Backend: SandboxRegistryLimit, Status: "blocked", Kind: "registry", SetAt: at, ResetsAt: at.Add(10 * time.Minute)}))
+	paused := func(state State, role string) bool {
+		return slices.ContainsFunc(state.Pauses, func(p Pause) bool {
+			return p.Target == (Target{Scope: "role", Role: role}) && p.Source == PauseProviderUsageLimit && p.Reason == RegistryLimitReason
+		})
+	}
+	state, _ := s.EffectiveAt(at)
+	if !paused(state, "mason") || state.Profiles["mason"] != in.Config.Roles["mason"].Profile {
+		t.Fatalf("the sbx mason was not paused on its own profile: profiles %v, pauses %+v", state.Profiles, state.Pauses)
+	}
+	if paused(state, host) {
+		t.Fatalf("role %s, outside sbx, was paused: %+v", host, state.Pauses)
+	}
+	state, _ = s.EffectiveAt(at.Add(10 * time.Minute))
+	if paused(state, "mason") || len(state.ProviderLimits) != 0 {
+		t.Fatalf("the limit outlived its reset: %+v", state)
+	}
+	must(t, s.ClearProviderLimit(SandboxRegistryLimit))
+	state, _ = s.EffectiveAt(at)
+	if paused(state, "mason") {
+		t.Fatalf("the owner's clear did not lift the pause: %+v", state.Pauses)
+	}
+}

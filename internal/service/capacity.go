@@ -131,7 +131,9 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 		}
 		for _, role := range slices.Sorted(maps.Keys(cfg.Roles)) {
 			configured := cfg.Roles[role].Profile
-			if cfg.Profiles[configured].Agent != name || usage.Limit == nil {
+			// The registry limit holds the sbx roles, whatever their backend.
+			registry := name == runtime.SandboxRegistryLimit && cfg.Roles[role].Sandbox == "sbx"
+			if (cfg.Profiles[configured].Agent != name && !registry) || usage.Limit == nil {
 				continue
 			}
 			switch p := profiles[role]; p.Source {

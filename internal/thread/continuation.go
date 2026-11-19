@@ -201,6 +201,12 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 					fallback = r.Fallbacks[fallback.Name]
 				}
 			}
+			registry := limited && result.Limit.Kind == coreadapter.RegistryLimitKind
+			if registry {
+				// Every backend's sandbox comes from the same registry
+				// account, so another profile would only spend the limit.
+				fallback = coreadapter.Profile{}
+			}
 			if tried[fallback.Name] {
 				fallback = coreadapter.Profile{}
 			}
@@ -211,6 +217,9 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 			if limited {
 				decision.Kind, decision.Retry, decision.FallbackProfile = coreadapter.Infrastructure, fallback.Name != "", fallback.Name
 				decision.Reason = "provider usage limit"
+				if registry {
+					decision.Reason = "Docker Hub's pull rate limit"
+				}
 			}
 			a.FailureClass, a.Failure = decision.Kind, "the session failed: "+decision.Reason
 			if runErr != nil {

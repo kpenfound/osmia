@@ -268,7 +268,9 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   provider usage (`Provider usage on <day>:`,
   then per provider `<provider>: USD <spend> known spend`, marked `at least`
   like the daily budget, with `Limit: <status> kind=<kind> until <time>` or
-  `until cleared` while a usage limit is in force, `Fallback: <role> runs
+  `until cleared` while a usage limit is in force (the provider `sbx` is
+  Docker Hub's pull rate limit, which holds every sbx role, and `Paused:` lists
+  them), `Fallback: <role> runs
   <profile> in place of <configured>` and `Paused: <role> has no fallback
   available` for the roles the limit affects, and an `unattributed:` line for
   costs no attempt names a provider for), the

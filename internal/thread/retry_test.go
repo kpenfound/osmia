@@ -251,3 +251,33 @@ func TestStartupFailureKeepsBackendDiagnosticWithoutSession(t *testing.T) {
 		t.Fatalf("diagnostic after restart: %+v %v", th, err)
 	}
 }
+
+// A registry limit holds every backend's sandbox, so the turn tries no
+// fallback profile: another create would only be another request against the
+// limit. The limit is recorded for the service to pause the sbx roles.
+func TestARegistryLimitTriesNoFallback(t *testing.T) {
+	repo, _, _ := setup(t)
+	queue(t, repo, "first")
+	var ran, recorded []string
+	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain,
+		OnProviderLimit: func(p coreadapter.Profile, limit coreadapter.ProviderLimit) error {
+			recorded = append(recorded, p.Name+":"+limit.Kind)
+			return nil
+		},
+		Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			ran = append(ran, p.Profile.Name)
+			return coreadapter.SessionResult{IsError: true, ErrorSubtype: "registry_rate_limit", Limit: &coreadapter.ProviderLimit{Status: "blocked", Kind: coreadapter.RegistryLimitKind, ResetsAt: timestamp.Add(time.Hour)}}, errors.New("create sandbox: rate limited")
+		}),
+	}
+	// The turn fails, and its error is the sandbox's.
+	q, _ := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned"})
+	if len(q.Attempts) == 0 {
+		t.Fatal("no attempt was recorded")
+	}
+	if !reflect.DeepEqual(ran, []string{"default"}) || !reflect.DeepEqual(recorded, []string{"default:registry"}) {
+		t.Fatalf("runs %v, recorded %v; want one attempt and the registry limit recorded", ran, recorded)
+	}
+	if a := q.Attempts[0]; a.FailureClass != coreadapter.Infrastructure {
+		t.Fatalf("attempt %+v, want an infrastructure failure", a)
+	}
+}

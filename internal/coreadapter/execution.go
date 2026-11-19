@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"time"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/vcs"
@@ -173,6 +174,10 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 		result.IsError = true
 		result.ErrorSubtype = "session_cost_cap"
 		result.Outcome = nil
+	}
+	if errors.Is(runErr, agent.ErrRegistryRateLimited) {
+		result.Limit = &ProviderLimit{Status: "blocked", Kind: RegistryLimitKind, ResetsAt: time.Now().Add(RegistryRateLimitWait)}
+		result.ErrorSubtype = "registry_rate_limit"
 	}
 	if runErr != nil {
 		result.IsError = true

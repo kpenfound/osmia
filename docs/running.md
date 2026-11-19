@@ -214,7 +214,8 @@ The member view is laid out like a chat client:
   finish. Check slots are separate from agent and per-workstream limits;
   waiting does not consume the check timeout. Reload applies a changed limit to
   new admissions while checks already running finish. The pauses open to every
-  pause with who set it (you, the daily budget or a provider usage limit), why
+  pause with who set it (you, the daily budget, a provider usage limit or
+  Docker Hub's pull rate limit on sbx sandboxes), why
   and when, where you resume one or pause the
   factory, a project or a workstream, softly or hard. A backend activity
   button sits beside them, marked whenever an operation is in flight and

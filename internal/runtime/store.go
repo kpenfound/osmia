@@ -41,6 +41,16 @@ const (
 	PauseLoopGuard          = "loop-guard"
 )
 
+// SandboxRegistryLimit is the key of the limit Docker Hub's pull rate limit
+// sets: not an agent backend but the sbx sandboxes, whose kits every backend
+// pulls through the machine's one Docker account. While it is in force, every
+// role whose sandbox is sbx is paused, whatever its fallbacks; `osmia profiles
+// clear-limit sbx` lifts it early.
+const SandboxRegistryLimit = "sbx"
+
+// RegistryLimitReason is why a role is paused for the registry limit.
+const RegistryLimitReason = "Docker Hub's pull rate limit: sbx sandboxes cannot be created"
+
 type Priority struct {
 	Project     config.ProjectID      `json:"project"`
 	Workstreams []config.WorkstreamID `json:"workstreams"`
@@ -421,6 +431,12 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 		out.ProviderLimits = append(out.ProviderLimits, limit)
 	}
 	for role, binding := range in.Config.Roles {
+		if binding.Sandbox == "sbx" {
+			if limit, ok := registryLimit(out.ProviderLimits); ok {
+				out.Pauses = append(out.Pauses, Pause{Target: Target{Scope: "role", Role: role}, Mode: "soft", Source: PauseProviderUsageLimit, Reason: RegistryLimitReason, SetAt: limit.SetAt})
+				continue
+			}
+		}
 		if _, overridden := st.Profiles[role]; overridden && out.Profiles[role] == st.Profiles[role] {
 			continue
 		}
@@ -445,6 +461,14 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 		out.Pauses = append(out.Pauses, Pause{Target: Target{Scope: "role", Role: role}, Mode: "soft", Source: PauseProviderUsageLimit, Reason: "Provider " + limit.Backend + " usage limit (" + limit.Status + ")", SetAt: limit.SetAt})
 	}
 	return out, ds
+}
+func registryLimit(limits []ProviderLimit) (ProviderLimit, bool) {
+	for _, limit := range limits {
+		if limit.Backend == SandboxRegistryLimit {
+			return limit, true
+		}
+	}
+	return ProviderLimit{}, false
 }
 func limitedBackend(limits []ProviderLimit, backend string) bool {
 	for _, limit := range limits {
