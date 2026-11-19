@@ -898,7 +898,7 @@
     },
     "/v1/delivery/{workstream}/land": {
       "post": {
-        "summary": "Approve and land: record the owner's approval and land an assembled workstream of a project whose delivery is \"jev\" by a fast-forward of its base branch to the pushed commit; refused as a conflict, with nothing pushed, for a project that delivers by pull request, a stale presentation, unaccepted blocking findings, checks that did not pass on the pushed commit, or a dependency still waiting to merge",
+        "summary": "Approve and land: record the owner's approval and land an assembled workstream of a project whose delivery is \"jev\" by a fast-forward of its base branch to the pushed commit, through the same service entry point as a confident Jev delivery-route pick; it works with Jev unconfigured, and a held move, a refused push (the draft is marked ready, with no further card) and an unknown push outcome are reported in the response and settled without another card; refused as a conflict, with nothing pushed, for a project that delivers by pull request, a stale presentation, unaccepted blocking findings, checks that did not pass on the pushed commit, or a dependency still waiting to merge",
         "operationId": "postDeliveryByWorkstreamLand",
         "parameters": [
           {
@@ -5665,12 +5665,22 @@
             "$ref": "#/components/schemas/DeliveryApproval"
           },
           "commit": {
+            "description": "The signed commit the landing moves the base branch to.",
             "type": "string"
           },
           "outcome": {
+            "description": "landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so the workstream is rebased and checked again. pending: the push outcome is unknown and is settled against the fetched base branch.",
+            "enum": [
+              "landed",
+              "held",
+              "fell-back",
+              "base-moved",
+              "pending"
+            ],
             "type": "string"
           },
           "reason": {
+            "description": "Why the workstream did not land, when it did not.",
             "type": "string"
           }
         },
@@ -5744,6 +5754,7 @@
             "$ref": "#/components/schemas/DeliveryBrief"
           },
           "can_land": {
+            "description": "True when the owner may approve and land the workstream: its project's delivery is jev and the workstream is assembled. Landing is still refused when checks did not pass on the pushed commit. Absent for a project that delivers by pull request or a delivered workstream.",
             "type": "boolean"
           },
           "checks": {
@@ -5789,6 +5800,7 @@
             "$ref": "#/components/schemas/DeliveryReady"
           },
           "recommendation": {
+            "description": "The route land or pull-request that Jev picked below the decision threshold or without applying it, from its delivery-route decision. Empty when Jev made no pick.",
             "type": "string"
           },
           "report": {
@@ -6996,13 +7008,15 @@
             "type": "string"
           },
           "jev": {
-            "$ref": "#/components/schemas/InboxJev"
+            "$ref": "#/components/schemas/InboxJev",
+            "description": "What Jev decided about the entry when the decision came to the owner after all: an answer below the threshold, a deferral, or a pick the service refused to apply. On a delivery entry it is Jev's delivery-route decision."
           },
           "kind": {
             "type": "string"
           },
           "land": {
-            "$ref": "#/components/schemas/InboxAnswer"
+            "$ref": "#/components/schemas/InboxAnswer",
+            "description": "The answer that approves a delivery entry and lands the workstream. Present only on a delivery entry of a project whose delivery is jev, beside the Mark ready answer."
           },
           "number": {
             "type": "integer"

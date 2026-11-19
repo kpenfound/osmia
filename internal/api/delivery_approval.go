@@ -52,11 +52,11 @@ type DeliveryPresentation struct {
 	// project's delivery setting is "jev", so the service can fast-forward the
 	// base branch to the pushed commit. It is omitted for a project that
 	// delivers by pull request and for a delivered workstream.
-	CanLand bool `json:"can_land,omitempty"`
+	CanLand bool `json:"can_land,omitempty" description:"True when the owner may approve and land the workstream: its project's delivery is jev and the workstream is assembled. Landing is still refused when checks did not pass on the pushed commit. Absent for a project that delivers by pull request or a delivered workstream."`
 	// Recommendation is the route Jev recommends when it picked one without
 	// the authority to apply it: DeliveryRouteLand or DeliveryRoutePullRequest.
 	// It is empty when Jev made no pick.
-	Recommendation string `json:"recommendation,omitempty"`
+	Recommendation string `json:"recommendation,omitempty" description:"The route land or pull-request that Jev picked below the decision threshold or without applying it, from its delivery-route decision. Empty when Jev made no pick."`
 }
 
 // The routes a delivery approval takes. An approval with no route marks the
@@ -237,7 +237,7 @@ const (
 // commit the landing moves the base branch to.
 type DeliveryLandResponse struct {
 	Approval DeliveryApproval `json:"approval"`
-	Outcome  string           `json:"outcome"`
-	Reason   string           `json:"reason,omitempty"`
-	Commit   string           `json:"commit,omitempty"`
+	Outcome  string           `json:"outcome" enum:"landed,held,fell-back,base-moved,pending" description:"landed: the base branch is at the pushed commit and the workstream is delivered. held: the router holds the landing and nothing was pushed; it is applied once the hold clears. fell-back: the upstream refused the push, so the draft pull request was marked ready and the workstream delivered. base-moved: the base branch moved, so the workstream is rebased and checked again. pending: the push outcome is unknown and is settled against the fetched base branch."`
+	Reason   string           `json:"reason,omitempty" description:"Why the workstream did not land, when it did not."`
+	Commit   string           `json:"commit,omitempty" description:"The signed commit the landing moves the base branch to."`
 }
