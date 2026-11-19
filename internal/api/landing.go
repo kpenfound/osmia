@@ -1,9 +1,8 @@
 package api
 
-// UnitLanding is the document units/<unit>/landing.json: the approval a
-// unit landed on, with the reviewed candidate and base, the governing spec
-// and plan revisions and seal, the criteria the unit serves, and the
-// feature branch commit that landed it with its message.
+// UnitLanding is a unit's landing.json: the candidate that landed on the
+// feature branch, the commit it landed as and the approval, turn and sealed
+// identity it landed under.
 type UnitLanding struct {
 	Unit      string   `json:"unit"`
 	Operation string   `json:"operation"`

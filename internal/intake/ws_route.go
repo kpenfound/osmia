@@ -34,6 +34,7 @@ const (
 	TriggerDeliveryApproved  = "ws.delivery_approved"
 	TriggerReadyOnHost       = "ws.ready_on_host"
 	TriggerMergeRecorded     = "ws.merge_recorded"
+	TriggerLanded            = "ws.landed"
 	TriggerMoveOwner         = "ws.move_owner"
 	TriggerMoveProposal      = "ws.move_proposal"
 	TriggerStalled           = "ws.stalled"

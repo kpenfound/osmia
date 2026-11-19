@@ -148,8 +148,12 @@ type DeliveryApproval struct {
 	// AcceptedBlocking is what the final report found blocking that the
 	// owner accepted as it is by approving.
 	AcceptedBlocking []string `json:"accepted_blocking,omitempty"`
-	// DecidedBy is "jev" for an approval Jev decided at the owner threshold,
-	// with Judgment naming the judgment record, and empty for the owner's.
+	// DecidedBy names who the approval's authority is when it is not the owner
+	// who marked the pull request ready: "jev", with Judgment naming the
+	// judgment it rests on, when Jev decided the delivery at the owner
+	// threshold or by a gate decision. The service records such an approval of
+	// the drafted title and description, and the publication it asks for reads
+	// the authority here. Empty is the owner.
 	DecidedBy string `json:"decided_by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`
 }

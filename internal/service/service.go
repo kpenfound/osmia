@@ -1387,6 +1387,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	finals := &delivery.FinalReviewer{S: s.deliveryFor(cfg), Repository: repository}
 	publish := &delivery.Publisher{S: s.deliveryFor(cfg), Repository: repository}
+	landing := &delivery.Lander{S: s.deliveryFor(cfg), Repository: repository}
 	amend := &amendmentDrafter{Drafter: draft}
 	amendRounds := amendmentDebate{Debate: rounds}
 	budget := budgetSignals{s: s, repository: repository}
@@ -1434,7 +1435,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		}
 	}
 	return &stages{cfg: cfg, hooks: schedule, polls: polls, runner: runner,
-		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
+		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish, landings: landing}}, nil
 }
 
 // concurrentOperation selects operations whose inspection and effects run

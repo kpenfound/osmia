@@ -176,7 +176,7 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 	return func(stream config.WorkstreamID, op coreadapter.Operation) scheduler.HoldCause {
 		gone := false
 		switch op.Action {
-		case DriftAction, LandAction, RebaseAction, PublishAction, publishUpstreamAction:
+		case DriftAction, LandAction, RebaseAction, PublishAction, publishUpstreamAction, landDeliveryAction:
 			var err error
 			gone, err = abandoned(repository, stream)
 			gone = gone && err == nil
@@ -190,9 +190,16 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 		}
 		if gitOperation(op) {
 			switch op.Action {
-			case LandAction, RebaseAction, PublishAction, publishUpstreamAction:
+			case LandAction, RebaseAction, PublishAction, publishUpstreamAction, landDeliveryAction:
 				if errors.Is(s.held(repository, stream), errPaused) {
 					return scheduler.HeldByPause
+				}
+			}
+			if op.Action == landDeliveryAction {
+				// A landing waits for the operations of its workstream, as the router
+				// holds it while they run.
+				if why, err := landingBusy(repository, stream, op); err != nil || why != "" {
+					return scheduler.HeldByOther
 				}
 			}
 			if joining, err := s.gitWorkgroupJoining(repository, stream); err != nil || joining {

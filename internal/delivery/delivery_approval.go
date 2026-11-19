@@ -350,12 +350,6 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery commit messages"}
 	}
-	pinned, _ := json.Marshal(struct {
-		Title       string
-		Description string
-		Style       string
-		Messages    []workspace.DeliveryMessage
-	}{title, draft, style, messages})
 	brief, err := s.presentBrief(ctx, repository, stream, report, review.Revision, approval != nil)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery brief"}
@@ -364,7 +358,19 @@ func (s *Controller) PresentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read check result"}
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: DescriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief}, nil
+}
+
+// draftHash identifies the title, description, style and commit messages a
+// presentation drafts, so a decision can name exactly what it read.
+func draftHash(title, description, style string, messages []workspace.DeliveryMessage) string {
+	pinned, _ := json.Marshal(struct {
+		Title       string
+		Description string
+		Style       string
+		Messages    []workspace.DeliveryMessage
+	}{title, description, style, messages})
+	return DescriptionHash(string(pinned))
 }
 
 // ApproveDelivery records the owner's approval to mark the pull request ready

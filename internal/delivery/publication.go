@@ -135,6 +135,11 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 	if held, err := p.S.ChangeHeld(p.Repository, stream); err != nil || held {
 		return err
 	}
+	// A landing in flight decides how the workstream is delivered: marking its
+	// pull request ready waits for the landing's outcome.
+	if landing, err := LandingInFlight(p.Repository, stream); err != nil || landing {
+		return err
+	}
 	feature, err := p.Repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return err
@@ -760,13 +765,13 @@ func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreada
 // that outcome.
 func (p *Publisher) recordApplied(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string, docs []trace.Document, txs ...trace.Transaction) (coreadapter.OperationResult, error) {
 	// The first transaction is the workstream's move to delivered, which the
-	// approval authorised, the owner's or Jev's; the router applies it as a
-	// pinned move.
-	judgment := ""
-	if approval, err := ApprovalAt(p.Repository, stream, in.Approval); err == nil && approval.DecidedBy == trace.DecidedByJev {
-		judgment = approval.Judgment
+	// approval authorised, the owner's or the one the service recorded for Jev's
+	// delivery decision; the router applies it as a pinned move.
+	approval, err := ApprovalAt(p.Repository, stream, in.Approval)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
 	}
-	res, err := routeDelivered(ctx, p.S.Router, p.Repository, stream, TriggerDeliveryApproved, judgment, docs, txs[0], txs[1:]...)
+	res, err := routeDeliveredBy(ctx, p.S.Router, p.Repository, stream, TriggerDeliveryApproved, LandDecider{By: approval.DecidedBy, Judgment: approval.Judgment}, docs, txs[0], txs[1:]...)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

@@ -110,7 +110,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	projectText, err := os.ReadFile(filepath.Join(traceDir, "config.toml"))
 	must(t, err)
-	if string(projectText) != "version = 1\nname = \"dagger\"\nupstream = \"dagger/dagger\"\nfork = \"owner/dagger\"\nclone = "+fmt.Sprintf("%q", added.Project.Clone)+"\nbase_branch = \"main\"\nlanding = \"commit-per-unit\"\n" {
+	if string(projectText) != "version = 1\nname = \"dagger\"\nupstream = \"dagger/dagger\"\nfork = \"owner/dagger\"\nclone = "+fmt.Sprintf("%q", added.Project.Clone)+"\nbase_branch = \"main\"\nlanding = \"commit-per-unit\"\ndelivery = \"pull-request\"\n" {
 		t.Fatalf("project configuration:\n%s", projectText)
 	}
 	charter, err := projectDocument(t, s.cfg.Root, id, "charter.md")

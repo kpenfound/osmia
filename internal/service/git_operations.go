@@ -34,7 +34,7 @@ func gitOperation(op coreadapter.Operation) bool {
 		return false
 	}
 	switch op.Action {
-	case SealAction, BuildAction, LandAction, RebaseAction, DriftAction, PublishAction, publishUpstreamAction:
+	case SealAction, BuildAction, LandAction, RebaseAction, DriftAction, PublishAction, publishUpstreamAction, landDeliveryAction:
 		return true
 	}
 	return false

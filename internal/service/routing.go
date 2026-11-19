@@ -69,6 +69,10 @@ func (p routerPort) Route(ctx context.Context, x router.Exit) (router.Result, er
 	return p.s.RouteExit(ctx, x)
 }
 
+func (p routerPort) Admit(ctx context.Context, x router.Exit) (router.Admission, error) {
+	return p.s.router.Admit(ctx, x)
+}
+
 func (p routerPort) Submit(x router.Exit, done func(router.Result, error)) bool {
 	return p.s.SubmitExit(x, done)
 }

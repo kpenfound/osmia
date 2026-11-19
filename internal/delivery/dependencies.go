@@ -60,11 +60,15 @@ type Dependencies struct {
 	PostPushWait *time.Duration
 	// CloudRerun requests the one rerun of a push's failed checks. It is nil
 	// when none can be requested.
-	CloudRerun                  checks.CloudRerunner
-	ChangeHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
-	ChangeRepositoryHeld        func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
-	UpstreamDeliveryPending     func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)
-	UnresolvedWork              func(*trace.Repository, config.WorkstreamID) (bool, error)
+	CloudRerun              checks.CloudRerunner
+	ChangeHeld              func(*trace.Repository, config.WorkstreamID) (bool, error)
+	ChangeRepositoryHeld    func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
+	UpstreamDeliveryPending func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)
+	UnresolvedWork          func(*trace.Repository, config.WorkstreamID) (bool, error)
+	// RequestRebase asks for the existing rebase of the workstream's feature
+	// branch onto its upstream's base branch now, as the owner's request does.
+	// It is nil when none can be asked for.
+	RequestRebase               func(context.Context, *trace.Repository, config.WorkstreamID) error
 	ReopenHeld                  func(*trace.Repository, config.WorkstreamID) (bool, error)
 	BaseObservationAt           func(*trace.Repository, config.WorkstreamID) (bool, int, error)
 	WorkgroupMergeOrderResolved func(*trace.Repository, config.WorkstreamID) (string, error)
