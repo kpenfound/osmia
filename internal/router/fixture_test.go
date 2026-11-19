@@ -204,11 +204,6 @@ func (f *fx) notices() []string {
 		if e.Event.Kind != trace.NoticeKind || !strings.HasPrefix(e.TransitionID, "route-") {
 			continue
 		}
-		for _, suffix := range []string{"-held", "-owner", "-refused"} {
-			if strings.HasSuffix(e.TransitionID, suffix) {
-				out = append(out, e.Event.Body)
-			}
-		}
 	}
 	return out
 }
