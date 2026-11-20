@@ -53,8 +53,6 @@ type Dependencies struct {
 	// CloudStatuses reads the combined statuses of the pushed commit. When nil,
 	// PullRequests is used if it reads statuses.
 	CloudStatuses pulls.StatusReader
-	// CloudStatusFetcher reads the JSON a "Run Dagger Checks" status points at.
-	CloudStatusFetcher checks.CloudStatusFetcher
 	// PostPushWait replaces FinalChecksWait, the time after a push before the
 	// statuses of its commit are read. Nil keeps FinalChecksWait.
 	PostPushWait *time.Duration

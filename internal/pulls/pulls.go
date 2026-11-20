@@ -228,7 +228,23 @@ func (g GitHub) do(ctx context.Context, action, access, repository, method, path
 	return err
 }
 
+// doStatusRead is do for reading a commit's statuses: its errors name the
+// status code, the content type and any decode error, and no response text.
+func (g GitHub) doStatusRead(ctx context.Context, action, repository, path string, out any) error {
+	start := time.Now()
+	status, err := g.send(ctx, true, http.MethodGet, path, nil, http.StatusOK, out)
+	ghlog.Log(ctx, start, ghlog.Entry{Action: action, Access: ghlog.Read, Repository: repository, Method: http.MethodGet, Path: path, Status: status, NoResponse: status == 0, Err: err})
+	return err
+}
+
 func (g GitHub) request(ctx context.Context, method, path string, in any, want int, out any) (status int, err error) {
+	return g.send(ctx, false, method, path, in, want, out)
+}
+
+// send performs one request. With diagnostic, every failure of the answer is
+// a ResponseError built from the status code, the response Content-Type and
+// the decode error alone: it carries no text taken from the response body.
+func (g GitHub) send(ctx context.Context, diagnostic bool, method, path string, in any, want int, out any) (status int, err error) {
 	base := g.BaseURL
 	if base == "" {
 		base = "https://api.github.com"
@@ -263,16 +279,62 @@ func (g GitHub) request(ctx context.Context, method, path string, in any, want i
 	defer resp.Body.Close()
 	status = resp.StatusCode
 	if status != want {
+		if diagnostic {
+			return status, diagnosticError(resp, "", "")
+		}
 		return status, statusError(resp)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
 	if err != nil || len(data) > MaxResponse {
+		if diagnostic {
+			return status, diagnosticError(resp, fmt.Sprintf("the response could not be read or is over %d bytes", MaxResponse), "")
+		}
 		return status, &ResponseError{Status: status, Message: "unreadable or oversized response"}
 	}
 	if err := json.Unmarshal(data, out); err != nil {
+		if diagnostic {
+			return status, diagnosticError(resp, "the response could not be decoded", decodeProblem(err))
+		}
 		return status, &ResponseError{Status: status, Message: "invalid response"}
 	}
 	return status, nil
+}
+
+// diagnosticError describes an answer by its status code and Content-Type, the
+// rate limit and retry headers GitHub sent, what went wrong and the decode
+// error, when there is one. It never names the body or the credential.
+func diagnosticError(resp *http.Response, problem, decode string) *ResponseError {
+	contentType := errorText(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "none"
+	}
+	text := fmt.Sprintf("GitHub answered %d with content type %q", resp.StatusCode, contentType)
+	if problem != "" {
+		text += ": " + problem
+	}
+	if decode != "" {
+		text += " (" + decode + ")"
+	}
+	text += rateLimitHints(resp)
+	return &ResponseError{Status: resp.StatusCode, Message: text}
+}
+
+// decodeProblem names a JSON decode error without quoting the input: the
+// messages of the decoder can repeat a character or a value of the body.
+func decodeProblem(err error) string {
+	var syntax *json.SyntaxError
+	var typed *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax) && strings.HasPrefix(syntax.Error(), "unexpected end"):
+		return "the JSON ends unexpectedly"
+	case errors.As(err, &syntax):
+		return fmt.Sprintf("invalid JSON at byte %d", syntax.Offset)
+	case errors.As(err, &typed):
+		return fmt.Sprintf("a value does not fit %s", typed.Type)
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return "the JSON ends unexpectedly"
+	}
+	return "the JSON does not match the expected form"
 }
 
 // errTransport is a request that got no answer: the connection failed or
@@ -325,6 +387,17 @@ func statusError(resp *http.Response) *ResponseError {
 	if permissions := errorText(resp.Header.Get("X-Accepted-GitHub-Permissions")); permissions != "" {
 		text += "; the request needs the token permissions " + permissions
 	}
+	text += rateLimitHints(resp)
+	if doc := errorText(body.DocumentationURL); doc != "" {
+		text += "; see " + doc
+	}
+	return &ResponseError{Status: resp.StatusCode, Message: text, Details: details}
+}
+
+// rateLimitHints says from the response headers when the rate limit is
+// exhausted or GitHub asks to retry later.
+func rateLimitHints(resp *http.Response) string {
+	var text string
 	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
 		text += "; the rate limit is exhausted"
 		if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
@@ -334,10 +407,7 @@ func statusError(resp *http.Response) *ResponseError {
 	if after, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && after >= 0 {
 		text += fmt.Sprintf("; GitHub asks to retry after %ds", after)
 	}
-	if doc := errorText(body.DocumentationURL); doc != "" {
-		text += "; see " + doc
-	}
-	return &ResponseError{Status: resp.StatusCode, Message: text, Details: details}
+	return text
 }
 
 // errorText is one value of an error response, on one line and bounded.

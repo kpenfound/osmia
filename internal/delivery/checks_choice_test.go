@@ -327,7 +327,7 @@ func TestChoiceSurvivesARestartOnceAndClosesWhenAResultCompletes(t *testing.T) {
 
 	// A completed result closes the question; answering it is then refused.
 	f.clock.Advance(10 * time.Minute)
-	f.api.set(f.loaded(), f.done(3, "success", 5*time.Minute, counts(3, 3, 0, 0)))
+	f.api.setWithChecks(3, f.loaded(), f.done(3, "success", 5*time.Minute))
 	if run := f.mustComplete(); run.Status != "passed" {
 		t.Fatalf("run %+v", run)
 	}

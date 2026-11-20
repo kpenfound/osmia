@@ -455,13 +455,17 @@ statuses of the pushed head commit in the upstream repository:
 - After each push it reads nothing for 2 minutes. It then reads the statuses at
   the `pull_request_poll` interval (default 10 minutes).
 - `load` is a status of its own, and a failed `load` is a failed result. The
-  overall result comes only from the **Run Dagger Checks** status, whose link
-  holds a small JSON file with `dagger.status` and the counts of total, passed,
-  failed and cancelled checks. No individual check is polled for it. On a
-  failure the failed checks' names and their `dagger trace` ids come from the
-  failing per-check statuses of the same read.
-- A completed run passes only when no check failed, none was cancelled and the
-  counts account for the total. A run with cancelled or unaccounted checks is
+  result comes from the commit statuses alone; a status's link is a Cloud page
+  link that the service never fetches. The **Run Dagger Checks** status is the
+  run: absent or pending means pending, and `success`, `failure` or `error`
+  means complete. The per-check statuses are every other context but `load`;
+  they give the counts of total, passed (`success`) and failed (`failure` or
+  `error`) checks, and a check in any other state has no result. On a failure
+  the failed checks' names and their `dagger trace` ids come from the failing
+  per-check statuses of the same read.
+- A completed run fails when the run or any check failed. It passes only when
+  `load` and the run succeeded and every check, of at least one, succeeded. A
+  run that reports no checks, or whose checks have no result, is
   never a pass: it counts as an incomplete run, as does a run still pending
   `checks_timeout` after the push. The final review then waits with a doubling
   delay, up to an hour, and after three incomplete runs in a row it shows in

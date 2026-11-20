@@ -761,7 +761,7 @@ records the completed result as `final/checks-<k>.json` for final review `k`,
 with the source `pull_request`, the pull request and push, the status URL, the
 counts, the failed checks with their `dagger trace` ids and the one rerun of
 failed checks. A run with no completed "Run Dagger Checks" status within
-`checks_timeout` of the push, or with cancelled or unaccounted checks, is
+`checks_timeout` of the push, or that reports no checks or has checks with no result, is
 recorded as incomplete and read again after a wait that doubles with each
 further run, up to an hour. The final reader's prompt carries the result; neither
 it nor a unit reviewer runs checks. A completed result is read back instead of

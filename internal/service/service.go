@@ -113,9 +113,6 @@ type Options struct {
 	// which the final review watches. It defaults to PullRequests when that
 	// reads statuses, as the GitHub client does.
 	CloudStatuses pulls.StatusReader
-	// CloudStatusFetcher reads the JSON a "Run Dagger Checks" status points
-	// at. Its zero value reads https://dagger.cloud only.
-	CloudStatusFetcher CloudStatusFetcher
 	// CloudRerun requests the rerun of a pull request's failed Cloud checks.
 	// It defaults to the Dagger CLI with the token dagger.cloud_token_env
 	// names.

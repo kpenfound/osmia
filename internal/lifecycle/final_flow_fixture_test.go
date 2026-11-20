@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,21 +60,19 @@ func (c *flowClock) Advance(d time.Duration) {
 	c.at = c.at.Add(d)
 }
 
-// cloudHost stands in for GitHub's combined commit statuses and for the
-// Dagger Cloud JSON a "Run Dagger Checks" status points at. It shows the
+// cloudHost stands in for GitHub's combined commit statuses. It shows the
 // latest status of each context of a commit, as GitHub does, and keeps every
 // read it answers.
 type cloudHost struct {
 	mu       sync.Mutex
 	clock    *flowClock
 	statuses map[string]map[string]pulls.CommitStatus
-	docs     map[string]string
 	reads    map[string][]time.Time
 	next     int64
 }
 
 func newCloudHost(clock *flowClock) *cloudHost {
-	return &cloudHost{clock: clock, statuses: map[string]map[string]pulls.CommitStatus{}, docs: map[string]string{}, reads: map[string][]time.Time{}}
+	return &cloudHost{clock: clock, statuses: map[string]map[string]pulls.CommitStatus{}, reads: map[string][]time.Time{}}
 }
 
 func (h *cloudHost) CommitStatuses(_ context.Context, repository, commit string) (pulls.CommitStatuses, error) {
@@ -96,16 +91,6 @@ func (h *cloudHost) CommitStatuses(_ context.Context, repository, commit string)
 		}
 	}
 	return out, nil
-}
-
-func (h *cloudHost) RoundTrip(r *http.Request) (*http.Response, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	body, ok := h.docs[r.URL.String()]
-	if !ok {
-		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}, Request: r}, nil
-	}
-	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
 }
 
 // readCount is how many times commit's statuses were read.
@@ -150,12 +135,14 @@ func (h *cloudHost) pending(commit string) pulls.CommitStatus {
 	return h.post(commit, pulls.CommitStatus{Context: checkrun.CloudRunContext, State: "pending"})
 }
 
-// completed posts a finished "Run Dagger Checks" whose JSON holds the counts.
-func (h *cloudHost) completed(commit, state string, total, passed, failed, cancelled int) pulls.CommitStatus {
+// completed posts passed successful per-check statuses and then a finished
+// "Run Dagger Checks" status in state, whose link is a Cloud page.
+func (h *cloudHost) completed(commit, state string, passed int) pulls.CommitStatus {
+	for i := range passed {
+		h.passedCheck(commit, fmt.Sprintf("check-%d", i))
+	}
 	h.mu.Lock()
-	id := h.next + 1
-	target := fmt.Sprintf("https://dagger.cloud/checks/%d.json", id)
-	h.docs[target] = fmt.Sprintf(`{"dagger":{"status":"completed","checks":{"total":%d,"passed":%d,"failed":%d,"cancelled":%d}}}`, total, passed, failed, cancelled)
+	target := fmt.Sprintf("https://dagger.cloud/acme/checks/github.com/acme/widgets@%s?check=%d", commit, h.next+1)
 	h.mu.Unlock()
 	return h.post(commit, pulls.CommitStatus{Context: checkrun.CloudRunContext, State: state, TargetURL: target})
 }
@@ -222,11 +209,9 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	must(t, os.WriteFile(filepath.Join(j.fork, "hooks", "pre-receive"), []byte(hook), 0o700))
 
 	// The service reads statuses through the pull request host it publishes
-	// with, waits the whole 2 minutes after a push and reads the Cloud JSON
-	// from the fake host.
+	// with and waits the whole 2 minutes after a push.
 	b.opts.PullRequests = j.pulls
 	b.opts.FinalChecksWait = nil
-	b.opts.CloudStatusFetcher = checkrun.CloudStatusFetcher{HTTP: &http.Client{Transport: j.host}, Allow: func(u *url.URL) bool { return u.Scheme == "https" && u.Hostname() == "dagger.cloud" }}
 	b.opts.reviewChecks = j.checks
 
 	stream, repository := b.buildFixture().SeedGit(t, "flow")

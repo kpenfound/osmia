@@ -2,15 +2,9 @@ package checks
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/pulls"
@@ -39,30 +33,23 @@ const (
 	CloudPending CloudOutcome = "pending"
 	// CloudPassed is a completed run in which every check passed.
 	CloudPassed CloudOutcome = "passed"
-	// CloudIncomplete is a completed run with no failure in which some check
-	// was cancelled or has no result.
+	// CloudIncomplete is a completed run with no failure in which the run
+	// reports no checks or some check has no result.
 	CloudIncomplete CloudOutcome = "incomplete"
 	// CloudFailed is a completed run in which a check failed.
 	CloudFailed CloudOutcome = "failed"
 )
 
-// CloudCounts are the check counts of a Cloud run.
+// CloudCounts are the check counts of a Cloud run, taken from the per-check
+// statuses: every context but `load` and the run's own. Cancelled is zero in a
+// new result, since a commit status has no cancelled state; records written
+// earlier may carry a value.
 type CloudCounts struct {
 	Total     int `json:"total"`
 	Passed    int `json:"passed"`
 	Failed    int `json:"failed"`
 	Cancelled int `json:"cancelled"`
 }
-
-// CloudStatusDocument is the JSON the "Run Dagger Checks" status points at.
-type CloudStatusDocument struct {
-	// Status is the run's state; "completed" is the only final one.
-	Status string      `json:"status"`
-	Checks CloudCounts `json:"checks"`
-}
-
-// Completed reports whether the run has finished.
-func (d CloudStatusDocument) Completed() bool { return d.Status == "completed" }
 
 // CloudFailedCheck is one check that failed, from its own commit status.
 // TraceID is the `dagger trace` id its description names, when it names one.
@@ -88,22 +75,22 @@ type CloudCheck struct {
 //
 // Load is the `load` status and Run the "Run Dagger Checks" status the result
 // was read from; two reads of one commit that saw different postings of Run
-// differ in Run.ID and its times. Counts is set for a completed run. Failed
+// differ in Run.ID and its times. Counts is set for a completed run. StatusURL
+// is the link to the Cloud page the run status names; it is never fetched. Failed
 // lists the failing checks of a failed result, sorted by name. Checks lists
 // every check the statuses report for a completed run, sorted by name: all the
 // contexts but `load` and the run's own.
 type CloudResult struct {
-	Outcome    CloudOutcome         `json:"outcome"`
-	Repository string               `json:"repository"`
-	Commit     string               `json:"commit"`
-	Load       *pulls.CommitStatus  `json:"load,omitempty"`
-	Run        *pulls.CommitStatus  `json:"run,omitempty"`
-	Counts     *CloudCounts         `json:"counts,omitempty"`
-	Failed     []CloudFailedCheck   `json:"failed,omitempty"`
-	Checks     []CloudCheck         `json:"checks,omitempty"`
-	StatusURL  string               `json:"status_url,omitempty"`
-	Detail     string               `json:"detail,omitempty"`
-	Document   *CloudStatusDocument `json:"-"`
+	Outcome    CloudOutcome        `json:"outcome"`
+	Repository string              `json:"repository"`
+	Commit     string              `json:"commit"`
+	Load       *pulls.CommitStatus `json:"load,omitempty"`
+	Run        *pulls.CommitStatus `json:"run,omitempty"`
+	Counts     *CloudCounts        `json:"counts,omitempty"`
+	Failed     []CloudFailedCheck  `json:"failed,omitempty"`
+	Checks     []CloudCheck        `json:"checks,omitempty"`
+	StatusURL  string              `json:"status_url,omitempty"`
+	Detail     string              `json:"detail,omitempty"`
 }
 
 // IsFailure reports whether the result is a failed one: a completed run in
@@ -113,7 +100,7 @@ func (r CloudResult) IsFailure() bool {
 }
 
 // Completed reports whether the run reached a final result: it passed,
-// failed, or finished with checks cancelled or unaccounted for.
+// failed, or finished with no checks or checks unaccounted for.
 func (r CloudResult) Completed() bool {
 	switch r.Outcome {
 	case CloudPassed, CloudIncomplete, CloudFailed:
@@ -122,75 +109,80 @@ func (r CloudResult) Completed() bool {
 	return false
 }
 
-// ErrCloudStatusUnavailable is a finished "Run Dagger Checks" status whose
-// JSON was not read: the caller counts the run as incomplete, never as passed.
-var ErrCloudStatusUnavailable = errors.New("the Dagger Cloud status JSON is unavailable")
-
-// InterpretCloudStatuses turns one combined-status read into a result. doc is
-// the parsed JSON of the "Run Dagger Checks" status, or nil when it has not
-// been read. A "Run Dagger Checks" status that is not pending needs doc;
-// without it the error wraps ErrCloudStatusUnavailable and the result holds
-// the statuses but no outcome. The overall state comes only from doc, never
-// from the per-check statuses.
-func InterpretCloudStatuses(read pulls.CommitStatuses, doc *CloudStatusDocument) (CloudResult, error) {
+// InterpretCloudStatuses turns one combined-status read into a result, from the
+// statuses alone.
+//
+// A missing `load` is CloudLoadMissing and a failed one CloudLoadFailed. A
+// "Run Dagger Checks" status that is absent or not yet success, failure or
+// error is CloudPending. Once the run has completed, the counts come from the
+// per-check statuses: total is all of them, passed those in success and failed
+// those in failure or error. The result is failed when the run or any check
+// failed, passed only when `load` and the run succeeded and there is at least
+// one check, every one of them a success, and incomplete otherwise.
+func InterpretCloudStatuses(read pulls.CommitStatuses) CloudResult {
 	result := CloudResult{Repository: read.Repository, Commit: read.Commit}
 	load, ok := read.Status(CloudLoadContext)
 	if !ok {
 		result.Outcome = CloudLoadMissing
-		return result, nil
+		return result
 	}
 	result.Load = &load
+	run, hasRun := read.Status(CloudRunContext)
+	if hasRun {
+		result.Run, result.StatusURL = &run, run.TargetURL
+	}
 	if failing(load.State) {
 		result.Outcome = CloudLoadFailed
 		result.Failed = []CloudFailedCheck{failedCheck(load)}
-		if run, ok := read.Status(CloudRunContext); ok {
-			result.Run, result.StatusURL = &run, run.TargetURL
-		}
-		return result, nil
+		return result
 	}
-	run, ok := read.Status(CloudRunContext)
-	if ok {
-		result.Run, result.StatusURL = &run, run.TargetURL
-	}
-	if !ok || run.State == "pending" {
+	if !hasRun || !runCompleted(run.State) {
 		result.Outcome = CloudPending
-		return result, nil
+		return result
 	}
-	if doc == nil {
-		return result, fmt.Errorf("%w for the %q status %d", ErrCloudStatusUnavailable, CloudRunContext, run.ID)
-	}
-	result.Document = doc
-	if !doc.Completed() {
-		result.Outcome = CloudPending
-		return result, nil
-	}
-	counts := doc.Checks
-	result.Counts = &counts
 	result.Checks = cloudChecks(read)
-	switch {
-	case counts.Failed > 0:
-		result.Outcome = CloudFailed
+	counts := CloudCounts{Total: len(result.Checks)}
+	for _, c := range result.Checks {
+		switch {
+		case c.State == "success":
+			counts.Passed++
+		case failing(c.State):
+			counts.Failed++
+		}
+	}
+	result.Counts = &counts
+	if counts.Failed > 0 {
 		for _, s := range read.Statuses {
 			if s.Context != CloudLoadContext && s.Context != CloudRunContext && failing(s.State) {
 				result.Failed = append(result.Failed, failedCheck(s))
 			}
 		}
 		sort.Slice(result.Failed, func(i, j int) bool { return result.Failed[i].Name < result.Failed[j].Name })
-	case counts.Cancelled == 0 && counts.Total > 0 && counts.Passed == counts.Total:
+	}
+	switch {
+	case failing(run.State) || counts.Failed > 0:
+		result.Outcome = CloudFailed
+		if counts.Failed == 0 {
+			result.Detail = fmt.Sprintf("the %q status is %s but no check status failed", CloudRunContext, run.State)
+		}
+	case load.State == "success" && counts.Total > 0 && counts.Passed == counts.Total:
 		result.Outcome = CloudPassed
 	default:
 		result.Outcome = CloudIncomplete
 		switch {
+		case load.State != "success":
+			result.Detail = fmt.Sprintf("the %q status is %s", CloudLoadContext, load.State)
 		case counts.Total == 0:
 			result.Detail = "the run reports no checks"
-		case counts.Cancelled > 0:
-			result.Detail = fmt.Sprintf("%d of %d checks were cancelled", counts.Cancelled, counts.Total)
 		default:
-			result.Detail = fmt.Sprintf("%d of %d checks have no result", counts.Total-counts.Passed-counts.Cancelled, counts.Total)
+			result.Detail = fmt.Sprintf("%d of %d checks have no result", counts.Total-counts.Passed-counts.Failed, counts.Total)
 		}
 	}
-	return result, nil
+	return result
 }
+
+// runCompleted reports whether a "Run Dagger Checks" state is a final one.
+func runCompleted(state string) bool { return state == "success" || failing(state) }
 
 // cloudChecks lists the checks the statuses report, sorted by name.
 func cloudChecks(read pulls.CommitStatuses) []CloudCheck {
@@ -237,122 +229,22 @@ func failedCheck(s pulls.CommitStatus) CloudFailedCheck {
 	return check
 }
 
-// maxCloudStatusJSON bounds the "Run Dagger Checks" JSON that is read.
-const maxCloudStatusJSON = 1 << 20
-
-// CloudStatusFetcher reads the JSON a "Run Dagger Checks" status points at. It
-// sends no credentials: the GitHub token never leaves the GitHub client.
-type CloudStatusFetcher struct {
-	// HTTP is the client used; nil means a client with a 30 second timeout.
-	HTTP *http.Client
-	// Allow decides which URLs may be read, including the targets of
-	// redirects; nil allows only https://dagger.cloud.
-	Allow func(*url.URL) bool
-}
-
-func (f CloudStatusFetcher) allowed(u *url.URL) bool {
-	if u.User != nil {
-		return false
-	}
-	if f.Allow != nil {
-		return f.Allow(u)
-	}
-	return u.Scheme == "https" && u.Hostname() == "dagger.cloud"
-}
-
-// Fetch reads and parses the JSON at target. An unreadable, oversized,
-// malformed or unexpected document is an error.
-func (f CloudStatusFetcher) Fetch(ctx context.Context, target string) (CloudStatusDocument, error) {
-	u, err := url.Parse(target)
-	if err != nil || !f.allowed(u) {
-		return CloudStatusDocument{}, fmt.Errorf("%w: %q is not a Dagger Cloud status URL", ErrCloudStatusUnavailable, hostOnly(target))
-	}
-	client := http.Client{Timeout: 30 * time.Second}
-	if f.HTTP != nil {
-		client = *f.HTTP
-	}
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 || !f.allowed(req.URL) {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return CloudStatusDocument{}, fmt.Errorf("%w: %v", ErrCloudStatusUnavailable, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return CloudStatusDocument{}, fmt.Errorf("%w: the request failed", ErrCloudStatusUnavailable)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return CloudStatusDocument{}, fmt.Errorf("%w: Dagger Cloud answered %d", ErrCloudStatusUnavailable, resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxCloudStatusJSON+1))
-	if err != nil || len(data) > maxCloudStatusJSON {
-		return CloudStatusDocument{}, fmt.Errorf("%w: the response is unreadable or too large", ErrCloudStatusUnavailable)
-	}
-	return ParseCloudStatusDocument(data)
-}
-
-// hostOnly keeps only the scheme and host of a URL for error text.
-func hostOnly(target string) string {
-	if u, err := url.Parse(target); err == nil && u.Host != "" {
-		return u.Scheme + "://" + u.Host
-	}
-	return "an unparsable URL"
-}
-
-// ParseCloudStatusDocument parses {"dagger":{"status":...,"checks":{...}}},
-// ignoring fields it does not know. A document without the dagger object, a
-// status, or with a negative count is an error.
-func ParseCloudStatusDocument(data []byte) (CloudStatusDocument, error) {
-	var raw struct {
-		Dagger *CloudStatusDocument `json:"dagger"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return CloudStatusDocument{}, fmt.Errorf("%w: malformed JSON", ErrCloudStatusUnavailable)
-	}
-	if raw.Dagger == nil || strings.TrimSpace(raw.Dagger.Status) == "" {
-		return CloudStatusDocument{}, fmt.Errorf("%w: no dagger status in the JSON", ErrCloudStatusUnavailable)
-	}
-	c := raw.Dagger.Checks
-	if c.Total < 0 || c.Passed < 0 || c.Failed < 0 || c.Cancelled < 0 {
-		return CloudStatusDocument{}, fmt.Errorf("%w: negative check counts", ErrCloudStatusUnavailable)
-	}
-	return *raw.Dagger, nil
-}
-
 // ReadCloudChecks reads the combined statuses of commit in repository and
-// interprets them, reading the "Run Dagger Checks" JSON when that status is
-// not pending. An error means the read or the JSON failed; the caller counts
-// the run as incomplete and never as passed.
-func ReadCloudChecks(ctx context.Context, reader pulls.StatusReader, fetcher CloudStatusFetcher, repository, commit string) (CloudResult, error) {
-	result, _, err := ReadCloudStatuses(ctx, reader, fetcher, repository, commit)
+// interprets them. It reads nothing else: no status target URL is fetched. An
+// error means the statuses could not be read; the caller counts the run as
+// incomplete and never as passed.
+func ReadCloudChecks(ctx context.Context, reader pulls.StatusReader, repository, commit string) (CloudResult, error) {
+	result, _, err := ReadCloudStatuses(ctx, reader, repository, commit)
 	return result, err
 }
 
 // ReadCloudStatuses is ReadCloudChecks that also returns the statuses it
 // read, so a caller can look at the status of any one check in the same read.
 // The statuses are empty when the read itself failed.
-func ReadCloudStatuses(ctx context.Context, reader pulls.StatusReader, fetcher CloudStatusFetcher, repository, commit string) (CloudResult, pulls.CommitStatuses, error) {
+func ReadCloudStatuses(ctx context.Context, reader pulls.StatusReader, repository, commit string) (CloudResult, pulls.CommitStatuses, error) {
 	read, err := reader.CommitStatuses(ctx, repository, commit)
 	if err != nil {
 		return CloudResult{}, pulls.CommitStatuses{}, err
 	}
-	var doc *CloudStatusDocument
-	if run, ok := read.Status(CloudRunContext); ok && run.State != "pending" {
-		if load, ok := read.Status(CloudLoadContext); ok && !failing(load.State) {
-			d, err := fetcher.Fetch(ctx, run.TargetURL)
-			if err != nil {
-				result, _ := InterpretCloudStatuses(read, nil)
-				return result, read, err
-			}
-			doc = &d
-		}
-	}
-	result, err := InterpretCloudStatuses(read, doc)
-	return result, read, err
+	return InterpretCloudStatuses(read), read, nil
 }

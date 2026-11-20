@@ -26,7 +26,7 @@ func TestFinalChecksRecordTheCloudEvidenceOfAFlakyCheck(t *testing.T) {
 	f.failingRun()
 	f.mustWait()
 	f.clock.Advance(10 * time.Minute)
-	fresh := f.done(14, "success", f.clock.Now().Sub(f.pushedAt), counts(3, 3, 0, 0))
+	fresh := f.done(14, "success", f.clock.Now().Sub(f.pushedAt))
 	at := f.clock.Now()
 	f.api.set(f.loaded(), fresh,
 		pulls.CommitStatus{ID: 15, Context: "test:a", State: "success", Description: "Passed in 1m1s. Run `dagger trace fresh-a`", CreatedAt: at},
@@ -78,7 +78,7 @@ func TestFinalChecksRecordCloudEvidenceOnFailedAndIncompleteRunsWithoutChangingT
 	f.mustWait()
 	f.clock.Advance(10 * time.Minute)
 	now := f.clock.Now().Sub(f.pushedAt)
-	f.api.set(f.loaded(), f.done(20, "failure", now, counts(92, 91, 1, 0)),
+	f.api.set(f.loaded(), f.done(20, "failure", now),
 		pulls.CommitStatus{ID: 21, Context: "test:a", State: "success", CreatedAt: f.clock.Now()},
 		failedCheck(22, "test:b", "trace-b2", now, f))
 	run := f.mustComplete()
@@ -102,7 +102,7 @@ func TestFinalChecksRecordCloudEvidenceOnFailedAndIncompleteRunsWithoutChangingT
 
 	g := newWatchFixture(t)
 	g.afterWait()
-	g.api.set(g.loaded(), g.done(3, "success", 5*time.Minute, counts(10, 8, 0, 0)))
+	g.api.setWithChecks(8, g.loaded(), g.done(3, "success", 5*time.Minute), pulls.CommitStatus{ID: 70, Context: "slow-a", State: "pending"}, pulls.CommitStatus{ID: 71, Context: "slow-b", State: "pending"})
 	incomplete, err := g.check()
 	if err == nil || incomplete.Status != ChecksIncomplete || incomplete.ExitCode != -1 || incomplete.Evidence == nil || incomplete.Evidence.Engine != api.CheckEngineCloud {
 		t.Fatalf("incomplete run %+v: %v", incomplete, err)
@@ -130,5 +130,24 @@ func TestFinalCheckRunsWrittenWithoutEvidenceStillLoadAndConvert(t *testing.T) {
 	local := FinalCheckRun{Review: 1, Status: "passed", Flaky: []string{"dag://y"}, Selection: &CheckSelection{Links: []string{"dag://y", "dag://z"}}, OutputPath: "final/checks-1-output.txt", OutputRevision: 1}.FlakeEvidence()
 	if local.Engine != api.CheckEngineLocal || !slices.Equal(local.CoRun, []string{"dag://y", "dag://z"}) || local.OutputPath == "" || len(local.Unavailable) == 0 || local.Unavailable[0].Where != FinalChecksPath(1) {
 		t.Fatalf("local %+v", local)
+	}
+}
+
+func TestAFinalCheckRecordWithCancelledCountsStillRendersAsEvidence(t *testing.T) {
+	t.Parallel()
+	old := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"incomplete","exit_code":-1,` +
+		`"error":"the completed run is not a pass: 1 of 10 checks were cancelled","status_url":"https://dagger.cloud/checks/3.json","counts":{"total":10,"passed":9,"failed":0,"cancelled":1},"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
+	var run FinalCheckRun
+	if err := json.Unmarshal([]byte(old), &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Counts == nil || run.Counts.Cancelled != 1 || run.Counts.Total != 10 {
+		t.Fatalf("run %+v", run)
+	}
+	evidence := FinalCheckEvidence(run)
+	for _, want := range []string{"10 checks, 9 passed, 0 failed, 1 cancelled", "https://dagger.cloud/checks/3.json"} {
+		if !strings.Contains(evidence, want) {
+			t.Fatalf("evidence lacks %q:\n%s", want, evidence)
+		}
 	}
 }

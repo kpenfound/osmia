@@ -90,10 +90,7 @@ func TestCloudStatusesKeepEveryCheckNameWithItsTraceAndDuration(t *testing.T) {
 		cloudStatus(3, "test:b", "success", "Passed in 1m2s. Run `dagger trace tb`", "https://dagger.cloud/traces/tb"),
 		cloudStatus(2, "test:a", "failure", "Failed in 2m33s. Run `dagger trace ta`", ""),
 		cloudStatus(4, "lint", "success", "", ""))
-	result, err := InterpretCloudStatuses(read, cloudDoc("completed", 3, 2, 1, 0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := InterpretCloudStatuses(read)
 	want := []CloudCheck{
 		{Name: "lint", State: "success", StatusID: 4},
 		{Name: "test:a", State: "failure", StatusID: 2, TraceID: "ta", Duration: 2*time.Minute + 33*time.Second},
@@ -102,7 +99,7 @@ func TestCloudStatusesKeepEveryCheckNameWithItsTraceAndDuration(t *testing.T) {
 	if !slices.Equal(result.Checks, want) {
 		t.Fatalf("checks %+v, want %+v", result.Checks, want)
 	}
-	pending, _ := InterpretCloudStatuses(cloudRead(load, cloudStatus(5, CloudRunContext, "pending", "", "")), nil)
+	pending := InterpretCloudStatuses(cloudRead(load, cloudStatus(5, CloudRunContext, "pending", "", "")))
 	if len(pending.Checks) != 0 {
 		t.Fatalf("pending %+v", pending.Checks)
 	}
@@ -147,4 +144,3 @@ func TestCloudEvidenceNamesTheEngineChecksAndTracesAndMarksWhatCloudDoesNotRepor
 		t.Fatalf("bare %+v", bare)
 	}
 }
-

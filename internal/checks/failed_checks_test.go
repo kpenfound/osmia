@@ -71,7 +71,7 @@ func TestDescribeFailedChecks(t *testing.T) {
 	}
 
 	none := DescribeFailedChecks(nil, &api.CheckCounts{Total: 5, Passed: 4, Failed: 1}, "https://dagger.cloud/run.json", true)
-	if !strings.Contains(none, "no failing check status was found") || !strings.Contains(none, "counts 1 failed of 5 checks") || !strings.Contains(none, "https://dagger.cloud/run.json") || strings.Contains(none, "Failed checks (") {
+	if !strings.Contains(none, "no failing check status was found") || !strings.Contains(none, "show 5 checks, 4 passed, 1 failed") || !strings.Contains(none, "https://dagger.cloud/run.json") || strings.Contains(none, "Failed checks (") {
 		t.Errorf("no failing status:\n%s", none)
 	}
 	if got := DescribeFailedChecks(nil, nil, "", false); got != "" {

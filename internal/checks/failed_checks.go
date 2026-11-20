@@ -47,7 +47,7 @@ func SafeLink(link string) string {
 	return u.String()
 }
 
-var linkInText = regexp.MustCompile(`(?i)https?://[^\s<>"'`+"`"+`)\]]+`)
+var linkInText = regexp.MustCompile(`(?i)https?://[^\s<>"'` + "`" + `)\]]+`)
 
 // SafeText returns text with every http or https link in it as SafeLink gives
 // it: a link that carries a credential keeps no part of it, and a link that
@@ -89,8 +89,8 @@ func DescribeFailedCheck(f api.CheckFailure) string {
 
 // DescribeFailedChecks lists the failed checks of a failed run, one per line,
 // each starting with "- ". A failed run that names none says that no failing
-// check status was found, with the counts of its JSON and the run's status
-// URL, and never lists nothing. It is empty for a run that did not fail.
+// check status was found, with its counts and the run's status URL, and never
+// lists nothing. It is empty for a run that did not fail.
 // counts and statusURL may be absent.
 func DescribeFailedChecks(failed []api.CheckFailure, counts *api.CheckCounts, statusURL string, runFailed bool) string {
 	if len(failed) > 0 {
@@ -105,7 +105,10 @@ func DescribeFailedChecks(failed []api.CheckFailure, counts *api.CheckCounts, st
 	}
 	out := "The run failed, but no failing check status was found, so no failed check can be named"
 	if counts != nil {
-		out += fmt.Sprintf(": the run's JSON counts %d failed of %d checks (%d passed, %d cancelled)", counts.Failed, counts.Total, counts.Passed, counts.Cancelled)
+		out += fmt.Sprintf(": the run's check statuses show %d checks, %d passed, %d failed", counts.Total, counts.Passed, counts.Failed)
+		if counts.Cancelled > 0 {
+			out += fmt.Sprintf(", %d cancelled", counts.Cancelled)
+		}
 	}
 	if link := SafeLink(statusURL); link != "" {
 		out += "; run status: " + link

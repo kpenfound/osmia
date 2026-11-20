@@ -24,9 +24,9 @@ import (
 // statuses of the workstream's pull request: PullRequest, Push and
 // PushedCommit name the push whose commit the statuses belong to (Commit is
 // the reviewed commit that push signed), Run is the "Run Dagger Checks"
-// posting the result came from, StatusURL its JSON, Counts the counts that
-// JSON holds, FailedChecks the failed checks with their `dagger trace` ids
-// (Failed lists their names), Flaky the originally failed checks that passed
+// posting the result came from, StatusURL the link to its Cloud page (never
+// fetched), Counts the counts of the per-check statuses, FailedChecks the
+// failed checks with their `dagger trace` ids (Failed lists their names), Flaky the originally failed checks that passed
 // their rerun, and Reruns the rerun of the push's failed checks. An
 // incomplete run reported no result, and Error says why. A record with status
 // "continued" holds no result at all: the final read of the push started
@@ -333,7 +333,7 @@ func (w *finalWatch) step(ctx context.Context, incomplete int, latest FinalCheck
 	if reader == nil {
 		return FinalCheckRun{}, fmt.Errorf("final review %d cannot read the pull request statuses: the service has no GitHub status client", w.report.Review)
 	}
-	result, read, err := checkrun.ReadCloudStatuses(ctx, reader, a.S.CloudStatusFetcher, w.push.Upstream, w.push.Commit)
+	result, read, err := checkrun.ReadCloudStatuses(ctx, reader, w.push.Upstream, w.push.Commit)
 	if ctx.Err() != nil {
 		return FinalCheckRun{}, ctx.Err()
 	}

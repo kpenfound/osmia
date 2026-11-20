@@ -3,11 +3,7 @@ package servicetest
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,25 +15,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// passingCloudJSON is the JSON of a completed "Run Dagger Checks" status in
-// which every check passed.
-const passingCloudJSON = `{"dagger":{"status":"completed","checks":{"total":3,"passed":3,"failed":0,"cancelled":0}}}`
-
-type passingTransport struct{}
-
-func (passingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(passingCloudJSON)), Request: r}, nil
-}
-
-// PassingCloudFetcher answers every read of a "Run Dagger Checks" JSON with a
-// completed run in which every check passed, without a network.
-func PassingCloudFetcher() service.CloudStatusFetcher {
-	return service.CloudStatusFetcher{HTTP: &http.Client{Transport: passingTransport{}}, Allow: func(*url.URL) bool { return true }}
-}
-
 func Options(cfg config.Options) service.Options {
 	return service.Options{Config: cfg, Build: api.Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{fixturekit.Stream}, ShutdownTimeout: 100 * time.Millisecond,
-		CloudStatusFetcher: PassingCloudFetcher(), FinalChecksWait: fixturekit.NoPostPushWait()}
+		FinalChecksWait: fixturekit.NoPostPushWait()}
 }
 func FixtureAt(t *testing.T, home string) service.Options {
 	t.Helper()

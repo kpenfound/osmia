@@ -32,14 +32,14 @@ func cloudFailedStatus(f *watchFixture, id int64, name, traceID string, at time.
 
 // settleFailedRun reads the statuses of a failed run, lets the once-only
 // rerun come back with the same failure, and returns the recorded result.
-func settleFailedRun(f *watchFixture, countsJSON string, failing ...func(at time.Duration) pulls.CommitStatus) FinalCheckRun {
+func settleFailedRun(f *watchFixture, passed int, failing ...func(at time.Duration) pulls.CommitStatus) FinalCheckRun {
 	f.t.Helper()
 	post := func(id int64, at time.Duration) {
-		statuses := []pulls.CommitStatus{f.loaded(), f.done(id, "failure", at, countsJSON)}
+		statuses := []pulls.CommitStatus{f.loaded(), f.done(id, "failure", at)}
 		for _, status := range failing {
 			statuses = append(statuses, status(at))
 		}
-		f.api.set(statuses...)
+		f.api.setWithChecks(passed, statuses...)
 	}
 	f.afterWait()
 	post(10, 100*time.Second)
@@ -59,7 +59,7 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 		id := n
 		return func(at time.Duration) pulls.CommitStatus { return cloudFailedStatus(f, id, name, trace, at) }
 	}
-	run := settleFailedRun(f, counts(92, 89, 3, 0), check("test:a", traceA), check("build", traceB), check("lint", ""))
+	run := settleFailedRun(f, 89, check("test:a", traceA), check("build", traceB), check("lint", ""))
 	if run.Status != "failed" || len(run.FailedChecks) != 3 || len(f.rerunCalls()) != 1 {
 		t.Fatalf("run %+v, reruns %q", run, f.rerunCalls())
 	}
@@ -149,11 +149,11 @@ func TestFailedRunWithoutAFailingCheckStatusSaysSoWithTheCountsAndTheRunURL(t *t
 	t.Parallel()
 	f := newWatchFixture(t)
 	f.assemble()
-	run := settleFailedRun(f, counts(92, 91, 1, 0))
+	run := settleFailedRun(f, 91)
 	if run.Status != "failed" || len(run.FailedChecks) != 0 {
 		t.Fatalf("run %+v", run)
 	}
-	want := fmt.Sprintf("no failing check status was found, so no failed check can be named: the run's JSON counts 1 failed of 92 checks (91 passed, 0 cancelled); run status: %s", run.StatusURL)
+	want := fmt.Sprintf("no failing check status was found, so no failed check can be named: the run's check statuses show 91 checks, 91 passed, 0 failed; run status: %s", run.StatusURL)
 	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
 	detail, _ := got["detail"].(string)
 	if _, listed := got["failed_checks"]; listed || got["outcome"] != "failed" || !strings.Contains(detail, want) {
@@ -170,7 +170,7 @@ func TestPassedAndIncompleteRunsGiveNoFailedChecks(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
 	f.afterWait()
-	f.api.set(f.loaded(), f.done(3, "success", 100*time.Second, counts(92, 92, 0, 0)))
+	f.api.setWithChecks(92, f.loaded(), f.done(3, "success", 100*time.Second))
 	run := f.mustComplete()
 	if run.Status != "passed" || strings.Contains(FinalCheckEvidence(run), "Failed") || f.noticeOf() != "" {
 		t.Fatalf("passed run %+v:\n%s", run, FinalCheckEvidence(run))
@@ -179,7 +179,7 @@ func TestPassedAndIncompleteRunsGiveNoFailedChecks(t *testing.T) {
 	f = newWatchFixture(t)
 	f.cfg.Project.ChecksTimeout = "30m"
 	f.afterWait()
-	f.api.set(f.loaded(), f.done(3, "success", 100*time.Second, counts(92, 90, 0, 2)))
+	f.api.setWithChecks(90, f.loaded(), f.done(3, "success", 100*time.Second), pulls.CommitStatus{ID: 70, Context: "slow-a", State: "pending"}, pulls.CommitStatus{ID: 71, Context: "slow-b", State: "pending"})
 	if _, err := f.check(); err == nil {
 		t.Fatal("an incomplete run settled")
 	}
@@ -200,9 +200,6 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 	runURL := "https://dagger.cloud/run.json?token=" + secret
 	post := func(id int64, at time.Duration) {
 		done := pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: "failure", CreatedAt: f.at(at), TargetURL: runURL}
-		f.api.mu.Lock()
-		f.api.docs[runURL] = counts(92, 88, 4, 0)
-		f.api.mu.Unlock()
 		withTrace := cloudFailedStatus(f, id+100, "test:a", traceA, at)
 		withTrace.TargetURL += "&access_token=" + secret
 		userinfo := cloudFailedStatus(f, id+101, "build", "", at)

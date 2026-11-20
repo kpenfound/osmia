@@ -5,8 +5,6 @@ import "github.com/kpenfound/osmia/internal/checks"
 type ReviewChecks = checks.ReviewChecks
 type DaggerChecks = checks.DaggerChecks
 
-type CloudStatusFetcher = checks.CloudStatusFetcher
-
 type CloudRerunner = checks.CloudRerunner
 
 const ChecksPassed = checks.ChecksPassed
