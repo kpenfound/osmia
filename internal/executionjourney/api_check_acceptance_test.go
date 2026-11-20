@@ -40,7 +40,26 @@ func TestAcceptanceFactoryInstructions(t *testing.T) {
 	}
 	assertCheckGateReviewInstructions(t, factoryInstructions(coreadapter.Scope{Role: reviewerRole}))
 	assertCheckGateReviewInstructions(t, factoryInstructions(coreadapter.Scope{Role: committeeRole}))
-	assertCheckGateReviewInstructions(t, finalSystemPrompt(config.Project{}))
+	assertFinalCheckReviewInstructions(t, finalSystemPrompt(config.Project{}))
+	// The final reader's turn gets its own check instructions, not the unit-review wording.
+	assertFinalCheckReviewInstructions(t, finalSystemPrompt(config.Project{})+factoryInstructions(coreadapter.Scope{Role: committeeRole, Turn: "final-3-committee-1-1"}))
+}
+
+// assertFinalCheckReviewInstructions fails unless the prompt tells the final
+// reader how to use a recorded check result and carries none of the
+// unit-review check gate wording.
+func assertFinalCheckReviewInstructions(t *testing.T, prompt string) {
+	t.Helper()
+	for _, want := range []string{"A recorded pass satisfies every criterion that needs tests or checks to pass", "A recorded failure is evidence you may cite", "is not a finding by itself"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("final review instructions lack %q: %s", want, prompt)
+		}
+	}
+	for _, unwanted := range []string{"check gate", "for the candidate", "smart-check selection"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("final review instructions carry the unit-review wording %q: %s", unwanted, prompt)
+		}
+	}
 }
 
 var acceptancePlan = intakefixture.AcceptancePlan

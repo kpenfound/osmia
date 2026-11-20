@@ -683,8 +683,24 @@ func IncompleteFinalChecks(repository *trace.Repository, stream config.Workstrea
 	return n, latest, nil
 }
 
+// FinalCheckPaths lists the files of the final reader's view that hold the
+// check result run is: its record, and the captured output the record names.
+// A result with no record, as for a review of a delivered workstream, has
+// none.
+func FinalCheckPaths(run FinalCheckRun) []string {
+	if run.Status == "" {
+		return nil
+	}
+	paths := []string{FinalChecksPath(run.Review)}
+	if run.OutputPath != "" {
+		paths = append(paths, run.OutputPath)
+	}
+	return paths
+}
+
 // FinalCheckEvidence is how the final reader's prompt carries the check
-// result of the commit it reads.
+// result of the commit it reads. Every file it mentions is one of
+// FinalCheckPaths, which the reader's view holds.
 func FinalCheckEvidence(run FinalCheckRun) string {
 	if run.Source == api.CheckSourcePullRequest {
 		return pullRequestEvidence(run)
@@ -705,7 +721,7 @@ func FinalCheckEvidence(run FinalCheckRun) string {
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		out += "\n" + flaky
 	}
-	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
+	return out + checkrun.ViewOutputEvidence(run.Output, run.OutputPath, run.Truncated)
 }
 
 // FailedChecksNotice is what the chief of staff hears of a final review whose

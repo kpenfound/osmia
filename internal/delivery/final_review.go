@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -147,6 +148,11 @@ func FinalReviewIDs(k int) (transition, event string) {
 }
 
 func FinalTurnPrefix(k int, member string) string { return fmt.Sprintf("final-%d-%s-", k, member) }
+
+// IsFinalTurn reports whether turn is a turn of a final review's reader.
+func IsFinalTurn(turn string) bool { return finalTurnPattern.MatchString(turn) }
+
+var finalTurnPattern = regexp.MustCompile(`^final-[0-9]+-`)
 
 func FinalTurnID(k int, member string, attempt int) string {
 	return fmt.Sprintf("%s%d", FinalTurnPrefix(k, member), attempt)
@@ -1126,7 +1132,8 @@ func (a *FinalReviewer) SelectView(ctx context.Context, scope coreadapter.Scope,
 
 // stage builds the view: the reviewed commit's tracked files under branch/,
 // the sealed spec.md and plan.json, the charter revision the review reads as
-// charter.md, and each unit's latest report and landing under units/. It
+// charter.md, the review's recorded check result under final/ with the output
+// file it names, and each unit's latest report and landing under units/. It
 // returns the paths to select.
 func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport, workspace string) ([]string, error) {
 	if err := os.RemoveAll(workspace); err != nil {
@@ -1159,6 +1166,17 @@ func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream co
 	}
 	files["context.md"] = contextBundle.Render()
 	paths = append(paths, "context.md")
+
+	checked, err := FinalCheckFiles(a.Repository, stream, report)
+	if err != nil {
+		return nil, err
+	}
+	for name, content := range checked {
+		files[name] = content
+	}
+	if len(checked) > 0 {
+		paths = append(paths, finalChecksView)
+	}
 
 	docs, err := trace.Read[trace.Document](a.Repository, stream)
 	if err != nil {
@@ -1657,8 +1675,12 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func FinalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and Dagger Cloud ran the project's checks on the exact commit you read, with the result the service read from the pull request in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + checkGateReviewInstructions
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and Dagger Cloud ran the project's checks on the exact commit you read, with the result the service read from the pull request in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + finalCheckReviewInstructions
 }
+
+// finalCheckReviewInstructions tells the final reader how to use the check
+// result in its prompt and view.
+const finalCheckReviewInstructions = " The check result of the commit you read is recorded by the service in the check result section of your prompt and in the final/checks file of your view; you cannot run checks. A recorded pass satisfies every criterion that needs tests or checks to pass: the pass is the evidence that the required tests ran and passed, so never raise a finding because you cannot run tests yourself or cannot see that a named test was selected. A recorded failure is evidence you may cite in a finding, with the failed checks it names. A result that says the final read continues without check results, or that no check results exist, is not a finding by itself; judge the feature from the branch."
 
 func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {
 	notes := ""
@@ -1694,7 +1716,18 @@ func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 		fmt.Fprintf(&b, "Start from what changed since then. Say in your summary whether each of its blocking findings is resolved. Raise a new blocking finding only where a change since review %d breaks the feature, or where the feature plainly fails a criterion; do not reopen what review %d accepted, and do not repeat its advisory findings.\n", previous.Review, previous.Review)
 		earlier = b.String()
 	}
+	held := ""
+	for _, path := range FinalCheckPaths(checks) {
+		if path == FinalChecksPath(checks.Review) {
+			held += fmt.Sprintf("- %s: the recorded check result of the section above, as the service recorded it.\n", path)
+		} else {
+			held += fmt.Sprintf("- %s: the complete captured check output that record names.\n", path)
+		}
+	}
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
+
+Check result:
+%s
 
 Your view holds:
 - branch/: every tracked file of the reviewed commit.
@@ -1702,13 +1735,11 @@ Your view holds:
 - charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty.
 - context.md: local decisions and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
-%s
+%s%s
 %s
 
 Every criterion and the merged units that serve it:
 %s%s
 Read the branch as a whole, not unit by unit: follow how the units' work connects, from where the feature is entered to what it changes, and check it against the spec's intent and the charter. Then call %s once with your summary and findings, an empty list when there are none, and end your turn.
-
-%s
-`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, notes, diff, served.String(), earlier, FinalReportTool, FinalCheckEvidence(checks))
+`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, FinalCheckEvidence(checks), held, notes, diff, served.String(), earlier, FinalReportTool)
 }

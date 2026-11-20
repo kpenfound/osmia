@@ -5,6 +5,7 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -27,10 +28,14 @@ func factoryInstructions(scope coreadapter.Scope) string {
 	default:
 		return ""
 	}
-	if scope.Role == architectRole || scope.Role == committeeRole {
+	// The final reader's own system prompt says how it uses the recorded check
+	// result, so it gets none of the check gate wording written for plans and
+	// unit reviews.
+	final := scope.Role == committeeRole && delivery.IsFinalTurn(scope.Turn)
+	if scope.Role == architectRole || (scope.Role == committeeRole && !final) {
 		role += " Acceptance requiring the whole check suite to pass or run, or asking a reviewer to show which tests ran, is an engineering defect to correct: the service-owned check gate already runs checks with smart-check selection."
 	}
-	if scope.Role == reviewerRole || scope.Role == committeeRole {
+	if scope.Role == reviewerRole || (scope.Role == committeeRole && !final) {
 		role += checkGateReviewInstructions
 	}
 	return "\n\nCurrent factory operating policy (takes precedence over older role instructions, including those in conversation history; preserves task-specific requirements and owner decisions): the owner controls intent, constraints and publication. The factory controls engineering choices and recorded plan revisions within that intent. " + role + "\n"
