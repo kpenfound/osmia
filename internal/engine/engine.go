@@ -41,8 +41,6 @@ type Options struct {
 	ActionTimeout time.Duration
 }
 
-// Controller uses a resolved, validated configuration. It never changes the
-// configuration or manages containers other than ManagedDaggerEngineName.
 type Controller struct {
 	config  config.ResolvedDagger
 	options Options
