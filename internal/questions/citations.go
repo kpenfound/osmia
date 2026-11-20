@@ -17,7 +17,7 @@ import (
 
 // CitationForms lists the citations an answer may rest on, for prompts and
 // refusals.
-const CitationForms = "source#<record> (a recorded remote source), inspection#<record> (a recorded code inspection), charter#<n> or <project>/charter#<n> (a charter rule; project is its p_ ID), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
+const CitationForms = "source#<record> (a recorded remote source), trace#<record> (a recorded Dagger Cloud trace output), inspection#<record> (a recorded code inspection), charter#<n> or <project>/charter#<n> (a charter rule; project is its p_ ID), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
 
 var (
 	rulingCitation = regexp.MustCompile(`^ruling#([A-Za-z0-9][A-Za-z0-9_-]{0,127})$`)
@@ -55,6 +55,18 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 			}
 		}
 		return unresolved("this workstream has no recorded remote source %s", id)
+	}
+	if id, ok := strings.CutPrefix(citation, "trace#"); ok {
+		docs, err := trace.Read[trace.Document](repository, stream)
+		if err != nil {
+			return err
+		}
+		for _, d := range docs {
+			if d.ID == id && d.Path == "traces/"+id+".json" {
+				return nil
+			}
+		}
+		return unresolved("this workstream has no recorded Dagger Cloud trace output %s", id)
 	}
 	if id, ok := strings.CutPrefix(citation, "inspection#"); ok {
 		if _, err := repository.CodeInspection(stream, id); err != nil {

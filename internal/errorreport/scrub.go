@@ -18,7 +18,7 @@ const (
 	PlaceholderSHA   = "<sha>"
 	PlaceholderHost  = "<host>"
 	PlaceholderEmail = "<email>"
-	redacted         = "[redacted]"
+	redacted         = redact.Marker
 )
 
 // ScrubError reports why text could not be scrubbed or a report could not be
@@ -111,27 +111,11 @@ func (s *Scrubber) secrets() []string {
 	return append(redact.KnownSecrets(), s.extra...)
 }
 
-type secretRule struct {
-	re   *regexp.Regexp
-	repl string
-}
-
-var secretRules = []secretRule{
-	{regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{16,}`), redacted},
-	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{16,}`), redacted},
-	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}`), redacted},
-	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*`), redacted},
-	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), redacted},
-	{regexp.MustCompile(`(?i)\b(authorization|proxy-authorization|x-api-key|x-auth-token|api[-_]?key)(\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?"?[^\s",;&]+`), "${1}${2}" + redacted},
-	{regexp.MustCompile(`(?i)\b(bearer)(\s+)[A-Za-z0-9._~+/=-]{6,}`), "${1}${2}" + redacted},
-	{regexp.MustCompile(`(?i)\b(access_token|client_secret|password|passwd|secret|token)(=)[^\s&"']+`), "${1}${2}" + redacted},
-}
-
 // tokenShaped reports whether text still holds a value shaped like a
 // credential the secret rules target.
 func tokenShaped(text string) bool {
-	for _, rule := range secretRules[:5] {
-		if rule.re.MatchString(text) {
+	for _, rule := range redact.ShapedRules[:redact.TokenRules] {
+		if rule.Re.MatchString(text) {
 			return true
 		}
 	}
@@ -235,10 +219,7 @@ func cleanText(text string) string {
 
 func (s *Scrubber) secretPass(text string) string {
 	text = redact.Secrets(text, s.secrets()...)
-	for _, rule := range secretRules {
-		text = rule.re.ReplaceAllString(text, rule.repl)
-	}
-	return text
+	return redact.Shaped(text)
 }
 
 func (s *Scrubber) scrub(text string) string {

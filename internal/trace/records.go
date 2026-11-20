@@ -636,7 +636,8 @@ func sealingPath(parts []string) bool {
 }
 
 // adaptiveDocumentPath reports whether parts name a discovery, a recorded
-// source or a chief of staff's follow-up: <folder>/<key>.json.
+// source, a recorded Dagger Cloud trace output or a chief of staff's
+// follow-up: <folder>/<key>.json.
 func adaptiveDocumentPath(parts []string) bool {
-	return len(parts) == 2 && (parts[0] == "discoveries" || parts[0] == "sources" || parts[0] == "follow-ups") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+	return len(parts) == 2 && (parts[0] == "discoveries" || parts[0] == "sources" || parts[0] == "traces" || parts[0] == "follow-ups") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }

@@ -58,7 +58,10 @@ type Dependencies struct {
 	PostPushWait *time.Duration
 	// CloudRerun requests the one rerun of a push's failed checks. It is nil
 	// when none can be requested.
-	CloudRerun              checks.CloudRerunner
+	CloudRerun checks.CloudRerunner
+	// CloudTrace fetches the output of a Dagger Cloud trace. It is nil when
+	// none can be fetched.
+	CloudTrace              checks.TraceRunner
 	ChangeHeld              func(*trace.Repository, config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld    func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
 	UpstreamDeliveryPending func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)

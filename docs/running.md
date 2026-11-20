@@ -486,6 +486,32 @@ statuses of the pushed head commit in the upstream repository:
   check that failed and then passed on the rerun is recorded as flaky and
   counts as a pass; one that fails again stays failed. At most one rerun is made
   for a push.
+- The chief of staff and the final reader can read why a check failed with the
+  `read_cloud_trace` action, which no other role holds. It takes the trace ID a
+  failed check's `dagger trace <id>` command names and, optionally, that check's
+  name, and returns the output `dagger trace <id>` shows: for the whole trace, or
+  for the one check when `check` is given. The service runs the `dagger` CLI
+  itself, with the Dagger Cloud token `cloud_token_env` names, which only the
+  command's environment holds, never a role. The trace ID must start with a
+  letter or digit and hold only letters, digits, `_` and `-`, up to 64
+  characters, and a check name is up to 256 bytes without control characters;
+  anything else is refused before a command runs, and neither value can become a
+  flag or an extra argument. The output is scrubbed of the service's secrets and
+  of secret-shaped values, and kept to its last 64 KiB: the result then says
+  `truncated` and the full `size`. Each fetch is recorded as the workstream
+  document `traces/<trace ID>-all.json` (the whole trace) or
+  `traces/<trace ID>-check-<digest>.json` (one check), which every role reads
+  with `factory_context`; it names the trace ID, the check or that the whole
+  trace is covered, the fetch time, the truncation and the output, and the
+  result carries its path and a `trace#<record>` citation. A request for the
+  same trace ID and the same check, or the same whole trace, returns that
+  record without fetching again, also after a restart; a record for one check
+  never answers a request for another check or for the whole trace. A fetch
+  that fails still returns a result, with `fetched` false and a `reason`:
+  `no_token`, `token_rejected`, `unknown_trace` (also a trace the token's
+  organization cannot see), `timeout`, `cli_unavailable` or `failed` (a cause
+  the CLI's exit status and output do not tell, with a bounded, scrubbed
+  excerpt). The turn continues, and nothing is recorded for a failure.
 - Everything is recorded, so a restart resumes where the watch was: the wait is
   measured from the recorded push, and no push, rerun or notice is repeated.
 

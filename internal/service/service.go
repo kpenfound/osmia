@@ -117,6 +117,9 @@ type Options struct {
 	// It defaults to the Dagger CLI with the token dagger.cloud_token_env
 	// names.
 	CloudRerun CloudRerunner
+	// CloudTrace fetches the output of a Dagger Cloud trace. It defaults to
+	// the Dagger CLI with the token dagger.cloud_token_env names.
+	CloudTrace TraceRunner
 	// FinalChecksWait replaces the 2 minutes after a push during which the
 	// final review reads no status. Nil keeps them.
 	FinalChecksWait *time.Duration
