@@ -152,6 +152,52 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 	}
 }
 
+// Every [error_reports] setting applies on reload: turning the reporter on and
+// off and changing its repository, labels, caps and sources never needs a
+// restart.
+func TestReloadAppliesErrorReports(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := fixture(t)
+	files := configFiles(t, opts)
+	_, c := start(t, opts)
+	before, err := c.Configuration(ctx)
+	must(t, err)
+	if e := before.Effective.ErrorReports; e.Enabled || e.Repository != "kpenfound/osmia" {
+		t.Fatalf("default effective error reports: %+v", e)
+	}
+
+	files.write(t, files.topText+`[error_reports]
+enabled = true
+repository = "owner/other"
+labels = ["bug"]
+max_issues_per_hour = 1
+max_issues_per_day = 2
+max_comments_per_day = 3
+sources = ["github"]
+`, files.projectText)
+	reloaded, err := c.Reload(ctx)
+	must(t, err)
+	now, err := c.Configuration(ctx)
+	must(t, err)
+	want := config.ErrorReports{Enabled: true, Repository: "owner/other", Labels: []string{"bug"}, MaxIssuesPerHour: 1, MaxIssuesPerDay: 2, MaxCommentsPerDay: 3, Sources: []string{"github"}}
+	if len(reloaded.RestartRequired) != 0 || !reflect.DeepEqual(now.Effective.ErrorReports, want) || hasCode(now.Diagnostics, "configuration", RestartRequired) || reloaded.Digest == before.Digest {
+		t.Fatalf("reload %+v, effective %+v, diagnostics %+v", reloaded, now.Effective.ErrorReports, now.Diagnostics)
+	}
+
+	files.write(t, files.topText, files.projectText)
+	reloaded, err = c.Reload(ctx)
+	must(t, err)
+	now, err = c.Configuration(ctx)
+	must(t, err)
+	if len(reloaded.RestartRequired) != 0 || !reflect.DeepEqual(now.Effective.ErrorReports, before.Effective.ErrorReports) {
+		t.Fatalf("after removing the section: %+v %+v", reloaded, now.Effective.ErrorReports)
+	}
+
+	files.write(t, files.topText+"[error_reports]\nrepository = \"not a repository\"\n", files.projectText)
+	reloadFails(t, c, files.top, "error_reports.repository")
+}
+
 // A reload resolves the runtime state against the new configuration without
 // rewriting it: pauses, priorities and profile overrides survive, and an
 // override the new configuration cannot honour is only set aside until a

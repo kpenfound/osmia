@@ -160,6 +160,10 @@ func (r Root) Tailnet() (string, error) { return r.managed("tailnet") }
 // Notifications is the ledger of owner notifications sent to notify.webhook.
 func (r Root) Notifications() (string, error) { return r.managed("notifications.json") }
 
+// ErrorReports is the error reporter's saved state: the issues it filed, its
+// rate-limit windows and its unresolved writes.
+func (r Root) ErrorReports() (string, error) { return r.managed("error-reports.json") }
+
 // SlotIntervals is the ledger of the held and waited capacity intervals that
 // are still open, which lets a restart send each one with its original start.
 func (r Root) SlotIntervals() (string, error) { return r.managed("slot-intervals.json") }

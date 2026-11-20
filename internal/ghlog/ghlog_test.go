@@ -85,3 +85,31 @@ func TestScopeOfIsEmptyWithoutWithScope(t *testing.T) {
 		t.Fatalf("scope %+v", scope)
 	}
 }
+
+func TestLogMarksTheErrorReportersRequestsAndNoOthers(t *testing.T) {
+	var buf bytes.Buffer
+	ctx := WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+	if IsReporter(ctx) {
+		t.Fatal("a fresh context is not the reporter's")
+	}
+	Log(ctx, time.Now(), Entry{Action: "pulls.find", Access: Read, Method: "GET", Path: "/repos/a/b/pulls", Status: 200})
+	Log(WithReporter(ctx), time.Now(), Entry{Action: "issues.create", Access: Write, Method: "POST", Path: "/repos/a/b/issues", Status: 500})
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("log %s", buf.String())
+	}
+	var plain, own map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &own); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain[ReporterField]; ok {
+		t.Fatalf("an ordinary record carries the reporter marker: %v", plain)
+	}
+	if own[ReporterField] != true || own[Marker] != MarkerValue || own["action"] != "issues.create" {
+		t.Fatalf("record %v", own)
+	}
+}

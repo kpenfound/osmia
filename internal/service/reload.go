@@ -238,6 +238,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	if len(next.Projects) == 0 {
 		events = append(events, Event{Kind: EventSpend})
 	}
+	s.reporter.configure(next)
 	s.hub.Publish(events...)
 	for _, warning := range next.Warnings {
 		s.log().Warn(warning, "component", "config")

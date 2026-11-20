@@ -54,6 +54,24 @@ func ScopeOf(ctx context.Context) Scope {
 	return scope
 }
 
+type reporterKey struct{}
+
+// ReporterField is the field a GitHub activity record carries, with the value
+// true, when the error reporter made the request. No other record carries it.
+const ReporterField = "error_reporter"
+
+// WithReporter marks every GitHub request made with the returned context as
+// the error reporter's own, so its activity records carry ReporterField.
+func WithReporter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reporterKey{}, true)
+}
+
+// IsReporter reports whether ctx marks its requests as the error reporter's.
+func IsReporter(ctx context.Context) bool {
+	marked, _ := ctx.Value(reporterKey{}).(bool)
+	return marked
+}
+
 // Marker is the field every GitHub activity record carries, and no other
 // record carries.
 const Marker = "activity"
@@ -164,6 +182,9 @@ func Log(ctx context.Context, start time.Time, e Entry) {
 		if scope.Unit != "" {
 			attrs = append(attrs, slog.String("unit", scope.Unit))
 		}
+	}
+	if IsReporter(ctx) {
+		attrs = append(attrs, slog.Bool(ReporterField, true))
 	}
 	msg := "github request completed"
 	if e.Err != nil {

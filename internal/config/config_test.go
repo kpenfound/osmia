@@ -489,6 +489,19 @@ func TestInvalid(t *testing.T) {
 		{"webhook scheme", topConfig + "[notify]\nwebhook = 'ftp://example.com/hook'\n", "", "notify.webhook: scheme must be http or https"},
 		{"webhook malformed", topConfig + "[notify]\nwebhook = 'https://exa mple.com/%zz'\n", "", "notify.webhook: must be an absolute http or https URL"},
 		{"webhook wrong type", topConfig + "[notify]\nwebhook = 1\n", "", "config.toml:"},
+		{"error reports unknown key", topConfig + "[error_reports]\ntoken = 'x'\n", "", "error_reports.token: unknown configuration key"},
+		{"error reports repository url", topConfig + "[error_reports]\nrepository = 'https://github.com/kpenfound/osmia'\n", "", "error_reports.repository: must be an owner/name GitHub repository"},
+		{"error reports repository no owner", topConfig + "[error_reports]\nrepository = 'osmia'\n", "", "error_reports.repository:"},
+		{"error reports repository empty", topConfig + "[error_reports]\nrepository = ''\n", "", "error_reports.repository:"},
+		{"error reports repository git suffix", topConfig + "[error_reports]\nrepository = 'kpenfound/osmia.git'\n", "", "error_reports.repository:"},
+		{"error reports repository space", topConfig + "[error_reports]\nrepository = 'kpenfound/os mia'\n", "", "error_reports.repository:"},
+		{"error reports repository extra segment", topConfig + "[error_reports]\nrepository = 'a/b/c'\n", "", "error_reports.repository:"},
+		{"error reports unknown source", topConfig + "[error_reports]\nsources = ['api', 'model']\n", "", "error_reports.sources[1]: expected api, operation, github"},
+		{"error reports empty label", topConfig + "[error_reports]\nlabels = ['bug', ' ']\n", "", "error_reports.labels[1]: must not be empty"},
+		{"error reports zero hourly cap", topConfig + "[error_reports]\nmax_issues_per_hour = 0\n", "", "error_reports.max_issues_per_hour: must be positive"},
+		{"error reports negative daily cap", topConfig + "[error_reports]\nmax_issues_per_day = -1\n", "", "error_reports.max_issues_per_day: must be positive"},
+		{"error reports zero comment cap", topConfig + "[error_reports]\nmax_comments_per_day = 0\n", "", "error_reports.max_comments_per_day: must be positive"},
+		{"error reports wrong type", topConfig + "[error_reports]\nenabled = 'yes'\n", "", "config.toml:"},
 		{"empty socket", topConfig + "[listen]\nsocket = ''\n", "", "listen.socket"},
 		{"socket escape", topConfig + "[listen]\nsocket = '../outside.sock'\n", "", "listen.socket"},
 		{"socket directory", topConfig + "[listen]\nsocket = '.'\n", "", "direct child"},
@@ -812,6 +825,80 @@ func TestNotifyWebhook(t *testing.T) {
 	_, err := Load(fixture(t, topConfig+"[notify]\nwebhook = 'gopher://hooks.example.com/services/SECRET'\n", projectConfig))
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("rejected webhook error %v must not quote %s", err, secret)
+	}
+}
+
+// Without an [error_reports] section the reporter is off and files to the
+// Osmia repository with the documented labels, caps and sources.
+func TestErrorReportsDefaults(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := c.ErrorReports
+	if e.Enabled || e.Repository != "kpenfound/osmia" || !slices.Equal(e.Labels, []string{"factory-error", "automated"}) {
+		t.Fatalf("defaults %+v", e)
+	}
+	if e.MaxIssuesPerHour <= 0 || e.MaxIssuesPerDay <= 0 || e.MaxCommentsPerDay <= 0 {
+		t.Fatalf("caps %+v", e)
+	}
+	if !slices.Equal(e.Sources, []string{"api", "operation", "github"}) {
+		t.Fatalf("sources %v", e.Sources)
+	}
+	for _, source := range ErrorSources {
+		if !e.SourceEnabled(source) {
+			t.Fatalf("source %s is off by default", source)
+		}
+	}
+}
+
+// Every [error_reports] key is read, and a key left out keeps its default.
+func TestErrorReportsSettings(t *testing.T) {
+	c, err := Load(fixture(t, topConfig+`[error_reports]
+enabled = true
+repository = "owner/name.repo"
+labels = ["bug"]
+max_issues_per_hour = 2
+max_issues_per_day = 7
+max_comments_per_day = 9
+sources = ["api", "github"]
+`, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ErrorReports{Enabled: true, Repository: "owner/name.repo", Labels: []string{"bug"}, MaxIssuesPerHour: 2, MaxIssuesPerDay: 7, MaxCommentsPerDay: 9, Sources: []string{"api", "github"}}
+	if !reflect.DeepEqual(c.ErrorReports, want) {
+		t.Fatalf("got %+v want %+v", c.ErrorReports, want)
+	}
+	if c.ErrorReports.SourceEnabled("operation") || !c.ErrorReports.SourceEnabled("github") {
+		t.Fatalf("sources %v", c.ErrorReports.Sources)
+	}
+	partial, err := Load(fixture(t, topConfig+"[error_reports]\nenabled = true\n", projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := partial.ErrorReports; !e.Enabled || e.Repository != "kpenfound/osmia" || len(e.Labels) != 2 || len(e.Sources) != 3 || e.MaxIssuesPerHour != DefaultMaxIssuesPerHour {
+		t.Fatalf("partial %+v", e)
+	}
+}
+
+// The reporter's saved state is a managed file at the top of the root, beside
+// the notification ledger.
+func TestErrorReportsStatePath(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports, err := c.Root.ErrorReports()
+	if err != nil {
+		t.Fatal(err)
+	}
+	notifications, err := c.Root.Notifications()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(reports) != "error-reports.json" || filepath.Dir(reports) != filepath.Dir(notifications) || filepath.Dir(reports) != c.Root.String() {
+		t.Fatalf("state %s, ledger %s, root %s", reports, notifications, c.Root)
 	}
 }
 

@@ -4731,6 +4731,9 @@
           "dagger": {
             "$ref": "#/components/schemas/ConfigDaggerConfig"
           },
+          "error_reports": {
+            "$ref": "#/components/schemas/ConfigErrorReports"
+          },
           "events": {
             "$ref": "#/components/schemas/ConfigEvents"
           },
@@ -4888,6 +4891,44 @@
           "files": {
             "items": {
               "$ref": "#/components/schemas/ConfigFile"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ConfigErrorReports": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "max_comments_per_day": {
+            "type": "integer"
+          },
+          "max_issues_per_day": {
+            "type": "integer"
+          },
+          "max_issues_per_hour": {
+            "type": "integer"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
             },
             "type": [
               "array",

@@ -438,6 +438,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		fmt.Fprintf(stdout, "Configuration: %s (%s)\n", cfg.Digest, cfg.Root)
 		showConfigDrift(stdout, cfg.Drift)
+		if cfg.Effective != nil {
+			showErrorReports(stdout, cfg.Effective.ErrorReports)
+		}
 		diagnostics(stdout, cfg.Diagnostics)
 		if e := cfg.LastError; e != nil {
 			fmt.Fprintf(stdout, "Last reload failed at %s: %s\n", e.At.UTC().Format(time.RFC3339), e.Message)
@@ -1834,6 +1837,25 @@ func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 		}
 		fmt.Fprintln(w, line)
 	}
+}
+
+// showErrorReports prints the effective [error_reports] section.
+func showErrorReports(w io.Writer, e config.ErrorReports) {
+	list := func(values []string) string {
+		quoted := make([]string, len(values))
+		for i, v := range values {
+			quoted[i] = strconv.Quote(v)
+		}
+		return "[" + strings.Join(quoted, ", ") + "]"
+	}
+	fmt.Fprintln(w, "[error_reports]")
+	fmt.Fprintf(w, "enabled = %t\n", e.Enabled)
+	fmt.Fprintf(w, "repository = %s\n", strconv.Quote(e.Repository))
+	fmt.Fprintf(w, "labels = %s\n", list(e.Labels))
+	fmt.Fprintf(w, "max_issues_per_hour = %d\n", e.MaxIssuesPerHour)
+	fmt.Fprintf(w, "max_issues_per_day = %d\n", e.MaxIssuesPerDay)
+	fmt.Fprintf(w, "max_comments_per_day = %d\n", e.MaxCommentsPerDay)
+	fmt.Fprintf(w, "sources = %s\n", list(e.Sources))
 }
 
 // showProviderUsage prints today's known spend by provider, each provider's
