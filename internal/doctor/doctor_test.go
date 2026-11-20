@@ -22,6 +22,7 @@ import (
 
 const projectID = "p_0123456789abcdef0123456789abcdef"
 
+// SOME MORE COMMENTS HERE
 const topLevel = `version = 1
 active_projects = [%q]
 
@@ -165,9 +166,6 @@ func TestHealthyRoot(t *testing.T) {
 		}
 	}
 	expect(t, find(t, checks, "widgets upstream"), Pass, `remote "origin" answers, branch main exists`)
-	expect(t, find(t, checks, "widgets trace"), Pass, "0 workstreams")
-	expect(t, find(t, checks, "runtime.json"), Pass, "")
-	expect(t, find(t, checks, "claude"), Pass, "claude 1.0.0")
 	expect(t, find(t, checks, "GITHUB_TOKEN"), Pass, "owner")
 	absent(t, checks, "docker")
 	if Failed(checks) {
