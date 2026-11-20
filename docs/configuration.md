@@ -86,6 +86,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
+<root>/error-reports.json                     the error reporter's saved state: the issues it filed, its caps and its unresolved writes, once error_reports.enabled has been set
 <root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
 <root>/service-intervals.json                 the pool limit intervals and uptime of the running service, while [telemetry] is on
 <root>/projects/<repo-id>/config.toml
@@ -260,6 +261,16 @@ progress_window = "15m"
 # Optional absolute http or https URL that each new owner decision is posted
 # to as plain text; empty sends nothing.
 webhook = ""
+
+[error_reports]
+# Files GitHub issues about the service's own failures; see "Error reporter".
+enabled = false
+repository = "kpenfound/osmia"
+labels = ["factory-error", "automated"]
+max_issues_per_hour = 5
+max_issues_per_day = 20
+max_comments_per_day = 20
+sources = ["api", "operation", "github"]
 
 [skills]
 # How stale a skill clone may get before a turn that needs it pulls it:
@@ -1379,7 +1390,7 @@ in `runtime.json`, never these files.
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
 `listen.web`, `listen.tailnet`, `listen.tailnet_https` and the `[telemetry]` table keep their loaded
 values until the service restarts. Role skills and `skills.refresh` apply to turns that start after a
-reload, and `[transcribe]` to transcriptions that start after one. The `active_projects` list applies live: additions start their retained
+reload, `[transcribe]` to transcriptions that start after one and `[error_reports]` to the errors captured after one. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
@@ -1662,6 +1673,54 @@ status, a reply that is not a `{"text": ...}` object and a timeout each answer
 a transcription error with no text. On the web and tailnet listeners the route
 follows the other writes: the `Host` must name the listener and the request
 body must be JSON.
+
+## Error reporter
+
+The error reporter files a GitHub issue when the running service hits an error
+that points to a bug or a broken integration in Osmia itself. It is off until
+`enabled` is set. What it files, how it keeps a public repository safe and how
+repeats are grouped are described in
+[the error reporter](running.md#error-reporter).
+
+```toml
+[error_reports]
+# Turns the reporter on. Errors from before it was turned on, or while it was
+# off, are never filed.
+enabled = false
+# The owner/name GitHub repository issues are filed in.
+repository = "kpenfound/osmia"
+# Labels put on each new issue.
+labels = ["factory-error", "automated"]
+# At most this many new issues in any hour and in any 24 hours.
+max_issues_per_hour = 5
+max_issues_per_day = 20
+# At most this many "still occurring" comments per UTC day.
+max_comments_per_day = 20
+# The error sources that are filed. Omit it to file all three.
+sources = ["api", "operation", "github"]
+```
+
+| Key | Default | Validation/meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Boolean. While `false` nothing is captured and nothing is filed. |
+| `repository` | `kpenfound/osmia` | An `owner/name` GitHub repository; anything else is an error naming `error_reports.repository`. Issues are filed in it with `GITHUB_TOKEN`. |
+| `labels` | `["factory-error", "automated"]` | Labels put on each new issue. An empty or blank label is an error naming its index; an empty list puts no label on new issues. |
+| `max_issues_per_hour` | `5` | Positive integer. The most new issues opened in any rolling hour. |
+| `max_issues_per_day` | `20` | Positive integer. The most new issues opened in any rolling 24 hours. |
+| `max_comments_per_day` | `20` | Positive integer. The most "still occurring" comments posted per UTC day. |
+| `sources` | `["api", "operation", "github"]` | A subset of `api`, `operation` and `github`; an unknown entry is an error naming its index. Omitting the key files all three; a source left out files nothing. |
+
+A cap that is not a positive integer is an error naming the key, such as
+`error_reports.max_issues_per_day`. Every value is validated whether or not
+`enabled` is set, so turning the reporter on never reveals a broken one. The
+section applies through reload: `osmia reload` turns the reporter on or off and
+changes the target, labels, caps and sources with no restart
+([reload](running.md#reload)). `osmia config` shows the effective section.
+
+The reporter uses the service's `GITHUB_TOKEN`; the permission it needs is
+listed under [the token](running.md#the-token-the-reporter-needs). Its saved
+state is `<root>/error-reports.json`, at the top of the root beside the
+notification ledger.
 
 ## Optional telemetry
 

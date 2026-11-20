@@ -777,6 +777,183 @@ changed or removed webhook.
 While a notification problem stands, `osmia status` and `osmia config` show a
 `notify` diagnostic describing it. They never show the webhook's URL.
 
+## Error reporter
+
+With `[error_reports]` enabled ([configuration](configuration.md#error-reporter)),
+the service files a GitHub issue when it hits an error that points to a bug or
+a broken integration in Osmia itself. The reporter only files issues. It starts
+no workstream, hands nothing in and triggers no other factory work; you decide
+which issues to [hand in](#handing-a-filed-issue-in). It is off by default.
+
+### What is filed
+
+Each error source can be switched off with `sources`:
+
+- `api`: the service's own HTTP API answering a 5xx status. The report names
+  the endpoint's route template, never the concrete path.
+- `operation`: an `operation failed` record of the [factory action
+  log](#factory-action-log), such as a failed draft, sealing, check run,
+  landing or publication.
+- `github`: a failed GitHub REST request, meaning a [GitHub activity
+  record](#github-activity-log) at `ERROR` that carries an HTTP method and path
+  (an error status, an unexpected status or no response).
+
+These are never filed:
+
+- Git remote operations (resolving a remote, fetching, looking up a remote
+  branch, pushing). They carry no method and path, so they are not REST
+  requests; they are still recorded in the GitHub activity log as usual.
+- Model-provider errors during agent turns, such as overload, 5xx, timeouts and
+  rate limits, and failures reaching Jev.
+- Failures of the reporter's own GitHub calls. Its records carry
+  `"error_reporter":true`, so a failing reporter never reports itself.
+- Errors from before the reporter was enabled or while it was disabled.
+  Turning it off drops whatever it had queued.
+
+The reporter reads the same error records as the [service log](#service-log),
+whether that goes to the journal or to a file. Capturing a record never blocks
+or slows the request or operation that produced it: records wait in a bounded
+queue, and when it is full the oldest is dropped and counted. The count appears
+in the next issue or comment filed.
+
+### What a report holds
+
+The repository an issue is filed in may be public, and an issue is published at
+once. A report is built only from these fields:
+
+- the source, the action or endpoint template, the HTTP status and the error
+  code;
+- the scrubbed error message;
+- the Osmia version and commit;
+- the first and last time seen, the occurrence count and the counts of events
+  skipped by a cap or lost from the queue;
+- the fingerprint;
+- the project, workstream and unit, as Osmia IDs only;
+- for a new issue that replaces a closed one, a link to the closed issue in the
+  same repository.
+
+It never holds prompts, transcripts, issue or pull request titles or bodies,
+check output, diffs, configuration values or the free-form attributes of the
+log record.
+
+The message, and any other free text, is scrubbed before it leaves the process:
+
+| Removed | Replaced by |
+| --- | --- |
+| Known secrets, GitHub tokens (`ghp_`, `gho_`, `github_pat_`), `sk-` API keys, bearer and authorization header values | `[redacted]` |
+| An `owner/name` repository other than the target | `<repo>` |
+| A GitHub REST path | its route template, such as `/repos/{owner}/{repo}/pulls/{n}` |
+| An absolute filesystem path, including the root, home, views and threads directories | `<path>` |
+| A branch name or git ref | `<ref>` |
+| A commit SHA, except the Osmia build commit | `<sha>` |
+| A host, IP address, tailnet name or hostname; a URL keeps its scheme and host only for `github.com` and `api.github.com` | `<host>` |
+| An email address | `<email>` |
+
+Scrubbing fails closed. If scrubbing or rendering fails or panics, if a field
+is not an opaque Osmia ID or an HTTP status, or if the scrubbed text still looks
+like a credential, nothing is filed for that error and a
+[diagnostic](#reporter-diagnostics) shows the reason.
+
+### Grouping, comments and caps
+
+Errors with the same fingerprint share one issue. The fingerprint is built from
+the source, the action or endpoint template, the status or error code and the
+scrubbed message, with IDs, hashes, numbers and timestamps normalised, so
+occurrences that differ only in those are one error.
+
+Grouping is per target repository: a saved issue is identified by its
+repository and number together. A repeat opens no new issue while the saved one
+is open. It updates the saved count and last-seen time, and adds at most one
+`Still occurring` comment per issue per UTC day, carrying the count and the
+last-seen time.
+
+Every recurrence checks whether the saved issue is still open, whether or not a
+comment is due that day. When it was closed, a new issue is opened that links
+the closed one, even when its daily comment was already posted or the comment
+cap is spent. The closed issue is never reopened. The service spaces out its
+reads of an issue's state; a recurrence that could not be checked yet is kept
+and checked as soon as a read is allowed, so the new issue does not wait for
+another occurrence.
+
+The caps are `max_issues_per_hour` and `max_issues_per_day` for new issues,
+counted over rolling windows, and `max_comments_per_day` for comments, counted
+per UTC day. An event over a cap is counted, not filed, and the count appears in
+the next issue or comment that is filed. A new issue replacing a closed one
+counts against the issue caps only.
+
+### Uncertain writes
+
+A write to GitHub can succeed without the service learning it did: the response
+can be lost, or the service can stop after GitHub accepted the write but before
+the result was saved. Before every issue creation or comment the reporter saves
+its intent in `<root>/error-reports.json`, written atomically, and clears it
+once the result is saved.
+
+An intent still unresolved, because the outcome was uncertain (no response, a
+timeout, a 5xx) or because the service stopped, is reconciled before any
+retry: the reporter looks in the intent's repository for the issue or comment
+carrying its marker, a line holding the fingerprint (and, for a comment, its
+day), and adopts it when found. It writes again only when none exists. The
+lookup does not depend on labels: it can try the labels saved with the intent
+first, but it concludes that no issue exists only after listing every issue in
+the repository updated since the intent was recorded, with no label filter. A
+change of `labels` by reload, or labels removed from the issue on GitHub, cannot
+cause a duplicate. Comments are found through the issue's own comments.
+
+A failed filing, a reconciliation read included, is retried with a growing
+delay and given up after 5 attempts.
+
+### Changing the repository
+
+`repository` can change on reload. Saved issues and unresolved intents stay
+tied to the repository they were made in:
+
+- New reports, and events that were queued but not yet decided, go to the new
+  repository.
+- The service never reads, comments on or links an issue in one repository
+  using a number saved for another. A fingerprint with an issue in the old
+  repository is a new error in the new one.
+- An unresolved intent for the old repository makes no further write while it
+  is not the target. If you switch back, it is reconciled first, and the
+  fingerprint groups again with its original issue, so switching back opens no
+  duplicate.
+
+### The token the reporter needs
+
+The reporter uses the `GITHUB_TOKEN` in the service's environment. For the
+target repository the token must be able to create issues and comments and to
+read issues and comments (they are read to check an issue's state and to
+reconcile). A fine-grained token needs **Issues: Read and write** on the
+repository; a classic token needs `public_repo` for a public repository, or
+`repo` for a private one. Without `GITHUB_TOKEN`, or when the token lacks the
+permission, nothing is filed and a [diagnostic](#reporter-diagnostics) says so.
+
+### Reporter diagnostics
+
+While filing is failing, `osmia status` and `osmia config` show a diagnostic
+for the error reporter, for example a missing or under-permissioned token, a
+repository that cannot be reached, a scrub or render failure, or a filing the
+reporter gave up on. It is cleared after a later successful filing. It never
+shows the token or the text of a report.
+
+Every GitHub call the reporter makes appears in the [GitHub activity
+log](#github-activity-log): creating an issue is `issues.create` and
+commenting is `issues.comment`, both with `write` access, and the reads it makes
+are logged with `read` access. Each record carries `"error_reporter":true`.
+
+### Handing a filed issue in
+
+A filed issue is an ordinary GitHub issue. To have it fixed, hand its URL in
+with the existing issue hand-in:
+
+```sh
+osmia handin <project-id> https://github.com/OWNER/REPO/issues/NUMBER
+```
+
+The service fetches the issue with `GITHUB_TOKEN` and the rest is an ordinary
+[hand-in](cli.md#commands-and-flags) that you ratify. The reporter itself never does
+this.
+
 ## Service log
 
 While `osmia serve` runs, foreground, detached or under systemd, everything it writes to its
@@ -849,8 +1026,10 @@ osmia serve 2>&1 | jq -c 'select(.activity == "github")'
 
 Each GitHub activity record also carries:
 
-- `action`: what was done, such as `pulls.find`, `issues.fetch` or
-  `workspace.push`.
+- `action`: what was done, such as `pulls.find`, `issues.fetch`,
+  `issues.create`, `issues.comment` or `workspace.push`. The last two are the
+  [error reporter](#error-reporter)'s writes, and its records also carry
+  `"error_reporter":true`.
 - `access`: `read` or `write`.
 - `repository`, for a REST request, or `remote` and `branch`, for a git
   remote operation.
