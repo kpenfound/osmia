@@ -16,8 +16,11 @@ const finalChecksView = "final"
 // FinalCheckFiles returns the files of the reader's view that carry the
 // review's recorded check result, by their path in the view: the latest
 // final/checks-<k>.json recorded for the reviewed commit, and the output file
-// that record names (OutputPath at OutputRevision). It returns none when no
-// record of the commit exists, as for a review of a delivered workstream.
+// that record names (OutputPath at OutputRevision), and for a failed Dagger
+// Cloud result the recorded trace output, or the recorded failure, of each of
+// its failed checks that names a trace ID, under final/checks-<k>-traces/. It
+// returns none when no record of the commit exists, as for a review of a
+// delivered workstream.
 func FinalCheckFiles(repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (map[string]string, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -41,6 +44,9 @@ func FinalCheckFiles(repository *trace.Repository, stream config.WorkstreamID, r
 		return nil, nil
 	}
 	files := map[string]string{record.Path: record.Content}
+	for name, content := range finalTraceFiles(docs, run) {
+		files[name] = content
+	}
 	if run.OutputPath == "" {
 		return files, nil
 	}

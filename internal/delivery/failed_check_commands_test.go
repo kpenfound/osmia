@@ -34,6 +34,15 @@ func cloudFailedStatus(f *watchFixture, id int64, name, traceID string, at time.
 // rerun come back with the same failure, and returns the recorded result.
 func settleFailedRun(f *watchFixture, passed int, failing ...func(at time.Duration) pulls.CommitStatus) FinalCheckRun {
 	f.t.Helper()
+	driveFailedRun(f, passed, failing...)
+	return f.mustComplete()
+}
+
+// driveFailedRun reads the statuses of a failed run and lets the once-only
+// rerun come back with the same failure, up to the read that records the
+// result.
+func driveFailedRun(f *watchFixture, passed int, failing ...func(at time.Duration) pulls.CommitStatus) {
+	f.t.Helper()
 	post := func(id int64, at time.Duration) {
 		statuses := []pulls.CommitStatus{f.loaded(), f.done(id, "failure", at)}
 		for _, status := range failing {
@@ -46,7 +55,6 @@ func settleFailedRun(f *watchFixture, passed int, failing ...func(at time.Durati
 	f.mustWait()
 	f.clock.Advance(10 * time.Minute)
 	post(20, f.clock.Now().Sub(f.pushedAt))
-	return f.mustComplete()
 }
 
 func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *testing.T) {

@@ -1726,6 +1726,7 @@ func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 			held += fmt.Sprintf("- %s: the complete captured check output that record names.\n", path)
 		}
 	}
+	held += finalTraceEvidence(checks)
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
 
 Check result:

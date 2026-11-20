@@ -61,7 +61,10 @@ type Dependencies struct {
 	CloudRerun checks.CloudRerunner
 	// CloudTrace fetches the output of a Dagger Cloud trace. It is nil when
 	// none can be fetched.
-	CloudTrace              checks.TraceRunner
+	CloudTrace checks.TraceRunner
+	// AutoTraceTimeout bounds each automatic fetch of a failed check's trace
+	// output. Zero keeps AutoTraceTimeout's default.
+	AutoTraceTimeout        time.Duration
 	ChangeHeld              func(*trace.Repository, config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld    func(*trace.Repository, config.WorkstreamID, coreadapter.Operation) (bool, error)
 	UpstreamDeliveryPending func(*trace.Repository, *config.Config, config.WorkstreamID) (bool, error)

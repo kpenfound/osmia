@@ -120,6 +120,9 @@ type Options struct {
 	// CloudTrace fetches the output of a Dagger Cloud trace. It defaults to
 	// the Dagger CLI with the token dagger.cloud_token_env names.
 	CloudTrace TraceRunner
+	// CloudTraceTimeout replaces the time one automatic trace fetch of a
+	// failed check may hold the final review. Zero keeps the default.
+	CloudTraceTimeout time.Duration
 	// FinalChecksWait replaces the 2 minutes after a push during which the
 	// final review reads no status. Nil keeps them.
 	FinalChecksWait *time.Duration
