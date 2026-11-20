@@ -88,7 +88,12 @@ func (s *Service) configuration() ConfigResponse {
 	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
+	byID := make(map[config.ProjectID]config.Project, len(cfg.Projects))
 	for _, p := range cfg.Projects {
+		byID[p.ID] = p
+	}
+	for _, id := range s.projectsByNewestWorkstream(cfg) {
+		p := byID[id]
 		view := projectView(cfg.Root, p)
 		// A project without a trace, or removed since the snapshot, has no
 		// charter to report.
@@ -133,7 +138,7 @@ func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.effective()
 	cfg := s.current()
 	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Jev: s.jev.Status(), Diagnostics: []Diagnostic{}}
-	for _, id := range cfg.ProjectIDs() {
+	for _, id := range s.projectsByNewestWorkstream(cfg) {
 		out.Projects = append(out.Projects, ProjectRuntime{Project: id, ContextMode: s.Context().Mode(id)})
 	}
 	if len(out.Projects) == 0 {

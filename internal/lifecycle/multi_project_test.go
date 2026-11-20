@@ -155,8 +155,11 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	}
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project != nil || len(cfg.Projects) != 2 || cfg.Projects[0].ID != project || cfg.Projects[1].ID != otherProject {
+	if cfg.Project != nil || len(cfg.Projects) != 2 || !(cfg.Projects[0].ID == project && cfg.Projects[1].ID == otherProject || cfg.Projects[0].ID == otherProject && cfg.Projects[1].ID == project) {
 		t.Fatalf("configuration projects: %+v %+v", cfg.Project, cfg.Projects)
+	}
+	if got := cfg.Effective.ActiveProjects; len(got) != 2 || got[0] != string(project) || got[1] != string(otherProject) {
+		t.Fatalf("effective active projects: %v", got)
 	}
 	status, err := c.Statuses(ctx)
 	must(t, err)

@@ -199,6 +199,18 @@ top-level file, and every active repo's file, must exist and specify
 tables and case variants), duplicate TOML keys, malformed TOML and incorrect
 types are errors.
 
+`GET /v1/config` lists the active projects in `projects`, and `GET /v1/runtime`
+lists them in its own `projects`, in one order: by the creation time of each
+project's newest workstream, newest first. Feature workstreams, workgroup
+members, design sessions and exploratory sessions all count, and so do archived
+workstreams while their creation time can be read. Projects whose newest
+workstreams were created at the same time, and projects with no workstream,
+which come last, keep their `active_projects` order. A project whose trace
+cannot be read sorts as if it had no workstreams. The order has no option and
+no query parameter; the web page's project pickers and the project pane, and the
+CLI's project listings, show it. `effective.active_projects` keeps the
+configuration file's order, so read it when that order matters.
+
 The following optional settings show their defaults:
 
 ```toml

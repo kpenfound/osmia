@@ -106,8 +106,14 @@ func TestStartupSplitsProjectsAndPreservesConfigAndChartersAcrossRestarts(t *tes
 	for restart := range 2 {
 		s, err := Start(context.Background(), f.opts)
 		must(t, err)
-		if got := s.configuration().Projects; len(got) != 2 || got[0].ID != project || got[1].ID != otherProject {
+		// The projects list orders by newest workstream; the effective
+		// configuration keeps the file's order.
+		view := s.configuration()
+		if got := view.Projects; len(got) != 2 || !(got[0].ID == project && got[1].ID == otherProject || got[0].ID == otherProject && got[1].ID == project) {
 			t.Fatalf("active projects: %+v", got)
+		}
+		if got := view.Effective.ActiveProjects; len(got) != 2 || got[0] != string(project) || got[1] != string(otherProject) {
+			t.Fatalf("effective active projects: %v", got)
 		}
 		must(t, s.Close())
 		copied := assertSplit(t, f, before, source)

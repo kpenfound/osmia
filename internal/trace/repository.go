@@ -91,6 +91,10 @@ type Repository struct {
 	reads *sql.DB
 	// cache holds the trace's decoded records under its own lock.
 	cache recordCache
+	// created caches each workstream's creation time, which never changes
+	// once written, under createdMu.
+	createdMu sync.Mutex
+	created   map[config.WorkstreamID]time.Time
 	// decoded counts the stored records this handle decoded.
 	decoded        atomic.Uint64
 	workgroupReads atomic.Uint64

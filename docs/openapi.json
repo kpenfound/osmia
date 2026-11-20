@@ -5186,6 +5186,7 @@
             "$ref": "#/components/schemas/ProjectView"
           },
           "projects": {
+            "description": "Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep their active_projects order. Read effective.active_projects for the configuration file's order.",
             "items": {
               "$ref": "#/components/schemas/ProjectView"
             },
@@ -8273,6 +8274,7 @@
             ]
           },
           "projects": {
+            "description": "Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in active_projects order.",
             "items": {
               "$ref": "#/components/schemas/ProjectRuntime"
             },
