@@ -106,7 +106,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 	// The run completes with one failed check: one rerun of the failed checks
 	// is requested, from the workstream's checkout, with the Cloud token.
-	failedRun := j.host.completed(firstCommit, "failure", 3, 2, 1, 0)
+	failedRun := j.host.completed(firstCommit, "failure", 2)
 	failedCheck := j.host.failedCheck(firstCommit, "test:resume", "abc123")
 	j.step(t, 1, flowPoll, "the failed checks were rerun")
 	calls := j.rerunCalls(t)
@@ -145,7 +145,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	// the check that failed shows as passed again.
 	j.host.pending(firstCommit)
 	j.step(t, 1, flowPoll, "is pending")
-	fresh := j.host.completed(firstCommit, "success", 3, 3, 0, 0)
+	fresh := j.host.completed(firstCommit, "success", 2)
 	j.host.passedCheck(firstCommit, "test:resume")
 	j.clock.Advance(flowPoll)
 	run := j.awaitCheckRun(t, 1)
@@ -214,7 +214,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	oldReads := j.host.readCount(firstCommit)
 	j.host.loaded(secondCommit)
-	j.host.completed(secondCommit, "success", 3, 3, 0, 0)
+	j.host.completed(secondCommit, "success", 3)
 	j.step(t, 2, 90*time.Second, "no status is read until 2m0s after the push")
 	if j.host.readCount(secondCommit) != 0 {
 		t.Fatalf("the new commit's statuses were read before the wait passed")
@@ -424,7 +424,7 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		t.Fatal("the final read started before the checks completed")
 	}
 	j.host.loaded(first.Commit)
-	passed := j.host.completed(first.Commit, "success", 3, 3, 0, 0)
+	passed := j.host.completed(first.Commit, "success", 3)
 	j.clock.Advance(flowPoll)
 	run := j.awaitCheckRun(t, 1)
 	if run.Status != "passed" || run.Source != "pull_request" || run.Push != 1 || run.PushedCommit != first.Commit || run.Run == nil || run.Run.ID != passed.ID {

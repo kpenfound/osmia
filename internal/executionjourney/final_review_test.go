@@ -197,8 +197,8 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
-	assertCheckGateReviewInstructions(t, reader.Turns[len(reader.Turns)-1].Request.SystemPrompt)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Dagger Cloud ran the project's checks") || !strings.Contains(prompt, "The result is passed.") ||
+	assertFinalCheckReviewInstructions(t, reader.Turns[len(reader.Turns)-1].Request.SystemPrompt)
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Dagger Cloud ran the project's checks") || !strings.Contains(prompt, "The result is passed.") || strings.Index(prompt, "Check result:\n") > strings.Index(prompt, "Every criterion and the merged units") || !strings.Contains(prompt, "- final/checks-1.json:") ||
 		!strings.Contains(prompt, "- spec#1: served by merged units resume, each reviewed against its acceptance\n- spec#2: served by merged units dedupe") || strings.Contains(prompt, "change since") {
 		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
 	}

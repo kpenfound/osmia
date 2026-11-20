@@ -156,9 +156,10 @@ fresh approval before it is pushed. There is no group-wide delivery approval or
 pre-authorized update. Final-review acceptance remains a separate gate. The
 factory never merges a PR, releases it or pushes a base branch.
 After each push the service reads no Dagger Cloud status for 2 minutes, then
-reads the pushed commit's combined statuses at `pull_request_poll`. The overall
-result is the **Run Dagger Checks** status; a completed run with cancelled or
-unaccounted checks is incomplete, never a pass, and a failure is rerun once with
+reads the pushed commit's combined statuses at `pull_request_poll`. The result
+comes from those statuses alone: the **Run Dagger Checks** status is the run and
+the other statuses count its checks. A completed run that reports no checks or
+has checks without a result is incomplete, never a pass, and a failure is rerun once with
 `dagger cloud checks rerun --failed --pr <N>` (with `--org` from
 `dagger.organization` for a project without a fork) and settled only by a posting made
 after the rerun was requested. `osmia delivery` shows the result,

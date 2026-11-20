@@ -253,7 +253,7 @@ func (s *Controller) PollChecksNow(ctx context.Context, repository *trace.Reposi
 		return ChecksPollResult{}, "the service has no GitHub status client, so the statuses cannot be read", nil
 	}
 	forgetPoll(repository, stream, push.Number)
-	result, _, err := checkrun.ReadCloudStatuses(ctx, reader, s.CloudStatusFetcher, push.Upstream, push.Commit)
+	result, _, err := checkrun.ReadCloudStatuses(ctx, reader, push.Upstream, push.Commit)
 	repository.WakeWorkflow()
 	if ctx.Err() != nil {
 		return ChecksPollResult{}, "", ctx.Err()

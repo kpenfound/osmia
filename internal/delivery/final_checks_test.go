@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -50,12 +50,11 @@ func (c *watchClock) Advance(d time.Duration) {
 }
 
 // fakeStatusAPI stands in for GitHub's combined status read of the pushed
-// commit and for the Dagger Cloud JSON the "Run Dagger Checks" status points at.
+// commit.
 type fakeStatusAPI struct {
 	mu       sync.Mutex
 	clock    *watchClock
 	statuses []pulls.CommitStatus
-	docs     map[string]string
 	reads    []time.Time
 	commits  []string
 	err      error
@@ -72,16 +71,6 @@ func (f *fakeStatusAPI) CommitStatuses(_ context.Context, repository, commit str
 	return pulls.CommitStatuses{Repository: repository, Commit: commit, Statuses: append([]pulls.CommitStatus(nil), f.statuses...)}, nil
 }
 
-func (f *fakeStatusAPI) RoundTrip(r *http.Request) (*http.Response, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	body, ok := f.docs[r.URL.String()]
-	if !ok {
-		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}, Request: r}, nil
-	}
-	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
-}
-
 func (f *fakeStatusAPI) set(statuses ...pulls.CommitStatus) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -94,16 +83,18 @@ func (f *fakeStatusAPI) readCount() int {
 	return len(f.reads)
 }
 
-func (f *fakeStatusAPI) doc(id int64, body string) string {
-	target := fmt.Sprintf("https://dagger.cloud/checks/%d.json", id)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.docs[target] = body
-	return target
+// setWithChecks is set with n more per-check statuses, all of them success.
+func (f *fakeStatusAPI) setWithChecks(n int, statuses ...pulls.CommitStatus) {
+	f.set(append(statuses, passing(n)...)...)
 }
 
-func counts(total, passed, failed, cancelled int) string {
-	return fmt.Sprintf(`{"dagger":{"status":"completed","checks":{"total":%d,"passed":%d,"failed":%d,"cancelled":%d}}}`, total, passed, failed, cancelled)
+// passing is n per-check statuses that succeeded.
+func passing(n int) []pulls.CommitStatus {
+	var out []pulls.CommitStatus
+	for i := range n {
+		out = append(out, pulls.CommitStatus{ID: int64(1000 + i), Context: fmt.Sprintf("check-%03d", i), State: "success", Description: "Passed in 1m."})
+	}
+	return out
 }
 
 type watchFixture struct {
@@ -118,6 +109,8 @@ type watchFixture struct {
 	rerunLog string
 	program  string
 	scope    *coreadapter.Scope
+	// reader replaces api as the service's status reader when it is set.
+	reader pulls.StatusReader
 }
 
 func newWatchFixture(t *testing.T) *watchFixture {
@@ -126,7 +119,7 @@ func newWatchFixture(t *testing.T) *watchFixture {
 	cfg.Project.PullRequestPoll = "10m"
 	cfg.Project.ChecksTimeout = "2h"
 	f := &watchFixture{t: t, cfg: cfg, repo: repo, clock: &watchClock{at: fixturekit.DemoStart.Add(time.Hour)}}
-	f.api = &fakeStatusAPI{clock: f.clock, docs: map[string]string{}}
+	f.api = &fakeStatusAPI{clock: f.clock}
 	f.pushedAt = f.clock.Now()
 	f.rerunLog = filepath.Join(t.TempDir(), "rerun.log")
 	f.program = filepath.Join(t.TempDir(), "dagger")
@@ -143,6 +136,10 @@ func newWatchFixture(t *testing.T) *watchFixture {
 // newReviewer is a reviewer over fresh service state, as a restarted service
 // has: nothing is remembered but the trace.
 func (f *watchFixture) newReviewer() *FinalReviewer {
+	var statuses pulls.StatusReader = f.api
+	if f.reader != nil {
+		statuses = f.reader
+	}
 	controller := New(Dependencies{
 		Now:   f.clock.Now,
 		Step:  func(string) error { return nil },
@@ -150,8 +147,8 @@ func (f *watchFixture) newReviewer() *FinalReviewer {
 		ConversationTrace: func(string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *api.APIError) {
 			return f.repo.Project(), stream, f.repo, nil
 		},
-		CloudStatuses: f.api, CloudStatusFetcher: checkrun.CloudStatusFetcher{HTTP: &http.Client{Transport: f.api}, Allow: func(u *url.URL) bool { return u.Hostname() == "dagger.cloud" }},
-		CloudRerun: checkrun.DaggerChecks{Program: f.program, CloudToken: cloudToken},
+		CloudStatuses: statuses,
+		CloudRerun:    checkrun.DaggerChecks{Program: f.program, CloudToken: cloudToken},
 	})
 	return &FinalReviewer{S: controller, Repository: f.repo}
 }
@@ -243,9 +240,9 @@ func (f *watchFixture) pending(id int64, at time.Duration) pulls.CommitStatus {
 	return pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: "pending", CreatedAt: f.at(at)}
 }
 
-// done is a finished "Run Dagger Checks" posting whose JSON holds counts.
-func (f *watchFixture) done(id int64, state string, at time.Duration, body string) pulls.CommitStatus {
-	return pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: state, CreatedAt: f.at(at), TargetURL: f.api.doc(id, body)}
+// done is a finished "Run Dagger Checks" posting.
+func (f *watchFixture) done(id int64, state string, at time.Duration) pulls.CommitStatus {
+	return pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: state, CreatedAt: f.at(at), TargetURL: fmt.Sprintf("https://dagger.cloud/checks/%d", id)}
 }
 
 func failedCheck(id int64, name, traceID string, at time.Duration, f *watchFixture) pulls.CommitStatus {
@@ -289,10 +286,10 @@ func TestFinalChecksRecordThePushedCommitOnceStatusesCompleteLate(t *testing.T) 
 		t.Fatalf("a pending run was recorded: %+v", f.runs())
 	}
 	f.clock.Advance(10 * time.Minute)
-	f.api.set(f.loaded(), f.done(3, "success", 5*time.Minute, counts(92, 92, 0, 0)))
+	f.api.setWithChecks(92, f.loaded(), f.done(3, "success", 5*time.Minute))
 	run := f.mustComplete()
 	if run.Status != "passed" || run.Source != "pull_request" || run.PullRequest != 7 || run.Push != 1 || run.PushedCommit != pushedCommit || run.Commit != reviewedCommit ||
-		run.Counts == nil || run.Counts.Total != 92 || run.Run == nil || run.Run.ID != 3 || run.StatusURL != "https://dagger.cloud/checks/3.json" {
+		run.Counts == nil || run.Counts.Total != 92 || run.Run == nil || run.Run.ID != 3 || run.StatusURL != "https://dagger.cloud/checks/3" {
 		t.Fatalf("run %+v", run)
 	}
 	if recorded := f.runs(); len(recorded) != 1 || recorded[0].Status != "passed" {
@@ -304,7 +301,7 @@ func TestFinalChecksRecordThePushedCommitOnceStatusesCompleteLate(t *testing.T) 
 		t.Fatalf("again %+v, reads %d", again, f.api.readCount())
 	}
 	evidence := FinalCheckEvidence(run)
-	for _, want := range []string{"pull request #7", "push 1", pushedCommit, "92 checks, 92 passed, 0 failed, 0 cancelled", "https://dagger.cloud/checks/3.json"} {
+	for _, want := range []string{"pull request #7", "push 1", pushedCommit, "92 checks, 92 passed, 0 failed, 0 cancelled", "https://dagger.cloud/checks/3"} {
 		if !strings.Contains(evidence, want) {
 			t.Fatalf("evidence lacks %q:\n%s", want, evidence)
 		}
@@ -329,7 +326,7 @@ func TestFinalChecksSendOneNoticeWhenLoadNeverRanAndKeepWatching(t *testing.T) {
 		t.Fatalf("a restart repeated the notice: %d", f.notices())
 	}
 	f.clock.Advance(10 * time.Minute)
-	f.api.set(f.loaded(), f.done(3, "success", 20*time.Minute, counts(2, 2, 0, 0)))
+	f.api.setWithChecks(2, f.loaded(), f.done(3, "success", 20*time.Minute))
 	if run := f.mustComplete(); run.Status != "passed" || f.notices() != 1 {
 		t.Fatalf("run %+v, notices %d", run, f.notices())
 	}
@@ -378,7 +375,7 @@ func TestFinalChecksRecordIncompleteRunsWithDoublingWaitsWhenPendingPastTheTimeo
 	if n, _, _ := f.reviewer.IncompleteChecks(stream, 1, reviewedCommit); n != 3 {
 		t.Fatalf("incomplete runs: %d", n)
 	}
-	f.api.set(f.loaded(), f.done(3, "success", 40*time.Minute, counts(5, 5, 0, 0)))
+	f.api.setWithChecks(5, f.loaded(), f.done(3, "success", 40*time.Minute))
 	if run := f.mustComplete(); run.Status != "passed" {
 		t.Fatalf("run %+v", run)
 	}
@@ -387,32 +384,175 @@ func TestFinalChecksRecordIncompleteRunsWithDoublingWaitsWhenPendingPastTheTimeo
 	}
 }
 
-func TestFinalChecksNeverRecordACancelledCheckAsPassed(t *testing.T) {
+// settleIncomplete reads statuses that leave the run incomplete, past the
+// timeout of the push, and returns the record it wrote and the error that
+// makes the operation retry.
+func (f *watchFixture) settleIncomplete(statuses ...pulls.CommitStatus) (FinalCheckRun, error) {
+	f.t.Helper()
+	f.api.set(statuses...)
+	run, err := f.check()
+	var waiting *WaitingChecksError
+	if err == nil || errors.As(err, &waiting) {
+		f.t.Fatalf("run %+v: %v", run, err)
+	}
+	return run, err
+}
+
+func TestFinalChecksNeverRecordAnUnaccountedCompletedRunAsPassed(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		checks   []pulls.CommitStatus
+		wantText string
+	}{
+		{"zero checks", nil, "the run reports no checks"},
+		{"a pending check", append(passing(9), pulls.CommitStatus{ID: 50, Context: "test:slow", State: "pending"}), "1 of 10 checks have no result"},
+		{"only pending checks", []pulls.CommitStatus{{ID: 50, Context: "a", State: "pending"}, {ID: 51, Context: "b", State: "pending"}}, "2 of 2 checks have no result"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t)
+			f.afterWait()
+			run, err := f.settleIncomplete(append([]pulls.CommitStatus{f.loaded(), f.done(3, "success", 5*time.Minute)}, tc.checks...)...)
+			if run.Status != ChecksIncomplete || !strings.Contains(run.Error, tc.wantText) || run.Counts == nil || run.Counts.Cancelled != 0 || run.StatusURL != "https://dagger.cloud/checks/3" || !strings.Contains(err.Error(), "the completed run is not a pass") {
+				t.Fatalf("run %+v: %v", run, err)
+			}
+			if recorded := f.runs(); len(recorded) != 1 || recorded[0].Status != ChecksIncomplete {
+				t.Fatalf("recorded %+v", recorded)
+			}
+			// It stays incomplete on the reads that follow, earlier incomplete records included.
+			for range 2 {
+				f.clock.Advance(FinalCheckDelay(1) * 4)
+				if run, _ := f.settleIncomplete(append([]pulls.CommitStatus{f.loaded(), f.done(3, "success", 5*time.Minute)}, tc.checks...)...); run.Status != ChecksIncomplete {
+					t.Fatalf("run %+v", run)
+				}
+			}
+			for _, recorded := range f.runs() {
+				if recorded.Status != ChecksIncomplete {
+					t.Fatalf("recorded %+v", recorded)
+				}
+			}
+		})
+	}
+}
+
+// stuckOnIncomplete records two incomplete runs for the push, as a workstream
+// that never could read a result has, and moves the clock to the next read.
+func (f *watchFixture) stuckOnIncomplete() {
+	f.t.Helper()
+	f.cfg.Project.ChecksTimeout = "30m"
+	f.afterWait()
+	f.api.set(f.loaded(), f.pending(2, 40*time.Second))
+	f.mustWait()
+	f.clock.At(f.at(30 * time.Minute))
+	for n := 1; n <= 2; n++ {
+		if _, err := f.check(); err == nil || !strings.Contains(err.Error(), "did not complete") {
+			f.t.Fatalf("run %d: %v", n, err)
+		}
+		f.clock.Advance(FinalCheckDelay(n))
+	}
+	if n, _, _ := f.reviewer.IncompleteChecks(stream, 1, reviewedCommit); n != 2 {
+		f.t.Fatalf("incomplete runs: %d", n)
+	}
+}
+
+func TestFinalChecksRecordAPassFromStatusesAloneAfterIncompleteRecords(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
-	f.afterWait()
-	f.api.set(f.loaded(), f.done(3, "success", 5*time.Minute, counts(10, 9, 0, 1)))
-	run, err := f.check()
-	if err == nil || run.Status != ChecksIncomplete || !strings.Contains(run.Error, "1 of 10 checks were cancelled") || run.Counts == nil || run.Counts.Cancelled != 1 {
-		t.Fatalf("run %+v: %v", run, err)
+	f.stuckOnIncomplete()
+	f.api.setWithChecks(3, f.loaded(), f.done(3, "success", 40*time.Minute))
+	run := f.mustComplete()
+	if run.Status != "passed" || run.ExitCode != 0 || run.Counts == nil || *run.Counts != (api.CheckCounts{Total: 3, Passed: 3}) || run.StatusURL != "https://dagger.cloud/checks/3" || run.Run == nil || run.Run.ID != 3 {
+		t.Fatalf("run %+v", run)
 	}
-	if recorded := f.runs(); len(recorded) != 1 || recorded[0].Status == "passed" {
+	recorded := f.runs()
+	if last := recorded[len(recorded)-1]; last.Status != "passed" || len(recorded) != 3 {
 		t.Fatalf("recorded %+v", recorded)
 	}
-	// Unaccounted checks are not a pass either.
-	g := newWatchFixture(t)
-	g.afterWait()
-	g.api.set(g.loaded(), g.done(3, "success", 5*time.Minute, counts(10, 8, 0, 0)))
-	if run, err := g.check(); err == nil || run.Status != ChecksIncomplete || !strings.Contains(run.Error, "have no result") {
-		t.Fatalf("run %+v: %v", run, err)
+	if n, latest, _ := f.reviewer.IncompleteChecks(stream, 1, reviewedCommit); n != 0 || latest.Status != "passed" {
+		t.Fatalf("incomplete runs after the pass: %d %+v", n, latest)
+	}
+	if len(f.rerunCalls()) != 0 {
+		t.Fatalf("rerun calls %q", f.rerunCalls())
+	}
+}
+
+func TestFinalChecksRecordAFailureFromStatusesAloneAfterIncompleteRecords(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		statuses func(f *watchFixture) []pulls.CommitStatus
+		failed   []string
+	}{
+		{"the run failed", func(f *watchFixture) []pulls.CommitStatus {
+			return append([]pulls.CommitStatus{f.loaded(), f.done(10, "failure", 41*time.Minute)}, passing(3)...)
+		}, nil},
+		{"the run errored", func(f *watchFixture) []pulls.CommitStatus {
+			return append([]pulls.CommitStatus{f.loaded(), f.done(10, "error", 41*time.Minute)}, passing(3)...)
+		}, nil},
+		{"a check failed", func(f *watchFixture) []pulls.CommitStatus {
+			return append([]pulls.CommitStatus{f.loaded(), f.done(10, "success", 41*time.Minute), failedCheck(11, "test:a", "trace-a", 40*time.Minute, f)}, passing(3)...)
+		}, []string{"test:a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t)
+			f.stuckOnIncomplete()
+			f.api.set(tc.statuses(f)...)
+			// The failure is rerun once, as ever, and the original keeps showing.
+			f.mustWait()
+			if calls := f.rerunCalls(); len(calls) != 1 || !strings.HasPrefix(calls[0], "cloud checks rerun --failed --pr 7") {
+				t.Fatalf("rerun calls %q", calls)
+			}
+			f.clock.Advance(10 * time.Minute)
+			fresh := f.clock.Now().Sub(f.pushedAt)
+			statuses := tc.statuses(f)
+			statuses[1] = f.done(20, statuses[1].State, fresh)
+			for i := range statuses {
+				if statuses[i].Context != "load" && statuses[i].Context != "Run Dagger Checks" && statuses[i].State == "failure" {
+					statuses[i].ID, statuses[i].CreatedAt = 21, f.clock.Now()
+				}
+			}
+			f.api.set(statuses...)
+			run := f.mustComplete()
+			if run.Status != "failed" || run.ExitCode != 1 || !slices.Equal(run.Failed, tc.failed) || len(run.Reruns) != 1 || run.Run == nil || run.Run.ID != 20 {
+				t.Fatalf("run %+v", run)
+			}
+			if tc.failed != nil && run.FailedChecks[0].TraceID != "trace-a" {
+				t.Fatalf("failed checks %+v", run.FailedChecks)
+			}
+			if len(f.rerunCalls()) != 1 {
+				t.Fatalf("rerun calls %q", f.rerunCalls())
+			}
+		})
+	}
+}
+
+func TestFinalChecksStayIncompleteWhenOnlyZeroOrPendingChecksReportAfterIncompleteRecords(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t)
+	f.stuckOnIncomplete()
+	run, _ := f.settleIncomplete(f.loaded(), f.done(3, "success", 40*time.Minute))
+	if run.Status != ChecksIncomplete || !strings.Contains(run.Error, "the run reports no checks") {
+		t.Fatalf("run %+v", run)
+	}
+	f.clock.Advance(FinalCheckDelay(3))
+	run, _ = f.settleIncomplete(append([]pulls.CommitStatus{f.loaded(), f.done(3, "success", 40*time.Minute), {ID: 60, Context: "test:slow", State: "pending"}}, passing(2)...)...)
+	if run.Status != ChecksIncomplete || !strings.Contains(run.Error, "1 of 3 checks have no result") {
+		t.Fatalf("run %+v", run)
+	}
+	for _, recorded := range f.runs() {
+		if recorded.Status == "passed" {
+			t.Fatalf("recorded %+v", recorded)
+		}
 	}
 }
 
 // failingRun makes the pushed commit show a completed failure of two checks.
 func (f *watchFixture) failingRun() (original pulls.CommitStatus, checks []pulls.CommitStatus) {
-	original = f.done(10, "failure", 100*time.Second, counts(92, 90, 2, 0))
+	original = f.done(10, "failure", 100*time.Second)
 	checks = []pulls.CommitStatus{failedCheck(11, "test:a", "trace-a", 95*time.Second, f), failedCheck(12, "test:b", "trace-b", 95*time.Second, f)}
-	f.api.set(append([]pulls.CommitStatus{f.loaded(), original}, checks...)...)
+	f.api.setWithChecks(90, append([]pulls.CommitStatus{f.loaded(), original}, checks...)...)
 	return original, checks
 }
 
@@ -475,7 +615,7 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 	}
 
 	// A different posting made before the request is not the rerun's either.
-	f.api.set(append([]pulls.CommitStatus{f.loaded(), f.done(9, "failure", 80*time.Second, counts(92, 90, 2, 0))}, checks...)...)
+	f.api.set(append([]pulls.CommitStatus{f.loaded(), f.done(9, "failure", 80*time.Second)}, checks...)...)
 	f.clock.Advance(10 * time.Minute)
 	f.mustWait()
 	if len(f.runs()) != 0 {
@@ -492,7 +632,7 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 
 	// The fresh completion passes, and the originally failed checks are flakes.
 	f.clock.Advance(10 * time.Minute)
-	fresh := f.done(14, "success", f.clock.Now().Sub(f.pushedAt), counts(92, 92, 0, 0))
+	fresh := f.done(14, "success", f.clock.Now().Sub(f.pushedAt))
 	f.api.set(f.loaded(), fresh, pulls.CommitStatus{ID: 15, Context: "test:a", State: "success", CreatedAt: f.clock.Now()})
 	run := f.mustComplete()
 	if run.Status != "passed" || len(run.Reruns) != 1 || run.Reruns[0].Original.ID != original.ID || run.Reruns[0].Fresh == nil || run.Reruns[0].Fresh.ID != 14 || len(run.Reruns[0].Flakes) != 2 || len(run.Flaky) != 2 || len(run.Failed) != 0 {
@@ -516,7 +656,7 @@ func TestFinalChecksKeepACheckFailedThatFailsItsFreshRerun(t *testing.T) {
 	f.clock.Advance(10 * time.Minute)
 	now := f.clock.Now().Sub(f.pushedAt)
 	// test:a passes its rerun, test:b fails again with a new trace.
-	f.api.set(f.loaded(), f.done(20, "failure", now, counts(92, 91, 1, 0)),
+	f.api.set(f.loaded(), f.done(20, "failure", now),
 		pulls.CommitStatus{ID: 21, Context: "test:a", State: "success", CreatedAt: f.clock.Now()},
 		failedCheck(22, "test:b", "trace-b2", now, f))
 	run := f.mustComplete()
@@ -588,7 +728,7 @@ func TestFinalChecksResumeAfterARestartWithoutRepeatingARerunOrANotice(t *testin
 	f.mustWait()
 	f.restart()
 	f.clock.Advance(10 * time.Minute)
-	f.api.set(f.loaded(), f.done(31, "success", f.clock.Now().Sub(f.pushedAt), counts(92, 92, 0, 0)))
+	f.api.setWithChecks(92, f.loaded(), f.done(31, "success", f.clock.Now().Sub(f.pushedAt)))
 	run := f.mustComplete()
 	if run.Status != "passed" || run.Reruns[0].Original.ID != original.ID || len(f.rerunCalls()) != 1 || len(run.Flaky) != 2 {
 		t.Fatalf("run %+v, reruns %d", run, len(f.rerunCalls()))
@@ -635,4 +775,62 @@ func rerunOf(original pulls.CommitStatus, at time.Time) (r api.CheckRerun) {
 	r.RequestedAt = at
 	r.Original.ID = original.ID
 	return r
+}
+
+type statusTransport func(*http.Request) (*http.Response, error)
+
+func (f statusTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestFinalChecksCarryTheStatusReadErrorWithoutAnyBodyText(t *testing.T) {
+	t.Parallel()
+	const sentinel = "SENTINEL-GITHUB-BODY"
+	const token = "ghp_SENTINELTOKEN0123456789"
+	for _, tc := range []struct {
+		name         string
+		code         int
+		contentType  string
+		body         string
+		want, absent []string
+	}{
+		{"undecodable answer", 200, "text/html", "<html>" + sentinel + " " + token + "</html>", []string{"GitHub answered 200", `content type "text/html"`, "could not be decoded", "invalid JSON"}, []string{"malformed JSON"}},
+		{"refusal", 403, "application/json", `{"message":"` + sentinel + `","errors":[{"message":"` + sentinel + `"}],"documentation_url":"https://` + sentinel + `.example"}`, []string{"GitHub answered 403", `content type "application/json"`}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t)
+			f.cfg.Project.ChecksTimeout = "30m"
+			f.reader = pulls.GitHub{BaseURL: "https://api.example", Token: token, HTTP: &http.Client{Transport: statusTransport(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tc.code, Header: http.Header{"Content-Type": {tc.contentType}}, Body: io.NopCloser(strings.NewReader(tc.body)), Request: r}, nil
+			})}}
+			f.restart()
+			f.afterWait()
+			check := func(label, text string) {
+				t.Helper()
+				for _, want := range tc.want {
+					if !strings.Contains(text, want) {
+						t.Errorf("%s %q lacks %q", label, text, want)
+					}
+				}
+				for _, banned := range append([]string{"SENTINEL", token, "Authorization", "Bearer", "<html>", "documentation_url"}, tc.absent...) {
+					if strings.Contains(text, banned) {
+						t.Errorf("%s %q names %q", label, text, banned)
+					}
+				}
+			}
+			waiting := f.mustWait()
+			check("waiting error", waiting.Error())
+			f.clock.At(f.at(30 * time.Minute))
+			run, err := f.check()
+			if err == nil || run.Status != ChecksIncomplete {
+				t.Fatalf("run %+v: %v", run, err)
+			}
+			check("retry error", err.Error())
+			check("incomplete record", run.Error)
+			recorded := f.runs()
+			if len(recorded) != 1 {
+				t.Fatalf("recorded %+v", recorded)
+			}
+			check("stored record", recorded[0].Error)
+		})
+	}
 }

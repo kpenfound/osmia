@@ -12,13 +12,16 @@ import (
 func NoPostPushWait() *time.Duration { d := time.Duration(0); return &d }
 
 // PassingStatuses is the combined status read of a commit whose module loaded
-// and whose "Run Dagger Checks" status is a finished run. The JSON it points at
-// is the fixture fetcher's, in which every check passed.
+// and whose "Run Dagger Checks" status is a finished run in which each of its
+// three checks passed.
 func PassingStatuses(repository, commit string) pulls.CommitStatuses {
 	at := DemoStart
 	return pulls.CommitStatuses{Repository: repository, Commit: commit, Statuses: []pulls.CommitStatus{
 		{ID: 1, Context: "load", State: "success", CreatedAt: at, UpdatedAt: at},
-		{ID: 2, Context: "Run Dagger Checks", State: "success", TargetURL: "https://dagger.cloud/checks/fixture.json", CreatedAt: at, UpdatedAt: at},
+		{ID: 2, Context: "Run Dagger Checks", State: "success", TargetURL: "https://dagger.cloud/checks/fixture", CreatedAt: at, UpdatedAt: at},
+		{ID: 3, Context: "lint", State: "success", CreatedAt: at, UpdatedAt: at},
+		{ID: 4, Context: "test", State: "success", CreatedAt: at, UpdatedAt: at},
+		{ID: 5, Context: "build", State: "success", CreatedAt: at, UpdatedAt: at},
 	}}
 }
 

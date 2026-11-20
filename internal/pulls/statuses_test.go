@@ -3,6 +3,7 @@ package pulls
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -130,5 +131,89 @@ func TestCommitStatusesAreLoggedAsReads(t *testing.T) {
 	records := decodeGHRecords(t, &buf)
 	if len(records) != 1 || records[0].Action != "commits.status" || records[0].Access != ghlog.Read || records[0].Method != http.MethodGet || records[0].Status != http.StatusOK || records[0].Repository != "acme/widgets" {
 		t.Fatalf("records %+v", records)
+	}
+}
+
+// roundTrip lets a test serve any answer, including one whose body cannot be
+// read.
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type unreadableBody struct{}
+
+func (unreadableBody) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("connection reset: SENTINEL-READ-ERROR")
+}
+func (unreadableBody) Close() error { return nil }
+
+func TestCommitStatusReadErrorsNameTheAnswerAndNoBodyText(t *testing.T) {
+	t.Parallel()
+	const sentinel = "SENTINEL-BODY-TEXT"
+	const token = "ghp_SENTINELTOKEN0123456789abcdefghijklmn"
+	answer := func(code int, contentType, body string) roundTrip {
+		return func(r *http.Request) (*http.Response, error) {
+			header := http.Header{}
+			if contentType != "" {
+				header.Set("Content-Type", contentType)
+			}
+			return &http.Response{StatusCode: code, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		}
+	}
+	tests := []struct {
+		name  string
+		serve roundTrip
+		want  []string
+	}{
+		{"html answer", answer(200, "text/html; charset=utf-8", "<html>"+sentinel+" "+token+"</html>"), []string{"GitHub answered 200", `content type "text/html; charset=utf-8"`, "could not be decoded", "invalid JSON at byte"}},
+		{"no content type", answer(200, "", sentinel), []string{"GitHub answered 200", `content type "none"`, "could not be decoded"}},
+		{"truncated json", answer(200, "application/json", `{"statuses":[{"context":"`+sentinel), []string{"GitHub answered 200", `content type "application/json"`, "the JSON ends unexpectedly"}},
+		{"wrong shape", answer(200, "application/json", `{"statuses":"`+sentinel+`"}`), []string{"GitHub answered 200", "could not be decoded", "a value does not fit"}},
+		{"non-2xx with a github error body", answer(403, "application/json; charset=utf-8", `{"message":"`+sentinel+`-message `+token+`","errors":[{"message":"`+sentinel+`-detail"}],"documentation_url":"https://`+sentinel+`.example/docs"}`), []string{"GitHub answered 403", `content type "application/json; charset=utf-8"`}},
+		{"non-2xx html", answer(502, "text/html", "<html>"+sentinel+"</html>"), []string{"GitHub answered 502", `content type "text/html"`}},
+		{"unreadable", func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: unreadableBody{}, Request: r}, nil
+		}, []string{"GitHub answered 200", `content type "application/json"`, "could not be read"}},
+		{"oversized", answer(200, "application/json", `{"statuses":[],"pad":"`+strings.Repeat("x", MaxResponse)+sentinel+`"}`), []string{"GitHub answered 200", `content type "application/json"`, "could not be read or is over"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+			g := GitHub{BaseURL: "https://api.example", Token: token, HTTP: &http.Client{Transport: tc.serve}}
+			_, err := g.CommitStatuses(ctx, "acme/widgets", "abc123")
+			if err == nil {
+				t.Fatal("no error")
+			}
+			var response *ResponseError
+			if !errors.As(err, &response) || response.Status == 0 {
+				t.Fatalf("error %v is not a ResponseError with a status", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks %q", err, want)
+				}
+			}
+			for _, text := range []string{err.Error(), buf.String()} {
+				for _, banned := range []string{sentinel, "SENTINEL", token, "Bearer", "Authorization", "documentation_url", "malformed JSON", "<html>"} {
+					if strings.Contains(text, banned) {
+						t.Errorf("%q names %q", text, banned)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestOtherRequestsKeepTheirErrorDetails(t *testing.T) {
+	t.Parallel()
+	g := GitHub{BaseURL: "https://api.example", HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 422, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"message":"Validation Failed","errors":[{"message":"name already exists"}]}`)), Request: r}, nil
+	})}}
+	_, err := g.request(context.Background(), http.MethodGet, "/x", nil, http.StatusOK, &struct{}{})
+	var response *ResponseError
+	if !errors.As(err, &response) || !strings.Contains(err.Error(), "Validation Failed") || len(response.Details) != 1 {
+		t.Fatalf("error %v", err)
 	}
 }

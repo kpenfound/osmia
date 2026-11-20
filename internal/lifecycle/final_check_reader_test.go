@@ -1,0 +1,169 @@
+package lifecycle_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// A final review reads the Dagger Cloud statuses of the commit it pushed and
+// the reader's turn starts from what they settle, through the running
+// service, a fake pull request host and a fake `dagger`:
+//
+//   - `load` success, a successful run and at least one check, all successful,
+//     record passed;
+//   - a failed run, or a failed check, records failed after the one rerun of
+//     the failed checks, whose fresh statuses settle it;
+//   - a successful run with no checks, or with a pending check, records
+//     incomplete: no pass is recorded and the reader is not asked.
+//
+// Where a result is recorded, the reader's prompt has it in its check result
+// section before the criteria, and the reader's view holds the record.
+func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
+	cases := []struct {
+		name string
+		// post shows the statuses of the commit; again shows the rerun's.
+		post, again func(j *flowJourney, commit string)
+		status      string
+		// detail is what an incomplete record says is missing.
+		detail string
+		// failed names the check a failed record lists.
+		failed string
+	}{
+		{name: "every check passed", status: "passed", post: func(j *flowJourney, commit string) {
+			j.host.loaded(commit)
+			j.host.completed(commit, "success", 3)
+		}},
+		{name: "the run failed", status: "failed", post: func(j *flowJourney, commit string) {
+			j.host.loaded(commit)
+			j.host.completed(commit, "failure", 3)
+		}, again: func(j *flowJourney, commit string) {
+			j.host.completed(commit, "failure", 3)
+		}},
+		{name: "a check failed", status: "failed", failed: "test:resume", post: func(j *flowJourney, commit string) {
+			j.host.loaded(commit)
+			j.host.completed(commit, "success", 2)
+			j.host.failedCheck(commit, "test:resume", "abc123")
+		}, again: func(j *flowJourney, commit string) {
+			j.host.completed(commit, "success", 2)
+			j.host.failedCheck(commit, "test:resume", "abc123")
+		}},
+		{name: "the run reports no checks", status: "incomplete", detail: "the run reports no checks", post: func(j *flowJourney, commit string) {
+			j.host.loaded(commit)
+			j.host.completed(commit, "success", 0)
+		}},
+		{name: "a check is pending", status: "incomplete", detail: "1 of 3 checks have no result", post: func(j *flowJourney, commit string) {
+			j.host.loaded(commit)
+			j.host.completed(commit, "success", 2)
+			j.host.post(commit, pulls.CommitStatus{Context: "test:slow", State: "pending"})
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			j := newFlowJourney(t)
+			stream := j.stream
+			var mu sync.Mutex
+			var viewed string
+			var viewErr error
+			j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				content, err := callTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
+				mu.Lock()
+				viewed, viewErr = content, err
+				mu.Unlock()
+				_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+				return err
+			})
+			j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
+
+			j.start(t)
+			first := j.awaitPushes(t, 1)[0]
+			j.step(t, 1, 90*time.Second, "no status is read until 2m0s after the push")
+			c.post(j, first.Commit)
+			at := first.At.Add(delivery.FinalChecksWait + 5*time.Second)
+
+			if c.status == "incomplete" {
+				j.stepTo(t, 1, at, "the completed run is not a pass: "+c.detail)
+				for _, run := range j.checkRuns(t, 1) {
+					if run.Status != delivery.ChecksIncomplete || run.Source != "pull_request" || !strings.Contains(run.Error, c.detail) || run.Counts == nil || run.Counts.Cancelled != 0 {
+						t.Fatalf("the check record %+v", run)
+					}
+				}
+				if runs := j.checkRuns(t, 1); len(runs) == 0 {
+					t.Fatal("no incomplete record was written")
+				}
+				if _, started := j.reportOf(t, 1); started || len(j.rerunCalls(t)) != 0 {
+					t.Fatalf("a result that is not settled started the final read (reruns %q)", j.rerunCalls(t))
+				}
+				if reader, err := j.live().Thread(stream, committeeAgent(1)); err == nil && len(reader.Turns) != 0 {
+					t.Fatalf("the reader was asked %d times without a result", len(reader.Turns))
+				}
+				return
+			}
+
+			if c.status == "failed" {
+				j.stepTo(t, 1, at, "the failed checks were rerun")
+				if len(j.rerunCalls(t)) != 1 {
+					t.Fatalf("rerun calls %q", j.rerunCalls(t))
+				}
+				c.again(j, first.Commit)
+				j.clock.Advance(flowPoll)
+			} else {
+				j.clock.Advance(at.Sub(j.clock.Peek()))
+			}
+			run := j.awaitCheckRun(t, 1)
+			if run.Status != c.status || run.Source != "pull_request" || run.Push != 1 || run.PushedCommit != first.Commit || run.Counts == nil || run.Counts.Total != 3 || run.Counts.Cancelled != 0 {
+				t.Fatalf("the check record %+v", run)
+			}
+			if c.status == "failed" {
+				if len(run.Reruns) != 1 || len(j.rerunCalls(t)) != 1 {
+					t.Fatalf("reruns %+v, calls %q", run.Reruns, j.rerunCalls(t))
+				}
+				if c.failed != "" && (len(run.FailedChecks) != 1 || run.FailedChecks[0].Name != c.failed || run.FailedChecks[0].TraceID != "abc123") {
+					t.Fatalf("failed checks %+v", run.FailedChecks)
+				}
+			}
+			j.awaitReport(t, 1)
+
+			// The reader's turn starts with the result in its own section,
+			// before the criteria, and not at the end.
+			reader, err := j.live().Thread(stream, committeeAgent(1))
+			must(t, err)
+			prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt
+			section, view, criteria := strings.Index(prompt, "Check result:\n"), strings.Index(prompt, "Your view holds:"), strings.Index(prompt, "Every criterion and the merged units")
+			if section < 0 || view < 0 || criteria < 0 || section > criteria {
+				t.Fatalf("check result at %d, view list at %d, criteria at %d:\n%s", section, view, criteria, prompt)
+			}
+			for _, want := range []string{fmt.Sprintf("The result is %s.", c.status), fmt.Sprintf("push 1, commit %s", first.Commit), "- " + delivery.FinalChecksPath(1) + ":"} {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("the reader's prompt lacks %q:\n%s", want, prompt)
+				}
+			}
+			if c.failed != "" && !strings.Contains(prompt, "dagger trace abc123") {
+				t.Fatalf("the reader's prompt lacks the failed check's trace:\n%s", prompt)
+			}
+			if run.StatusURL == "" || !strings.Contains(prompt, run.StatusURL) {
+				t.Fatalf("the reader's prompt lacks the status link %q:\n%s", run.StatusURL, prompt)
+			}
+			if tail := prompt[criteria:]; strings.Contains(tail, "Dagger Cloud ran the project's checks") {
+				t.Fatalf("the check result is at the end of the prompt:\n%s", prompt)
+			}
+
+			// The reader's view holds the record as it was recorded.
+			recorded := streamDocuments(t, j.live(), stream, delivery.FinalChecksDocument(1))
+			mu.Lock()
+			defer mu.Unlock()
+			var content string
+			if viewErr != nil || json.Unmarshal([]byte(viewed), &content) != nil || content != recorded[len(recorded)-1].Content {
+				t.Fatalf("the reader's view holds %q (%v), the record is %q", viewed, viewErr, recorded[len(recorded)-1].Content)
+			}
+		})
+	}
+}

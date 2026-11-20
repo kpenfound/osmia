@@ -3,13 +3,10 @@ package pulls
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // CommitStatus is the latest status GitHub holds for one context of a commit.
@@ -73,7 +70,7 @@ func (g GitHub) CommitStatuses(ctx context.Context, repository, commit string) (
 		query := url.Values{"per_page": {strconv.Itoa(statusPageSize)}, "page": {strconv.Itoa(page)}}
 		path := "/repos/" + repository + "/commits/" + url.PathEscape(commit) + "/status?" + query.Encode()
 		var combined githubCombinedStatus
-		if err := g.do(ctx, "commits.status", ghlog.Read, repository, http.MethodGet, path, nil, http.StatusOK, &combined); err != nil {
+		if err := g.doStatusRead(ctx, "commits.status", repository, path, &combined); err != nil {
 			return CommitStatuses{}, fmt.Errorf("read the statuses of %s@%s: %w", repository, commit, err)
 		}
 		for _, s := range combined.Statuses {

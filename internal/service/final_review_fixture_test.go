@@ -1,10 +1,6 @@
 package service
 
 import (
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -40,24 +36,8 @@ func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 	pulls.SyncHead = true
 	wait := fixturekit.NoPostPushWait()
 	for _, o := range []*Options{&f.s.options, &f.opts} {
-		o.PullRequests, o.FinalChecksWait, o.CloudStatusFetcher = pulls, wait, passingCloudFetcher()
+		o.PullRequests, o.FinalChecksWait = pulls, wait
 	}
-}
-
-// passingCloudRun is the JSON of a completed "Run Dagger Checks" status in
-// which every check passed.
-const passingCloudRun = `{"dagger":{"status":"completed","checks":{"total":3,"passed":3,"failed":0,"cancelled":0}}}`
-
-type passingCloudTransport struct{}
-
-func (passingCloudTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(passingCloudRun)), Request: r}, nil
-}
-
-// passingCloudFetcher answers every read of a "Run Dagger Checks" JSON with a
-// passing run, without a network.
-func passingCloudFetcher() CloudStatusFetcher {
-	return CloudStatusFetcher{HTTP: &http.Client{Transport: passingCloudTransport{}}, Allow: func(*url.URL) bool { return true }}
 }
 
 // newFinalFixtureWith is newFinalFixture with extra configuration appended.

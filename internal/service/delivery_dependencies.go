@@ -28,7 +28,7 @@ func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 		ContextFor: s.contextFor, Stoppable: s.stoppable, ThreadRunner: s.threadRunner,
 		Held: s.held, ContinueStopped: s.continueStopped, MemoryTurns: memoryTurns, Step: s.step,
 		Committee: s.options.Committee, PullRequests: s.options.PullRequests, Jev: s.jev, Router: routerPort{s},
-		CloudStatuses: s.options.CloudStatuses, CloudStatusFetcher: s.options.CloudStatusFetcher, CloudRerun: s.configuredRerun(cfg), PostPushWait: s.options.FinalChecksWait,
+		CloudStatuses: s.options.CloudStatuses, CloudRerun: s.configuredRerun(cfg), PostPushWait: s.options.FinalChecksWait,
 		ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
 		UpstreamDeliveryPending: upstreamDeliveryPending, UnresolvedWork: unresolvedWork, ReopenHeld: reopenHeld,
 		BaseObservationAt: func(r *trace.Repository, w config.WorkstreamID) (bool, int, error) {

@@ -1387,7 +1387,9 @@ type FeedUnitChecks struct {
 // result without a source was produced by a local check run.
 const CheckSourcePullRequest = "pull_request"
 
-// CheckCounts are the check counts of a Dagger Cloud run.
+// CheckCounts are the check counts of a Dagger Cloud run, taken from its
+// per-check commit statuses. Cancelled is zero in a new result; a record
+// written earlier may carry a value.
 type CheckCounts struct {
 	Total     int `json:"total"`
 	Passed    int `json:"passed"`
