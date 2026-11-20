@@ -545,7 +545,8 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 	var loaded wire.ConfigResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &loaded))
 	top, proj := loaded.Drift.Files[0].Path, loaded.Drift.Files[1].Path
-	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\nConfig file: " + proj + " (project " + project + "): unchanged\n"; successful(t, root, "config") != want {
+	errorReports := "[error_reports]\nenabled = false\nrepository = \"kpenfound/osmia\"\nlabels = [\"factory-error\", \"automated\"]\nmax_issues_per_hour = 5\nmax_issues_per_day = 20\nmax_comments_per_day = 20\nsources = [\"api\", \"operation\", \"github\"]\n"
+	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\nConfig file: " + proj + " (project " + project + "): unchanged\n" + errorReports; successful(t, root, "config") != want {
 		t.Fatalf("config as loaded:\n%s\nwant:\n%s", successful(t, root, "config"), want)
 	}
 
@@ -567,6 +568,16 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 	}
 	if code, out, diag := invoke(t, root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
 		t.Fatalf("config with arguments: %d %q %q", code, out, diag)
+	}
+}
+
+func TestShowErrorReportsPrintsEffectiveValues(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	showErrorReports(&out, config.ErrorReports{Enabled: true, Repository: "owner/name", Labels: []string{"bug"}, MaxIssuesPerHour: 1, MaxIssuesPerDay: 2, MaxCommentsPerDay: 3, Sources: []string{"github"}})
+	want := "[error_reports]\nenabled = true\nrepository = \"owner/name\"\nlabels = [\"bug\"]\nmax_issues_per_hour = 1\nmax_issues_per_day = 2\nmax_comments_per_day = 3\nsources = [\"github\"]\n"
+	if out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }
 
