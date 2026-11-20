@@ -76,8 +76,14 @@ type fakeChecks = fixturekit.FakeChecks
 
 type fakeJJ = fixturekit.FakeJJ
 
+// unreachableGitHub is where a fixture's error reporter files unless a test
+// points it at a fake: a local port nothing listens on, so no test can reach
+// the real GitHub.
+const unreachableGitHub = "http://127.0.0.1:1"
+
 func testOptions(cfg config.Options) Options {
-	return Options{Config: cfg, Build: Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{stream}, ShutdownTimeout: 100 * time.Millisecond}
+	return Options{Config: cfg, Build: Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{stream}, ShutdownTimeout: 100 * time.Millisecond,
+		ErrorReporter: ErrorReporterOptions{BaseURL: unreachableGitHub}}
 }
 
 type blockingTurns = fixturekit.BlockingTurns

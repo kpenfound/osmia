@@ -142,6 +142,9 @@ type Options struct {
 	// notification the webhook refused again, doubled after each further
 	// failure. It defaults to 30 seconds.
 	NotifyRetry time.Duration
+	// ErrorReporter tunes the error reporter, which runs when [error_reports]
+	// enables it. Its zero value selects the defaults.
+	ErrorReporter ErrorReporterOptions
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
@@ -256,15 +259,15 @@ type Service struct {
 	// flakeFixMu serializes opening flake-fix workstreams, so occurrences of
 	// one group never race to reserve and hand in.
 	flakeFixMu sync.Mutex
-	sessionMu sync.Mutex // serializes session opens
-	turns     runningTurns
-	options   Options
-	store     *runtime.Store
-	logger    *slog.Logger
-	lock      *os.File
-	listener  *net.UnixListener
-	web       net.Listener  // nil unless listen.web is configured
-	tailnet   *tailnet.Link // nil unless listen.tailnet is configured
+	sessionMu  sync.Mutex // serializes session opens
+	turns      runningTurns
+	options    Options
+	store      *runtime.Store
+	logger     *slog.Logger
+	lock       *os.File
+	listener   *net.UnixListener
+	web        net.Listener  // nil unless listen.web is configured
+	tailnet    *tailnet.Link // nil unless listen.tailnet is configured
 	// tailnetDone closes when the tailnet supervisor has stopped.
 	tailnetDone chan struct{}
 	socketInfo  os.FileInfo
@@ -289,6 +292,9 @@ type Service struct {
 	activity *activity.Registry
 	// notifier posts new inbox entries to notify.webhook.
 	notifier *notifier
+	// reporter files the service's own errors as GitHub issues when
+	// [error_reports] enables it.
+	reporter *errorReporter
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
@@ -325,6 +331,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
+	// Every record the service writes passes the error capture, which keeps
+	// nothing while the error reporter is off.
+	capture := newErrorCapture(opts.ErrorReporter.Queue, opts.ErrorReporter.Now)
+	logger = slog.New(capture.wrap(logger.Handler()))
 	opts.Logger = logger
 	ctx = ghlog.WithLogger(ctx, logger)
 	root, err := opts.Config.Resolve()
@@ -597,6 +607,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
 	go s.notifier.run(s.lifetime)
+	s.reporter = newErrorReporter(s, capture)
+	s.reporter.configure(cfg)
+	go s.reporter.run(s.lifetime)
 	// Removed projects have no runtime, so their pending Hearsay records are
 	// posted from here.
 	s.removedDone = make(chan struct{})
@@ -638,6 +651,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.cancel()
 		s.routing.Wait()
 		<-s.notifier.done
+		<-s.reporter.done
 		<-s.removedDone
 		if s.tailnet != nil {
 			<-s.tailnetDone

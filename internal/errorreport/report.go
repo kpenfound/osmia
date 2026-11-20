@@ -78,6 +78,7 @@ var (
 	methodRe   = regexp.MustCompile(`^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$`)
 	segmentRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._~-]*$`)
 	instanceRe = regexp.MustCompile(`[0-9]|^[a-z]{1,4}_[A-Za-z0-9]+$`)
+	versionRe  = regexp.MustCompile(`^v[0-9]{1,2}$`)
 )
 
 // Report scrubs ev and returns the report to file. It fails closed: when
@@ -214,7 +215,7 @@ func templatePath(path string) string {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
 	for i, seg := range segs {
 		switch {
-		case isParam(seg) || seg == "*":
+		case isParam(seg) || seg == "*" || versionRe.MatchString(seg):
 		case segmentRe.MatchString(seg) && !instanceRe.MatchString(seg) && !(len(seg) >= 7 && isHex(seg)):
 		default:
 			segs[i] = "{id}"

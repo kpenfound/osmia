@@ -17,7 +17,8 @@ import (
 
 func Options(cfg config.Options) service.Options {
 	return service.Options{Config: cfg, Build: api.Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{fixturekit.Stream}, ShutdownTimeout: 100 * time.Millisecond,
-		FinalChecksWait: fixturekit.NoPostPushWait()}
+		FinalChecksWait: fixturekit.NoPostPushWait(),
+		ErrorReporter:   service.ErrorReporterOptions{BaseURL: "http://127.0.0.1:1"}}
 }
 func FixtureAt(t *testing.T, home string) service.Options {
 	t.Helper()
