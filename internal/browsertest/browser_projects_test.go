@@ -70,6 +70,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	// An unsaved selection in one project must not become another project's
 	// order, including when both have no saved priority yet.
 	p.OpenView("priority")
+	selectProject(project)
 	p.Click("#priority-list input[type=checkbox]")
 	selectProject(otherProject)
 	p.Await("the other project's empty selection", `!document.querySelector('#priority-list input').checked`)

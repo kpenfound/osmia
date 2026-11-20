@@ -124,15 +124,19 @@ type Diagnostic struct {
 
 // ConfigResponse contains validated fields only, never raw configuration text.
 // Project is the only active project: null until a project is registered and
-// while several are active. Projects lists every active project, in
-// active_projects order. LastError is the last failed reload, until a reload
-// succeeds.
+// while several are active. Projects lists every active project, ordered by
+// the creation time of each project's newest workstream, newest first. Every
+// kind of workstream counts, archived ones included while their creation time
+// can be read. Projects with equal newest times, and projects without a
+// workstream, which come last, keep their active_projects order. Callers who
+// need the configuration file's order read Effective.ActiveProjects.
+// LastError is the last failed reload, until a reload succeeds.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
 	Project     *ProjectView   `json:"project"`
-	Projects    []ProjectView  `json:"projects,omitempty"`
+	Projects    []ProjectView  `json:"projects,omitempty" description:"Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep their active_projects order. Read effective.active_projects for the configuration file's order."`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
 	// Drift compares the configuration files on disk with the loaded
@@ -622,8 +626,9 @@ type ProjectResponse struct {
 type RuntimeResponse struct {
 	Effective runtime.State               `json:"effective"`
 	Profiles  map[string]EffectiveProfile `json:"profiles"`
-	// Projects lists each active project's context mode.
-	Projects []ProjectRuntime `json:"projects"`
+	// Projects lists each active project's context mode, in the order of
+	// ConfigResponse.Projects.
+	Projects []ProjectRuntime `json:"projects" description:"Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in active_projects order."`
 	// Jev reports Jev's mode. Every mode but ready means its judgments fall
 	// back.
 	Jev         jev.Status   `json:"jev"`
