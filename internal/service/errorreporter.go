@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -76,9 +77,13 @@ type errorReporter struct {
 	capture *errorCapture
 	done    chan struct{}
 	rearm   atomic.Bool
+	// gen counts the applied configurations that changed [error_reports]; a
+	// pass files only while the generation it started with is current.
+	gen atomic.Uint64
 
-	mu     sync.Mutex
-	faults map[string]string
+	mu      sync.Mutex
+	faults  map[string]string
+	applied config.ErrorReports
 
 	st     *errorreport.State
 	stPath string
@@ -100,15 +105,32 @@ func newErrorReporter(s *Service, capture *errorCapture) *errorReporter {
 	return &errorReporter{s: s, capture: capture, done: make(chan struct{}), faults: map[string]string{}}
 }
 
+// errSuperseded marks a write or a read the reporter dropped because the
+// configuration changed under it. It is neither a success nor a failure.
+var errSuperseded = errors.New("the error reports configuration changed")
+
 // configure applies the loaded [error_reports] section: it starts or stops
-// capturing at once, and lets a given-up write be tried again.
+// capturing at once, lets a given-up write be tried again, and, when the
+// section changed, supersedes the pass that is running so it sends no more
+// from the old configuration.
 func (r *errorReporter) configure(cfg *config.Config) {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
+	changed := !reflect.DeepEqual(r.applied, cfg.ErrorReports)
+	r.applied = cfg.ErrorReports
+	if changed {
+		r.gen.Add(1)
+	}
+	r.mu.Unlock()
 	r.capture.configure(cfg.ErrorReports)
 	r.rearm.Store(true)
 }
+
+// superseded reports whether a configuration change has been applied since
+// the environment env was built.
+func (r *errorReporter) superseded(env reportEnv) bool { return r.gen.Load() != env.gen }
 
 func (r *errorReporter) opts() ErrorReporterOptions { return r.s.options.ErrorReporter }
 
@@ -183,6 +205,8 @@ type reportEnv struct {
 	filer   issues.Filer
 	scrub   *errorreport.Scrubber
 	sources config.ErrorReports
+	// gen is the configuration generation the environment was built from.
+	gen uint64
 }
 
 // pass files what is due: it reconciles an unresolved write, resolves the
@@ -192,6 +216,10 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 	if r.rearm.Swap(false) {
 		r.retry = reportRetry{}
 	}
+	// The generation is read before the configuration: a reload stores its
+	// configuration before it bumps the generation, so an environment built
+	// from the old configuration never carries the new generation.
+	gen := r.gen.Load()
 	cfg := r.s.current()
 	e := cfg.ErrorReports
 	if !e.Enabled {
@@ -218,7 +246,7 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 	}
 	r.clear(faultToken)
 	build := r.s.options.Build
-	env := reportEnv{repo: e.Repository, sources: e}
+	env := reportEnv{repo: e.Repository, sources: e, gen: gen}
 	env.cfg = errorreport.Config{Repository: e.Repository, Labels: slices.Clone(e.Labels), CheckInterval: r.checkInterval(), Version: build.Version, Commit: build.Commit}
 	env.cfg.MaxIssuesPerHour, env.cfg.MaxIssuesPerDay, env.cfg.MaxCommentsPerDay = e.MaxIssuesPerHour, e.MaxIssuesPerDay, e.MaxCommentsPerDay
 	env.filer = issues.Filer{BaseURL: r.opts().BaseURL, Token: token, HTTP: r.opts().HTTP}
@@ -227,7 +255,7 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 		env.filer.HTTP = &http.Client{Timeout: 30 * time.Second}
 	}
 	var wait time.Duration
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && !r.superseded(env) {
 		if n := r.capture.takeDropped(); n > 0 {
 			r.st.NoteQueueDrops(n)
 			r.dirty = true
@@ -239,6 +267,10 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 		}
 	}
 	r.save()
+	if r.superseded(env) {
+		// A reload changed the configuration: start again with it.
+		return time.Millisecond
+	}
 	return wait
 }
 
@@ -247,6 +279,9 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 // first as the decision asks. It reports whether something was decided; when
 // not, wait says when to try again.
 func (r *errorReporter) settleOne(ctx context.Context, env reportEnv) (progress bool, wait time.Duration) {
+	if r.superseded(env) {
+		return false, 0
+	}
 	head, haveHead := r.capture.head()
 	var rep *errorreport.Report
 	if haveHead {
@@ -267,6 +302,9 @@ func (r *errorReporter) settleOne(ctx context.Context, env reportEnv) (progress 
 		now := r.now()
 		d := errorreport.Decide(r.st, env.cfg, errorreport.Input{Report: rep, Check: check}, now)
 		check = nil
+		if r.superseded(env) {
+			return false, 0
+		}
 		switch d.Kind {
 		case errorreport.Reconcile:
 			if ok, wait := r.reconcile(ctx, env, *d.Intent, haveHead); !ok {
@@ -275,13 +313,16 @@ func (r *errorReporter) settleOne(ctx context.Context, env reportEnv) (progress 
 		case errorreport.CheckState:
 			state, err := r.readState(ctx, env, d.Issue)
 			if err != nil {
-				if ctx.Err() != nil {
+				if ctx.Err() != nil || r.superseded(env) {
 					return false, 0
 				}
 				r.failGitHub("reading the state of the issue saved for an error report", err)
 				r.st.NoteCheckAttempt(env.repo, d.Fingerprint, now)
 				r.dirty = true
 				continue
+			}
+			if r.superseded(env) {
+				return false, 0
 			}
 			r.clear(faultGitHub)
 			check = &errorreport.Check{Repository: env.repo, Issue: d.Issue, State: state, At: now}
@@ -381,7 +422,7 @@ func (r *errorReporter) try(ctx context.Context, env reportEnv, in errorreport.I
 		r.clear(faultGitHub, faultScrub)
 		return true, 0
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(err, errSuperseded) {
 		return false, 0
 	}
 	var scrubbed *errorreport.ScrubError
@@ -391,6 +432,15 @@ func (r *errorReporter) try(ctx context.Context, env reportEnv, in errorreport.I
 		r.retry = reportRetry{}
 		r.failScrub(err)
 		return true, 0
+	}
+	if r.superseded(env) {
+		// A write sent before the reload failed: the intent counts the
+		// attempt and stays for reconciliation, but the failure is not the
+		// current configuration's to report.
+		r.st.NoteAttempt(in)
+		r.dirty = true
+		r.save()
+		return false, 0
 	}
 	key := intentKey(in)
 	if r.retry.key != key {
@@ -419,6 +469,9 @@ func (r *errorReporter) settle(ctx context.Context, env reportEnv, in errorrepor
 	switch in.Kind {
 	case errorreport.IntentCreate:
 		issue, found, err := r.findIssue(ctx, env, in)
+		if r.superseded(env) {
+			return errSuperseded
+		}
 		if err != nil {
 			return err
 		}
@@ -427,6 +480,9 @@ func (r *errorReporter) settle(ctx context.Context, env reportEnv, in errorrepor
 		}
 	case errorreport.IntentComment:
 		found, err := r.findComment(ctx, env, in)
+		if r.superseded(env) {
+			return errSuperseded
+		}
 		if err != nil {
 			return err
 		}
@@ -463,6 +519,9 @@ func (r *errorReporter) findIssue(ctx context.Context, env reportEnv, in errorre
 			}
 		}
 	}
+	if r.superseded(env) {
+		return issues.Issue{}, false, errSuperseded
+	}
 	list, err := env.filer.ListIssues(ctx, in.Repository, in.Since(), nil)
 	if err != nil {
 		return issues.Issue{}, false, err
@@ -488,6 +547,9 @@ func (r *errorReporter) findComment(ctx context.Context, env reportEnv, in error
 
 // write renders the intent and posts it, and records the result.
 func (r *errorReporter) write(ctx context.Context, env reportEnv, in errorreport.Intent) error {
+	if r.superseded(env) {
+		return errSuperseded
+	}
 	switch in.Kind {
 	case errorreport.IntentCreate:
 		rendered, err := errorreport.RenderIssue(in.Filing)

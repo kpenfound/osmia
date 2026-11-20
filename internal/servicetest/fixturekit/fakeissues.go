@@ -92,6 +92,10 @@ const (
 	StatusAfterApply
 	// StatusBeforeApply answers Status and applies nothing.
 	StatusBeforeApply
+	// HoldBeforeServe signals Applied when the request arrives, holds it until
+	// Release closes or the client gives up, and then serves it normally: a
+	// read returns what the server holds at that time.
+	HoldBeforeServe
 )
 
 // Fault scripts the fake GitHub's answer to matching requests. Times counts
@@ -104,7 +108,8 @@ type Fault struct {
 	Status int
 	Times  int
 	// Applied receives a value when a HoldAfterApply fault has applied the
-	// write; Release lets it go.
+	// write, or when a HoldBeforeServe fault has received the request; Release
+	// lets it go.
 	Applied chan struct{}
 	Release chan struct{}
 
@@ -296,7 +301,7 @@ func (g *FakeIssueServer) serve(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 4 && r.Method == http.MethodGet:
 		g.list(w, r, repository)
 	case len(parts) == 5 && r.Method == http.MethodGet:
-		g.state(w, repository, parts[4])
+		g.state(w, r, repository, parts[4])
 	case len(parts) == 6 && parts[5] == "comments" && r.Method == http.MethodPost:
 		g.comment(w, r, repository, parts[4], body)
 	case len(parts) == 6 && parts[5] == "comments" && r.Method == http.MethodGet:
@@ -332,10 +337,22 @@ func (g *FakeIssueServer) finish(w http.ResponseWriter, r *http.Request, f *Faul
 	return true
 }
 
-func (g *FakeIssueServer) before(w http.ResponseWriter, kind, repository string) (*Fault, bool) {
+func (g *FakeIssueServer) before(w http.ResponseWriter, r *http.Request, kind, repository string) (*Fault, bool) {
 	g.mu.Lock()
 	f := g.fault(kind, repository)
 	g.mu.Unlock()
+	if f != nil && f.Effect == HoldBeforeServe {
+		if f.Applied != nil {
+			f.Applied <- struct{}{}
+		}
+		select {
+		case <-f.Release:
+		case <-r.Context().Done():
+			drop(w)
+			return f, true
+		}
+		return nil, false
+	}
 	if f != nil && f.Effect == StatusBeforeApply {
 		reply(w, f.Status, map[string]string{"message": "scripted failure"})
 		return f, true
@@ -344,7 +361,7 @@ func (g *FakeIssueServer) before(w http.ResponseWriter, kind, repository string)
 }
 
 func (g *FakeIssueServer) create(w http.ResponseWriter, r *http.Request, repository string, body []byte) {
-	f, done := g.before(w, FaultCreate, repository)
+	f, done := g.before(w, r, FaultCreate, repository)
 	if done {
 		return
 	}
@@ -368,7 +385,7 @@ func (g *FakeIssueServer) create(w http.ResponseWriter, r *http.Request, reposit
 }
 
 func (g *FakeIssueServer) comment(w http.ResponseWriter, r *http.Request, repository, number string, body []byte) {
-	f, done := g.before(w, FaultComment, repository)
+	f, done := g.before(w, r, FaultComment, repository)
 	if done {
 		return
 	}
@@ -408,8 +425,8 @@ func (g *FakeIssueServer) find(repository string, number int) *FakeIssue {
 	return nil
 }
 
-func (g *FakeIssueServer) state(w http.ResponseWriter, repository, number string) {
-	if _, done := g.before(w, FaultState, repository); done {
+func (g *FakeIssueServer) state(w http.ResponseWriter, r *http.Request, repository, number string) {
+	if _, done := g.before(w, r, FaultState, repository); done {
 		return
 	}
 	n, _ := strconv.Atoi(number)
@@ -428,7 +445,7 @@ func (g *FakeIssueServer) state(w http.ResponseWriter, repository, number string
 }
 
 func (g *FakeIssueServer) list(w http.ResponseWriter, r *http.Request, repository string) {
-	if _, done := g.before(w, FaultListIssues, repository); done {
+	if _, done := g.before(w, r, FaultListIssues, repository); done {
 		return
 	}
 	q := r.URL.Query()
@@ -456,7 +473,7 @@ func (g *FakeIssueServer) list(w http.ResponseWriter, r *http.Request, repositor
 }
 
 func (g *FakeIssueServer) listComments(w http.ResponseWriter, r *http.Request, repository, number string) {
-	if _, done := g.before(w, FaultListComments, repository); done {
+	if _, done := g.before(w, r, FaultListComments, repository); done {
 		return
 	}
 	n, _ := strconv.Atoi(number)
