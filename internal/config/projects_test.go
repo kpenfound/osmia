@@ -84,7 +84,7 @@ func TestOptionalForkRoundTrips(t *testing.T) {
 				t.Fatal(c.Project)
 			}
 			path := filepath.Join(c.Root.String(), "projects", pid, "config.toml")
-			if err := WriteProjectConfig(path, c.Project); err != nil {
+			if err := writeProjectConfig(path, c.Project); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(path)
@@ -99,5 +99,35 @@ func TestOptionalForkRoundTrips(t *testing.T) {
 				t.Fatalf("reload %v: %v", reloaded, err)
 			}
 		})
+	}
+}
+
+// WithLoadedProjects lists already loaded projects in the order given and
+// reads no project file, so it works once every project file is gone.
+func TestWithLoadedProjectsReadsNoFile(t *testing.T) {
+	second := strings.Replace(projectConfig, "~/clone", "~/other", 1)
+	c, err := Load(twoProjects(t, second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []ProjectID{pid, pidOther} {
+		path, err := c.Root.ProjectConfig(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reversed := c.WithLoadedProjects([]Project{c.For(pidOther).Project, c.For(pid).Project})
+	if !slices.Equal(reversed.ProjectIDs(), []ProjectID{pidOther, pid}) || !slices.Equal(reversed.ActiveProjects, []string{pidOther, pid}) || reversed.HasProject() {
+		t.Fatalf("projects %v, active %v", reversed.ProjectIDs(), reversed.ActiveProjects)
+	}
+	one := c.WithLoadedProjects([]Project{c.For(pid).Project})
+	if one.Project.ID != pid || !slices.Equal(one.ActiveProjects, []string{pid}) {
+		t.Fatalf("one project: %q %v", one.Project.ID, one.ActiveProjects)
+	}
+	if !slices.Equal(c.ProjectIDs(), []ProjectID{pid, pidOther}) {
+		t.Fatal("the receiver changed")
 	}
 }

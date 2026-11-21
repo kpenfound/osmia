@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -14,6 +15,56 @@ import (
 // have an effect, in display order. hearsay_entities is the mapping whose
 // entries are set and cleared one by one.
 var ProjectSettings = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity.per_workstream", "capacity.git_operations", "hearsay_scope", "hearsay_declare_repo", "flake_fixes", "hearsay_entities"}
+
+// SettingValue is the value p holds for a setting of ProjectSettings, nil for
+// a name that is not one. The hearsay_entities mapping is never nil, so an
+// empty one encodes as {}.
+func (p Project) SettingValue(name string) any {
+	switch name {
+	case "name":
+		return p.Name
+	case "upstream":
+		return p.Upstream
+	case "fork":
+		return p.Fork
+	case "clone":
+		return p.Clone
+	case "base_branch":
+		return p.BaseBranch
+	case "landing":
+		return p.Landing
+	case "delivery":
+		return p.Delivery
+	case "upstream_rebase":
+		return p.UpstreamRebase
+	case "pull_request_poll":
+		return p.PullRequestPoll
+	case "checks_timeout":
+		return p.ChecksTimeout
+	case "capacity.per_workstream":
+		return p.Capacity.PerWorkstream
+	case "capacity.git_operations":
+		return p.Capacity.GitOperations
+	case "hearsay_scope":
+		return p.HearsayScope
+	case "hearsay_declare_repo":
+		return p.HearsayDeclareRepo
+	case "flake_fixes":
+		return p.FlakeFixes
+	case "hearsay_entities":
+		entities := map[string]string{}
+		maps.Copy(entities, p.HearsayEntities)
+		return entities
+	}
+	return nil
+}
+
+// ProjectSettingsLabel names the stored settings of project id where an error
+// stands in for a file path: a FieldError about stored settings carries it as
+// its Path, so the owner is never pointed at a file Osmia no longer reads.
+func ProjectSettingsLabel(id ProjectID) string {
+	return "project " + string(id) + " settings"
+}
 
 // ProjectPin identifies the exact bytes of a project configuration file.
 func ProjectPin(data []byte) string {

@@ -59,7 +59,6 @@ Create the top-level file:
 
 ```toml
 version = 1
-active_projects = []
 
 [profiles.default]
 agent = "claude"
@@ -72,6 +71,11 @@ tailnet = "osmia"
 webhook = "https://ntfy.sh/your-private-topic"
 ```
 
+- **No project list.** The file names no project. You register projects in step
+  4, and Osmia keeps them, with their settings, in its own store under the root;
+  it never writes this file. `osmia config validate` checks the file without
+  starting a service (see [validating a configuration
+  offline](configuration.md#validating-a-configuration-offline)).
 - **Profiles and roles.** A profile names an `agent` (`claude`, `codex` or
   `opencode`) and a `model`, and optionally `effort`, `fallback`, `timeout` and
   `max_turns`. Every role (`architect`, `committee`, `chief_of_staff`,
@@ -185,7 +189,10 @@ An `origin` remote pointing to `you/repo` is sufficient. Delivery pushes an
 Osmia feature branch and opens a pull request against the configured base
 branch; it does not push to that base branch or merge the request.
 
-The command prints the project ID (`p_…`). The service creates the project's
+The command prints the project ID (`p_…`). The service stores the project's
+settings and lists it in the project registry, both in Osmia's own store at
+`<root>/project-store/`, so neither your top-level file nor any project file
+changes. It creates the project's
 trace, `<root>/projects/<project-id>/trace.db`, outside your clone, seeds
 an entity map of the repository's directories and CODEOWNERS as its first
 revision, and starts no agent turn. The service re-seeds that map by itself when

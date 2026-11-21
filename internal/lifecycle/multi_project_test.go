@@ -207,10 +207,8 @@ func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
 	if traces := s.traces(); len(traces) != 1 || traces[0].Project() != otherProject {
 		t.Fatalf("traces in the capacity pool: %d", len(traces))
 	}
-	disk, err := config.Load(f.opts.Config)
-	must(t, err)
-	if !slices.Equal(disk.ProjectIDs(), []config.ProjectID{otherProject}) {
-		t.Fatalf("active projects on disk %v", disk.ProjectIDs())
+	if got := activeProjects(t, f.opts.Config.Root); !slices.Equal(got, []string{string(otherProject)}) {
+		t.Fatalf("registry %v", got)
 	}
 	// The remaining project still dispatches.
 	other := f.repository(otherProject)

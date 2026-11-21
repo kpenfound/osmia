@@ -55,7 +55,7 @@ type Config struct {
 	// project of a loaded configuration, or the project For selected. It is
 	// zero when no project, or more than one, is active.
 	Project Project `toml:"-" json:"project"`
-	// Projects holds every active project, in active_projects order.
+	// Projects holds every active project, in registry order.
 	Projects []Project `toml:"-" json:"projects,omitempty"`
 	// Warnings describes settings that loaded but have no effect, one
 	// sentence each. A service logs them when it loads or reloads.
@@ -358,8 +358,11 @@ func fieldError(path, field, reason string) error {
 }
 
 // Load returns nil on every failure. The top-level file is required, and only
-// the explicitly active projects are read, each of which must load and
-// validate; archived directories are not activated.
+// the projects its active_projects lists are read, each from its own file and
+// each of which must load and validate; archived directories are not
+// activated. It is the loader of a root whose project import into the project
+// store is not complete: a root that has completed it takes its projects from
+// the store.
 func Load(options Options) (*Config, error) {
 	c, err := LoadTopLevel(options)
 	if err != nil {
@@ -409,11 +412,11 @@ func LoadTopLevel(options Options) (*Config, error) {
 	for i, s := range c.ActiveProjects {
 		ids[i], err = ParseProjectID(s)
 		if err != nil {
-			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), err.Error())
+			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), "expected p_ followed by 32 lowercase hex digits")
 		}
 	}
 	if err := CheckProjectIDs(ids...); err != nil {
-		return nil, fieldError(path, "active_projects", err.Error())
+		return nil, fieldError(path, "active_projects", ErrCollision.Error())
 	}
 	if !md.IsDefined("listen", "socket") {
 		c.Listen.Socket, err = root.Socket()
@@ -550,7 +553,7 @@ func (c *Config) validateCommittee(path string) error {
 // zero.
 func (c *Config) HasProject() bool { return c.Project.ID != "" }
 
-// ProjectIDs returns the IDs of the active projects, in active_projects order.
+// ProjectIDs returns the IDs of the active projects, in registry order.
 func (c *Config) ProjectIDs() []ProjectID {
 	ids := make([]ProjectID, len(c.Projects))
 	for i, p := range c.Projects {
@@ -615,24 +618,18 @@ func (c *Config) AddProject(id ProjectID, home string) (*Config, error) {
 	return &out, nil
 }
 
-// WithProjects returns a copy of c whose active projects are ids, in that
-// order, each loaded and validated from its configuration file. The receiver
-// is unchanged.
-func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
+// WithLoadedProjects returns a copy of c whose active projects are ps, already
+// loaded, in that order. It reads no file. The receiver is unchanged.
+func (c *Config) WithLoadedProjects(ps []Project) *Config {
 	out := *c
-	out.ActiveProjects, out.Projects, out.Project = []string{}, nil, Project{}
-	for _, id := range ids {
-		p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
-		if err != nil {
-			return nil, err
-		}
-		out.ActiveProjects = append(out.ActiveProjects, string(id))
-		out.Projects = append(out.Projects, p)
+	out.ActiveProjects, out.Projects, out.Project = []string{}, slices.Clone(ps), Project{}
+	for _, p := range ps {
+		out.ActiveProjects = append(out.ActiveProjects, string(p.ID))
 	}
 	if len(out.Projects) == 1 {
 		out.Project = out.Projects[0]
 	}
-	return &out, nil
+	return &out
 }
 
 // WithoutProject returns a copy of c with no active project.
@@ -812,6 +809,11 @@ const MasonDaggerIgnored = "roles.mason.dagger is ignored: the mason runs Dagger
 // LibrarianIgnored warns that a top-level file has the removed [roles.librarian]
 // table. The librarian role no longer exists.
 const LibrarianIgnored = "roles.librarian is ignored: the librarian role is removed"
+
+// ActiveProjectsIgnored warns that a top-level file still lists
+// active_projects after the project import is complete. The registry in
+// Osmia's own store decides which projects are active.
+const ActiveProjectsIgnored = "active_projects is ignored: the project registry in Osmia's own store decides which projects are active"
 
 // legacyWarnings reads the top-level file at path again for settings that are
 // accepted and ignored but deserve a warning. A file that cannot be read has

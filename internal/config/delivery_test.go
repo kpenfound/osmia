@@ -105,22 +105,22 @@ func TestEditProjectRoundTripsAndValidatesDelivery(t *testing.T) {
 	}
 }
 
-func TestWriteProjectConfigKeepsAndValidatesDelivery(t *testing.T) {
+func TestProjectConfigBytesKeepsAndValidatesDelivery(t *testing.T) {
 	clone := t.TempDir()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	p := Project{Name: "x", Upstream: "up/repo", Clone: clone, BaseBranch: "main", Delivery: DeliveryJev}
-	if err := WriteProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"jev\"\n") {
+	if err := writeProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"jev\"\n") {
 		t.Fatalf("jev: %v\n%s", err, read(t, path))
 	}
 	p.Delivery = ""
-	if err := WriteProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"pull-request\"\n") {
+	if err := writeProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"pull-request\"\n") {
 		t.Fatalf("default: %v\n%s", err, read(t, path))
 	}
 	for name, bad := range map[string]Project{
 		"other value": {Upstream: "up/repo", Clone: clone, BaseBranch: "main", Delivery: "merge"},
 		"jev on fork": {Upstream: "up/repo", Fork: "me/repo", Clone: clone, BaseBranch: "main", Delivery: DeliveryJev},
 	} {
-		if err := WriteProjectConfig(filepath.Join(t.TempDir(), "config.toml"), bad); err == nil {
+		if _, err := ProjectConfigBytes(bad); err == nil {
 			t.Errorf("%s written", name)
 		}
 	}

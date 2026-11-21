@@ -10,6 +10,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/projectmigration"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/router"
@@ -114,13 +116,15 @@ func (a stagedAdapter) GiveUp(ctx context.Context, op coreadapter.Operation, why
 	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }
 
-// reload reads the top-level configuration and every registered project's
-// file as one candidate and replaces the loaded configuration with it only
-// when all of them pass. A failure is kept as the last reload error until a
-// reload succeeds. Settings that need a restart keep their loaded values and
-// are named in the response. The runtime state is resolved against the
-// candidate, never rewritten, and the running project's passes adopt the
-// candidate's stages from their next pass.
+// reload reads the top-level configuration file and replaces the loaded
+// configuration with it, together with each active project's effective
+// settings, only when the file passes. A failure is kept as the last reload
+// error until a reload succeeds. Settings that need a restart keep their loaded
+// values and are named in the response. A reload reads no project settings
+// from the store, so a revision that was saved but not adopted stays pending,
+// and it never adds or removes a project. The runtime state is resolved
+// against the candidate, never rewritten, and every running project's passes
+// adopt the candidate's stages from their next pass.
 func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -135,73 +139,30 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.log().Error("reload failed", "error", failed.Message)
 		return ReloadResponse{}, &APIError{Code: Validation, Message: failed.Message + "; the loaded configuration is unchanged"}
 	}
-	for _, p := range cfg.Projects {
-		if !next.Active(p.ID) {
-			if api := s.projectRemovalGate(p.ID); api != nil {
-				return ReloadResponse{}, api
-			}
-		}
-	}
 	unchanged := &APIError{Code: Internal, Message: "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
 	failUnchanged := func() (ReloadResponse, *APIError) {
 		s.log().Error("reload failed", "error", unchanged.Message)
 		return ReloadResponse{}, unchanged
 	}
 	staged := map[*activeProject]*stages{}
-	var added, removed []*activeProject
-	rollback := func() {
-		for _, p := range added {
-			s.pool.Leave(p.id)
-			p.repository.Close()
-		}
-	}
 	for _, p := range projects {
 		if !next.Active(p.id) {
-			removed = append(removed, p)
 			continue
 		}
 		if staged[p], err = s.stages(next.For(p.id), p.repository); err != nil {
 			return failUnchanged()
 		}
 	}
-	for _, id := range next.ProjectIDs() {
-		present := false
-		for _, p := range projects {
-			present = present || p.id == id
-		}
-		if !present {
-			p, err := s.open(next.For(id))
-			if err != nil {
-				rollback()
-				return failUnchanged()
-			}
-			if p != nil {
-				added = append(added, p)
-			}
-		}
-	}
-	all := append(projects, added...)
-	projects = nil
-	for _, id := range next.ProjectIDs() {
-		for _, p := range all {
-			if p.id == id {
-				projects = append(projects, p)
-			}
-		}
-	}
-	projects = append(projects, removed...)
 	if err := s.ensureEngine(context.Background(), next); err != nil {
 		unchanged.Message = redact.Secrets(err.Error(), redact.KnownSecrets()...) + "; the loaded configuration is unchanged"
-		rollback()
 		return failUnchanged()
 	}
 	s.mu.Lock()
 	if err := s.resolveRuntime(next, projects); err != nil {
 		s.mu.Unlock()
-		rollback()
 		return failUnchanged()
 	}
-	s.cfg, s.projects, s.reloadErr = next, projects, nil
+	s.cfg, s.reloadErr = next, nil
 	s.capacity.Store(&next.Capacity)
 	reloadedAt := s.now()
 	s.checkSlots.resize(next.Capacity.Checks)
@@ -209,26 +170,8 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		p.pipeline.next.Store(stage)
 		p.pipeline.conversation.Store(stage)
 	}
-	for _, p := range removed {
-		s.log().Info("project draining", "project", string(p.id), "reason", "reload")
-		p.controller.Drain()
-		p.conversations.Drain()
-		if p.pollCancel != nil {
-			p.pollCancel()
-		}
-	}
-	for _, p := range added {
-		s.launch(p)
-	}
 	s.mu.Unlock()
 	s.spans.reload(reloadedAt, poolsOf(next.Capacity))
-	for _, p := range removed {
-		if err := s.finishDraining(p); err != nil {
-			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())
-			return ReloadResponse{}, &APIError{Code: Internal, Message: "configuration applied but a removed project could not finish draining; restart the service"}
-		}
-		s.log().Info("project stopped", "project", string(p.id), "reason", "reload")
-	}
 	// The runtime's effective profiles and the daily budget's limit follow the
 	// configuration.
 	events := []Event{{Kind: EventResync}, {Kind: EventConfig}, {Kind: EventRuntime}}
@@ -243,19 +186,23 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	for _, warning := range next.Warnings {
 		s.log().Warn(warning, "component", "config")
 	}
-	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0, "added", len(added), "removed", len(removed))
+	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0)
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
 
-// candidate loads the configuration on disk as a reload applies it over cfg.
-// Changed settings that need a restart keep cfg's values and are named: the
-// listen socket, the web and tailnet listeners and the telemetry export.
+// candidate builds the configuration a reload applies over cfg: the top-level
+// file as it is on disk, with cfg's active projects, in registry order, each
+// with its effective settings. Settings a project inherits from the top level
+// follow the reloaded file; the stored revisions are not read for anything
+// else. Changed settings that need a restart keep cfg's values and are named:
+// the listen socket, the web and tailnet listeners and the telemetry export.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
-	next, err := config.Load(s.options.Config)
+	top, err := config.LoadTopLevel(s.options.Config)
 	if err != nil {
 		return nil, nil, err
 	}
-	registerHearsaySecrets(next.Hearsay)
+	registerHearsaySecrets(top.Hearsay)
+	next := projectmigration.Compose(top, s.effectiveProjects(top, cfg))
 	restart := []string{}
 	if next.Listen.Socket != cfg.Listen.Socket {
 		restart = append(restart, "listen.socket")
@@ -284,6 +231,28 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	return next, restart, nil
 }
 
+// effectiveProjects returns cfg's active projects as a reload of the top-level
+// file top leaves them: their effective settings, with the one setting a
+// project inherits, capacity.per_workstream, taken from top when the project's
+// effective revision leaves it out. A project whose effective revision cannot
+// be read again keeps its effective settings as they are.
+func (s *Service) effectiveProjects(top, cfg *config.Config) []config.Project {
+	revisions := s.effectiveRevisionsNow()
+	store := projectstore.Open(cfg.Root)
+	out := make([]config.Project, 0, len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		if number, ok := revisions[p.ID]; ok {
+			if revision, err := store.At(p.ID, number); err == nil {
+				if file, err := top.DecodeProject(p.ID, s.options.Config.Home, revision.Data); err == nil {
+					p = file.Project
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // reloadError describes a configuration that failed to load by its file and
 // field, never by values read from it.
 func reloadError(err error, at time.Time) *ReloadError {
@@ -291,5 +260,5 @@ func reloadError(err error, at time.Time) *ReloadError {
 	if errors.As(err, &field) {
 		return &ReloadError{Path: field.Path, Field: field.Field, Message: field.Error(), At: at}
 	}
-	return &ReloadError{Message: "the configuration files cannot be located or read; check the top-level config.toml, the project files under the root and their permissions", At: at}
+	return &ReloadError{Message: "the configuration file cannot be located or read; check the top-level config.toml and its permissions", At: at}
 }

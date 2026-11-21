@@ -970,7 +970,7 @@ func TestXDGDirectories(t *testing.T) {
 	}
 }
 
-// A default config.toml may be a symlink, and edits reach its target.
+// A default config.toml may be a symlink, which loading follows.
 func TestSymlinkedConfig(t *testing.T) {
 	opts := fixture(t, strings.Replace(topConfig, `"`+pid+`"`, "", 1), projectConfig)
 	target := filepath.Join(opts.Home, "dotfiles", "osmia.toml")
@@ -991,14 +991,11 @@ func TestSymlinkedConfig(t *testing.T) {
 	if err != nil || path != target {
 		t.Fatalf("config %s %v", path, err)
 	}
-	if err := AddActiveProject(path, pid); err != nil {
-		t.Fatal(err)
-	}
 	if info, err := os.Lstat(configFile(opts)); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("symlink replaced: %v", err)
 	}
-	if c, err := Load(opts); err != nil || !c.HasProject() {
-		t.Fatalf("edited config: %+v %v", c, err)
+	if _, err := Load(opts); err != nil {
+		t.Fatalf("symlinked config: %v", err)
 	}
 }
 

@@ -84,7 +84,8 @@ func TestProjectCommands(t *testing.T) {
 	}
 	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
 	must(t, err)
-	if !strings.HasPrefix(string(text), "# owner comment\n") || !strings.Contains(string(text), `active_projects=["`+string(id)+`"]`) {
+	// The registration lists the project in the store, never in the top-level file.
+	if !strings.HasPrefix(string(text), "# owner comment\n") || !strings.Contains(string(text), "active_projects=[]\n") || strings.Contains(string(text), string(id)) {
 		t.Fatalf("configuration:\n%s", text)
 	}
 	status = successful(t, root, "status")

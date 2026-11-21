@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 func TestProjectPreviewSettingsAreUnavailable(t *testing.T) {
@@ -41,7 +43,7 @@ func TestProjectPreviewSettingsAreUnavailable(t *testing.T) {
 		}
 		data, err = os.ReadFile(files.project)
 		must(t, err)
-		if string(data) != text {
+		if string(data) != projectstore.RetiredMark+text {
 			t.Fatal("project file rewritten")
 		}
 		_, err = c.Reload(context.Background())

@@ -5,20 +5,19 @@ import (
 	errors "errors"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
-	os "os"
 	filepath "path/filepath"
 	"reflect"
-	strings "strings"
 	sync "sync"
 	testing "testing"
 	time "time"
 
 	config "github.com/kpenfound/osmia/internal/config"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
-	for _, mode := range []string{"reload", "shutdown"} {
+	for _, mode := range []string{"removal", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
@@ -31,7 +30,7 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 			must(t, repo.Close())
 			path, err := f.cfg.Root.ProjectConfig(member.ID)
 			must(t, err)
-			must(t, config.WriteProjectConfig(path, member))
+			fixturekit.WriteProjectFile(t, path, member)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }
@@ -54,7 +53,7 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 			s, c := start(t, f.opts)
 			await(t, "the member's running turn", entered)
 			finished := make(chan error, 1)
-			if mode == "reload" {
+			if mode == "removal" {
 				for _, id := range []config.ProjectID{project, otherProject} {
 					r, err := s.repository(id)
 					must(t, err)
@@ -64,16 +63,15 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 					must(t, err)
 				}
 
-				path := filepath.Join(f.opts.Config.Root, "config.toml")
-				top, err := os.ReadFile(path)
-				must(t, err)
-				line := "active_projects = [\"" + string(project) + "\", \"" + string(otherProject) + "\"]"
-				updated := strings.Replace(string(top), line, "active_projects = []", 1)
-				if updated == string(top) {
-					t.Fatal("fixture did not remove both project registrations")
-				}
-				must(t, os.WriteFile(path, []byte(updated), 0600))
-				go func() { _, err := c.Reload(ctx); finished <- err }()
+				go func() {
+					for _, id := range []config.ProjectID{project, otherProject} {
+						if _, err := c.RemoveProject(ctx, id); err != nil {
+							finished <- err
+							return
+						}
+					}
+					finished <- nil
+				}()
 				soon(t, "both projects draining", func() bool { return !s.current().Active(project) && !s.current().Active(otherProject) })
 				unblock()
 			} else {

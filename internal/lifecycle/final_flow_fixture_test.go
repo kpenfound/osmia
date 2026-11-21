@@ -220,11 +220,7 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	stream, repository := b.buildFixture().SeedGit(t, "flow")
 	b.stream, b.repository = stream, repository
 	b.s.setSole(&activeProject{repository: repository})
-	path, err := b.s.cfg.Root.ProjectConfig(b.project)
-	must(t, err)
-	data, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append([]byte("checks_timeout = \"2h\"\n"), data...), 0o600))
+	fixturekit.EditProjectSettings(t, b.opts.Config.Root, b.project, func(text string) string { return "checks_timeout = \"2h\"\n" + text })
 	mergeDirectly(t, b.shedFixture, repository, stream, "resume", map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"})
 	mergeDirectly(t, b.shedFixture, repository, stream, "dedupe", map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	return j

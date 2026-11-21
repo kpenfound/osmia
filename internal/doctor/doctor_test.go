@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/trace/legacytrace"
 )
@@ -372,7 +373,12 @@ func TestProjectRemotes(t *testing.T) {
 
 	git(t, clone, "remote", "add", "origin", filepath.Join(filepath.Dir(dir), "remotes", "acme", "widgets"))
 	project := fmt.Sprintf("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nfork = \"me/widgets\"\nbase_branch = \"trunk\"\nclone = %q\n", clone)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "config.toml"), []byte(project), 0o600))
+	// The first run imported the project, so its settings change in the store.
+	store := projectstore.Open(o.Root)
+	current, err := store.Current(projectID)
+	must(t, err)
+	_, err = store.Replace(projectID, current.Pin, []byte(project))
+	must(t, err)
 	checks = Run(context.Background(), o)
 	expect(t, find(t, checks, "widgets upstream"), Fail, "no branch trunk")
 	expect(t, find(t, checks, "widgets fork"), Fail, "no remote whose URL names me/widgets")
@@ -420,5 +426,69 @@ func TestJevNeedsItsKey(t *testing.T) {
 	expect(t, find(t, checks, "jev"), Pass, "~typesafe/jev-latest")
 	if Failed(checks) {
 		t.Fatal("a configured Jev failed doctor")
+	}
+}
+
+// Doctor imports a legacy root's projects into the store as serve does, and
+// from then on reads no project file: its checks pass with the retired file
+// unreadable, and it changes nothing.
+func TestImportsProjectsThenReadsOnlyTheStore(t *testing.T) {
+	o, dir := fixture(t)
+	file := filepath.Join(dir, "projects", projectID, "config.toml")
+	original, err := os.ReadFile(file)
+	must(t, err)
+	top, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	must(t, err)
+
+	checks := Run(context.Background(), o)
+	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
+	store := projectstore.Open(o.Root)
+	if done, err := store.Imported(); err != nil || !done {
+		t.Fatalf("import complete: %t %v", done, err)
+	}
+	retired, err := os.ReadFile(file)
+	must(t, err)
+	if string(retired) != projectstore.RetiredMark+string(original) {
+		t.Fatalf("retired file %q", retired)
+	}
+
+	must(t, os.Remove(file))
+	must(t, os.Mkdir(file, 0o700))
+	var steps []string
+	o.Step = func(name string) error { steps = append(steps, name); return nil }
+	checks = Run(context.Background(), o)
+	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
+	if len(steps) != 0 {
+		t.Fatalf("a completed import ran steps: %v", steps)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	must(t, err)
+	if string(after) != string(top) {
+		t.Fatal("doctor changed the top-level file")
+	}
+}
+
+// A listed file that does not load stops the import with nothing changed, and
+// the check names the project's file and field.
+func TestImportRefusesAListedFileThatDoesNotLoad(t *testing.T) {
+	o, dir := fixture(t)
+	file := filepath.Join(dir, "projects", projectID, "config.toml")
+	must(t, os.WriteFile(file, []byte("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = \"/x\"\nlanding = \"sideways\"\n"), 0o600))
+	before, err := os.ReadFile(file)
+	must(t, err)
+	checks := Run(context.Background(), o)
+	c := find(t, checks, "project "+projectID)
+	expect(t, c, Fail, file)
+	expect(t, c, Fail, "landing")
+	if strings.Contains(c.Detail, "sideways") || !Failed(checks) {
+		t.Fatalf("%+v", c)
+	}
+	after, err := os.ReadFile(file)
+	must(t, err)
+	if string(before) != string(after) {
+		t.Fatal("a refused import changed the file")
+	}
+	if done, err := projectstore.Open(o.Root).Imported(); err != nil || done {
+		t.Fatalf("imported: %t %v", done, err)
 	}
 }

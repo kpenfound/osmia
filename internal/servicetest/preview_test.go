@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -141,12 +142,16 @@ func assertNoPreviewBytes(t *testing.T, png []byte, value any) {
 
 func TestChiefPreviewIgnoresProjectTable(t *testing.T) {
 	f := NewPreviewJourney(t)
-	path, err := service.InspectForTest(f.S).Config().Root.ProjectConfig(f.ID)
+	cfg := service.InspectForTest(f.S).Config()
+	store := projectstore.Open(cfg.Root)
+	original, err := store.Current(f.ID)
 	fixturekit.Must(t, err)
-	original, err := os.ReadFile(path)
+	text := string(original.Data) + "\n# ignored preview values\n[preview]\ncall = ['unused', '--source=/outside']\nport = 1\npath = '/unused'\ntimeout = 'invalid'\n"
+	stored, err := store.Replace(f.ID, original.Pin, []byte(text))
 	fixturekit.Must(t, err)
-	text := string(original) + "\n# ignored preview values\n[preview]\ncall = ['unused', '--source=/outside']\nport = 1\npath = '/unused'\ntimeout = 'invalid'\n"
-	fixturekit.Must(t, os.WriteFile(path, []byte(text), 0600))
+	if _, _, err := store.Load(cfg, "", f.ID); err != nil {
+		t.Fatalf("stored settings with a preview table do not load: %v", err)
+	}
 	for i := 0; i < 2; i++ {
 		_, err := f.C.Reload(context.Background())
 		fixturekit.Must(t, err)
@@ -156,9 +161,9 @@ func TestChiefPreviewIgnoresProjectTable(t *testing.T) {
 	if image.ID == "" {
 		t.Fatal("ignored table prevented preview capture")
 	}
-	data, err := os.ReadFile(path)
+	after, err := store.Current(f.ID)
 	fixturekit.Must(t, err)
-	if string(data) != text {
-		t.Fatal("reload or capture rewrote project configuration")
+	if after.Pin != stored.Pin || string(after.Data) != text {
+		t.Fatal("reload or capture rewrote project settings")
 	}
 }

@@ -61,6 +61,12 @@ func (a TestAccess) PresentWorkstream(repo *trace.Repository, w *WorkstreamStatu
 }
 func (a TestAccess) Reload() (ReloadResponse, *APIError) { return a.s.reload() }
 
+// SaveProjectConfig saves edit to the stored settings of project id as the
+// Settings API does.
+func (a TestAccess) SaveProjectConfig(ctx context.Context, id config.ProjectID, edit ProjectConfigEdit) (ProjectConfigSaveResponse, *APIError) {
+	return a.s.saveProjectConfig(ctx, id, edit)
+}
+
 func (a TestAccess) StatusList() StatusResponse { return a.s.statusList() }
 func (a TestAccess) WorkstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	return a.s.workstreamStatus(raw)

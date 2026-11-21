@@ -11,11 +11,14 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/eventstream"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -156,6 +159,28 @@ func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 		}
 	}
 }
+
+// setPullRequestPoll saves interval as the project's pull_request_poll the way
+// the Settings API does: the settings are stored as a new revision and the
+// service adopts them.
+func setPullRequestPoll(t *testing.T, s *Service, cfg *config.Config, interval string) {
+	t.Helper()
+	id := cfg.Project.ID
+	path, err := cfg.Root.ProjectConfig(id)
+	must(t, err)
+	data, err := os.ReadFile(path)
+	must(t, err)
+	first, err := projectstore.Open(cfg.Root).WriteFirst(id, data)
+	must(t, err)
+	saved, api := service.InspectForTest(s.core()).SaveProjectConfig(context.Background(), id, wire.ProjectConfigEdit{Pin: first.Pin, Set: wire.ProjectConfigValues{PullRequestPoll: &interval}})
+	if api != nil {
+		t.Fatal(api)
+	}
+	if saved.Outcome != wire.ProjectConfigApplied {
+		t.Fatalf("save: %+v", saved)
+	}
+}
+
 func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 	t.Parallel()
 	for _, interval := range []time.Duration{10 * time.Minute, 20 * time.Minute, 5 * time.Minute} {
@@ -190,11 +215,7 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 			if host.Finds != 2 {
 				t.Fatalf("initial lookups=%d", host.Finds)
 			}
-			path, err := cfg.Root.ProjectConfig(cfg.Project.ID)
-			must(t, err)
-			data, err := os.ReadFile(path)
-			must(t, err)
-			must(t, os.WriteFile(path, append([]byte("pull_request_poll = \""+interval.String()+"\"\n"), data...), 0600))
+			setPullRequestPoll(t, s, cfg, interval.String())
 			for i := 0; i < 2; i++ {
 				_, api := s.reload()
 				if api != nil {
@@ -413,11 +434,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			if host.Finds != 1 {
 				t.Fatalf("initial finds=%d", host.Finds)
 			}
-			path, err := cfg.Root.ProjectConfig(cfg.Project.ID)
-			must(t, err)
-			data, err := os.ReadFile(path)
-			must(t, err)
-			must(t, os.WriteFile(path, append([]byte("pull_request_poll = \"20m\"\n"), data...), 0600))
+			setPullRequestPoll(t, s, cfg, "20m")
 			for i := 0; i < 2; i++ {
 				_, api := s.reload()
 				if api != nil {
