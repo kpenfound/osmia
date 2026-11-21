@@ -22,6 +22,29 @@ func (s *Service) groupApprovalLock(id config.WorkgroupID) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
+// heldGroupApprovals records, per root and workgroup, that the group-approval
+// pass has already reported the workgroup's retirement as unverifiable. Only
+// presence is kept, so a reason that names a different failing member on a later
+// pass does not report the same held workgroup again.
+var heldGroupApprovals sync.Map
+
+func (s *Service) heldGroupApprovalKey(id config.WorkgroupID) string {
+	return s.current().Root.String() + ":" + string(id)
+}
+
+// holdGroupApproval warns once while workgroup id stays unverified.
+func (s *Service) holdGroupApproval(id config.WorkgroupID, reason string) {
+	if _, held := heldGroupApprovals.LoadOrStore(s.heldGroupApprovalKey(id), reason); !held {
+		s.log().Warn("workgroup approval remains held", "workgroup", id, "error", reason)
+	}
+}
+
+// releaseGroupApproval ends the unverified state so a recurrence is reported
+// again.
+func (s *Service) releaseGroupApproval(id config.WorkgroupID) {
+	heldGroupApprovals.Delete(s.heldGroupApprovalKey(id))
+}
+
 func (s *Service) approvalTrace(ctx context.Context, repo *trace.Repository, id config.WorkgroupID) (*trace.Repository, trace.Workgroup, error) {
 	g, _, err := repo.CrossRepoWorkgroup(id)
 	if err != nil {
@@ -201,16 +224,34 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 			return err
 		}
 		if status.Complete {
+			s.releaseGroupApproval(id)
 			continue
 		}
 		leader, err := s.liveWorkgroupLeader(g)
 		if err != nil {
-			return err
-		}
-		if leader == "" {
-			s.log().Warn("workgroup approval remains held", "workgroup", id, "error", "no live member remains to reconcile incomplete approval")
+			if canceled := ctx.Err(); canceled != nil {
+				return canceled
+			}
+			s.holdGroupApproval(id, "retirement cannot be verified: "+err.Error())
 			continue
 		}
+		if leader == "" {
+			retired, err := s.workgroupFullyRetired(ctx, g)
+			if canceled := ctx.Err(); canceled != nil {
+				return canceled
+			}
+			if err == nil && retired {
+				s.releaseGroupApproval(id)
+				continue
+			}
+			reason := "no live member remains to reconcile incomplete approval; retirement cannot be verified"
+			if err != nil {
+				reason += ": " + err.Error()
+			}
+			s.holdGroupApproval(id, reason)
+			continue
+		}
+		s.releaseGroupApproval(id)
 		if leader != stream {
 			continue
 		}
