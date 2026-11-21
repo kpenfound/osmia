@@ -409,11 +409,11 @@ func LoadTopLevel(options Options) (*Config, error) {
 	for i, s := range c.ActiveProjects {
 		ids[i], err = ParseProjectID(s)
 		if err != nil {
-			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), err.Error())
+			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), "expected p_ followed by 32 lowercase hex digits")
 		}
 	}
 	if err := CheckProjectIDs(ids...); err != nil {
-		return nil, fieldError(path, "active_projects", err.Error())
+		return nil, fieldError(path, "active_projects", ErrCollision.Error())
 	}
 	if !md.IsDefined("listen", "socket") {
 		c.Listen.Socket, err = root.Socket()

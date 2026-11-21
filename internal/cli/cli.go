@@ -89,8 +89,10 @@ const usage = `Usage: osmia <command> [--root PATH]
   design start <design-id> [--json]  starts a workgroup from the drafted brief
   design destroy <design-id> [--json]
   config [--json]
+  config validate [--config PATH]  check a top-level config file offline; no service needed
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
+config validate reads only the top-level file: --config PATH, else the file --root resolves to.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
 `
 
@@ -98,7 +100,7 @@ type options struct {
 	root, socket, reason, project, base             string
 	upstream, fork, clone, baseBranch               string
 	repo, description, charterFile, id              string
-	profile, title, from                            string
+	profile, title, from, config                    string
 	json, hard, reasonSet, help, target, accept     bool
 	skipDebate, version, detach, public, creating   bool
 	projectSpecRevision, specRevision, planRevision int
@@ -120,7 +122,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -175,6 +177,8 @@ func parse(args []string) (o options, err error) {
 				o.title = value
 			case "--from":
 				o.from = value
+			case "--config":
+				o.config = value
 			case "--project-spec-revision", "--spec-revision", "--plan-revision":
 				n, err := strconv.Atoi(value)
 				if err != nil || n < 1 {
@@ -291,8 +295,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1
 	case "conversation", "feed":
 		valid = len(a) == 1
-	case "inbox", "reload", "config":
+	case "inbox", "reload":
 		valid = len(a) == 0
+	case "config":
+		valid = len(a) == 0 && o.config == "" || len(a) == 1 && a[0] == "validate" && !o.json && o.socket == ""
 	case "answer":
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
@@ -334,8 +340,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
 		return invalid()
+	}
+	if cmd == "config" && len(a) == 1 {
+		// Offline: dispatched before any socket, client or state is set up.
+		return runConfigValidate(o.root, o.config, stdout, stderr)
 	}
 	root, err := config.ResolveRoot(o.root, "")
 	if err != nil {
