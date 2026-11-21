@@ -242,7 +242,22 @@ func (e *WaitingChecksError) Error() string {
 // A completed record of the commit, from this watch or from an older local
 // run, is returned as it is. Reviews of delivered workstreams (maintenance)
 // push nothing and have no pull request statuses to wait for.
+//
+// A recorded failed result, whether recorded now or found already recorded,
+// has the trace output of each failed check that names a trace ID recorded
+// before FinalChecks returns it (see ReconcileFinalTraces).
 func (a *FinalReviewer) FinalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
+	run, err := a.finalChecks(ctx, cfg, stream, report)
+	if err != nil {
+		return run, err
+	}
+	if err := a.ReconcileFinalTraces(ctx, stream, run); err != nil {
+		return FinalCheckRun{}, err
+	}
+	return run, nil
+}
+
+func (a *FinalReviewer) finalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
 	if report.Maintenance {
 		return FinalCheckRun{Review: report.Review, Operation: report.Operation, Commit: report.Commit, ExitCode: -1, Error: "a review of a delivered workstream pushes nothing, so no pull request checks ran for it"}, nil
 	}

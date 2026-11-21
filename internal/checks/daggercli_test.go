@@ -375,6 +375,30 @@ func TestRealDaggerCLIServiceID(t *testing.T) {
 	}
 }
 
+// The trace fetch's command parses with the real CLI: help is answered after
+// the flags are read, so asking for it on the command the service builds shows
+// that the command, its --check=<name> element, which may begin with a dash,
+// and the trace ID in its positional slot are accepted, without reaching
+// Dagger Cloud.
+func TestRealDaggerCLITraceFetchCommandParses(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	for _, check := range []string{"", "test:a", "-x", "--help", "a b"} {
+		args := append(TraceFetchCommand("2f123ba77bf7bd2d4db2f70ed20613e8", check), "--help")
+		home := t.TempDir()
+		cmd := exec.CommandContext(ctx, "dagger", args...)
+		cmd.Dir = home
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("dagger %q: %v: %s", args, err, output)
+		}
+		if !strings.Contains(string(output), "dagger cloud traces view [trace]") || !strings.Contains(string(output), "--check string") {
+			t.Fatalf("dagger %q did not show the trace command's help:\n%s", args, output)
+		}
+	}
+}
+
 // viewCLI runs the real Dagger CLI from the root of the view at root, with the
 // arguments given and nothing that names a workspace, and returns its output
 // and exit status. A nested Dagger client takes its working directory from

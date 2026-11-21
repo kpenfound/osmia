@@ -111,6 +111,16 @@ type watchFixture struct {
 	scope    *coreadapter.Scope
 	// reader replaces api as the service's status reader when it is set.
 	reader pulls.StatusReader
+	// traces replaces the Dagger CLI at traceProgram as the service's trace
+	// fetch when it is set; with neither, the service has no trace fetch.
+	traces       checkrun.TraceRunner
+	traceProgram string
+	// cliTimeout bounds the Dagger CLI at traceProgram; autoTimeout bounds each
+	// automatic fetch. Zero keeps the defaults.
+	cliTimeout  time.Duration
+	autoTimeout time.Duration
+	// step, when set, is called at each interruption step of the service.
+	step func(string) error
 }
 
 func newWatchFixture(t *testing.T) *watchFixture {
@@ -140,6 +150,13 @@ func (f *watchFixture) newReviewer() *FinalReviewer {
 	if f.reader != nil {
 		statuses = f.reader
 	}
+	var traces checkrun.TraceRunner
+	switch {
+	case f.traces != nil:
+		traces = f.traces
+	case f.traceProgram != "":
+		traces = checkrun.DaggerChecks{Program: f.traceProgram, CloudToken: cloudToken, TraceTimeout: f.cliTimeout}
+	}
 	controller := New(Dependencies{
 		Now:   f.clock.Now,
 		Step:  func(string) error { return nil },
@@ -150,6 +167,13 @@ func (f *watchFixture) newReviewer() *FinalReviewer {
 		CloudStatuses: statuses,
 		CloudRerun:    checkrun.DaggerChecks{Program: f.program, CloudToken: cloudToken},
 	})
+	controller.CloudTrace, controller.AutoTraceTimeout = traces, f.autoTimeout
+	controller.Step = func(name string) error {
+		if f.step != nil {
+			return f.step(name)
+		}
+		return nil
+	}
 	return &FinalReviewer{S: controller, Repository: f.repo}
 }
 

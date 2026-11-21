@@ -275,7 +275,7 @@ func (s *Service) delivery() *delivery.Controller {
 	}
 	c.Committee = s.options.Committee
 	c.PullRequests = s.options.PullRequests
-	c.CloudStatuses, c.CloudRerun, c.PostPushWait = s.options.CloudStatuses, s.options.CloudRerun, s.options.FinalChecksWait
+	c.CloudStatuses, c.CloudRerun, c.CloudTrace, c.PostPushWait = s.options.CloudStatuses, s.options.CloudRerun, s.options.CloudTrace, s.options.FinalChecksWait
 	if s.options.Reconciliation.Now != nil {
 		c.Now = s.options.Reconciliation.Now
 	}

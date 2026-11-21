@@ -49,3 +49,18 @@ func TestRegisterIgnoresAnEmptySecret(t *testing.T) {
 		t.Fatalf("registering an empty secret changed KnownSecrets: %d, want %d", got, before)
 	}
 }
+
+func TestScrubRedactsCallerSecretsAndSecretShapedValues(t *testing.T) {
+	t.Parallel()
+	const secret = "a-secret-the-service-was-given"
+	in := "known " + secret + "\nghp_abcdefghijklmnopqrstuvwxyz0123456789\nAuthorization: Bearer abcdef0123456789\npassword=hunter22\nclone https://user:pw@example.com/r.git\nplain text"
+	got := Scrub(in, secret)
+	for _, leaked := range []string{secret, "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "abcdef0123456789", "hunter22", "user:pw"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("%q survived: %q", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "plain text") || !strings.Contains(got, Marker) {
+		t.Fatalf("scrubbed text %q", got)
+	}
+}

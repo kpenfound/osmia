@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -71,12 +72,18 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 			j := newFlowJourney(t)
 			stream := j.stream
 			var mu sync.Mutex
-			var viewed string
-			var viewErr error
+			var viewed, tracePath, traceViewed string
+			var viewErr, traceErr error
+			tracePath = "final/checks-1-traces/" + checkrun.TraceDocumentID("abc123", "test:resume") + ".json"
 			j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 				content, err := callTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
+				var traced string
+				var terr error
+				if c.failed != "" {
+					traced, terr = callTool(ctx, tools, "file_read", map[string]any{"path": tracePath})
+				}
 				mu.Lock()
-				viewed, viewErr = content, err
+				viewed, viewErr, traceViewed, traceErr = content, err, traced, terr
 				mu.Unlock()
 				_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				return err
@@ -154,6 +161,33 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 			}
 			if tail := prompt[criteria:]; strings.Contains(tail, "Dagger Cloud ran the project's checks") {
 				t.Fatalf("the check result is at the end of the prompt:\n%s", prompt)
+			}
+
+			// A failed check that names a trace has its output fetched once, narrowed
+			// to it, recorded for the workstream and held by the reader's view.
+			wantCalls := 0
+			if c.failed != "" {
+				wantCalls = 1
+			}
+			if calls := j.traceCalls(t); len(calls) != wantCalls || (wantCalls == 1 && calls[0] != "cloud traces view --check=test:resume abc123") {
+				t.Fatalf("the fake dagger fetched traces %q", calls)
+			}
+			if c.failed != "" {
+				docs := streamDocuments(t, j.live(), stream, checkrun.TraceDocumentID("abc123", "test:resume"))
+				var rec checkrun.TraceRecord
+				if len(docs) != 1 || docs[0].Path != checkrun.TraceDocumentPath("abc123", "test:resume") || json.Unmarshal([]byte(docs[0].Content), &rec) != nil ||
+					!strings.Contains(rec.Output, "trace output of: cloud traces view --check=test:resume abc123") || strings.Contains(rec.Output, flowToken) {
+					t.Fatalf("the recorded trace output %+v", docs)
+				}
+				mu.Lock()
+				var shown string
+				if traceErr != nil || json.Unmarshal([]byte(traceViewed), &shown) != nil || shown != docs[0].Content {
+					t.Fatalf("the reader's view holds the trace output %q (%v), the record is %q", traceViewed, traceErr, docs[0].Content)
+				}
+				mu.Unlock()
+				if !strings.Contains(prompt, "final/checks-1-traces/") {
+					t.Fatalf("the reader's prompt does not say where the trace output is:\n%s", prompt)
+				}
 			}
 
 			// The reader's view holds the record as it was recorded.

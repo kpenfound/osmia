@@ -68,6 +68,28 @@ func (s *Service) configuredRerun(cfg *config.Config) CloudRerunner {
 	return DaggerChecks{CloudToken: token}
 }
 
+// configuredTrace is the runner that fetches a Dagger Cloud trace's output
+// for cfg: the Dagger CLI with the token dagger.cloud_token_env names, which
+// may be unset, in which case every fetch reports that no token is configured.
+func (s *Service) configuredTrace(cfg *config.Config) TraceRunner {
+	return traceRunner(s, cfg)
+}
+
+// traceRunner is s's configured trace runner for cfg. A nil s, which a turn
+// built before the service is attached has, runs the Dagger CLI with the
+// token cfg names.
+func traceRunner(s *Service, cfg *config.Config) TraceRunner {
+	if s != nil && s.options.CloudTrace != nil {
+		return s.options.CloudTrace
+	}
+	if cfg == nil {
+		return DaggerChecks{}
+	}
+	token := os.Getenv(cfg.Dagger.Resolve().CloudTokenEnv)
+	redact.Register(token)
+	return DaggerChecks{CloudToken: token}
+}
+
 func (s *Service) ensureEngine(ctx context.Context, cfg *config.Config) error {
 	// Read and register the token before any engine command can report an error.
 	s.configuredChecks(cfg)

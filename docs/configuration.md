@@ -794,6 +794,31 @@ the Dagger Cloud token `cloud_token_env` names, without engine, provider,
 GitHub or SSH credentials. Final reviews take no check slot.
 There is no command fallback.
 
+The chief of staff and the final reader can read a failed check's trace through
+the service-run `read_cloud_trace` action: a trace ID, as a failed check's
+`dagger trace <id>` command names it, and optionally the check's name to narrow
+the output to that check. The service runs `dagger cloud traces view`
+for it, with a check passed as the single element `--check=<name>`, in a private
+temporary HOME with PATH, NO_COLOR and the Dagger Cloud token `cloud_token_env`
+names and nothing else, under a two-minute timeout. A fetch with no token
+configured returns the reason `no_token`. The scrubbed output, at most 64 KiB
+and its end when longer, is recorded as `traces/<trace ID>-all.json` for the
+whole trace or `traces/<trace ID>-check-<digest>.json` for one check, readable
+by every role with `factory_context`, and a later request for the same trace ID
+and narrowing returns that record.
+
+When a failed Dagger Cloud result is recorded, the service runs the same fetch
+for each failed check that names a trace ID, narrowed to that check, under the
+same timeout, and records it as the check's own
+`traces/<trace ID>-check-<digest>.json`; checks that share a trace ID each have
+a record. A fetch that fails or times out is recorded with its reason as
+`traces/<trace ID>-check-<digest>-failed.json`. Each trace ID and check is
+fetched once, across retries and restarts, and a retry after an interruption
+fetches only the pairs with neither record. The fetch never changes the recorded
+result or the rerun and never fails the final review. The final reader's view
+holds these records, or their failures, under `final/checks-<k>-traces/` beside
+`final/checks-<k>.json`.
+
 Reviewers read diffs through the `workstream_diff` tool rather than their
 prompts, which list the changed files with added and removed line counts. A unit
 reviewer reads its pinned candidate against its base, and the service refuses a

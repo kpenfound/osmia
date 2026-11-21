@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
@@ -946,7 +947,7 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.SelectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, reviewtools.DiffToolName}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, reviewtools.DiffToolName, checks.TraceToolName}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.Repository.Project()) || !strings.HasPrefix(scope.Turn, FinalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -958,6 +959,7 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 				return nil, err
 			}
 			cfg := a.S.About(a.Repository)
+			fetch := checks.TraceTool(checks.TraceFetcher{Repository: a.Repository, Runner: a.S.CloudTrace, Now: a.S.Now}, scope, FinalReviewActor, committeeRole)
 			read := func(from, to string) func(ctx context.Context) (string, error) {
 				return func(ctx context.Context) (string, error) {
 					g, err := featureWorkspaces(cfg, a.Repository).Of(stream)
@@ -970,11 +972,11 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 			branch := reviewtools.PinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit, Read: read(report.Upstream.Commit, report.Commit)}
 			previous, found, err := PreviousFinalReport(a.Repository, stream, in.Review)
 			if err != nil || !found {
-				return []coreadapter.Tool{tool, reviewtools.DiffTool(branch)}, err
+				return []coreadapter.Tool{tool, fetch, reviewtools.DiffTool(branch)}, err
 			}
 			branch.Name = "branch"
 			since := reviewtools.PinnedDiff{Name: "since", About: fmt.Sprintf("what changed since final review %d read %s, including any upstream change a rebase brought in", previous.Review, previous.Commit), From: previous.Commit, To: report.Commit, Read: read(previous.Commit, report.Commit)}
-			return []coreadapter.Tool{tool, reviewtools.DiffTool(branch, since)}, nil
+			return []coreadapter.Tool{tool, fetch, reviewtools.DiffTool(branch, since)}, nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -1724,6 +1726,7 @@ func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 			held += fmt.Sprintf("- %s: the complete captured check output that record names.\n", path)
 		}
 	}
+	held += finalTraceEvidence(checks)
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
 
 Check result:

@@ -180,6 +180,8 @@ type flowJourney struct {
 	host     *cloudHost
 	checks   *countingChecks
 	rerunLog string
+	// traceLog holds the calls the fake `dagger` got that fetch a trace.
+	traceLog string
 	received string
 	held     []func()
 }
@@ -192,14 +194,15 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	t.Helper()
 	bin := t.TempDir()
 	rerunLog := filepath.Join(t.TempDir(), "rerun.log")
-	script := fmt.Sprintf("#!/bin/sh\n{ printf 'args=%%s\\n' \"$*\"; printf 'pwd=%%s\\n' \"$(pwd -P)\"; printf 'token=%%s\\n' \"$DAGGER_CLOUD_TOKEN\"; } >> '%s'\n", rerunLog)
+	traceLog := filepath.Join(t.TempDir(), "trace.log")
+	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = cloud ] && [ \"$2\" = traces ]; then\n  printf '%%s\\n' \"$*\" >> '%s'\n  echo \"trace output of: $*\"\n  echo \"token: $DAGGER_CLOUD_TOKEN\"\n  exit 0\nfi\n{ printf 'args=%%s\\n' \"$*\"; printf 'pwd=%%s\\n' \"$(pwd -P)\"; printf 'token=%%s\\n' \"$DAGGER_CLOUD_TOKEN\"; } >> '%s'\n", traceLog, rerunLog)
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0o700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(flowTokenEnv, flowToken)
 
 	clock := &flowClock{at: demoStart}
 	b := newBriefFixtureAt(t, "[dagger]\ncloud_token_env = \""+flowTokenEnv+"\"\n[events]\nwindow = \"1ms\"\nprogress_window = \"1ms\"\n", clock.Now)
-	j := &flowJourney{briefJourney: b, clock: clock, checks: &countingChecks{}, rerunLog: rerunLog}
+	j := &flowJourney{briefJourney: b, clock: clock, checks: &countingChecks{}, rerunLog: rerunLog, traceLog: traceLog}
 	j.host = newCloudHost(j.clock)
 	j.fork, j.pulls = fixturekit.PublicationFork(t, b.clone, func() string { commit, _ := j.forkBranch(t); return commit })
 	j.pulls.SyncHead = true
@@ -299,6 +302,17 @@ func (j *flowJourney) rerunCalls(t *testing.T) []string {
 	}
 	must(t, err)
 	return strings.Split(strings.TrimSpace(string(data)), "args=")[1:]
+}
+
+// traceCalls returns the trace fetches the fake `dagger` got, one entry per call.
+func (j *flowJourney) traceCalls(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(j.traceLog)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	must(t, err)
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
 // finalOperation returns final review k's operation.
