@@ -318,7 +318,7 @@ failure and stays failed.
 Recording a flake changes no outcome: the run passes, fails or stays incomplete
 exactly as it does without anything below. What follows applies only to a
 project with `flake_fixes = true`
-([configuration](configuration.md#project-configtoml)); with the default it is off,
+([configuration](configuration.md#project-settings)); with the default it is off,
 nothing is recorded or sent, and the chief of staff's `flake_fix` tool refuses.
 
 **Groups and occurrences.** Flakes are grouped by flake group, not by exact

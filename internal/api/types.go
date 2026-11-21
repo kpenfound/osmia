@@ -128,18 +128,18 @@ type Diagnostic struct {
 // the creation time of each project's newest workstream, newest first. Every
 // kind of workstream counts, archived ones included while their creation time
 // can be read. Projects with equal newest times, and projects without a
-// workstream, which come last, keep their active_projects order. Callers who
-// need the configuration file's order read Effective.ActiveProjects.
+// workstream, which come last, keep the project registry's order. Callers who
+// need the registry's order read Effective.ActiveProjects.
 // LastError is the last failed reload, until a reload succeeds.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
 	Project     *ProjectView   `json:"project"`
-	Projects    []ProjectView  `json:"projects,omitempty" description:"Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep their active_projects order. Read effective.active_projects for the configuration file's order."`
+	Projects    []ProjectView  `json:"projects,omitempty" description:"Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep the project registry's order. Read effective.active_projects for the registry's order."`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
-	// Drift compares the configuration files on disk with the loaded
+	// Drift compares the top-level configuration file on disk with the loaded
 	// configuration.
 	Drift ConfigDrift `json:"drift"`
 	// Tailnet is the tailnet listener's state; it is omitted unless
@@ -155,22 +155,20 @@ const (
 	ConfigInvalid   = "invalid"
 )
 
-// ConfigDrift lists the top-level configuration file, then each active
-// project's, and any other file a reload would refuse. Differs is true when
-// any of them is not unchanged.
+// ConfigDrift lists the top-level configuration file, the only file a reload
+// reads. Project settings are not files and never appear. Differs is true when
+// the file is not unchanged.
 type ConfigDrift struct {
 	Differs bool         `json:"differs"`
 	Files   []ConfigFile `json:"files"`
 }
 
 // ConfigFile is one configuration file's State against the loaded
-// configuration. Project names the project a project file belongs to. Reason
-// says why an invalid file fails, as a reload reports it.
+// configuration. Reason says why an invalid file fails, as a reload reports it.
 type ConfigFile struct {
-	Path    string           `json:"path"`
-	Project config.ProjectID `json:"project,omitempty"`
-	State   string           `json:"state"`
-	Reason  string           `json:"reason,omitempty"`
+	Path   string `json:"path"`
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ReloadResponse reports an applied reload: the digest of the configuration
@@ -628,7 +626,7 @@ type RuntimeResponse struct {
 	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode, in the order of
 	// ConfigResponse.Projects.
-	Projects []ProjectRuntime `json:"projects" description:"Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in active_projects order."`
+	Projects []ProjectRuntime `json:"projects" description:"Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in registry order."`
 	// Jev reports Jev's mode. Every mode but ready means its judgments fall
 	// back.
 	Jev         jev.Status   `json:"jev"`

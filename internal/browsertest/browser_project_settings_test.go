@@ -2,39 +2,38 @@ package browsertest
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/chromedp/chromedp"
-	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
 type ProjectConfigEdit = service.ProjectConfigEdit
 type ProjectConfigEditValues = service.ProjectConfigEditValues
 
-// ownerTables is what an owner keeps below a project file's root keys: an
-// ignored [preview] table and a commented capacity.
+// ownerTables is what an owner keeps below a project's root keys: an ignored
+// [preview] table and a commented capacity.
 const ownerTables = "\n[preview]\ncall = [\"serve\"]\nport = 8080\n\n[capacity]\n# Keep this low.\ngit_operations = 3\n"
 
-// settingsFixture is a running service with one project whose file an owner
-// keeps by hand, and a page on its Project management view.
+// settingsFixture is a running service with one project whose stored settings
+// carry an owner's own text, and a page on its Project management view.
 type settingsFixture struct {
 	t       *testing.T
 	s       *Service
 	c       *Client
 	p       *page
 	project config.ProjectID
-	path    string
-	// before is the file as the page first read it.
+	root    config.Root
+	// before is the stored settings as the page first read them.
 	before string
 }
 
 // newSettingsFixture starts a real service on a temporary root and registers
-// a project. Its file is commented and carries the owner's own root keys, then
-// ownerTables; the service loads it before the page opens.
+// a project. Its settings are commented and carry the owner's own root keys,
+// then ownerTables; the service adopts them before the page opens.
 func newSettingsFixture(t *testing.T, rootKeys string) *settingsFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
@@ -46,13 +45,20 @@ func newSettingsFixture(t *testing.T, rootKeys string) *settingsFixture {
 	project := added.Project.ID
 	snapshot, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	base, err := os.ReadFile(snapshot.Path)
+	root, err := config.ResolveRoot(opts.Config.Root, "")
 	must(t, err)
-	text := "# Owner notes.\n" + string(base) + rootKeys + ownerTables
-	must(t, os.WriteFile(snapshot.Path, []byte(text), 0600))
-	_, err = c.Reload(ctx)
+	store := projectstore.Open(root)
+	base, err := store.Current(project)
 	must(t, err)
-	return &settingsFixture{t: t, s: s, c: c, project: project, path: snapshot.Path, before: text}
+	text := "# Owner notes.\n" + string(base.Data) + rootKeys + ownerTables
+	owned, err := store.Replace(project, snapshot.Pin, []byte(text))
+	must(t, err)
+	// A save that changes nothing makes the service adopt the owner's text.
+	_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: owned.Pin})
+	must(t, err)
+	f := &settingsFixture{t: t, s: s, c: c, project: project, root: root}
+	f.before = f.disk()
+	return f
 }
 
 // open shows the project's settings in Project management at the viewport's
@@ -71,7 +77,7 @@ func (f *settingsFixture) open(width, height int64) {
 	f.p.OpenView("projects")
 	f.p.Choose("#project-edit [name=project]", string(f.project))
 	f.p.Eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
-	f.p.AwaitText("#config-file", f.path)
+	f.p.AwaitText("#config-file", "Stored settings of project "+string(f.project))
 	f.p.Await("settings read", `document.querySelector('#project-config').dataset.pin !== ''`)
 }
 
@@ -83,22 +89,27 @@ func settingMarker(name, part string) string {
 
 func settingsResult() string { return "#project-config .result" }
 
+// disk is the text of the project's current stored revision.
 func (f *settingsFixture) disk() string {
 	f.t.Helper()
-	data, err := os.ReadFile(f.path)
+	revision, err := projectstore.Open(f.root).Current(f.project)
 	must(f.t, err)
-	return string(data)
+	return string(revision.Data)
 }
 
-// hand edits the file on disk the way an owner does, without reloading.
+// hand records an edit of the stored settings the way another writer does,
+// without the service adopting it.
 func (f *settingsFixture) hand(from, to string) string {
 	f.t.Helper()
-	text := f.disk()
-	edited := strings.Replace(text, from, to, 1)
-	if edited == text {
-		f.t.Fatalf("%q is not in the file:\n%s", from, text)
+	store := projectstore.Open(f.root)
+	current, err := store.Current(f.project)
+	must(f.t, err)
+	edited := strings.Replace(string(current.Data), from, to, 1)
+	if edited == string(current.Data) {
+		f.t.Fatalf("%q is not in the stored settings:\n%s", from, current.Data)
 	}
-	must(f.t, os.WriteFile(f.path, []byte(edited), 0600))
+	_, err = store.Replace(f.project, current.Pin, []byte(edited))
+	must(f.t, err)
 	return edited
 }
 
@@ -113,20 +124,6 @@ func (f *settingsFixture) effective() config.Project {
 	}
 	f.t.Fatalf("project %s is not in effect: %+v", f.project, cfg.Effective.Projects)
 	return config.Project{}
-}
-
-// drift is the state of the project's file against the loaded configuration.
-func (f *settingsFixture) drift() string {
-	f.t.Helper()
-	cfg, err := f.c.Configuration(context.Background())
-	must(f.t, err)
-	for _, file := range cfg.Drift.Files {
-		if file.Path == f.path {
-			return file.State
-		}
-	}
-	f.t.Fatalf("no drift entry for %s: %+v", f.path, cfg.Drift.Files)
-	return ""
 }
 
 // keepsOtherBytes checks that after holds every line of before in order,
@@ -149,15 +146,15 @@ lines:
 				continue lines
 			}
 		}
-		t.Fatalf("line %q of the file was dropped or reordered:\nbefore:\n%s\nafter:\n%s", line, before, after)
+		t.Fatalf("line %q of the stored settings was dropped or reordered:\nbefore:\n%s\nafter:\n%s", line, before, after)
 	}
 }
 
-// Project management shows every setting of the project file with the file's
-// values, marks the omitted ones as defaults, and saves a change to the file
-// the service runs from: the file's other content stays as it was, the service
-// uses the new values without a reload, and the drift view shows no drift.
-func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
+// Project management shows every setting of the project with its stored
+// values, marks the omitted ones as defaults, and saves a change as a new
+// revision of the stored settings: the other content stays as it was and the
+// service uses the new values without a reload.
+func TestBrowserProjectManagementSavesProjectSettingsToTheStore(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
 	ctx := context.Background()
@@ -172,15 +169,15 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
 			defaults = append(defaults, setting.Name)
 		}
 	}
-	f.p.Await("every setting of the file, in order", `[...document.querySelectorAll('#config-fields [data-setting]')].map(n => n.dataset.setting).join(',') === `+quote(strings.Join(names, ",")))
+	f.p.Await("every setting of the stored settings, in order", `[...document.querySelectorAll('#config-fields [data-setting]')].map(n => n.dataset.setting).join(',') === `+quote(strings.Join(names, ",")))
 	f.p.Await("omitted settings marked as defaults and no others", `[...document.querySelectorAll('#config-fields [data-setting]')].filter(n => n.querySelector('[data-marker=default]').textContent !== '').map(n => n.dataset.setting).join(',') === `+quote(strings.Join(defaults, ",")))
 	f.p.Await("no setting pending", `[...document.querySelectorAll('#config-fields [data-marker=pending]')].every(n => n.textContent === '')`)
 	for _, setting := range read.Settings {
 		if text, ok := setting.Value.(string); ok {
-			f.p.Await("the file's value of "+setting.Name, `document.querySelector(`+quote(settingInput(setting.Name))+`).value === `+quote(text))
+			f.p.Await("the stored value of "+setting.Name, `document.querySelector(`+quote(settingInput(setting.Name))+`).value === `+quote(text))
 		}
 	}
-	f.p.Await("the saved capacity from the file", `document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '3'`)
+	f.p.Await("the saved capacity from the stored settings", `document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '3'`)
 	f.p.Await("a default shown with its value", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === `+quote(config.DefaultChecksTimeout))
 	f.p.AwaitText(settingMarker("capacity.per_workstream", "default"), "inherited")
 	f.p.Await("settings fit at phone width", `document.documentElement.scrollWidth <= innerWidth && document.querySelector('#config-fields').getBoundingClientRect().right <= innerWidth`)
@@ -195,13 +192,13 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
 	disk := f.disk()
 	for _, want := range []string{`checks_timeout = "30m"`, "git_operations = 5", `hearsay_scope = "work:main:shop"`, `cart = "code:shop:cart"`} {
 		if !strings.Contains(disk, want) {
-			t.Fatalf("%s is not in the file:\n%s", want, disk)
+			t.Fatalf("%s is not in the stored settings:\n%s", want, disk)
 		}
 	}
 	keepsOtherBytes(t, f.before, disk, "git_operations = 3")
 	for _, kept := range []string{"# Owner notes.", "[preview]", `call = ["serve"]`, "port = 8080", "# Keep this low."} {
 		if !strings.Contains(disk, kept) {
-			t.Fatalf("%q was lost from the file:\n%s", kept, disk)
+			t.Fatalf("%q was lost from the stored settings:\n%s", kept, disk)
 		}
 	}
 	// No Reload was pressed: the service already runs the saved values.
@@ -209,58 +206,48 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheFile(t *testing.T) {
 	if p.ChecksTimeout != "30m" || p.Capacity.GitOperations != 5 || p.HearsayScope != "work:main:shop" || p.HearsayEntities["cart"] != "code:shop:cart" {
 		t.Fatalf("in effect: %+v", p)
 	}
-	if state := f.drift(); state != api.ConfigUnchanged {
-		t.Fatalf("drift of the saved file: %s", state)
-	}
 	saved, err := f.c.ProjectConfig(ctx, f.project)
 	must(t, err)
-	f.p.Await("the save sent only the changed settings, pinned to the file it read", `(() => {
+	f.p.Await("the save sent only the changed settings, pinned to the revision it read", `(() => {
       const w = managementWrites.at(-1);
       return w.method === 'PUT' && w.body.pin === `+quote(read.Pin)+` && Object.keys(w.body.set).sort().join(',') === 'capacity.git_operations,checks_timeout,hearsay_entities,hearsay_scope' && w.body.clear.length === 0;
     })()`)
-	f.p.Await("the form holds the saved file's version, without a pending value", `document.querySelector('#project-config').dataset.pin === `+quote(saved.Pin)+` && document.querySelector('#project-config .result').textContent.includes(`+quote(f.path)+`) && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === '' && document.querySelector(`+quote(settingMarker("checks_timeout", "pending"))+`).textContent === ''`)
+	f.p.Await("the form holds the saved revision, without a pending value", `document.querySelector('#project-config').dataset.pin === `+quote(saved.Pin)+` && document.querySelector('#project-config .result').textContent.includes('Saved project settings as revision') && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === '' && document.querySelector(`+quote(settingMarker("checks_timeout", "pending"))+`).textContent === ''`)
 }
 
-// A hand edit the service has not applied shows as the file's value marked
-// not yet applied beside the value in effect. A save of another setting keeps
-// the edit in the file and puts it into effect, rather than reverting it.
-func TestBrowserProjectManagementShowsAnUnappliedHandEditAndKeepsItOnSave(t *testing.T) {
+// A stored revision the service has not applied shows as the stored value
+// marked not yet applied beside the value in effect. A save of another
+// setting builds on it and puts it into effect, rather than reverting it.
+func TestBrowserProjectManagementShowsAnUnappliedRevisionAndKeepsItOnSave(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
 	f.hand("landing = \"commit-per-unit\"\n", "landing = \"commit-per-unit\"\nchecks_timeout = \"20m\"\n")
 	if p := f.effective(); p.ChecksTimeout != config.DefaultChecksTimeout {
-		t.Fatalf("the hand edit was applied: %+v", p)
+		t.Fatalf("the unapplied revision was applied: %+v", p)
 	}
 	f.open(1280, 800)
 
-	f.p.Await("the file's value", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '20m'`)
+	f.p.Await("the stored value", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '20m'`)
 	f.p.AwaitText(settingMarker("checks_timeout", "pending"), "Not yet applied. In effect: "+config.DefaultChecksTimeout)
-	f.p.Await("only that setting pending and set in the file", `[...document.querySelectorAll('#config-fields [data-marker=pending]')].filter(n => n.textContent !== '').length === 1 && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === ''`)
-	if f.drift() != api.ConfigChanged {
-		t.Fatalf("drift of the hand-edited file: %s", f.drift())
-	}
+	f.p.Await("only that setting pending and set in the stored settings", `[...document.querySelectorAll('#config-fields [data-marker=pending]')].filter(n => n.textContent !== '').length === 1 && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === ''`)
 
 	f.p.SetValue(settingInput("capacity.git_operations"), "2")
 	f.p.Click("#project-config [type=submit]")
 	managementOutcome(f.p, settingsResult(), "ok")
 	disk := f.disk()
 	if !strings.Contains(disk, `checks_timeout = "20m"`) || !strings.Contains(disk, "git_operations = 2") {
-		t.Fatalf("the hand edit or the saved value is not in the file:\n%s", disk)
+		t.Fatalf("the earlier revision's edit or the saved value is not in the stored settings:\n%s", disk)
 	}
 	p := f.effective()
 	if p.ChecksTimeout != "20m" || p.Capacity.GitOperations != 2 {
 		t.Fatalf("both changes are in effect: %+v", p)
 	}
-	if state := f.drift(); state != api.ConfigUnchanged {
-		t.Fatalf("drift after the save: %s", state)
-	}
 	f.p.Await("nothing pending after the save", `[...document.querySelectorAll('#config-fields [data-marker=pending]')].every(n => n.textContent === '')`)
 }
 
 // An invalid value is refused with the field error on the page, the draft
-// stays, and the file and the loaded configuration stay as they were. A
-// check that spans files is refused the same way, and the kept draft saves
-// once it is corrected.
+// stays, and the stored settings and the loaded configuration stay as they
+// were. The kept draft saves once it is corrected.
 func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -273,7 +260,7 @@ func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testi
 	f.p.Await("the draft kept and the field marked", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === 'soon' && document.querySelector(`+quote(settingInput("checks_timeout"))+`).getAttribute('aria-invalid') === 'true'`)
 	f.p.AwaitText(settingsResult(), "checks_timeout")
 	if f.disk() != f.before {
-		t.Fatalf("a refused save changed the file:\n%s", f.disk())
+		t.Fatalf("a refused save changed the stored settings:\n%s", f.disk())
 	}
 	if p := f.effective(); p.ChecksTimeout != config.DefaultChecksTimeout {
 		t.Fatalf("a refused save changed the loaded configuration: %+v", p)
@@ -286,7 +273,7 @@ func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testi
 	f.p.AwaitText(settingsResult(), "landing")
 	f.p.Await("both fields of the draft kept", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '30m' && document.querySelector(`+quote(settingInput("landing"))+`).value === 'sideways'`)
 	if f.disk() != f.before {
-		t.Fatalf("a refused save changed the file:\n%s", f.disk())
+		t.Fatalf("a refused save changed the stored settings:\n%s", f.disk())
 	}
 
 	f.p.SetValue(settingInput("landing"), "squash")
@@ -297,42 +284,40 @@ func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testi
 	}
 }
 
-// A save pinned to a file that changed on disk after the page read it is
-// refused as stale and writes nothing. The draft stays with a notice that
-// the configuration changed elsewhere, until the owner reads the latest file
-// values, which show the hand edit as not yet applied.
+// A save pinned to a revision that another writer replaced after the page read
+// it is refused as stale and writes nothing. The draft stays with a notice that
+// the configuration changed elsewhere, until the owner reads the latest stored
+// values, which show the other revision as not yet applied.
 func TestBrowserProjectManagementRefusesAStaleSaveAndLoadsTheLatestValues(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
 	f.open(1280, 800)
-	f.p.Await("the file's capacity", `document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '3'`)
+	f.p.Await("the stored capacity", `document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '3'`)
 
 	f.p.SetValue(settingInput("capacity.git_operations"), "6")
 	edited := f.hand("landing = \"commit-per-unit\"\n", "landing = \"commit-per-unit\"\nchecks_timeout = \"20m\"\n")
 	f.p.Click("#project-config [type=submit]")
 	managementOutcome(f.p, settingsResult(), "error")
-	f.p.AwaitText(settingsResult(), "changed since it was read")
+	f.p.AwaitText(settingsResult(), "changed since they were read")
 	f.p.Await("the stale notice and the draft", `!document.querySelector('#config-changed').hidden && document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '6'`)
 	if f.disk() != edited {
-		t.Fatalf("a stale save wrote to the file:\n%s", f.disk())
+		t.Fatalf("a stale save wrote to the stored settings:\n%s", f.disk())
 	}
 
 	f.p.Click("#project-config [data-action=read-config]")
 	managementOutcome(f.p, settingsResult(), "ok")
-	f.p.Await("the latest file values, with the hand edit not yet applied", `document.querySelector('#config-changed').hidden &&
+	f.p.Await("the latest stored values, with the other revision not yet applied", `document.querySelector('#config-changed').hidden &&
       document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '20m' &&
       document.querySelector(`+quote(settingInput("capacity.git_operations"))+`).value === '3' &&
       document.querySelector(`+quote(settingMarker("checks_timeout", "pending"))+`).textContent.includes('In effect: `+config.DefaultChecksTimeout+`')`)
 	if p := f.effective(); p.ChecksTimeout != config.DefaultChecksTimeout {
 		t.Fatalf("loading the latest values reloaded the service: %+v", p)
 	}
-	if f.drift() != api.ConfigChanged {
-		t.Fatalf("drift of the hand-edited file: %s", f.drift())
-	}
 }
 
-// Clearing a field on the page and saving removes its key from the file,
-// and the default or inherited value then applies and shows as the default.
+// Clearing a field on the page and saving removes its key from the stored
+// settings, and the default or inherited value then applies and shows as the
+// default.
 func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "checks_timeout = \"30m\" # the owner's choice\n")
@@ -340,7 +325,7 @@ func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 		t.Fatalf("before: %+v", p)
 	}
 	f.open(1280, 800)
-	f.p.Await("the file's timeout, not a default", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '30m' && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === ''`)
+	f.p.Await("the stored timeout, not a default", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '30m' && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === ''`)
 
 	f.p.SetValue(settingInput("checks_timeout"), "")
 	f.p.SetValue(settingInput("fork"), "")
@@ -348,11 +333,11 @@ func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 	managementOutcome(f.p, settingsResult(), "ok")
 	disk := f.disk()
 	if strings.Contains(disk, "checks_timeout") || strings.Contains(disk, "fork =") {
-		t.Fatalf("cleared keys are still in the file:\n%s", disk)
+		t.Fatalf("cleared keys are still in the stored settings:\n%s", disk)
 	}
 	for _, kept := range []string{"# Owner notes.", "[preview]", "# Keep this low.", "git_operations = 3", "upstream = "} {
 		if !strings.Contains(disk, kept) {
-			t.Fatalf("%q was lost from the file:\n%s", kept, disk)
+			t.Fatalf("%q was lost from the stored settings:\n%s", kept, disk)
 		}
 	}
 	if p := f.effective(); p.ChecksTimeout != config.DefaultChecksTimeout || p.Fork != "" {

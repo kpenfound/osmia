@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -60,7 +61,9 @@ func (f *Project) Start(t *testing.T) { t.Helper(); f.S, f.C = Start(t, f.Option
 func (f *Project) SeedBuild(t *testing.T, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	return intakefixture.SeedBuild(t, f.Stop, func() *config.Config {
-		cfg, err := config.Load(f.Options.Config)
+		top, err := config.LoadTopLevel(f.Options.Config)
+		fixturekit.Must(t, err)
+		cfg, err := projectmigration.Apply(top, f.Options.Config.Home)
 		fixturekit.Must(t, err)
 		return cfg.For(f.ID)
 	}, f.recordBuild, key, graph, backend, base)

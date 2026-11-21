@@ -38,6 +38,9 @@ const usage = `Usage: osmia <command> [--root PATH]
   project create <name> --repo NAME --charter-file PATH|- [--description TEXT] [--public] [--id PROJECT-ID] [--json]
   project create --id PROJECT-ID [--json]
   project remove <project-id> [--json]
+  project settings <project-id> show [--json]  offline repair: read a stored project's settings
+  project settings <project-id> set NAME=VALUE... [--json]  record a new revision; the service must be stopped
+  project settings <project-id> clear NAME... [--json]  record a new revision without those settings
   project memory <project-id>
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
@@ -89,8 +92,11 @@ const usage = `Usage: osmia <command> [--root PATH]
   design start <design-id> [--json]  starts a workgroup from the drafted brief
   design destroy <design-id> [--json]
   config [--json]
+  config validate [--config PATH]  check a top-level config file offline; no service needed
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
+config validate reads only the top-level file: --config PATH, else the file --root resolves to.
+project settings works offline on the root's store and refuses while the service runs; use the Settings page then.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
 `
 
@@ -98,7 +104,7 @@ type options struct {
 	root, socket, reason, project, base             string
 	upstream, fork, clone, baseBranch               string
 	repo, description, charterFile, id              string
-	profile, title, from                            string
+	profile, title, from, config                    string
 	json, hard, reasonSet, help, target, accept     bool
 	skipDebate, version, detach, public, creating   bool
 	projectSpecRevision, specRevision, planRevision int
@@ -120,7 +126,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -175,6 +181,8 @@ func parse(args []string) (o options, err error) {
 				o.title = value
 			case "--from":
 				o.from = value
+			case "--config":
+				o.config = value
 			case "--project-spec-revision", "--spec-revision", "--plan-revision":
 				n, err := strconv.Atoi(value)
 				if err != nil || n < 1 {
@@ -291,8 +299,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1
 	case "conversation", "feed":
 		valid = len(a) == 1
-	case "inbox", "reload", "config":
+	case "inbox", "reload":
 		valid = len(a) == 0
+	case "config":
+		valid = len(a) == 0 && o.config == "" || len(a) == 1 && a[0] == "validate" && !o.json && o.socket == ""
 	case "answer":
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
@@ -317,6 +327,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "rebase" || a[0] == "memory") ||
+			len(a) >= 3 && a[0] == "settings" && o.socket == "" && (len(a) == 3 && a[2] == "show" || len(a) >= 4 && (a[2] == "set" || a[2] == "clear")) ||
 			len(a) == 1 && a[0] == "create" && o.id != "" && o.repo == "" && o.charterFile == "" && o.description == "" && !o.public
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
@@ -334,8 +345,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
 		return invalid()
+	}
+	if cmd == "config" && len(a) == 1 {
+		// Offline: dispatched before any socket, client or state is set up.
+		return runConfigValidate(o.root, o.config, stdout, stderr)
 	}
 	root, err := config.ResolveRoot(o.root, "")
 	if err != nil {
@@ -364,6 +379,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "doctor" {
 		return runDoctor(ctx, root, o.json, stdout, stderr)
+	}
+	if cmd == "project" && a[0] == "settings" {
+		// Offline: dispatched before any socket or client is set up.
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		return runProjectSettings(root, id, a[2], a[3:], o.json, stdout, stderr)
 	}
 	socket := o.socket
 	if socket == "" {
@@ -439,6 +462,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Configuration: %s (%s)\n", cfg.Digest, cfg.Root)
 		showConfigDrift(stdout, cfg.Drift)
 		if cfg.Effective != nil {
+			showRegistry(stdout, cfg.Effective.Projects)
 			showErrorReports(stdout, cfg.Effective.ErrorReports)
 		}
 		diagnostics(stdout, cfg.Diagnostics)
@@ -1823,19 +1847,23 @@ func showDailyBudget(w io.Writer, b *wire.DailyBudgetStatus) {
 	fmt.Fprintln(w)
 }
 
-// showConfigDrift prints each configuration file's state against the loaded
-// configuration.
+// showConfigDrift prints the top-level configuration file's state against the
+// loaded configuration.
 func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 	for _, f := range d.Files {
-		line := "Config file: " + f.Path
-		if f.Project != "" {
-			line += " (project " + string(f.Project) + ")"
-		}
-		line += ": " + f.State
+		line := "Config file: " + f.Path + ": " + f.State
 		if f.Reason != "" {
 			line += ": " + f.Reason
 		}
 		fmt.Fprintln(w, line)
+	}
+}
+
+// showRegistry prints the active projects in registry order, each with the
+// settings it runs with, which come from the project store.
+func showRegistry(w io.Writer, projects []config.Project) {
+	for _, p := range projects {
+		fmt.Fprintf(w, "Registered project: %s (%s) upstream=%s push-repository=%s clone=%s base_branch=%s\n", p.ID, p.Name, p.Upstream, p.PushRepository(), p.Clone, p.BaseBranch)
 	}
 }
 

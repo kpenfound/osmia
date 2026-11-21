@@ -10,6 +10,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.T) {
@@ -18,7 +19,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	names := map[config.ProjectID]string{project: "Dagger", otherProject: "Osmia"}
 	for _, p := range f.cfg.Projects {
 		p.Name = names[p.ID]
-		must(t, config.WriteProjectConfig(filepath.Join(f.opts.Config.Root, "projects", string(p.ID), "config.toml"), p))
+		fixturekit.WriteProjectFile(t, filepath.Join(f.opts.Config.Root, "projects", string(p.ID), "config.toml"), p)
 	}
 	withWeb(t, f.opts, "127.0.0.1:0")
 	clone := filepath.Join(t.TempDir(), "client")

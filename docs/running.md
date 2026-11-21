@@ -173,11 +173,11 @@ loads the latest text.
 
 Project management shows the project's settings and the actions that affect that project. **Rebase workstreams** and removal affect that project. Removing it is refused while any member in any workgroup is unresolved. Project changes, charter saves and configuration saves arrive live, including API changes. Pause, capacity caps and `git_operations` affect only that project's member, subject to graph edges.
 
-**Project settings** shows every setting of the project's `projects/<project-id>/config.toml` and names that file: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the file's values as they are on disk. A setting the file leaves out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** writes only the fields you changed to the file, keeping its comments, key order, other tables and any hand edit; the service then uses the saved values without **Reload**, and the Configuration view shows no drift for that file. Clearing a field and saving removes its key, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
+**Project settings** shows every setting of the project's [stored settings](configuration.md#the-project-registry-and-settings-store), headed by the project and the stored revision it read: `name`, `upstream`, `fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`, `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`, `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo` (a `false`/`true` choice) and the `hearsay_entities` mapping (one `entity = Hearsay entity id` line each). The fields hold the stored values. A setting the stored settings leave out shows the value it would take and is marked **Default**; `capacity.per_workstream` shows the inherited top-level value. **Save settings** records only the fields you changed as a new revision, keeping the rest of the stored text, and the service then uses the saved values without **Reload**; the Configuration view is unaffected, because it compares only the top-level file. Clearing a field and saving removes its setting, so the default applies again; `upstream` and `clone` are required and cannot be cleared.
 
-If you hand-edited the file and the service has not reloaded it, the setting shows the file's value marked **Not yet applied** beside the value in effect. Saving another setting keeps that edit in the file and puts it into effect. If the file does not load, the view shows the loader's error and offers no save until the file is fixed by hand; the loaded values stay in effect.
+A setting whose stored value differs from the value in effect shows the stored value marked **Not yet applied** beside the value in effect. That happens after a save that was stored but not applied (below). Saving that project again keeps the stored value and puts every stored value into effect; a restart does too. **Reload** does not: it re-reads only the top-level file. If the stored settings do not load, for example because the project's `clone` is now a regular file, the view shows the loader's error, names the offline repair command for the setting at fault (`osmia project settings <project-id> set <setting>=VALUE`, which needs the service stopped), shows the values in effect read-only and offers no save; the loaded values stay in effect.
 
-A refused save, such as an invalid value or a failure preparing the service, keeps your draft and shows the field error or the reason; nothing is written. If the file changed elsewhere since the form read it, the save is refused as stale, writes nothing and keeps the draft with a notice that the configuration changed elsewhere. **Read settings** then loads the latest file values on purpose. An untouched form follows other clients' saves and reloads live; a form with a draft keeps its draft and version and shows the notice. A save that replaced the file but could not be applied is reported as saved, not as a refusal: the saved values show as **Not yet applied** at the file's new version, and **Reload** in Configuration, or a later save from the form, applies them.
+A refused save, such as an invalid value or a failure preparing the service, keeps your draft and shows the field error or the reason; nothing is written. If the stored settings changed elsewhere since the form read them, the save is refused as stale, writes nothing and keeps the draft with a notice that the settings changed elsewhere. **Read settings** then loads the latest stored values on purpose. An untouched form follows other clients' saves live; a form with a draft keeps its draft and version and shows the notice. A save that was recorded but could not be applied is reported as saved, not as a refusal: the saved values show as **Not yet applied** at the new revision, and the project's next save from the form, or a restart, applies them.
 
 Ask the chief in the workstream conversation to capture built work; previews need no project setup.
 
@@ -306,11 +306,11 @@ The member view is laid out like a chat client:
   including those archive entries, read only: it has no message field, and the
   view says “This workgroup is unavailable.” only when the group or its shared
   conversation is gone.
-- The settings menu opens new projects, projects and their charters, the
-  priority order, each role's profile with its provider's usage today, and
-  the loaded configuration with any [disk drift](#disk-drift) and settings
-  that need a restart. The settings button is marked while a reload has
-  something to apply.
+- The settings menu opens new projects, projects with their charters and stored
+  settings, the priority order, each role's profile with its provider's usage
+  today, and the loaded configuration with any [disk drift](#disk-drift) of the
+  top-level file and settings that need a restart. The settings button is
+  marked while a reload has something to apply.
 
 Images appear as inline thumbnails in workstream, shared workgroup and
 exploratory session feeds. Select a thumbnail to open the full-size image in a
@@ -569,7 +569,7 @@ merged, the approval is recorded and the pull request stays a draft until it
 has; you approve again once the dependency update has been reviewed.
 
 **Approve and land.** On a project whose
-[`delivery`](configuration.md#project-configtoml) is `jev`, the delivery card also
+[`delivery`](configuration.md#project-settings) is `jev`, the delivery card also
 offers **Approve and land** beside **Mark ready for review** (**Accept findings
 and land** when the final review has blocking findings). It is pinned to the
 same review, commit and description, and works whether or not Jev is configured.
@@ -726,25 +726,114 @@ and what to do when a mason runs out of memory are in
 [Sandbox size](configuration.md#sandbox-size). Osmia sets no `cpus` or `memory`
 of its own.
 
+## Projects, their settings and the import
+
+The active projects, in order, and every active project's settings live in
+Osmia's own store under the root, in `<root>/project-store/`, not in a file you
+edit. [The store](configuration.md#the-project-registry-and-settings-store)
+changes through the web page's project controls, `osmia project add`, `create`
+and `remove`, the Settings API and the offline `osmia project settings` repair.
+**The service never writes the top-level `config.toml`**: it reads that file
+only, so the file can be read-only, owned by a deployment tool or kept in a
+dotfiles repository, and it stays byte for byte as you left it through startup,
+doctor, registration, removal, settings saves and reload.
+
+### First start after an upgrade
+
+A root that has `active_projects` in its top-level file and one
+`projects/<project-id>/config.toml` per listed project is imported into the store
+once, by the first `osmia serve` or `osmia doctor` that owns the root. Until the
+import is complete, the steps run in this order:
+
+1. the trace migration, as before;
+2. a project split that an earlier run journalled in `project-splits.json`
+   finishes;
+3. a preflight loads every listed project's file. If one does not load, the run
+   stops with the loader's error naming the file and the field, such as
+   `<root>/projects/<project-id>/config.toml: clone: …`. Nothing was modified:
+   no project file, no top-level file, no split journal, and nothing is marked
+   imported. Until the import is complete that file is still the project's only
+   settings, so the refusal is resolved by correcting the field the error names
+   and starting again;
+4. a new project split, if a listed project still names a group, covers listed
+   projects only; the files of projects that are not listed are not read or
+   rewritten;
+5. the import records the list, in order, and each listed file as that project's
+   first stored revision, marks each file retired, and records the import as
+   complete together with the registry.
+
+An interruption at any point resumes on the next start or doctor run without a
+second revision of any project and without losing a setting. A root with no
+`active_projects`, such as a fresh install, starts with an empty registry.
+
+Once the import is complete the service reads neither `active_projects` nor any
+`projects/<project-id>/config.toml` again, and startup and doctor look for no
+project split. A leftover `active_projects` in the top-level file is accepted and
+ignored, and the service logs a warning at startup and reload that it has no
+effect. Editing it, or a retired file, changes no project and no setting.
+
+Each imported file stays at `projects/<project-id>/config.toml` with the settings
+it held at the import, now starting with a comment block that says it is
+retired: Osmia reads project settings from its store, the file is no longer read
+and edits to it have no effect. Files of projects that were not listed in
+`active_projects` are never imported and never changed.
+
+### Rolling back
+
+The store adds nothing that an earlier Osmia version refuses to open. If you
+roll back to that version and its top-level file, which still lists
+`active_projects`, it starts on the retired project files and runs the projects
+and settings as they stood at the import. From then on the two versions keep
+separate records: a project added, removed or reconfigured by one version after
+the import is not seen by the other, which reads only its own files or its own
+store.
+
+### When a project's stored settings do not load
+
+If the environment changes so that a project's stored settings no longer load,
+for example its `clone` becomes a regular file, `osmia serve` refuses to start
+and `osmia doctor` fails. The error names the project, the setting and the
+reason, and ends with how to correct it:
+
+```text
+project p_0123456789abcdef0123456789abcdef settings: clone: must be a directory; correct it with osmia project settings p_0123456789abcdef0123456789abcdef set clone=VALUE while the service is stopped
+```
+
+With the service stopped, run `osmia project settings <project-id> show` to read
+the stored settings, then `osmia project settings <project-id> set
+clone=~/src/widgets`. The command applies a settings save's validation and
+records the result as a new revision; it changes neither the registry nor the
+top-level file and reads no retired file. While a service runs, the command
+refuses and writes nothing: use the Settings page or `PUT
+/v1/projects/config/<project-id>`. See [the command](cli.md#command-line).
+
 ## Reload
 
 `osmia reload` (or the page's reload control) reads the top-level
-`config.toml` and the `config.toml` of every project in `active_projects`, and
-validates them together. If any file fails, nothing changes: the loaded
+`config.toml` and validates it. If it fails, nothing changes: the loaded
 configuration stays in force and the error names the file, the field and why.
 `osmia config` shows that failure until a reload succeeds.
 
-When every file passes, the new configuration replaces the loaded one in one
+When the file passes, the new configuration replaces the loaded one in one
 step. Profiles, role bindings and sandboxes, capacity, budgets, shed and mason
-limits, the webhook and project settings apply to what the service decides
-next. A turn already running finishes on the configuration it started with, so
-a changed `cpus` or `memory` of an `sbx` role applies to sandboxes created
-afterwards.
-Projects added to `active_projects` start; projects removed from it stop
-taking new work and drain what is in flight before the reload returns.
+limits and the webhook apply to what the service decides next, together with
+each active project's effective settings: those the project already runs with,
+plus the top-level settings it inherits, such as `capacity.per_workstream` when a
+project leaves it out. A turn already running finishes on the configuration it
+started with, so a changed `cpus` or `memory` of an `sbx` role applies to
+sandboxes created afterwards.
+
+A reload never adds or removes a project and never adopts a stored revision of a
+project's settings. A save that returned `saved_not_applied` therefore stays
+pending across a reload: the project keeps running on its previous settings and
+the saved revision is still shown as **Not yet applied**. The project's next
+successful save, which builds on the pending revision because its pin names it,
+or a restart, puts it into effect. Project settings change only through the
+Settings page, the API, the offline repair command and the load of the stored
+revisions at startup.
 
 The root, `listen.socket`, `listen.web`, `listen.tailnet`,
-`listen.tailnet_https` and the `[telemetry]` table keep their loaded values until the service restarts; the reload lists the ones the files change
+`listen.tailnet_https` and the `[telemetry]` table keep their loaded values until the service restarts; the reload lists the ones the file changes
 as requiring a restart.
 
 Pauses, priorities and profile overrides are runtime state, not
@@ -754,12 +843,14 @@ applies again once a reload brings the profile back.
 
 ### Disk drift
 
-`osmia config` and the page compare the configuration files on disk with the
-loaded configuration, so you can see whether a reload has something to apply
-without applying it. Each file is `unchanged`, `changed` when a setting it
+`osmia config` and the page compare the top-level configuration file on disk
+with the loaded configuration, so you can see whether a reload has something to
+apply without applying it. The file is `unchanged`, `changed` when a setting it
 holds differs from the loaded one, or `invalid` when it cannot be read or does
-not validate, with the reason. A comment or formatting change leaves a file
-`unchanged`.
+not validate, with the reason. A comment or formatting change leaves it
+`unchanged`. Drift covers the top-level file only: a stored revision that is
+pending, a leftover `active_projects` and a retired project file are never
+drift.
 
 ## Notifications
 
@@ -1101,7 +1192,7 @@ each carrying `project`, and `workstream` and `unit` when there are any:
 - `service started` (`version`, `commit`, `root`, `listeners`) and
   `service stopped` (`reason`).
 - `project started`, `project draining` and `project stopped` (`reason`).
-- `reload succeeded` (`digest`, `restart_required`, `added`, `removed`) and
+- `reload succeeded` (`digest`, `restart_required`) and
   `reload failed` (`error`).
 - `api request handled` (`listener`, `method`, `path`, `status`,
   `duration`), with no request or response body.

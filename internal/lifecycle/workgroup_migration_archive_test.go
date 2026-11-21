@@ -75,8 +75,7 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 				if !errors.Is(err, crash) {
 					t.Fatalf("startup interruption: got %v, want %v", err, crash)
 				}
-				cfg, err := config.Load(opts.Config)
-				must(t, err)
+				cfg := loadRegistered(t, opts.Config)
 				repo, err := trace.Open(cfg.Root, cfg.For(projects[0]).Project)
 				must(t, err)
 				var revision int

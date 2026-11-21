@@ -375,7 +375,7 @@ follows the source. Documents and decisions on both sources follow their
 project's current access.
 
 A project can opt in to declaring its GitHub repo on its Hearsay project
-(`hearsay_declare_repo` in its `config.toml`, off by default). With the project's
+(`hearsay_declare_repo` in its settings, off by default). With the project's
 `upstream` set, its Hearsay project then declares
 `{"source": "github", "project": "<upstream>"}` in `repos`. Its records then
 become visible to everyone who can read that repository in Hearsay, which for a

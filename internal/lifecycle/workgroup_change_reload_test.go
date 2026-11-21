@@ -2,18 +2,17 @@ package lifecycle_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestApprovedChangeSurvivesProjectRemovalGateAndReaddition(t *testing.T) {
+func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
@@ -40,14 +39,10 @@ func TestApprovedChangeSurvivesProjectRemovalGateAndReaddition(t *testing.T) {
 	if api != nil {
 		t.Fatal(api)
 	}
-	path := filepath.Join(f.opts.Config.Root, "config.toml")
-	original, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, []byte(strings.Replace(string(original), `"`+string(project)+`", `, "", 1)), 0600))
-	_, err = client.Reload(ctx)
+	_, err := client.RemoveProject(ctx, project)
 	assertCode(t, err, Validation)
 	if approved.Workgroup == "" || !strings.Contains(err.Error(), string(approved.Workgroup)) || !s.current().Active(project) {
-		t.Fatalf("reload did not refuse removal and name the unresolved workgroup: %v", err)
+		t.Fatalf("removal was not refused naming the unresolved workgroup: %v", err)
 	}
 	repo := f.repository(project)
 	changes, err := readChanges(repo, stream)
@@ -74,25 +69,22 @@ func TestApprovedChangeSurvivesProjectRemovalGateAndReaddition(t *testing.T) {
 	if len(finished.Applied) != 1 || finished.Applied[0] != stream || !equalJSONTest(finished.Decision, approved.Decision) || !equalJSONTest(finished.Members, approved.Members) || !equalJSONTest(finished.Before, approved.Before) || !equalJSONTest(finished.After, approved.After) {
 		t.Fatalf("cancellation changed original pins or duplicated effects: %+v", finished)
 	}
-	// The cancellation resolves the member, so removing and re-adding its
-	// project can now reload the journal without repeating its effects.
-	_, err = client.Reload(ctx)
+	// The cancellation resolves the member, so its project can now be removed;
+	// the retained trace holds the applied journal as it was.
+	_, err = client.RemoveProject(ctx, project)
 	must(t, err)
 	if s.current().Active(project) {
 		t.Fatal("resolved project stayed active after removal")
 	}
-	must(t, os.WriteFile(path, original, 0600))
-	_, err = client.Reload(ctx)
+	resolved, err := config.ResolveRoot(f.opts.Config.Root, "")
 	must(t, err)
-	if !s.current().Active(project) {
-		t.Fatal("resolved project was not re-added")
-	}
-	repo, err = s.repository(project)
+	repo, err = trace.OpenByID(resolved, project)
 	must(t, err)
+	defer repo.Close()
 	changes, err = readChanges(repo, stream)
 	must(t, err)
 	if len(changes) != 1 || !equalJSONTest(changes[0], finished) {
-		t.Fatalf("readdition changed the applied journal: %+v", changes)
+		t.Fatalf("removal changed the applied journal: %+v", changes)
 	}
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	must(t, err)

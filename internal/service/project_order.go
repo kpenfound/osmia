@@ -10,7 +10,7 @@ import (
 // projectsByNewestWorkstream returns cfg's active project IDs ordered by the
 // creation time of each project's newest workstream, newest first. Projects
 // with equal newest times, and projects with no readable workstream creation
-// time, keep their active_projects order, the latter after every other.
+// time, keep their registry order, the latter after every other.
 func (s *Service) projectsByNewestWorkstream(cfg *config.Config) []config.ProjectID {
 	ids := cfg.ProjectIDs()
 	if len(ids) < 2 {

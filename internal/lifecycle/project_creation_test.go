@@ -120,8 +120,7 @@ func (f *creationFixture) assertNothingWritten(t *testing.T, existing ...string)
 // and the journal is gone.
 func (f *creationFixture) assertCompleted(t *testing.T, s *Service, c *Client, id config.ProjectID, req wire.ProjectCreateRequest) {
 	t.Helper()
-	cfg, err := config.Load(f.opts.Config)
-	must(t, err)
+	cfg := loadRegistered(t, f.opts.Config)
 	if !cfg.Active(id) {
 		t.Fatalf("project %s is not active: %v", id, cfg.ActiveProjects)
 	}

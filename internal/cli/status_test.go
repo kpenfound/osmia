@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -544,9 +545,14 @@ func TestConfigCommandShowsDiskDrift(t *testing.T) {
 	root := opts.Config.Root
 	var loaded wire.ConfigResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &loaded))
-	top, proj := loaded.Drift.Files[0].Path, loaded.Drift.Files[1].Path
+	// The drift covers the top-level file only; the registry's projects follow.
+	if len(loaded.Drift.Files) != 1 || len(loaded.Effective.Projects) != 1 {
+		t.Fatalf("drift files %+v, projects %+v", loaded.Drift.Files, loaded.Effective.Projects)
+	}
+	top, p := loaded.Drift.Files[0].Path, loaded.Effective.Projects[0]
+	registered := fmt.Sprintf("Registered project: %s (%s) upstream=%s push-repository=%s clone=%s base_branch=%s\n", p.ID, p.Name, p.Upstream, p.PushRepository(), p.Clone, p.BaseBranch)
 	errorReports := "[error_reports]\nenabled = false\nrepository = \"kpenfound/osmia\"\nlabels = [\"factory-error\", \"automated\"]\nmax_issues_per_hour = 5\nmax_issues_per_day = 20\nmax_comments_per_day = 20\nsources = [\"api\", \"operation\", \"github\"]\n"
-	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\nConfig file: " + proj + " (project " + project + "): unchanged\n" + errorReports; successful(t, root, "config") != want {
+	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\n" + registered + errorReports; successful(t, root, "config") != want {
 		t.Fatalf("config as loaded:\n%s\nwant:\n%s", successful(t, root, "config"), want)
 	}
 

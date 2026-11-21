@@ -31,6 +31,8 @@ osmia project memory p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
 osmia rebase w_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
+osmia project settings p_0123456789abcdef0123456789abcdef show
+osmia project settings p_0123456789abcdef0123456789abcdef set clone=~/src/widgets
 osmia edit charter p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia handin p_0123456789abcdef0123456789abcdef design.md --with p_1123456789abcdef0123456789abcdef
@@ -63,6 +65,7 @@ osmia profiles
 osmia profiles set mason default
 osmia profiles clear mason
 osmia config
+osmia config validate --config ./config.toml
 osmia reload
 osmia status --json
 ```
@@ -803,11 +806,13 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   edits the same documents through the same API.
 - `project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
-  validates the request, generates the project ID, writes
-  `projects/<id>/config.toml`, creates the trace repository with a charter
+  validates the request, generates the project ID, stores the project's first
+  settings in the [project store](configuration.md#the-project-registry-and-settings-store),
+  creates the trace repository with a charter
   template and an entity map seeded from the clone's tracked files as its
-  first revision, lists the ID in `active_projects` and activates the project
-  without a restart. The service then re-seeds the entity map by itself, from
+  first revision, adds the ID to the store's project registry and activates the
+  project without a restart. It writes neither the top-level `config.toml` nor
+  any project file. The service then re-seeds the entity map by itself, from
   CODEOWNERS and the directory structure of the upstream default branch, when
   an architect draft starts and again before a sealing resolves footprints; it
   records a new revision only when the map changes. The clone path is made
@@ -897,8 +902,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   other drift rebase holds it; follow them with `status`. A request also
   resumes a workstream whose drift rebase is held. A project ID that is
   not the active project fails with `not_found` (exit 4).
-- `project remove <project-id>` takes the active project out of
-  `active_projects` and closes its runtime state. Removal is refused while it
+- `project remove <project-id>` takes the active project off the project
+  registry and closes its runtime state. It writes neither the top-level
+  `config.toml` nor any project file; the project's stored settings stay in the
+  store. Removal is refused while it
   has any unresolved member in any workgroup. Its trace repository, every
   workstream's own trace repository and the clone are kept. Adding the same
   upstream again afterwards creates a new project ID and new trace
@@ -907,6 +914,42 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   removal and its pending Hearsay records in the retained trace without
   contacting Hearsay, and the service posts them afterwards; see
   [Hearsay integration](hearsay.md#project-removal).
+- `project settings <project-id> show`, `project settings <project-id> set
+  NAME=VALUE...` and `project settings <project-id> clear NAME...` are the
+  offline repair of a registered project's [stored
+  settings](configuration.md#repairing-stored-settings). Use them when the
+  stored settings no longer load, for example because the project's `clone` is
+  now a regular file, so that `osmia serve` refuses to start. They work with the
+  service stopped, need no socket and take no `--socket`. While a service owns
+  the root, or holds the project's trace, they refuse with exit 1, write nothing
+  and point to the Settings page and `PUT /v1/projects/config/<project-id>`;
+  stop the service with `osmia stop` to use them.
+  - `show` prints the current stored revision's number and every setting with its
+    value, marking a setting the revision leaves out `(default)`. A revision that
+    does not load prints the loader's error and its stored text instead, and the
+    command still exits 0. `--json` prints the revision, its `pin` and the
+    `settings` (`name`, `value`, `default`), or the `error` and `stored` text.
+  - `set` takes one or more `NAME=VALUE` arguments, where NAME is a setting of
+    the [project's settings](configuration.md#reading-and-saving-a-projects-settings)
+    or `hearsay_entities.<local entity id>` for one entity-map entry. `clear`
+    takes names alone and removes those settings, so the default or inherited
+    value applies again; an entity entry is cleared as
+    `hearsay_entities.<local entity id>`. Whole numbers are written bare
+    (`capacity.git_operations=4`) and booleans as `true` or `false`.
+  - An edit applies the same validation as a settings save, edits the stored
+    text the way a save does, and records the result as a new revision. It can
+    replace a revision that does not load, provided the edited result loads.
+    A refused edit prints `invalid settings: <error>; nothing was written`, with
+    the error naming the setting as a save's refusal does, and exits 1. A
+    successful edit prints `Project <id>: recorded settings revision <n> (it
+    replaces revision <m>). The service uses it when it starts.` With `--json`
+    it prints `project`, `revision`, `previous` and `pin`.
+  - The command reads only the top-level file and the project store. It never
+    reads a retired `projects/<id>/config.toml` and never changes the project
+    registry or the top-level file. A project that is not on the registry is
+    refused, and a root that has not completed its first start is refused with
+    a note to start the service once. A command line that is not one of the
+    three forms, or a project ID that is malformed, exits 2.
 - `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file
@@ -973,16 +1016,53 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   `profiles set <role> <profile>` overrides a binding.
   `profiles clear <role>` restores its configured default.
 - `config` shows the loaded configuration's digest and root, then one line
-  per configuration file comparing it on disk with the loaded configuration
-  (`Config file: <path>[ (project <id>)]: unchanged`, `changed`, or
+  comparing the top-level file on disk with the loaded configuration
+  (`Config file: <path>: unchanged`, `changed`, or
   `invalid: <field>: <reason>`; see [disk drift](running.md#disk-drift)),
+  the registry's projects in registry order with the settings each runs with
+  (`Registered project: <id> (<name>) upstream=… clone=… base_branch=…`),
   the configuration diagnostics and the last failed reload. Reading it applies
   nothing; `reload` does. It takes no argument.
+- `config validate [--config <path>]` checks one top-level configuration file
+  offline, under the rules `osmia serve` applies when it loads that file. It is
+  the check a deployment tool can run before it hands a file to the service; see
+  [validating a configuration offline](configuration.md#validating-a-configuration-offline).
+  - **Which file.** With `--config <path>`, that file. Without it, the file the
+    root resolves to: `~/.config/osmia/config.toml` (or under
+    `$XDG_CONFIG_HOME`), or `<root>/config.toml` with `--root`. `--config`
+    wins over `--root`. A relative path resolves against the working
+    directory.
+  - **Exit 0** when the file is valid. It prints `<path>: valid` to stdout.
+    Load warnings, such as an ignored `[beekeeper]` or `[roles.librarian]`
+    section or a leftover `active_projects`, go to stderr as `warning: <text>`
+    and leave the exit code 0.
+  - **Exit 1** when the file is invalid or unreadable. Stdout is empty and
+    stderr carries the loader's error, naming the file and the field as
+    `<path>: <field>: <reason>`, or `<path>: cannot be read`. The error never
+    quotes a value from the file; wrong-typed values and malformed TOML name
+    the key and the line, never the text.
+  - **Exit 2** for a usage error: an unknown argument, a duplicate `--config`,
+    `--json`, `--socket`, or an invalid root.
+  - **Offline.** It does not contact the service and needs no socket or running
+    service. It reads only the top-level file: no project file, no project
+    store, no trace, no runtime state. It creates no file or directory, the root
+    included, and makes no network call. It never reads the value of an
+    environment variable a setting names (`cloud_token_env`, `headers_env`,
+    `api_key_env` and the like), so it passes whether or not the variable is
+    set. It does not check the host, such as whether a clone exists or a port is
+    free.
+  - **`active_projects`.** A top-level file that still lists `active_projects`
+    validates when the list is well formed (each entry `p_` followed by 32
+    lowercase hex digits, no duplicates). An Osmia that has not imported its
+    projects yet reads the list once; one that has ignores it with a warning.
+    The command does not check that the listed projects exist.
 - `reload` asks the service to [reload its configuration](running.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
-  to apply: <settings>` when the files change settings that only a restart
-  applies. A file that fails validation fails with `validation` (exit 4),
-  naming the file and field; the loaded configuration stays in force.
+  to apply: <settings>` when the file changes settings that only a restart
+  applies. A reload reads only the top-level file. A file that fails
+  validation fails with `validation` (exit 4), naming the file and field; the
+  loaded configuration stays in force. It never adds or removes a project and
+  does not apply a stored revision of a project's settings.
 - `session open <project-id> --profile <name> [--title TEXT]` opens a
   [session](design.md#68-sessions): a direct chat with one agent on its own
   worktree, outside the rest of the factory. `--profile` is required and
@@ -1061,6 +1141,8 @@ osmia status --socket local.sock --json
 
 Clients never load configuration, runtime, trace or project files. They obtain
 the active project and effective values over HTTP using the service client.
+Two commands are offline and take no socket: `config validate` and
+`project settings`.
 Changing socket configuration requires restarting the service and updating the
 client's `--socket` argument.
 
@@ -1172,7 +1254,7 @@ the root and the configuration directly, the way `serve` does.
 | Group | Checks |
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
-| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
+| `config` | The top-level `config.toml` loads and validates; the project import completes when doctor owns the root, and every registered project's stored settings load (see [the import](configuration.md#the-one-time-import)); `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
 | `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
@@ -1203,6 +1285,18 @@ detail states the estimate and these assumptions and whose fix is to set
 [Sandbox size](configuration.md#sandbox-size). The check is a warning too
 when doctor cannot read the host's memory.
 
+Before the project import is complete, doctor runs it when it owns the root, in
+the order startup runs it and with the same refusals: see [the one-time
+import](configuration.md#the-one-time-import). A listed project file that does
+not load fails the `config` group with the project, the file and the field, and
+doctor changes no project file and records nothing as imported. While a service
+owns the root, doctor does not import; it reads the projects from their files
+and changes nothing. A project registration waiting for the service to finish it
+is a warning that says the import has not run yet. After the import, doctor reads
+the registry and each project's stored settings and never a retired project
+file; a project whose stored settings do not load fails with the setting named
+and the offline repair command. Doctor never writes the top-level file.
+
 Checks that need something an earlier check found missing are left out: with
 no root only the toolchain and GitHub checks run, and with a configuration
 that does not load neither do the project checks. While a service owns the
@@ -1221,7 +1315,7 @@ root
   ✓ socket                                      /home/kyle/.local/share/osmia/osmia.sock is stale; serve removes it
 
 config
-  ✓ config.toml                                 /home/kyle/.config/osmia/config.toml (2 profiles, 1 active projects)
+  ✓ config.toml                                 /home/kyle/.config/osmia/config.toml (2 profiles)
   ✓ project p_0123456789abcdef0123456789abcdef  widgets (acme/widgets)
   ✓ jev                                        Jev is configured with OPENROUTER_API_KEY set for ~typesafe/jev-latest
 
@@ -1235,7 +1329,7 @@ toolchain
 projects
   ✓ widgets clone                               /home/kyle/src/widgets
   ✗ widgets upstream                            remote "origin" has no branch main
-      → set base_branch in the project's config.toml to a branch of acme/widgets
+      → set base_branch to a branch of acme/widgets with osmia project settings p_0123456789abcdef0123456789abcdef set base_branch=BRANCH while the service is stopped
 
 github
   ✓ GITHUB_TOKEN                                authenticates as kyle

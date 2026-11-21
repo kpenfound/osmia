@@ -23,6 +23,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectmigration"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -87,6 +89,10 @@ type Options struct {
 	// https://api.github.com.
 	GitHubAPI string
 	HTTP      *http.Client
+	// Step, when set, is called after each durable step of the project
+	// migration with its name. A failure stops the migration there, as a crash
+	// would. Tests use it.
+	Step func(string) error
 }
 
 // commandTimeout bounds each tool, remote and API probe.
@@ -132,7 +138,8 @@ func Run(ctx context.Context, o Options) []Check {
 	if lock != nil {
 		defer unlock(lock)
 	}
-	cfg, projects := r.config()
+	r.owned = lock != nil
+	cfg, projects := r.config(ctx)
 	r.toolchain(ctx, cfg)
 	if cfg != nil {
 		r.engine(ctx, cfg)
@@ -166,6 +173,9 @@ type run struct {
 	checks []Check
 	// running is set when a service owns the root.
 	running bool
+	// owned is set when doctor holds the root's ownership lock, so no service
+	// can start or write while it migrates the root's projects.
+	owned bool
 	// rootReady is set when the root is an accessible directory.
 	rootReady bool
 }
@@ -241,8 +251,10 @@ func (r *run) serviceLog() {
 }
 
 // config loads the top-level configuration and each active project's, and
-// returns the configuration with the projects that loaded.
-func (r *run) config() (*config.Config, []config.Project) {
+// returns the configuration with the projects that loaded. While no service
+// owns the root, it first completes the migration of the root's projects into
+// the store, as serve does on startup.
+func (r *run) config(ctx context.Context) (*config.Config, []config.Project) {
 	if !r.rootReady {
 		return nil, nil
 	}
@@ -256,20 +268,99 @@ func (r *run) config() (*config.Config, []config.Project) {
 		r.add(GroupConfig, "config.toml", Fail, configReason(err), remedy)
 		return nil, nil
 	}
-	r.add(GroupConfig, "config.toml", Pass, fmt.Sprintf("%s (%d profiles, %d active projects)", path, len(cfg.Profiles), len(cfg.ActiveProjects)), "")
+	r.add(GroupConfig, "config.toml", Pass, fmt.Sprintf("%s (%d profiles)", path, len(cfg.Profiles)), "")
+	return cfg, r.projects(ctx, cfg)
+}
+
+// projects returns the root's active projects that load. Once the import is
+// complete they are the registry's, loaded from the store, and no project file
+// is read. Before it, doctor completes the import when it owns the root; a
+// root a service owns, or one with a project registration waiting for serve to
+// finish it, has its projects read from their files without any change.
+func (r *run) projects(ctx context.Context, cfg *config.Config) []config.Project {
+	store := projectstore.Open(cfg.Root)
+	imported, err := store.Imported()
+	if err != nil {
+		r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
+		return nil
+	}
+	if !imported && r.owned {
+		pending, _ := cfg.Root.PendingProject()
+		if _, err := os.Stat(pending); err == nil {
+			r.add(GroupConfig, "project import", Warn, "a project registration is waiting to finish, so the projects are not imported yet", "start the service; it finishes the registration and then imports the projects")
+		} else if err := projectmigration.New(cfg, r.Home, r.Step).Run(ctx); err != nil {
+			r.importFailed(cfg, err)
+			return nil
+		} else {
+			imported = true
+		}
+	}
 	var projects []config.Project
+	if imported {
+		ids, err := store.Projects()
+		if err != nil {
+			r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
+			return nil
+		}
+		for _, id := range ids {
+			file, _, err := store.Load(cfg, r.Home, id)
+			if err != nil {
+				r.add(GroupConfig, "project "+string(id), Fail, storedReason(err), "correct the stored setting named with osmia project settings "+string(id)+" set NAME=VALUE while the service is stopped")
+				continue
+			}
+			projects = append(projects, r.projectLoaded(file.Project))
+		}
+		return projects
+	}
 	for _, s := range cfg.ActiveProjects {
 		id, _ := config.ParseProjectID(s)
 		loaded, err := cfg.WithProject(id, r.Home)
 		if err != nil {
-			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named, or remove "+s+" from active_projects")
+			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again")
 			continue
 		}
-		p := loaded.Project
-		r.add(GroupConfig, "project "+s, Pass, fmt.Sprintf("%s (%s)", p.Name, p.Upstream), "")
-		projects = append(projects, p)
+		projects = append(projects, r.projectLoaded(loaded.Project))
 	}
-	return cfg, projects
+	return projects
+}
+
+// projectLoaded reports a project that loaded and returns it.
+func (r *run) projectLoaded(p config.Project) config.Project {
+	r.add(GroupConfig, "project "+string(p.ID), Pass, fmt.Sprintf("%s (%s)", p.Name, p.Upstream), "")
+	return p
+}
+
+// importFailed reports a migration that stopped. A listed project's file that
+// did not load is reported as that project, with the file and the field; the
+// import then changed nothing.
+func (r *run) importFailed(cfg *config.Config, err error) {
+	var field *config.FieldError
+	if errors.As(err, &field) {
+		for _, s := range cfg.ActiveProjects {
+			id, perr := config.ParseProjectID(s)
+			if perr != nil {
+				continue
+			}
+			if path, perr := cfg.Root.ProjectConfig(id); perr == nil && path == field.Path {
+				r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again; the import changed nothing")
+				return
+			}
+		}
+	}
+	r.add(GroupConfig, "project import", Fail, configReason(err), "run osmia doctor again, or start the service; the import resumes where it stopped")
+}
+
+// storedReason is the text of a stored project's settings that did not load:
+// the field and why, without the retired file the loader names.
+func storedReason(err error) string {
+	var field *config.FieldError
+	if !errors.As(err, &field) {
+		return "the stored settings cannot be loaded"
+	}
+	if field.Field == "" {
+		return field.Reason
+	}
+	return field.Field + ": " + field.Reason
 }
 
 // configReason is a configuration error's text. A field error never carries
@@ -420,7 +511,7 @@ func (r *run) project(ctx context.Context, p config.Project) {
 	name := p.Name
 	info, err := os.Stat(p.Clone)
 	if err != nil || !info.IsDir() {
-		r.add(GroupProjects, name+" clone", Fail, p.Clone+" is not a directory", "clone "+p.Upstream+" to "+p.Clone+", or fix clone in the project's config.toml")
+		r.add(GroupProjects, name+" clone", Fail, p.Clone+" is not a directory", "clone "+p.Upstream+" to "+p.Clone+", or point the project at its clone with osmia project settings "+string(p.ID)+" set clone=PATH while the service is stopped")
 		return
 	}
 	short, cancel := context.WithTimeout(ctx, commandTimeout)
@@ -428,20 +519,20 @@ func (r *run) project(ctx context.Context, p config.Project) {
 	git := exec.CommandContext(short, "git", "-C", p.Clone, "rev-parse", "--is-inside-work-tree")
 	git.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
 	if out, err := git.Output(); err != nil || strings.TrimSpace(string(out)) != "true" {
-		r.add(GroupProjects, name+" clone", Fail, p.Clone+" is not a Git work tree", "clone "+p.Upstream+" to "+p.Clone+", or fix clone in the project's config.toml")
+		r.add(GroupProjects, name+" clone", Fail, p.Clone+" is not a Git work tree", "clone "+p.Upstream+" to "+p.Clone+", or point the project at its clone with osmia project settings "+string(p.ID)+" set clone=PATH while the service is stopped")
 		return
 	}
 	r.add(GroupProjects, name+" clone", Pass, p.Clone, "")
 	g := &workspace.Git{Clone: p.Clone}
-	r.remote(ctx, g, name+" upstream", p.Upstream, p.BaseBranch, p.Clone)
+	r.remote(ctx, g, p.ID, name+" upstream", p.Upstream, p.BaseBranch, p.Clone)
 	if push := p.PushRepository(); push != p.Upstream {
-		r.remote(ctx, g, name+" fork", push, "", p.Clone)
+		r.remote(ctx, g, p.ID, name+" fork", push, "", p.Clone)
 	}
 }
 
 // remote checks that the clone has a remote for repository and that it
 // answers, and when branch is set, that the branch exists there.
-func (r *run) remote(ctx context.Context, g *workspace.Git, check, repository, branch, clone string) {
+func (r *run) remote(ctx context.Context, g *workspace.Git, id config.ProjectID, check, repository, branch, clone string) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	remote, err := g.Remote(ctx, repository)
@@ -459,7 +550,7 @@ func (r *run) remote(ctx context.Context, g *workspace.Git, check, repository, b
 		return
 	}
 	if branch != "" && !exists {
-		r.add(GroupProjects, check, Fail, fmt.Sprintf("remote %q has no branch %s", remote, branch), "set base_branch in the project's config.toml to a branch of "+repository)
+		r.add(GroupProjects, check, Fail, fmt.Sprintf("remote %q has no branch %s", remote, branch), "set base_branch to a branch of "+repository+" with osmia project settings "+string(id)+" set base_branch=BRANCH while the service is stopped")
 		return
 	}
 	detail := fmt.Sprintf("remote %q answers", remote)
@@ -590,9 +681,7 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 		r.add(GroupState, "workgroup traces", Fail, "trace migration is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the workgroup traces under "+filepath.Join(cfg.Root.String(), "workgroups"))
 	}
 	workstreams := map[config.ProjectID][]config.WorkstreamID{}
-	var ids []config.ProjectID
 	for _, p := range projects {
-		ids = append(ids, p.ID)
 		check := p.Name + " trace"
 		directory, err := cfg.Root.ProjectTrace(p.ID)
 		if err != nil {
@@ -631,10 +720,7 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 		workstreams[p.ID] = streams
 		r.add(GroupState, check, Pass, fmt.Sprintf("%s (%d workstreams)", directory, len(streams)), "")
 	}
-	loaded, err := cfg.WithProjects(ids, r.Home)
-	if err != nil {
-		return
-	}
+	loaded := cfg.WithLoadedProjects(projects)
 	path, _ := cfg.Root.Runtime()
 	st, diagnostics, err := runtime.Open(runtime.Inputs{Config: loaded, Workstreams: workstreams})
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,8 @@ import (
 	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -46,7 +49,7 @@ func newSplitJourney(t *testing.T) *splitJourney {
 		p.Name = []string{"Server", "Client"}[i]
 		path, err := cfg.Root.ProjectConfig(id)
 		must(t, err)
-		must(t, config.WriteProjectConfig(path, p))
+		fixturekit.WriteProjectFile(t, path, p)
 		data, err := os.ReadFile(path)
 		must(t, err)
 		source := ""
@@ -56,6 +59,21 @@ func newSplitJourney(t *testing.T) *splitJourney {
 		j.configs[id] = " # Repository settings\n" + string(data) + "\n# Keep this comment\n"
 		must(t, os.WriteFile(path, []byte(fmt.Sprintf("group_id = %q", source)+j.configs[id]), 0600))
 	}
+	// The root is a legacy root again: its projects are listed and have files
+	// but nothing is imported, so the next start imports them and splits the
+	// grouped ones.
+	storeDirectory, err := cfg.Root.ProjectStore()
+	must(t, err)
+	must(t, os.RemoveAll(storeDirectory))
+	top, err := cfg.Root.Config()
+	must(t, err)
+	text, err := os.ReadFile(top)
+	must(t, err)
+	listed := regexp.MustCompile(`(?m)^active_projects = .*$`).ReplaceAllString(string(text), fmt.Sprintf("active_projects = [%q, %q]", f.project, f.project2))
+	if listed == string(text) {
+		t.Fatal("fixture did not list the projects")
+	}
+	must(t, os.WriteFile(top, []byte(listed), 0600))
 	f.start(t)
 	j.checkSplit(t)
 	return j
@@ -77,7 +95,7 @@ func (j *splitJourney) checkSplit(t *testing.T) {
 		must(t, err)
 		data, err := os.ReadFile(path)
 		must(t, err)
-		if string(data) != j.configs[id] {
+		if string(data) != projectstore.RetiredMark+j.configs[id] {
 			t.Fatalf("startup changed more than group_id: %q", data)
 		}
 		charter, err := j.c.Charter(context.Background(), id)

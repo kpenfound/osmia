@@ -1,17 +1,25 @@
 # Configuration
 
-`internal/config.Load` reads and validates the entire declarative configuration.
-It returns a configuration only when the top-level file and every active
-repo configuration pass. It creates no directories, repositories, sockets or state and does
-not launch agents. The local service owns startup and the Unix
-socket. Registration through `osmia project add` writes
-the project file and edits `active_projects`; see [project registration](#project-registration).
-A running service applies edited files through [reload](running.md#reload).
+Osmia's configuration has two authorities, and nothing layers one over the
+other. A **top-level setting** comes only from the top-level `config.toml`, a
+file you or a deployment tool own. Osmia reads it and never writes it. A
+**project setting**, and the list of active projects, comes only from Osmia's own
+[project registry and settings store](#the-project-registry-and-settings-store)
+under the root, which the service changes through registration, the Settings
+page and API and the offline [repair command](#repairing-stored-settings).
+
+`internal/config.LoadTopLevel` reads and validates the top-level file, and the
+store supplies each registered project's settings under the same validation. The
+service starts only when both pass. Loading creates no directories, repositories,
+sockets or state and does not launch agents. The local service owns startup and
+the Unix socket. A running service applies an edited top-level file through
+[reload](running.md#reload). `osmia config validate` checks that file without a
+service; see [validating a configuration offline](#validating-a-configuration-offline).
 Startup performs the recoverable migrations described below.
 
 ## Projects, repos and workgroups
 
-A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps and entity map. Its `p_…` ID identifies it in `active_projects` and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters and entity maps are independent for every project.
+A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps and entity map. Its `p_…` ID identifies it in the project registry and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters and entity maps are independent for every project.
 
 A workgroup represents one feature across any number of selected active projects. It has one member workstream per project, one shared chief, one workgroup spec, contracts and graph, and one ratification. The workgroup appears under each member's project card and sidebar group row, with members labelled by project name. Briefs, workgroup specs, slices and all factory state stay outside target repositories. File-based context supports the whole flow without Hearsay.
 
@@ -60,8 +68,7 @@ follows the XDG base directories:
 
 Each XDG variable is used only when it is an absolute path; there is no
 Osmia-specific environment variable. The default top-level file may be a
-symlink, for example into a dotfiles repository; it is read and edited at its
-target. Relative explicit roots resolve against the process working
+symlink, for example into a dotfiles repository; it is read at its target. Relative explicit roots resolve against the process working
 directory. `~` and `~/` use the user's home; `Options.Home` supplies an absolute
 home for embedding and tests. Other users' tilde syntax is rejected. Paths are
 absolute and cleaned, and existing symlink ancestors are resolved without requiring
@@ -89,7 +96,11 @@ configuration list; they belong to persisted workstream manifests.
 <root>/error-reports.json                     the error reporter's saved state: the issues it filed, its caps and its unresolved writes, once error_reports.enabled has been set
 <root>/slot-intervals.json                    capacity slots held or waited for at the last stop, once telemetry is on; a restart sends their spans with the original start
 <root>/service-intervals.json                 the pool limit intervals and uptime of the running service, while [telemetry] is on
-<root>/projects/<repo-id>/config.toml
+<root>/project-store/registry.json            the ordered project registry and whether the project import is complete
+<root>/project-store/settings/<repo-id>/<n>.toml  one stored revision of a project's settings
+<root>/project-store/lock                      the lock every write to the store holds
+<root>/project-splits.json                     journal of a project split, while one is unfinished
+<root>/projects/<repo-id>/config.toml          a retired file of an imported project, never read again; absent for projects registered since
 <root>/projects/<repo-id>/trace.db             project charter, entity map and lasting decisions
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
 <root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own trace.db and osmia.lock, separate from projects/<repo-id>/
@@ -112,16 +123,17 @@ database the next time the service opens its project; see
 
 `Root` provides checked helpers for these paths. Managed state paths reject
 symlink aliases, including aliases within the root that could collapse two
-identities; an explicit root's `config.toml` is managed the same way. The clone
+identities; an explicit root's `config.toml` is managed the same way, and is only
+read. The clone
 and root must be separate, non-nested directories, including after resolving
-symlinks. Relative clone paths resolve from the project configuration
-directory; missing clones are accepted for configuration purposes. Loading
+symlinks. Relative clone paths resolve from the project's directory under the
+root; missing clones are accepted for configuration purposes. Loading
 configuration writes nothing in the clone. Helpers check existing paths, not future filesystem changes;
 state writers must protect against concurrent symlink replacement.
 
 ### Project and workgroup migration
 
-At startup, each repo of a multi-repo project becomes an independent project, keeping its existing `p_` ID. Each split-off charter copies the group's current rules and numbers as a charter revision naming its source project and source charter revision. The owner edits each charter separately afterwards. Startup removes `group_id` from every configuration file, preserving every other byte, including comments. It is no longer a supported configuration field. The split is crash-safe and idempotent: interrupted startup resumes without duplicate charter revisions. Existing workgroups keep their identity, members, approvals, revision pins and shared chief without another ratification.
+At startup, each repo of a multi-repo project becomes an independent project, keeping its existing `p_` ID. Each split-off charter copies the group's current rules and numbers as a charter revision naming its source project and source charter revision. The owner edits each charter separately afterwards. Until the [project import](#the-one-time-import) is complete, startup removes `group_id` from the file of each listed project, preserving every other byte, including comments, and never rewrites the file of a project that is not listed. Once the import is complete, startup looks for no project to split. `group_id` is no longer a supported configuration field. The split is crash-safe and idempotent: interrupted startup resumes without duplicate charter revisions. Existing workgroups keep their identity, members, approvals, revision pins and shared chief without another ratification.
 
 Existing one-repo projects keep their ID, paths, charter and settings. The project/workgroup migration puts every non-session workstream, including building, delivered, abandoned and archived records, in its own workgroup with the existing chief thread. Exploratory sessions keep their kind and thread outside workgroups and remain excluded from factory passes. Traces, rulings, decisions and archive records are preserved without owner action. Repeated starts do not duplicate records or require moving existing member traces.
 
@@ -167,22 +179,180 @@ Workstreams already in `workstreams-deleting/` are deleted as they are.
 Progress, completion and any failure are logged, naming the project and
 workstream and never trace content or credentials.
 
+## Validating a configuration offline
+
+`osmia config validate [--config <path>]` validates one top-level configuration
+file under the rules `osmia serve` applies when it loads that file, so a
+deployment tool can check a file before it reaches the service. With `--config` it
+validates that file; without it, the file the root resolves to
+(`~/.config/osmia/config.toml`, or `<root>/config.toml` under `--root`). It
+exits 0 when the file is valid and non-zero when it is invalid or unreadable,
+writing the loader's error to stderr as `<path>: <field>: <reason>` without
+quoting any value from the file. Load warnings, such as an ignored
+`[beekeeper]` section, go to stderr and leave the exit code 0. The exit codes and
+output are in the [command reference](cli.md#command-line).
+
+The command is offline. It needs no running service or socket, opens no trace,
+store or other state, creates no file or directory (a missing root stays
+missing), makes no network call and reads no file but the one it validates. It
+never reads the value of an environment variable a setting names, such as
+`cloud_token_env`, `headers_env` or `api_key_env`; it checks the names only. A
+top-level file that still carries a well-formed `active_projects` list validates,
+so one file is accepted both before and after the project import.
+
+## The project registry and settings store
+
+The **project registry** is the ordered list of active projects. Each active
+project's **settings**, every setting in [the project settings](#project-settings)
+including `hearsay_entities`, are kept as revisions of the project's settings
+text. Both live in the store under the root, `<root>/project-store/`:
+
+```text
+<root>/project-store/registry.json                the ordered project IDs and whether the import is complete
+<root>/project-store/settings/<project-id>/<n>.toml   revision n of a project's settings
+<root>/project-store/lock                         held by every write
+```
+
+The registry and each revision are published by renaming a synced temporary file,
+so a reader sees a whole record or none. A revision holds the same TOML text a
+project file held, so the validation, defaults and the `Default` markers of the
+Settings page are the same. Each saved change is a new revision; earlier
+revisions stay. The revision's `pin` names it and changes with every revision.
+The store adds nothing to the root's trace layout and nothing below `projects/`.
+
+The registry's order is the order projects were imported or added in, and it is
+the order of `/v1/config` `effective.active_projects` and of the registered
+projects `osmia config` lists. The `projects` list that `/v1/config` returns, and
+the web page's project pickers and Settings page, show the projects with their
+stored settings in the [recency order](#top-level-configtoml) described below,
+with ties in registry order. The registry changes only through project registration (`osmia project
+add`, `osmia project create` and the project pane's creation) and removal. A
+project's settings change only through the Settings page, `PUT
+/v1/projects/config/<project-id>`, the offline repair command, and a restart's
+load of the stored revisions. Project settings and the list of projects survive
+restarts: the same projects are active, in the same order, with the settings
+last saved.
+
+**The service never writes the top-level `config.toml`.** Startup, migration,
+`osmia doctor`, registration, creation, removal, a settings save, a settings
+repair and reload read it and nothing else; the file stays byte for byte as it
+was, and every one of them works when it is read-only. The top-level settings
+stay in that file and are not stored in the registry.
+
+### The one-time import
+
+A root from an earlier Osmia version kept the active projects as `active_projects`
+in the top-level file and each project's settings in
+`projects/<project-id>/config.toml`. The first `osmia serve` or `osmia doctor`
+that owns the root imports both into the store, once. The import follows the
+older migrations, in this order, until it is complete:
+
+1. the [trace migration](#trace-migration);
+2. a [project split](#project-and-workgroup-migration) that an earlier run
+   journalled in `project-splits.json` finishes;
+3. the **preflight**: every listed project's file must load, under the
+   project-file rules. If one does not, the run stops with the loader's error
+   naming the file and the field, the import is not marked complete, and this
+   run has modified no project file and no top-level file. No split journal is
+   written either, even when another listed or unlisted project is grouped;
+4. a new project split, if a listed project still names a group, covers listed
+   projects only; the files of unlisted projects, grouped or not, are neither
+   read nor rewritten;
+5. the import: each listed file's text is recorded as that project's first
+   revision, each imported file is marked retired, and the registry, in
+   `active_projects` order, is written together with the record that the import
+   is complete.
+
+The import is crash safe and idempotent. A run interrupted at any step resumes on
+the next start or doctor run, records no second revision of any project and loses
+no setting; a completed import does nothing on later runs. The registry and the
+completion record are one file, so "imported" and "registry present" cannot
+disagree after a crash. `osmia doctor` performs the same import when it owns the
+root, and while a service owns the root it imports nothing and reads the projects
+from their files. A project registration an earlier version journalled finishes
+before the split and waits for the import to list its project. After the import the
+same projects are active with the same effective settings as before.
+
+After the import is complete, Osmia never reads `active_projects` or any
+`projects/<project-id>/config.toml` again. A leftover `active_projects` key in the
+top-level file is accepted and ignored: the service logs a warning that the key
+has no effect at startup and at each reload, and `osmia config validate` prints
+the same warning to stderr and exits 0. Editing the key or a retired file changes
+nothing, not at a restart or a reload. A root with no `active_projects`, such as
+a fresh install, starts with an empty registry.
+
+**Retired files.** Each imported file stays at `projects/<project-id>/config.toml`
+with the settings it held at the import. It starts with this comment block,
+the mark that it is retired, and still loads under the project-file rules:
+
+```toml
+# Retired: Osmia reads project settings from its store; this file is no longer read.
+# Edits here have no effect. An earlier Osmia version still starts on it.
+```
+
+The mark is added only after the store holds that project's first revision. Files
+in project directories that are not listed in `active_projects` are neither
+imported nor modified; the only exception is finishing a project split that an
+earlier run had already journalled.
+
+**Rollback compatibility.** The store adds nothing to the root or to a project's
+trace that the previous Osmia version refuses to open. Restoring the previous
+binary and its top-level file, which still carries `active_projects`, starts the
+previous version on the retired files: it runs the projects and settings as they
+stood at the import. Registry and settings changes made by either version after
+the import do not carry over to the other. The previous version keeps reading its
+files, and this version reads only its store.
+
+### Repairing stored settings
+
+A project's stored settings can stop loading when the environment changes, for
+example when its `clone` path is now a regular file. The service then refuses to
+start, as it does for any configuration that does not load, and `osmia doctor`
+fails. The error names the project, the setting and the reason, and points to the
+repair command instead of a file:
+
+```text
+project p_0123456789abcdef0123456789abcdef settings: clone: must be a directory; correct it with osmia project settings p_0123456789abcdef0123456789abcdef set clone=VALUE while the service is stopped
+```
+
+The Settings API's refusal to save over a revision that does not load points to
+the same command. Correct the settings with the service stopped:
+
+```sh
+osmia project settings p_0123456789abcdef0123456789abcdef show
+osmia project settings p_0123456789abcdef0123456789abcdef set clone=~/src/widgets
+```
+
+The command applies the same validation and field-naming refusals as a settings
+save and records the result as a new stored revision. It can save over a current
+revision that does not load, provided the edited result loads. It reads no
+retired file, changes neither the registry nor the top-level file, and refuses a
+project that is not in the registry. It does not run beside a service: while the
+service runs it refuses, writes nothing and points to the Settings page and
+`PUT /v1/projects/config/<project-id>`. After a repair the service starts with
+the same registry and the corrected settings. See
+[`osmia project settings`](cli.md#command-line).
+
 ## Top-level config.toml
 
 This minimal configuration supplies an agent model and no project yet:
 
 ```toml
 version = 1
-active_projects = []
 
 [profiles.default]
 agent = "claude"
 model = "your-model-name"
 ```
 
-Only IDs in `active_projects` are loaded; the list may be empty or absent, and
-the service then starts without a project until `osmia project add` registers
-one. With several IDs the service runs every listed one-repo project at once,
+The top-level file lists no project. The active projects are the
+[registry's](#the-project-registry-and-settings-store): a fresh install starts with
+an empty registry, and the service runs without a project until `osmia project
+add` registers one. A leftover `active_projects` list from an earlier version is
+accepted and imported once if the root has not been imported yet; afterwards it is
+ignored with a logged warning that it has no effect
+([the one-time import](#the-one-time-import)). With several registered projects
+the service runs every one-repo project at once,
 each with its own trace, reconciliation loop, lander and drift cadence. Role capacity
 (`capacity.*`), budgets and the factory-level pause are shared by all of them:
 a turn in flight on any project takes a slot of its role kind. Each repo
@@ -195,8 +365,10 @@ A paused project or one at its capacity or `git_operations` limit holds only
 its own member; the others continue as far as graph edges allow. Additional directories
 may hold archived
 traces and are not scanned or activated. Duplicate IDs are errors. The
-top-level file, and every active repo's file, must exist and specify
-`version = 1`; one repo file that fails to load fails the whole load. Unknown versions, keys (including empty unknown
+top-level file must exist and specify `version = 1`, and every registered
+project's stored settings must load; one project whose stored settings do not load
+fails the whole startup, with the error naming the project and the setting
+([repairing stored settings](#repairing-stored-settings)). Unknown versions, keys (including empty unknown
 tables and case variants), duplicate TOML keys, malformed TOML and incorrect
 types are errors.
 
@@ -206,11 +378,11 @@ project's newest workstream, newest first. Feature workstreams, workgroup
 members, design sessions and exploratory sessions all count, and so do archived
 workstreams while their creation time can be read. Projects whose newest
 workstreams were created at the same time, and projects with no workstream,
-which come last, keep their `active_projects` order. A project whose trace
+which come last, keep their registry order. A project whose trace
 cannot be read sorts as if it had no workstreams. The order has no option and
 no query parameter; the web page's project pickers and the project pane, and the
-CLI's project listings, show it. `effective.active_projects` keeps the
-configuration file's order, so read it when that order matters.
+CLI's project listings, show it. `effective.active_projects` follows the
+registry's order, so read it when that order matters.
 
 The following optional settings show their defaults:
 
@@ -1074,19 +1246,22 @@ writing anything, then:
 
 1. generates a fresh project ID and journals the registration in
    `<root>/project-add.json`;
-2. writes `projects/<id>/config.toml` with `name`, `upstream`, `fork`, the
-   absolute `clone`, `base_branch` (default `main`) and
+2. stores the project's first settings, revision 1 in the
+   [store](#the-project-registry-and-settings-store), with `name`, `upstream`,
+   `fork`, the absolute `clone`, `base_branch` (default `main`) and
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
 3. seeds the local entity map from the clone's
    tracked CODEOWNERS and directory structure, and creates the project's
    trace database, `projects/<id>/trace.db`, with
    a [charter](charter.md) template and the seed as the first
    revisions of the charter and `kb/entities.json`;
-4. adds the ID to `active_projects` in the top-level `config.toml` as a text
-   edit, so the owner's comments, ordering and formatting survive;
+4. adds the ID to the end of the project registry;
 5. activates the project (opens the trace and starts reconciliation) and
    removes the journal. Registration creates no workstream and requests no
    other work.
+
+Registration writes neither the top-level `config.toml` nor any
+`projects/<id>/config.toml`.
 
 Validation refuses, each with its own message: a blank name, an upstream or a supplied fork
 that is not `owner/repository`, an invalid base
@@ -1102,8 +1277,9 @@ the next start finish the registration with the same ID, or `osmia project add`
 run again finishes it. A retry never creates a second trace and an
 interrupted registration never blocks a retry: the same request returns the
 finished project; a different request waits until the pending registration finishes. A trace whose database never committed its
-manifest is discarded and redone, keeping only `config.toml`; one with a
-manifest is kept.
+manifest is discarded and redone; one with a manifest is kept. A registration
+that completes the registry step before the [project import](#the-one-time-import)
+is complete waits for the import to list its project, and finishes once it has.
 
 Registration can add distinct projects while other projects run. Each active
 registration needs its own clone. Repeating an active project's exact
@@ -1141,9 +1317,9 @@ directory is gone leaves the map. A new revision is recorded only when the map
 changes. A failed fetch or seed is logged once per distinct reason and does not
 block drafting or sealing, which go on with the latest recorded map.
 
-`osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
-active repo ID from `active_projects` as a text edit, stops admitting new work,
-and waits for in-flight operations to finish before closing its runtime; other active projects keep running. Removal is refused while that project has any unresolved member in any workgroup. The project's and every workstream's traces, and the owner's clone, are not deleted. Adding the
+`osmia project remove <project-id>` (API: `DELETE /v1/projects`) takes the
+project off the registry, stops admitting new work,
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The top-level `config.toml` is not written. Removal is refused while that project has any unresolved member in any workgroup. The project's and every workstream's traces, its stored settings and the owner's clone, are not deleted. Adding the
 same upstream again afterwards generates a new project ID and new trace
 repositories; the old ones stay untouched under `projects/<old-id>/` and
 `workstreams/<old-id>/` and are
@@ -1151,15 +1327,19 @@ never reused, so archived history is immutable and every add is a fresh start.
 
 The service's loaded configuration changes only for the registration added or
 removed: `/config` reports no `restart_required` or `reload_required` diagnostic
-for these edits.
+for these changes.
 Without a project, `/config` and `/runtime` carry a `no_project` diagnostic and
 project-scoped overrides are rejected as referencing an inactive project.
 
-## Project config.toml
+## Project settings
 
-Store this file at `projects/<project-id>/config.toml`; `osmia project add`
-writes it. The directory ID is the identity; there is no second configurable ID
-to disagree with it.
+A project's settings are the TOML below, kept as revisions in the
+[store](#the-project-registry-and-settings-store) under the project's ID;
+`osmia project add` stores the first revision. The ID is the identity; there is
+no second configurable ID to disagree with it. The settings are read and saved
+through [the Settings page and API](#reading-and-saving-a-projects-settings), and
+corrected offline with [`osmia project settings`](#repairing-stored-settings). The
+text of a revision follows the same keys and rules a project file did:
 
 ```toml
 version = 1
@@ -1298,34 +1478,36 @@ one still loads.
 ### Reading and saving a project's settings
 
 `GET /v1/projects/config/<project-id>` and `PUT /v1/projects/config/<project-id>`
-read and save one active project's `projects/<project-id>/config.toml`. An
+read and save one active project's stored settings. An
 inactive or unknown project is refused (`not_found`). Both follow the web and
 tailnet listener rules: a save needs `Content-Type: application/json`, and every
 request needs a `Host` naming the listener.
 
-**Read.** The editable snapshot is the file on disk. The read decodes the
-current bytes once and returns, for each effective setting (`name`, `upstream`,
+**Read.** The editable snapshot is the project's current stored revision. The
+read decodes its text once and returns, for each effective setting (`name`, `upstream`,
 `fork`, `clone`, `base_branch`, `landing`, `delivery`, `upstream_rebase`,
 `pull_request_poll`, `checks_timeout`, `capacity.per_workstream`,
 `capacity.git_operations`, `hearsay_scope`, `hearsay_declare_repo`,
 `flake_fixes`, `hearsay_entities`):
 
-- `value`: what the file gives it, or would give it. A setting the file leaves
-  out shows its default; `capacity.per_workstream` shows the loaded top-level
-  `capacity.per_workstream`.
-- `default`: true when the file leaves the setting out. `hearsay_entities` is a
-  default while it has no entries.
+- `value`: what the stored revision gives it, or would give it. A setting the
+  revision leaves out shows its default; `capacity.per_workstream` shows the
+  loaded top-level `capacity.per_workstream`.
+- `default`: true when the revision leaves the setting out. `hearsay_entities` is
+  a default while it has no entries.
 - `effective`: the value in the loaded configuration.
-- `pending`: true when `value` differs from `effective`, that is, the file holds
-  an edit that has not been applied. A reload or a save applies it.
+- `pending`: true when `value` differs from `effective`, that is, the stored
+  revision holds values that have not been applied. The project's next save or a
+  restart applies them; a reload does not.
 
-`pin` identifies exactly the bytes the values and markers describe, so the
-three always belong to the same snapshot. The `path` names the file.
-`clone` is shown as the loader resolves it. When the file does not load, the
-read still answers: `error` carries the loader's error for the file (its path,
-the field and the reason, never the file's text), `settings` hold only the
-values in effect, and there is no `pin`. A save is refused while the file does
-not load; fix it by hand.
+The response's `revision` is the number of the stored revision it read, and `pin`
+names exactly that revision, so the values, the markers and the pin always belong
+to the same snapshot. `clone` is shown as the loader resolves it. When the stored
+revision does not load, the read still answers: `error` carries the loader's
+error (naming the project's settings, the setting and the reason, never the
+stored text), `settings` hold only the values in effect, and there is no `pin`. A
+save is refused while the revision does not load; correct it offline with
+[`osmia project settings`](#repairing-stored-settings), which the refusal names.
 
 **Save.** The request carries the `pin`, the settings to change in `set` (an
 omitted setting is unchanged) and `clear`, the names of settings whose key is
@@ -1338,16 +1520,16 @@ or `hearsay_scope` clears it. `upstream` and `clone` are required
 and cannot be cleared. A save runs under the same lock as a reload and a
 project add or removal:
 
-1. If the file's bytes no longer match the `pin`, the save is refused with
-   `conflict` and writes nothing. A new read returns the edited file's values
-   and pin.
-2. The candidate file is a text edit of the pinned bytes: only the changed keys
+1. If the `pin` no longer names the project's current stored revision, the save
+   is refused with `conflict` and writes nothing. A new read returns the current
+   revision's values and pin. A missing `pin` is refused too.
+2. The candidate is a text edit of the pinned revision: only the changed keys
    are set, added or removed. Every other byte stays as it was, including
-   comments, key order, an ignored `[preview]` table and a hand edit that has
-   not been applied. A new key is placed with its siblings or in a new
-   `[capacity]` or `[hearsay_entities]` table at the end of the file. A layout
+   comments, key order, an ignored `[preview]` table and a revision saved earlier
+   that has not been applied. A new key is placed with its siblings or in a new
+   `[capacity]` or `[hearsay_entities]` table at the end of the text. A layout
    the edit cannot change safely, such as `capacity` written as an inline table,
-   is refused and the file is edited by hand.
+   is refused and named in the error.
 3. The candidate is validated with the loader's rules. An invalid value is
    refused as `validation` with the offending setting in `error.field` and the
    loader's message, for example `checks_timeout: must be a Go duration from 1m
@@ -1355,30 +1537,31 @@ project add or removal:
 4. The running service prepares to adopt the candidate as a reload does: the
    project's stages, the Dagger engine and the runtime state. A failure is
    refused with its reason.
-5. Only then is the file replaced atomically, keeping its mode, and the saved
-   project's settings adopted without a reload. The configuration event follows.
+5. Only then is the new revision recorded, and the saved project's settings
+   adopted without a reload. The configuration event follows.
 
-Every refusal, up to and including a failure writing the file, leaves the file's
-bytes, its directory (no temporary file) and the loaded configuration unchanged.
-A successful save adopts only the saved project: pending edits to the top-level
-file or to other projects' files stay unapplied. The whole saved file of this
-project takes effect, so a hand edit the read showed as pending is kept and
-applied rather than reverted. `GET /v1/config` reports the new values, the
-drift entry for the file is `unchanged` and a restart reads the same values back
-from the file.
+Every refusal, up to and including a failure recording the revision, leaves the
+stored revisions and the loaded configuration unchanged. A successful save adopts
+only the saved project: other projects' settings and the top-level file are not
+touched. The whole saved revision of this project takes effect, so a revision
+the read showed as pending is kept and applied rather than reverted.
+`GET /v1/config` reports the new values, and a restart reads the same values
+back from the store.
 
-The response is the snapshot of the saved bytes with its new `pin`, plus
-`outcome`:
+The response is the snapshot of the saved revision with its new `revision` and
+`pin`, plus `outcome`:
 
-- `applied`: the file holds the saved values and the service uses them.
-- `saved_not_applied`: a failure after the file was replaced, such as the write
-  not finishing cleanly, kept the values from taking effect. This is not a
-  refusal: the file holds the saved values at the returned `pin`, the drift view
-  shows the file as `changed`, a read flags the saved values as `pending`, and
-  `reason` says what failed. A reload or a later save with the returned pin
-  applies them.
+- `applied`: the store holds the saved revision and the service uses it.
+- `saved_not_applied`: a failure after the revision was recorded, such as the
+  adoption not finishing cleanly, kept the values from taking effect. This is not
+  a refusal: the store holds the saved revision at the returned `pin`, a read
+  flags the saved values as `pending`, and `reason` says what failed. The saved
+  revision stays pending across a reload, which re-reads only the top-level file
+  and never adopts a stored revision. The project keeps running on its previous
+  effective settings until its next successful save, which builds on the pending
+  revision because its pin names it, or a restart.
 
-The web page's **Project management** view reads and saves a project's settings through these two endpoints; see [running](running.md) for how it shows defaults, not-yet-applied hand edits, refusals, stale saves and a saved-but-not-applied outcome.
+The web page's **Project settings** form reads and saves a project's settings through these two endpoints; see [running](running.md) for how it shows defaults, saved-but-not-applied values, refusals and stale saves.
 
 ### Previews
 
@@ -1409,14 +1592,18 @@ Loading accepts profiles, bindings, capacity, budgets, shed limits, repository i
 and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses, priorities and archived workstreams belong
-in `runtime.json`, never these files.
-`osmia config` shows whether each file on disk differs from what is loaded
-([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
-to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
+in `runtime.json`, never in the top-level file or the project store.
+`osmia config` shows whether the top-level file on disk differs from what is
+loaded ([disk drift](running.md#disk-drift)), and `osmia reload` applies an
+edited top-level file to a running service after validating it
+([reload](running.md#reload)). Reload and drift cover the top-level file only:
+they never add or remove a project, and a reload never adopts a stored revision
+of a project's settings, so a saved-but-not-applied revision stays pending until
+that project's next save or a restart. The root, `listen.socket`,
 `listen.web`, `listen.tailnet`, `listen.tailnet_https` and the `[telemetry]` table keep their loaded
 values until the service restarts. Role skills and `skills.refresh` apply to turns that start after a
-reload, `[transcribe]` to transcriptions that start after one and `[error_reports]` to the errors captured after one. The `active_projects` list applies live: additions start their retained
-traces and removals drain in-flight operations before stopping.
+reload, `[transcribe]` to transcriptions that start after one and `[error_reports]` to the errors captured after one. Registration starts a project's retained
+trace live, and removal drains in-flight operations before stopping the project.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
 positive decimal USD strings. `per_session` caps known spend on each new turn.
@@ -1433,8 +1620,11 @@ Representative errors include the file and offending field:
 ```text
 <root>/config.toml: profiles.default.fallback: unknown profile backup
 <root>/config.toml: roles.mason.image: container requires an explicit image
-<root>/projects/<id>/config.toml: clone: clone and Osmia root must be separate, non-nested directories
+project <id> settings: clone: clone and Osmia root must be separate, non-nested directories
 ```
+
+An error about a project's stored settings names the project in place of a file
+and, at startup, ends with the [repair command](#repairing-stored-settings).
 
 Malformed TOML and values of the wrong type name the last key read and the line
 (`<path>: capacity.masons: value has the wrong type at line 3`), never
@@ -1479,7 +1669,7 @@ the owner decided are served on the same work-source entity, so no separate
 owner-source entity is read. Without a work source and without an override
 below, a project stays in file mode.
 
-Two optional keys in the project's `config.toml` change which entities are read:
+Two optional settings in the project's [stored settings](#project-settings) change which entities are read:
 
 ```toml
 # Replaces the project's default entity.
@@ -1547,7 +1737,7 @@ source also supplies the default read entity described under
 
 A project is posted to Hearsay without `repos`, with the owner named as its
 author: only the publisher and the owner can read its records. A project opts in
-to declaring its GitHub repo on its Hearsay project in its `config.toml`:
+to declaring its GitHub repo on its Hearsay project in its [settings](#project-settings):
 
 ```toml
 hearsay_declare_repo = true

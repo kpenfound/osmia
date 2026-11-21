@@ -304,8 +304,8 @@ Osmia.
 
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
-root holds its own `config.toml`. Runtime overrides, project configuration,
-project traces, workgroup traces and workstream trace databases and workspaces live
+root holds its own `config.toml`, which Osmia reads and never writes. Runtime overrides,
+the project registry and every project's settings (in `project-store/`), project traces, workgroup traces and workstream trace databases and workspaces live
 in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access

@@ -172,6 +172,11 @@ func (r Root) SlotIntervals() (string, error) { return r.managed("slot-intervals
 // running service has open, written only while telemetry is on.
 func (r Root) ServiceIntervals() (string, error) { return r.managed("service-intervals.json") }
 
+// ProjectStore is the directory of Osmia's own store of the project registry
+// and every active project's settings. It is a sibling of the files above and
+// of projects/, and never the top-level configuration file.
+func (r Root) ProjectStore() (string, error) { return r.managed("project-store") }
+
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 

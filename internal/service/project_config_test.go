@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 func str(s string) *string { return &s }
@@ -58,8 +59,19 @@ git_operations = 3
 `
 }
 
+// configFixture is a started service whose project's first stored revision is
+// savedFile, imported from a project file at the first start.
+type configFixture struct {
+	s     *Service
+	c     *Client
+	opts  Options
+	files reloadFiles
+	// text is the first stored revision.
+	text string
+}
+
 // projectConfigFixture starts a service whose project file is savedFile.
-func projectConfigFixture(t *testing.T) (*Service, *Client, Options, reloadFiles) {
+func projectConfigFixture(t *testing.T) configFixture {
 	t.Helper()
 	opts := fixture(t)
 	files := configFiles(t, opts)
@@ -67,26 +79,51 @@ func projectConfigFixture(t *testing.T) (*Service, *Client, Options, reloadFiles
 	files.write(t, files.topText, savedFile(clone))
 	files.projectText = savedFile(clone)
 	s, c := start(t, opts)
-	return s, c, opts, files
+	f := configFixture{s: s, c: c, opts: opts, files: files}
+	f.text = string(f.stored(t).Data)
+	if f.text != savedFile(clone) {
+		t.Fatalf("the import stored %q", f.text)
+	}
+	return f
 }
 
-func readFile(t *testing.T, path string) string {
+func (f configFixture) store(t *testing.T) *projectstore.Store {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	root, err := config.ResolveRoot(f.opts.Config.Root, "")
 	must(t, err)
-	return string(data)
+	return projectstore.Open(root)
 }
 
-// The read returns every effective setting with the file's value, whether the
-// file leaves it out, the value in effect and the pin of the bytes it decoded.
-// Only an active project can be read.
-func TestProjectConfigReadReturnsTheFileSnapshot(t *testing.T) {
+// stored is the project's current stored revision.
+func (f configFixture) stored(t *testing.T) projectstore.Revision {
+	t.Helper()
+	root, err := config.ResolveRoot(f.opts.Config.Root, "")
+	must(t, err)
+	revision, err := projectstore.Open(root).Current(project)
+	must(t, err)
+	return revision
+}
+
+// record stores text as the project's next revision, which the service does
+// not adopt: it is what a save the service could not apply leaves behind.
+func (f configFixture) record(t *testing.T, text string) projectstore.Revision {
+	t.Helper()
+	revision, err := f.store(t).Replace(project, f.stored(t).Pin, []byte(text))
+	must(t, err)
+	return revision
+}
+
+// The read returns every effective setting with its stored value, whether the
+// stored settings leave it out, the value in effect and the pin that names the
+// stored revision. Only an active project can be read.
+func TestProjectConfigReadReturnsTheStoredSnapshot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, opts, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c, opts := f.s, f.c, f.opts
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	if got.Project != project || got.Path != files.project || got.Pin != config.ProjectPin([]byte(files.projectText)) || got.Error != nil {
+	if revision := f.stored(t); got.Project != project || got.Revision != revision.Number || got.Pin != revision.Pin || got.Error != nil {
 		t.Fatalf("snapshot: %+v", got)
 	}
 	var names []string
@@ -137,22 +174,24 @@ func TestProjectConfigReadReturnsTheFileSnapshot(t *testing.T) {
 	refused(t, err, NotFound)
 }
 
-// A hand edit the service has not applied shows as the file's value beside the
-// value in effect, with the edited file's pin. A save of another setting with
-// that pin keeps the hand edit in the file and applies it, and applies
-// nothing else that is waiting on disk.
-func TestProjectConfigSaveKeepsAnUnappliedHandEdit(t *testing.T) {
+// A stored revision the service has not applied shows as the stored value
+// beside the value in effect, with its own pin. A save of another setting with
+// that pin builds on it and applies it, and applies nothing else that is
+// waiting on disk.
+func TestProjectConfigSaveBuildsOnAnUnappliedRevision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, opts, files := projectConfigFixture(t)
-	edited := strings.Replace(files.projectText, `checks_timeout = "15m"`, `checks_timeout = "30m"`, 1)
-	files.write(t, files.topText+"[capacity]\nmasons = 7\n", edited)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
+	edited := strings.Replace(f.text, `checks_timeout = "15m"`, `checks_timeout = "30m"`, 1)
+	revision := f.record(t, edited)
+	must(t, os.WriteFile(f.files.top, []byte(f.files.topText+"[capacity]\nmasons = 7\n"), 0600))
 
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
 	timeout := settingOf(t, got, "checks_timeout")
-	if timeout.Value != "30m" || timeout.Effective != "15m" || !timeout.Pending || got.Pin != config.ProjectPin([]byte(edited)) {
-		t.Fatalf("hand edit: %+v pin %s", timeout, got.Pin)
+	if timeout.Value != "30m" || timeout.Effective != "15m" || !timeout.Pending || got.Pin != revision.Pin || got.Revision != revision.Number {
+		t.Fatalf("unapplied revision: %+v pin %s", timeout, got.Pin)
 	}
 	for _, setting := range got.Settings {
 		if setting.Pending != (setting.Name == "checks_timeout") {
@@ -163,21 +202,20 @@ func TestProjectConfigSaveKeepsAnUnappliedHandEdit(t *testing.T) {
 	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.Landing = str("squash") })})
 	must(t, err)
 	want := strings.Replace(edited, "checks_timeout = \"30m\" # the default, spelled out\n", "checks_timeout = \"30m\" # the default, spelled out\nlanding = \"squash\"\n", 1)
-	disk := readFile(t, files.project)
-	if disk != want || saved.Outcome != ProjectConfigApplied || saved.Pin != config.ProjectPin([]byte(disk)) {
-		t.Fatalf("saved %+v\nfile:\n%s\nwant:\n%s", saved, disk, want)
+	now := f.stored(t)
+	if string(now.Data) != want || saved.Outcome != ProjectConfigApplied || saved.Pin != now.Pin || saved.Revision != revision.Number+1 {
+		t.Fatalf("saved %+v\nstored:\n%s\nwant:\n%s", saved, now.Data, want)
 	}
 	if p := s.current().For(project).Project; p.ChecksTimeout != "30m" || p.Landing != "squash" {
 		t.Fatalf("in effect: %+v", p)
 	}
-	// Another file's pending edit stays unapplied.
+	// The top-level file's pending edit stays unapplied.
 	if s.current().Capacity.Masons == 7 {
 		t.Fatal("the save applied the top-level file")
 	}
 	view, err := c.Configuration(ctx)
 	must(t, err)
-	drift := view.Drift.Files
-	if view.Effective.Project.ChecksTimeout != "30m" || drift[1].State != ConfigUnchanged || drift[0].State != ConfigChanged {
+	if view.Effective.Project.ChecksTimeout != "30m" || len(view.Drift.Files) != 1 || view.Drift.Files[0].State != ConfigChanged {
 		t.Fatalf("configuration after the save: %+v", view.Drift)
 	}
 	for _, setting := range saved.Settings {
@@ -185,19 +223,15 @@ func TestProjectConfigSaveKeepsAnUnappliedHandEdit(t *testing.T) {
 			t.Fatalf("applied save left %+v pending", setting)
 		}
 	}
-	fresh, err := config.Load(opts.Config)
-	must(t, err)
-	if !reflect.DeepEqual(fresh.Project, s.current().For(project).Project) {
-		t.Fatalf("a fresh load differs:\n%+v\n%+v", fresh.Project, s.current().For(project).Project)
-	}
 }
 
 // A save changes the edited keys and no other byte, announces the change, and
-// the values are what a fresh load of the root reads.
+// the values are what the next start loads from the store.
 func TestProjectConfigSavePreservesUntouchedBytes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, opts, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	events, _ := eventStream(t, c)
 	nextEvent(t, events)
 	got, err := c.ProjectConfig(ctx, project)
@@ -238,18 +272,20 @@ per_workstream = 5
 cart = "code:shop:cart"
 `
 	// New root keys follow the last root key, so they sit before [preview].
-	disk := readFile(t, files.project)
-	if disk != want || saved.Outcome != ProjectConfigApplied {
-		t.Fatalf("file:\n%s\nwant:\n%s\noutcome %+v", disk, want, saved)
+	stored := f.stored(t)
+	if string(stored.Data) != want || saved.Outcome != ProjectConfigApplied {
+		t.Fatalf("stored:\n%s\nwant:\n%s\noutcome %+v", stored.Data, want, saved)
 	}
 	p := s.current().For(project).Project
 	if p.ChecksTimeout != "45m" || p.Capacity.PerWorkstream != 5 || p.Capacity.GitOperations != 2 || p.HearsayScope != "work:main:shop" || !p.HearsayDeclareRepo || p.Name != "Shop" || !reflect.DeepEqual(p.HearsayEntities, map[string]string{"cart": "code:shop:cart"}) {
 		t.Fatalf("in effect: %+v", p)
 	}
-	fresh, err := config.Load(opts.Config)
+	root, err := config.ResolveRoot(f.opts.Config.Root, "")
 	must(t, err)
-	if !reflect.DeepEqual(fresh.Project, p) {
-		t.Fatalf("a fresh load differs:\n%+v\n%+v", fresh.Project, p)
+	top, err := config.LoadTopLevel(f.opts.Config)
+	must(t, err)
+	if loaded, _, err := projectstore.Open(root).Load(top, f.opts.Config.Home, project); err != nil || !reflect.DeepEqual(loaded.Project, p) {
+		t.Fatalf("a fresh load of the store differs: %v\n%+v\n%+v", err, loaded.Project, p)
 	}
 	view, err := c.Configuration(ctx)
 	must(t, err)
@@ -269,7 +305,8 @@ cart = "code:shop:cart"
 func TestProjectConfigSaveTurnsFlakeFixesOnAndOff(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, opts, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
 	if setting := settingOf(t, got, "flake_fixes"); setting.Value != false || setting.Effective != false || setting.Default == nil || !*setting.Default || setting.Pending {
@@ -281,17 +318,14 @@ func TestProjectConfigSaveTurnsFlakeFixesOnAndOff(t *testing.T) {
 
 	on, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.FlakeFixes = yes(true) })})
 	must(t, err)
-	if on.Outcome != ProjectConfigApplied || !strings.Contains(readFile(t, files.project), "flake_fixes = true\n") {
-		t.Fatalf("on: %+v\n%s", on, readFile(t, files.project))
+	if on.Outcome != ProjectConfigApplied || !strings.Contains(string(f.stored(t).Data), "flake_fixes = true\n") {
+		t.Fatalf("on: %+v\n%s", on, f.stored(t).Data)
 	}
 	if setting := settingOf(t, on.ProjectConfigResponse, "flake_fixes"); setting.Value != true || setting.Effective != true || *setting.Default || setting.Pending {
 		t.Fatalf("after turning on: %+v", setting)
 	}
 	if !s.current().For(project).Project.FlakeFixes {
 		t.Fatal("the running service did not adopt flake_fixes = true")
-	}
-	if fresh, err := config.Load(opts.Config); err != nil || !fresh.Project.FlakeFixes {
-		t.Fatalf("a fresh load: %v", err)
 	}
 
 	off, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: on.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.FlakeFixes = yes(false) })})
@@ -305,8 +339,8 @@ func TestProjectConfigSaveTurnsFlakeFixesOnAndOff(t *testing.T) {
 
 	cleared, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: off.Pin, Clear: []string{"flake_fixes"}})
 	must(t, err)
-	if strings.Contains(readFile(t, files.project), "flake_fixes") || !*settingOf(t, cleared.ProjectConfigResponse, "flake_fixes").Default {
-		t.Fatalf("cleared:\n%s", readFile(t, files.project))
+	if strings.Contains(string(f.stored(t).Data), "flake_fixes") || !*settingOf(t, cleared.ProjectConfigResponse, "flake_fixes").Default {
+		t.Fatalf("cleared:\n%s", f.stored(t).Data)
 	}
 }
 
@@ -315,11 +349,16 @@ func TestProjectConfigSaveTurnsFlakeFixesOnAndOff(t *testing.T) {
 func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
-	more := strings.Replace(files.projectText, "\n\n[preview]", "\nlanding = \"squash\"\n\n[preview]", 1)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
+	more := strings.Replace(f.text, "\n\n[preview]", "\nlanding = \"squash\"\n\n[preview]", 1)
 	more = strings.Replace(more, "[capacity]\n", "[capacity]\nper_workstream = 5\n", 1) + "\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
-	files.write(t, files.topText, more)
-	_, err := c.Reload(ctx)
+	read, err := c.ProjectConfig(ctx, project)
+	must(t, err)
+	// A save that carries the owner's text into effect.
+	revision, err := f.store(t).Replace(project, read.Pin, []byte(more))
+	must(t, err)
+	_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: revision.Pin})
 	must(t, err)
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
@@ -329,15 +368,15 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 
 	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Clear: []string{"landing", "checks_timeout", "capacity.per_workstream"}, ClearHearsayEntities: []string{"a"}})
 	must(t, err)
-	disk := readFile(t, files.project)
+	stored := string(f.stored(t).Data)
 	for _, gone := range []string{"landing", "checks_timeout", "per_workstream", "a = "} {
-		if strings.Contains(disk, gone) {
-			t.Fatalf("%s is still in the file:\n%s", gone, disk)
+		if strings.Contains(stored, gone) {
+			t.Fatalf("%s is still in the stored settings:\n%s", gone, stored)
 		}
 	}
 	for _, kept := range []string{"# Keep this low.", "git_operations = 3", "[preview]", "b = \"code:b\""} {
-		if !strings.Contains(disk, kept) {
-			t.Fatalf("%s is missing from the file:\n%s", kept, disk)
+		if !strings.Contains(stored, kept) {
+			t.Fatalf("%s is missing from the stored settings:\n%s", kept, stored)
 		}
 	}
 	p := s.current().For(project).Project
@@ -358,11 +397,12 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 }
 
 // An invalid value is refused with a field error naming the field, and the
-// file and the loaded configuration stay as they were.
+// stored settings and the loaded configuration stay as they were.
 func TestProjectConfigSaveRefusesInvalidValues(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
 	before := s.current()
@@ -385,11 +425,11 @@ func TestProjectConfigSaveRefusesInvalidValues(t *testing.T) {
 	} {
 		_, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(tc.set)})
 		failure := refused(t, err, Validation)
-		if failure.Field != tc.field || !strings.Contains(failure.Message, tc.field) || !strings.Contains(failure.Message, files.project) {
+		if failure.Field != tc.field || !strings.Contains(failure.Message, tc.field) || !strings.Contains(failure.Message, config.ProjectSettingsLabel(project)+": "+tc.field) || strings.Contains(failure.Message, "config.toml") {
 			t.Errorf("%s: %+v", tc.name, failure)
 		}
-		if readFile(t, files.project) != files.projectText || s.current() != before {
-			t.Fatalf("%s changed the file or the loaded configuration", tc.name)
+		if f.stored(t).Pin != got.Pin || s.current() != before {
+			t.Fatalf("%s changed the stored settings or the loaded configuration", tc.name)
 		}
 	}
 	// A request that sets and clears one setting, or names none, is refused too.
@@ -399,31 +439,36 @@ func TestProjectConfigSaveRefusesInvalidValues(t *testing.T) {
 	if failure := refused(t, err, Validation); failure.Field != "pin" {
 		t.Fatalf("no pin: %+v", failure)
 	}
-	if readFile(t, files.project) != files.projectText || s.current() != before {
-		t.Fatal("a refused request changed the file or the loaded configuration")
+	if f.stored(t).Pin != got.Pin || s.current() != before {
+		t.Fatal("a refused request changed the stored settings or the loaded configuration")
 	}
 }
 
-// A save pinned to bytes that are no longer on disk is refused as a conflict
-// and writes nothing; reading again returns the edited file's values and pin.
+// A save pinned to a revision that is no longer the current one is refused as a
+// conflict and writes nothing; reading again returns the current revision's
+// values and pin.
 func TestProjectConfigSaveRefusesAStalePin(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	edited := strings.Replace(files.projectText, `checks_timeout = "15m"`, `checks_timeout = "20m"`, 1)
-	files.write(t, files.topText, edited)
+	edited := strings.Replace(f.text, `checks_timeout = "15m"`, `checks_timeout = "20m"`, 1)
+	revision := f.record(t, edited)
 	before := s.current()
 
 	_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.Landing = str("squash") })})
 	refused(t, err, Conflict)
-	if readFile(t, files.project) != edited || s.current() != before {
+	if f.stored(t).Pin != revision.Pin || s.current() != before {
 		t.Fatal("a stale save wrote or applied something")
+	}
+	if revisions, err := f.store(t).Revisions(project); err != nil || len(revisions) != 2 {
+		t.Fatalf("revisions after a stale save: %d %v", len(revisions), err)
 	}
 	fresh, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	if fresh.Pin != config.ProjectPin([]byte(edited)) || settingOf(t, fresh, "checks_timeout").Value != "20m" {
+	if fresh.Pin != revision.Pin || settingOf(t, fresh, "checks_timeout").Value != "20m" {
 		t.Fatalf("fresh read: %+v", fresh)
 	}
 	// The same save pinned to the fresh read goes through.
@@ -434,84 +479,90 @@ func TestProjectConfigSaveRefusesAStalePin(t *testing.T) {
 	}
 }
 
-// A file that does not load is reported with the loader's error, the values in
-// effect and no pin; no save succeeds until it loads again.
-func TestProjectConfigReadReportsAFileThatDoesNotLoad(t *testing.T) {
+// Stored settings that do not load are reported with the loader's error, the
+// values in effect and no pin; no save succeeds until they load again, and the
+// refusal names the project, the field and the repair command rather than a
+// file.
+func TestProjectConfigReadReportsSettingsThatDoNotLoad(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	good, err := c.ProjectConfig(ctx, project)
 	must(t, err)
 	before := s.current()
 
-	broken := strings.Replace(files.projectText, "version = 1\n", "version = 1\nlanding = \"sideways\"\n", 1)
-	files.write(t, files.topText, broken)
+	broken := f.record(t, strings.Replace(f.text, "version = 1\n", "version = 1\nlanding = \"sideways\"\n", 1))
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
-	if got.Pin != "" || got.Error == nil || got.Error.Field != "landing" || !strings.Contains(got.Error.Message, files.project+": landing: ") {
-		t.Fatalf("snapshot of a broken file: %+v", got)
+	label := config.ProjectSettingsLabel(project)
+	if got.Pin != "" || got.Error == nil || got.Error.Field != "landing" || !strings.Contains(got.Error.Message, label+": landing: ") || strings.Contains(got.Error.Message, "config.toml") {
+		t.Fatalf("snapshot of broken settings: %+v", got)
 	}
 	for _, setting := range got.Settings {
 		if setting.Value != nil || setting.Default != nil || setting.Pending || setting.Effective == nil {
-			t.Fatalf("a broken file shows only the values in effect: %+v", setting)
+			t.Fatalf("broken settings show only the values in effect: %+v", setting)
 		}
 	}
 	if landing := settingOf(t, got, "landing"); landing.Effective != "commit-per-unit" {
 		t.Fatalf("landing in effect: %+v", landing)
 	}
-	for _, pin := range []string{"", good.Pin, config.ProjectPin([]byte(broken))} {
+	for _, pin := range []string{"", good.Pin, broken.Pin} {
 		_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: pin, Set: changes(func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("20m") })})
 		if err == nil {
-			t.Fatalf("a save with pin %q succeeded on a file that does not load", pin)
+			t.Fatalf("a save with pin %q succeeded on settings that do not load", pin)
+		}
+		if pin == broken.Pin {
+			failure := refused(t, err, Validation)
+			for _, want := range []string{label + ": landing: ", "osmia project settings " + string(project) + " set landing=VALUE", "service is stopped"} {
+				if !strings.Contains(failure.Message, want) {
+					t.Fatalf("refusal lacks %q: %s", want, failure.Message)
+				}
+			}
+			if strings.Contains(failure.Message, "config.toml") || strings.Contains(failure.Message, "by hand") {
+				t.Fatalf("refusal points at a file: %s", failure.Message)
+			}
 		}
 	}
-	if readFile(t, files.project) != broken || s.current() != before {
-		t.Fatal("a refused save changed the file or the loaded configuration")
+	if f.stored(t).Pin != broken.Pin || s.current() != before {
+		t.Fatal("a refused save changed the stored settings or the loaded configuration")
 	}
-	// An unparsable file reads the same way, naming no content.
-	files.write(t, files.topText, "version = 1\nsecret = 'shh\n[")
+	// Unparsable settings read the same way, naming no content.
+	f.record(t, "version = 1\nsecret = 'shh\n[")
 	got, err = c.ProjectConfig(ctx, project)
 	must(t, err)
 	if got.Pin != "" || got.Error == nil || strings.Contains(got.Error.Message, "shh") {
-		t.Fatalf("snapshot of an unparsable file: %+v", got)
+		t.Fatalf("snapshot of unparsable settings: %+v", got)
 	}
 
-	files.write(t, files.topText, files.projectText)
+	f.record(t, f.text)
 	got, err = c.ProjectConfig(ctx, project)
 	must(t, err)
-	if got.Error != nil || got.Pin != good.Pin {
-		t.Fatalf("snapshot once the file loads: %+v", got)
+	if got.Error != nil || got.Pin == "" {
+		t.Fatalf("snapshot once the settings load: %+v", got)
 	}
 	_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("20m") })})
 	must(t, err)
 }
 
-// A failure preparing the running service's adoption, or writing the file,
-// refuses the save with the reason and leaves the file, its directory and the
+// A failure preparing the running service's adoption, or writing the revision,
+// refuses the save with the reason and leaves the stored settings and the
 // loaded configuration as they were.
 func TestProjectConfigSaveRefusesWhenPreparingOrWritingFails(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
+	f := projectConfigFixture(t)
+	s, c := f.s, f.c
 	got, err := c.ProjectConfig(ctx, project)
 	must(t, err)
 	edit := ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("20m") })}
 	before := s.current()
-	leftovers := func() []string {
-		entries, err := os.ReadDir(filepath.Dir(files.project))
-		must(t, err)
-		var names []string
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".tmp") {
-				names = append(names, e.Name())
-			}
-		}
-		return names
-	}
 	unchanged := func(step string) {
 		t.Helper()
-		if readFile(t, files.project) != files.projectText || s.current() != before || len(leftovers()) != 0 {
-			t.Fatalf("%s left the file changed, a temporary file behind, or the loaded configuration changed", step)
+		revisions, err := f.store(t).Revisions(project)
+		must(t, err)
+		if len(revisions) != 1 || f.stored(t).Pin != got.Pin || s.current() != before {
+			t.Fatalf("%s left a revision recorded or the loaded configuration changed", step)
 		}
 	}
 
@@ -527,10 +578,14 @@ func TestProjectConfigSaveRefusesWhenPreparingOrWritingFails(t *testing.T) {
 	}
 	unchanged("a preparation failure")
 
-	s.setBoundary(nil)
-	s.setConfigWriter(func(string, []byte) error { return errors.New("disk full") })
+	s.setBoundary(func(step string) error {
+		if strings.HasPrefix(step, "revision-staged:") {
+			return errors.New("disk full")
+		}
+		return nil
+	})
 	_, err = c.SaveProjectConfig(ctx, project, edit)
-	if failure := refused(t, err, Internal); !strings.Contains(failure.Message, "disk full") || !strings.Contains(failure.Message, files.project) {
+	if failure := refused(t, err, Internal); !strings.Contains(failure.Message, "disk full") || !strings.Contains(failure.Message, string(project)) {
 		t.Fatalf("write failure: %+v", failure)
 	}
 	unchanged("a write failure")
@@ -541,7 +596,6 @@ func TestProjectConfigSaveRefusesWhenPreparingOrWritingFails(t *testing.T) {
 		}
 		return nil
 	})
-	s.setConfigWriter(nil)
 	_, err = c.SaveProjectConfig(ctx, project, edit)
 	refused(t, err, Internal)
 	unchanged("an interrupted write")
@@ -555,41 +609,37 @@ func TestProjectConfigSaveRefusesWhenPreparingOrWritingFails(t *testing.T) {
 	}
 }
 
-// A failure after the file was replaced is the saved-but-not-applied outcome,
-// never a refusal: the file holds the saved values at the new pin, the drift
-// view shows it as changed, a read flags the saved values as not yet applied,
-// and a reload or a later save with the new pin applies them.
-func TestProjectConfigSaveReportsAFailureAfterTheReplacement(t *testing.T) {
+// A failure after the revision was recorded is the saved-but-not-applied
+// outcome, never a refusal: the store holds the saved values at the new pin, a
+// read flags them as not yet applied, a reload leaves them pending, and a later
+// save with the new pin applies them.
+func TestProjectConfigSaveReportsAFailureAfterTheWrite(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for _, how := range []string{"reload", "save"} {
-		t.Run(how, func(t *testing.T) {
+	for _, failAt := range []string{"project-config-written", "revision-recorded"} {
+		t.Run(failAt, func(t *testing.T) {
 			t.Parallel()
-			s, c, _, files := projectConfigFixture(t)
+			f := projectConfigFixture(t)
+			s, c := f.s, f.c
 			got, err := c.ProjectConfig(ctx, project)
 			must(t, err)
 			s.setBoundary(func(step string) error {
-				if step == "project-config-written" {
+				if strings.HasPrefix(step, failAt) {
 					return errors.New("cannot reach the scheduler")
 				}
 				return nil
 			})
 			saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("20m") })})
 			must(t, err)
-			disk := readFile(t, files.project)
-			if saved.Outcome != ProjectConfigSavedNotApplied || !strings.Contains(saved.Reason, "cannot reach the scheduler") || saved.Pin != config.ProjectPin([]byte(disk)) || !strings.Contains(disk, `checks_timeout = "20m"`) {
-				t.Fatalf("saved %+v\n%s", saved, disk)
+			stored := f.stored(t)
+			if saved.Outcome != ProjectConfigSavedNotApplied || !strings.Contains(saved.Reason, "cannot reach the scheduler") || saved.Pin != stored.Pin || !strings.Contains(string(stored.Data), `checks_timeout = "20m"`) {
+				t.Fatalf("saved %+v\n%s", saved, stored.Data)
 			}
 			if timeout := settingOf(t, saved.ProjectConfigResponse, "checks_timeout"); timeout.Value != "20m" || timeout.Effective != "15m" || !timeout.Pending {
 				t.Fatalf("saved values read as applied: %+v", timeout)
 			}
 			if s.current().For(project).Project.ChecksTimeout != "15m" {
 				t.Fatal("the failed save was applied")
-			}
-			view, err := c.Configuration(ctx)
-			must(t, err)
-			if view.Drift.Files[1].State != ConfigChanged {
-				t.Fatalf("drift: %+v", view.Drift)
 			}
 			read, err := c.ProjectConfig(ctx, project)
 			must(t, err)
@@ -598,44 +648,28 @@ func TestProjectConfigSaveReportsAFailureAfterTheReplacement(t *testing.T) {
 			}
 
 			s.setBoundary(nil)
-			if how == "reload" {
-				_, err = c.Reload(ctx)
-				must(t, err)
-			} else {
-				applied, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: saved.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.Landing = str("squash") })})
-				must(t, err)
-				if applied.Outcome != ProjectConfigApplied {
-					t.Fatalf("later save: %+v", applied)
-				}
+			// A reload applies the top level and leaves the revision pending.
+			must(t, os.WriteFile(f.files.top, []byte(f.files.topText+"[capacity]\nmasons = 7\n"), 0600))
+			_, err = c.Reload(ctx)
+			must(t, err)
+			if p := s.current().For(project).Project; p.ChecksTimeout != "15m" || s.current().Capacity.Masons != 7 {
+				t.Fatalf("after the reload: %+v masons %d", p, s.current().Capacity.Masons)
 			}
-			if p := s.current().For(project).Project; p.ChecksTimeout != "20m" || (how == "save") != (p.Landing == "squash") {
+			read, err = c.ProjectConfig(ctx, project)
+			must(t, err)
+			if read.Pin != saved.Pin || !settingOf(t, read, "checks_timeout").Pending {
+				t.Fatalf("the reload did not keep the revision pending: %+v", read)
+			}
+
+			applied, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: saved.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.Landing = str("squash") })})
+			must(t, err)
+			if applied.Outcome != ProjectConfigApplied {
+				t.Fatalf("later save: %+v", applied)
+			}
+			if p := s.current().For(project).Project; p.ChecksTimeout != "20m" || p.Landing != "squash" {
 				t.Fatalf("in effect: %+v", p)
 			}
-			view, err = c.Configuration(ctx)
-			must(t, err)
-			if view.Drift.Differs {
-				t.Fatalf("drift after applying: %+v", view.Drift)
-			}
 		})
-	}
-}
-
-// A write that reports failure after the file was in fact replaced, as a
-// failing directory sync does, is not reported as a refusal.
-func TestProjectConfigSaveReportsAReplacedFileDespiteAWriteError(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s, c, _, files := projectConfigFixture(t)
-	got, err := c.ProjectConfig(ctx, project)
-	must(t, err)
-	s.setConfigWriter(func(path string, data []byte) error {
-		must(t, config.ReplaceFile(path, data))
-		return errors.New("directory sync failed")
-	})
-	saved, err := c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.ChecksTimeout = str("20m") })})
-	must(t, err)
-	if saved.Outcome != ProjectConfigSavedNotApplied || !strings.Contains(saved.Reason, "directory sync failed") || !strings.Contains(readFile(t, files.project), `"20m"`) {
-		t.Fatalf("saved %+v", saved)
 	}
 }
 
