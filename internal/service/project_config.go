@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"os"
 	"reflect"
@@ -92,47 +91,8 @@ func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID,
 	return out
 }
 
-// settingValue is the value a project holds for a setting of its file. The
-// hearsay_entities mapping is never nil, so an empty one encodes as {}.
-func settingValue(p config.Project, name string) any {
-	switch name {
-	case "name":
-		return p.Name
-	case "upstream":
-		return p.Upstream
-	case "fork":
-		return p.Fork
-	case "clone":
-		return p.Clone
-	case "base_branch":
-		return p.BaseBranch
-	case "landing":
-		return p.Landing
-	case "delivery":
-		return p.Delivery
-	case "upstream_rebase":
-		return p.UpstreamRebase
-	case "pull_request_poll":
-		return p.PullRequestPoll
-	case "checks_timeout":
-		return p.ChecksTimeout
-	case "capacity.per_workstream":
-		return p.Capacity.PerWorkstream
-	case "capacity.git_operations":
-		return p.Capacity.GitOperations
-	case "hearsay_scope":
-		return p.HearsayScope
-	case "hearsay_declare_repo":
-		return p.HearsayDeclareRepo
-	case "flake_fixes":
-		return p.FlakeFixes
-	case "hearsay_entities":
-		entities := map[string]string{}
-		maps.Copy(entities, p.HearsayEntities)
-		return entities
-	}
-	return nil
-}
+// settingValue is the value a project holds for a setting of its file.
+func settingValue(p config.Project, name string) any { return p.SettingValue(name) }
 
 // saveProjectConfig applies a pinned edit to an active project's config.toml.
 //

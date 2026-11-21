@@ -38,6 +38,9 @@ const usage = `Usage: osmia <command> [--root PATH]
   project create <name> --repo NAME --charter-file PATH|- [--description TEXT] [--public] [--id PROJECT-ID] [--json]
   project create --id PROJECT-ID [--json]
   project remove <project-id> [--json]
+  project settings <project-id> show [--json]  offline repair: read a stored project's settings
+  project settings <project-id> set NAME=VALUE... [--json]  record a new revision; the service must be stopped
+  project settings <project-id> clear NAME... [--json]  record a new revision without those settings
   project memory <project-id>
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
@@ -93,6 +96,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
 config validate reads only the top-level file: --config PATH, else the file --root resolves to.
+project settings works offline on the root's store and refuses while the service runs; use the Settings page then.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
 `
 
@@ -323,6 +327,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "create" && o.repo != "" && o.charterFile != "" || a[0] == "remove" || a[0] == "rebase" || a[0] == "memory") ||
+			len(a) >= 3 && a[0] == "settings" && o.socket == "" && (len(a) == 3 && a[2] == "show" || len(a) >= 4 && (a[2] == "set" || a[2] == "clear")) ||
 			len(a) == 1 && a[0] == "create" && o.id != "" && o.repo == "" && o.charterFile == "" && o.description == "" && !o.public
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
@@ -374,6 +379,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "doctor" {
 		return runDoctor(ctx, root, o.json, stdout, stderr)
+	}
+	if cmd == "project" && a[0] == "settings" {
+		// Offline: dispatched before any socket or client is set up.
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		return runProjectSettings(root, id, a[2], a[3:], o.json, stdout, stderr)
 	}
 	socket := o.socket
 	if socket == "" {
