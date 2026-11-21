@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -60,8 +61,11 @@ func assertSplit(t *testing.T, f *twoProjectFixture, before map[config.ProjectID
 		} else {
 			want = strings.Replace(want, `group_id = ""`, "", 1)
 		}
+		// The import retires the file after the split rewrote it: the retired
+		// mark leads and every other byte is the file's, without group_id.
+		want = projectstore.RetiredMark + want
 		if string(data) != want {
-			t.Fatalf("config bytes changed beyond group_id:\ngot %q\nwant %q", data, want)
+			t.Fatalf("config bytes changed beyond group_id and the retired mark:\ngot %q\nwant %q", data, want)
 		}
 		r, err := trace.Open(cfg.Root, p)
 		must(t, err)

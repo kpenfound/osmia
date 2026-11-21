@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 func str(s string) *string { return &s }
@@ -67,6 +68,9 @@ func projectConfigFixture(t *testing.T) (*Service, *Client, Options, reloadFiles
 	files.write(t, files.topText, savedFile(clone))
 	files.projectText = savedFile(clone)
 	s, c := start(t, opts)
+	// The import marks the file retired: its text is the baseline the tests
+	// compare against.
+	files.projectText = readFile(t, files.project)
 	return s, c, opts, files
 }
 
@@ -239,7 +243,7 @@ cart = "code:shop:cart"
 `
 	// New root keys follow the last root key, so they sit before [preview].
 	disk := readFile(t, files.project)
-	if disk != want || saved.Outcome != ProjectConfigApplied {
+	if disk != projectstore.RetiredMark+want || saved.Outcome != ProjectConfigApplied {
 		t.Fatalf("file:\n%s\nwant:\n%s\noutcome %+v", disk, want, saved)
 	}
 	p := s.current().For(project).Project

@@ -376,7 +376,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.Repositories == nil {
 		opts.Repositories = pulls.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}
-	cfg, err := config.Load(opts.Config)
+	migrationStep := func(name string) error {
+		if opts.boundary != nil {
+			return opts.boundary(ctx, name)
+		}
+		return nil
+	}
+	cfg, imported, err := loadForStart(ctx, opts.Config, migrationStep)
 	if err != nil {
 		return nil, err
 	}
@@ -424,15 +430,12 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
 	pendingRecovery.Finish(s.pending)
-	// Registration must finish before scanning its config: its trace may not
-	// be published yet, and its journal may carry a pinned charter copy.
-	if s.pending == nil {
-		if err := splitProjects(ctx, cfg, opts.Config.Home, s.step); err != nil {
-			return nil, fmt.Errorf("split projects: %w", err)
-		}
-		// Migration may have edited project files; load their saved bytes as
-		// the baseline before serving configuration writes.
-		cfg, err = config.Load(opts.Config)
+	// Registration must finish before the migration looks for projects to
+	// split: its trace may not be published yet, and its journal may carry a
+	// pinned charter copy. While it has not, the import waits for the next
+	// start and the projects load from their files as before it.
+	if s.pending == nil && !imported {
+		cfg, err = completeMigration(ctx, opts.Config, migrationStep)
 		if err != nil {
 			return nil, err
 		}

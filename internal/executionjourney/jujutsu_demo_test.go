@@ -17,6 +17,7 @@ import (
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	questions "github.com/kpenfound/osmia/internal/questions"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	workspace "github.com/kpenfound/osmia/internal/workspace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -108,16 +109,15 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	if sameRepository {
 		fork = filepath.Join(home, "remotes", "dagger", "dagger.git")
 		demoGit(t, home, "-C", f.clone, "remote", "rename", "upstream", "origin")
-		projectPath := filepath.Join(f.opts.Config.Root, "projects", string(f.s.cfg.Project.ID), "config.toml")
-		data, err := os.ReadFile(projectPath)
-		must(t, err)
-		var kept []string
-		for _, line := range strings.Split(string(data), "\n") {
-			if !strings.HasPrefix(strings.TrimSpace(line), "fork") {
-				kept = append(kept, line)
+		fixturekit.EditProjectSettings(t, f.opts.Config.Root, f.s.cfg.Project.ID, func(text string) string {
+			var kept []string
+			for _, line := range strings.Split(text, "\n") {
+				if !strings.HasPrefix(strings.TrimSpace(line), "fork") {
+					kept = append(kept, line)
+				}
 			}
-		}
-		must(t, os.WriteFile(projectPath, []byte(strings.Join(kept, "\n")), 0600))
+			return strings.Join(kept, "\n")
+		})
 	} else {
 		demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	}

@@ -158,6 +158,9 @@ func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, e
 		}
 		return s.notApplied(cfg, id, path, edited, "the file was replaced but writing it did not finish cleanly: "+redact.Secrets(werr.Error(), redact.KnownSecrets()...)), nil
 	}
+	if err := s.recordSaved(id, edited); err != nil {
+		return s.notApplied(cfg, id, path, edited, "the file was replaced but its settings could not be recorded in the project store: "+redact.Secrets(err.Error(), redact.KnownSecrets()...)), nil
+	}
 	if err := s.step("project-config-written"); err != nil {
 		return s.notApplied(cfg, id, path, edited, redact.Secrets(err.Error(), redact.KnownSecrets()...)), nil
 	}

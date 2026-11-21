@@ -3,7 +3,6 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -181,12 +181,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 	f.engine.Mu.Unlock()
 
 	// The owner sets the project's cadence to three hours.
-	path, err := f.s.cfg.Root.ProjectConfig(f.project)
-	must(t, err)
-	configFile, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString("upstream_rebase = \"3h\"\n")
-	must(t, errors.Join(err, configFile.Close()))
+	fixturekit.EditProjectSettings(t, f.opts.Config.Root, f.project, func(text string) string { return text + "upstream_rebase = \"3h\"\n" })
 	f.stop(t)
 	f.start(t)
 	if f.s.cfg.Project.RebaseInterval() != 3*time.Hour {

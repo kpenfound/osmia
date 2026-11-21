@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -22,9 +23,9 @@ import (
 // written before any other file and removed last, so a restart finds every
 // interrupted registration and finishes it with the same identity.
 type pendingProject struct {
-	Version     int            `json:"version"`
-	Project     config.Project `json:"project"`
-	CharterCopy *projectSplit  `json:"charter_copy,omitempty"`
+	Version     int                     `json:"version"`
+	Project     config.Project          `json:"project"`
+	CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
 	// Creation is set when the registration is the end of a project creation,
 	// which first creates and clones the repository.
 	Creation *projectCreation `json:"creation,omitempty"`
@@ -225,7 +226,7 @@ func (s *Service) writePending(p pendingProject) error {
 	if err := writeFileSynced(path, append(data, '\n')); err != nil {
 		return err
 	}
-	return syncSplitDirectory(filepath.Dir(path))
+	return projectmigration.SyncDirectory(filepath.Dir(path))
 }
 
 func (s *Service) readPending() (*pendingProject, error) {
@@ -246,8 +247,8 @@ func (s *Service) readPending() (*pendingProject, error) {
 			config.Project
 			Source config.ProjectID `json:"group_id,omitempty"`
 		} `json:"project"`
-		CharterCopy *projectSplit    `json:"charter_copy,omitempty"`
-		Creation    *projectCreation `json:"creation,omitempty"`
+		CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
+		Creation    *projectCreation        `json:"creation,omitempty"`
 	}
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
@@ -266,7 +267,7 @@ func (s *Service) readPending() (*pendingProject, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := migrateSplitTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
+		if err := projectmigration.MigrateTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
 			return nil, err
 		}
 		r, err := trace.Open(cfg.Root, cfg.For(stored.Project.Source).Project)
@@ -281,7 +282,7 @@ func (s *Service) readPending() (*pendingProject, error) {
 			return nil, err
 		}
 		charter.At = time.Now().UTC()
-		p.CharterCopy = &projectSplit{Project: p.Project, Source: stored.Project.Source, Charter: charter}
+		p.CharterCopy = &projectmigration.Split{Project: p.Project, Source: stored.Project.Source, Charter: charter}
 		if err := s.writePending(p); err != nil {
 			return nil, err
 		}
@@ -388,7 +389,7 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if pending.CharterCopy != nil {
-		if err := copySplitCharter(ctx, root, *pending.CharterCopy, pending.CharterCopy.Charter.At); err != nil {
+		if err := projectmigration.CopyCharter(ctx, root, *pending.CharterCopy, pending.CharterCopy.Charter.At); err != nil {
 			return p, err
 		}
 		if err := s.step("project-charter-copied"); err != nil {
@@ -408,6 +409,9 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := config.AddActiveProject(configPath, p.ID); err != nil {
 		return p, err
 	}
+	if err := s.recordRegistered(p.ID); err != nil {
+		return p, err
+	}
 	if err := s.step("active-project-listed"); err != nil {
 		return p, err
 	}
@@ -419,7 +423,7 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := os.Remove(journal); err != nil && !os.IsNotExist(err) {
 		return p, err
 	}
-	if err := syncSplitDirectory(filepath.Dir(journal)); err != nil {
+	if err := projectmigration.SyncDirectory(filepath.Dir(journal)); err != nil {
 		return p, err
 	}
 	return p, s.step("journal-removed")
@@ -528,7 +532,9 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	} else if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
 	}
-	loaded, err := config.Load(s.options.Config)
+	// Only the registered project's own file is read: the other projects are
+	// as cfg holds them.
+	loaded, err := cfg.AddProject(pending.Project.ID, s.options.Config.Home)
 	if err != nil {
 		return cfg, err
 	}
@@ -564,6 +570,9 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 	}
 	if err != nil {
 		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot edit active_projects in config.toml; check the file and its permissions"}
+	}
+	if err := s.recordRemoved(req.Project); err != nil {
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot remove the project from the project store; check the root's project-store directory and its permissions"}
 	}
 	s.mu.Lock()
 	var active *activeProject
