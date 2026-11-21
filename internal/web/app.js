@@ -1434,7 +1434,8 @@
       e.workgroup ? 'Workgroup, ' + [...new Set(groupMembers(id).map(w => repoLabel(w.project)))].join(', ') : repoLabel(e.project)));
     const proposals = groupProposals(id).map(p => labelGroupDecision(renderProposal(p),
       repoLabel(groupMembers(id).find(w => w.workstream === p.workstream)?.project)));
-    place(c.decisions, [c.heading, ...decisions, ...proposals, inboxResult]);
+    const cards = [...decisions, ...proposals];
+    place(c.decisions, [...(cards.length > 0 ? [c.heading] : []), ...cards, inboxResult]);
     place(box, [c.node]);
   }
 
