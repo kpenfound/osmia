@@ -205,15 +205,29 @@ func insertTopLevelLine(text, line string) string {
 // identity fields and explicit defaults, replacing any file at path atomically.
 // Callers own the directory: a fresh project identity never has one.
 func WriteProjectConfig(path string, p Project) error {
+	text, err := ProjectConfigBytes(p)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return writeAtomically(path, text, 0600)
+}
+
+// ProjectConfigBytes is the project configuration a newly registered project
+// starts with: its registered identity fields and explicit defaults, in the
+// project file's TOML form.
+func ProjectConfigBytes(p Project) ([]byte, error) {
 	if !ValidRepository(p.Upstream) || (p.Fork != "" && !ValidRepository(p.Fork)) || !filepath.IsAbs(p.Clone) || !ValidBranch(p.BaseBranch) {
-		return errors.New("invalid project configuration")
+		return nil, errors.New("invalid project configuration")
 	}
 	delivery := p.Delivery
 	if delivery == "" {
 		delivery = DeliveryPullRequest
 	}
 	if !slices.Contains([]string{DeliveryPullRequest, DeliveryJev}, delivery) || delivery == DeliveryJev && !strings.EqualFold(p.PushRepository(), p.Upstream) {
-		return errors.New("invalid project configuration: delivery")
+		return nil, errors.New("invalid project configuration: delivery")
 	}
 	text := fmt.Sprintf("version = 1\nname = %s\nupstream = %s\nfork = %s\nclone = %s\nbase_branch = %s\nlanding = \"commit-per-unit\"\ndelivery = %s\n",
 		tomlString(p.Name), tomlString(p.Upstream), tomlString(p.Fork), tomlString(p.Clone), tomlString(p.BaseBranch), tomlString(delivery))
@@ -222,15 +236,12 @@ func WriteProjectConfig(path string, p Project) error {
 	}
 	var check Project
 	if _, err := toml.Decode(text, &check); err != nil {
-		return err
+		return nil, err
 	}
 	if check.Name != p.Name || check.Clone != p.Clone {
-		return errors.New("project configuration did not round-trip")
+		return nil, errors.New("project configuration did not round-trip")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	return writeAtomically(path, []byte(text), 0600)
+	return []byte(text), nil
 }
 
 // tomlString quotes a basic string, escaping control characters portably.
