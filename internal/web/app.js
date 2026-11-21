@@ -5037,13 +5037,14 @@
     byId('project-edit').dataset.revision = charterRead ? charterRead.revision : '';
   }
 
-  // configRead is the project settings form's snapshot: the file's values
-  // and the pin of the bytes they were read from, the version a save is
+  // configRead is the project settings form's snapshot: the stored values
+  // and the pin of the revision they were read from, the version a save is
   // pinned to. base holds the text each field showed when the snapshot was
   // taken, so a field is part of the draft once it differs from it.
-  // latestError is the loader's error of the newest read, whose file did not
-  // load; the form offers no save while it is set. conflict means the file
-  // changed since the snapshot while the draft was kept.
+  // latestError is the loader's error of the newest read, whose stored
+  // revision did not load; the form offers no save while it is set. conflict
+  // means the stored settings changed since the snapshot while the draft was
+  // kept.
   let configRead = null;
   const configRows = new Map();
 
@@ -5121,7 +5122,7 @@
 
   // receiveConfig takes a read of the project's settings. An untouched form
   // follows it; a form with a draft, or one already marked stale, keeps its
-  // fields and pin and notes that the file changed, unless the explicit
+  // fields and pin and notes that the stored settings changed, unless the explicit
   // read asks for the latest values.
   function receiveConfig(project, out, explicit = false) {
     if (!explicit && configRead?.project === project && (configRead.conflict || configDirty())) {
@@ -5155,7 +5156,7 @@
       (project ? 'Reading the project settings…' : 'Choose a project to manage its settings.');
     const failed = read?.latestError;
     byId('config-load-error').hidden = !failed;
-    byId('config-load-error').textContent = failed ? 'The stored settings do not load, so they cannot be saved here: ' + failed.message + ' Repair them with osmia project settings ' + read.project + ' set NAME=VALUE while the service is stopped.' : '';
+    byId('config-load-error').textContent = failed ? 'The stored settings do not load, so they cannot be saved here: ' + failed.message + ' Repair them with osmia project settings ' + read.project + ' set ' + (failed.field || 'NAME') + '=VALUE while the service is stopped.' : '';
     byId('config-changed').hidden = !read?.conflict;
     form.dataset.pin = read ? read.pin : '';
     block(form.querySelector('[type=submit]'), !read || !read.pin || !!read.latestError);

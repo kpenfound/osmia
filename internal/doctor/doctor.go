@@ -316,7 +316,7 @@ func (r *run) projects(ctx context.Context, cfg *config.Config) []config.Project
 		id, _ := config.ParseProjectID(s)
 		loaded, err := cfg.WithProject(id, r.Home)
 		if err != nil {
-			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named, or remove "+s+" from active_projects")
+			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again")
 			continue
 		}
 		projects = append(projects, r.projectLoaded(loaded.Project))
@@ -342,7 +342,7 @@ func (r *run) importFailed(cfg *config.Config, err error) {
 				continue
 			}
 			if path, perr := cfg.Root.ProjectConfig(id); perr == nil && path == field.Path {
-				r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named, or remove "+s+" from active_projects, and run osmia doctor again; the import changed nothing")
+				r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again; the import changed nothing")
 				return
 			}
 		}

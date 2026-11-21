@@ -26,6 +26,7 @@ type settingsAPI struct {
 	timeout  string // checks_timeout in the stored settings
 	landing  string // landing in the stored settings
 	inEffect string // checks_timeout in the loaded configuration
+	unloaded bool   // the stored revision does not load: no pin, the values in effect
 	saves    []settingsSave
 }
 
@@ -38,6 +39,14 @@ type settingsSave struct {
 func (a *settingsAPI) snapshot() map[string]any {
 	setting := func(name string, value, effective any, isDefault bool) map[string]any {
 		return map[string]any{"name": name, "value": value, "default": isDefault, "effective": effective, "pending": !reflect.DeepEqual(value, effective)}
+	}
+	if a.unloaded {
+		effective := func(name string, value any) map[string]any {
+			return map[string]any{"name": name, "effective": value, "pending": false}
+		}
+		failure := map[string]any{"field": "clone", "message": "project p_fake settings: clone: clone is a regular file, not a directory"}
+		settings := []any{effective("upstream", "owner/shop"), effective("checks_timeout", a.inEffect)}
+		return map[string]any{"project": "p_fake", "revision": 1, "error": failure, "settings": settings}
 	}
 	return map[string]any{"project": "p_fake", "revision": len(a.saves) + 1, "pin": a.pin, "settings": []any{
 		setting("upstream", "owner/shop", "owner/shop", false),
@@ -100,6 +109,18 @@ func (a *settingsAPI) handler() http.Handler {
 	return mux
 }
 
+// openProjectSettings opens the Projects section of Settings on project p_fake and
+// waits for its stored settings to be read.
+func (p *page) openProjectSettings(url string) {
+	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(url+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.click("#settings-button")
+	p.click(`#settings-nav [data-open=projects]`)
+	p.await("the project to manage", `document.querySelector('#project-edit [name=project]').options.length > 1`)
+	p.run(chromedp.SetValue("#project-edit [name=project]", "p_fake", chromedp.ByQuery))
+	p.eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
+}
+
 func (a *settingsAPI) seen() []settingsSave {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -116,13 +137,7 @@ func TestBrowserProjectSettingsShowASavedButNotAppliedOutcomeAndAdoptItsPin(t *t
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)
 	p := openBrowser(t)
-	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
-	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.click("#settings-button")
-	p.click(`#settings-nav [data-open=projects]`)
-	p.await("the project to manage", `document.querySelector('#project-edit [name=project]').options.length > 1`)
-	p.run(chromedp.SetValue("#project-edit [name=project]", "p_fake", chromedp.ByQuery))
-	p.eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
+	p.openProjectSettings(server.URL)
 	field := func(name string) string { return `#project-config [data-setting="` + name + `"] ` }
 	p.awaitText("#config-file", "Stored settings of project p_fake, revision 1")
 	p.await("the stored value", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '15m'`)
@@ -147,4 +162,80 @@ func TestBrowserProjectSettingsShowASavedButNotAppliedOutcomeAndAdoptItsPin(t *t
 		t.Fatalf("the later save sent more than the changed setting: %+v", saves[1])
 	}
 	p.await("the saved values applied", `!document.querySelector(`+quote(field("checks_timeout")+"[data-marker=pending]")+`).textContent`)
+}
+
+// The page names the stored settings of a project and never a file: nothing in
+// the settings form tells the owner to edit a project's config.toml, and the
+// form reads from the store.
+func TestBrowserProjectSettingsNameTheStoredSettingsNotAFile(t *testing.T) {
+	t.Parallel()
+	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
+	server := httptest.NewServer(api.handler())
+	t.Cleanup(server.Close)
+	p := openBrowser(t)
+	p.openProjectSettings(server.URL)
+	p.awaitText("#config-file", "Stored settings of project p_fake, revision 1")
+	var text string
+	p.eval(`document.querySelector('#project-config').textContent`, &text)
+	for _, banned := range []string{"config.toml", "edit the file", "by hand", "hand-edit"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("the settings form says %q:\n%s", banned, text)
+		}
+	}
+}
+
+// A save pinned to a revision that is no longer the current one is refused as
+// stale: the form keeps the draft and its pin, says the settings changed
+// elsewhere, and a later read loads the stored values and accepts a save.
+func TestBrowserProjectSettingsSurfaceAConflictAndKeepTheDraft(t *testing.T) {
+	t.Parallel()
+	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
+	server := httptest.NewServer(api.handler())
+	t.Cleanup(server.Close)
+	p := openBrowser(t)
+	p.openProjectSettings(server.URL)
+	field := func(name string) string { return `#project-config [data-setting="` + name + `"] ` }
+	p.awaitText("#config-file", "Stored settings of project p_fake, revision 1")
+	p.await("the stored value", `document.querySelector(`+quote(field("landing")+"input")+`).value === 'commit-per-unit'`)
+
+	api.mu.Lock()
+	api.pin, api.landing = "pin-elsewhere", "squash"
+	api.mu.Unlock()
+	p.eval(`document.querySelector(`+quote(field("checks_timeout")+"input")+`).value = '45m'`, nil)
+	p.click("#project-config [type=submit]")
+	p.await("the save refused as stale", `document.querySelector('#project-config .result').dataset.outcome === 'error'`)
+	p.awaitText("#project-config .result", "changed since it was read")
+	p.await("the notice that the settings changed", `!document.querySelector('#config-changed').hidden`)
+	p.await("the draft and its pin kept", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '45m' && document.querySelector('#project-config').dataset.pin === 'pin-1'`)
+
+	p.click("#project-config [data-action=read-config]")
+	p.await("the stored values loaded", `document.querySelector(`+quote(field("landing")+"input")+`).value === 'squash' && document.querySelector('#project-config').dataset.pin === 'pin-elsewhere'`)
+	p.await("the notice cleared", `document.querySelector('#config-changed').hidden`)
+	p.eval(`document.querySelector(`+quote(field("checks_timeout")+"input")+`).value = '45m'`, nil)
+	p.click("#project-config [type=submit]")
+	p.await("the save from the latest read accepted", `document.querySelector('#project-config .result').dataset.outcome === 'ok'`)
+	if saves := api.seen(); len(saves) != 2 || saves[0].Pin != "pin-1" || saves[1].Pin != "pin-elsewhere" {
+		t.Fatalf("saves were pinned to %+v, want the stale pin and then the one read afterwards", saves)
+	}
+}
+
+// Stored settings that do not load are shown as read-only values in effect
+// with the loader's error, no save is offered, and the owner is pointed to the
+// offline repair command naming the field.
+func TestBrowserProjectSettingsThatDoNotLoadPointToTheRepairCommand(t *testing.T) {
+	t.Parallel()
+	api := &settingsAPI{fakeAPI: newFakeAPI(0), unloaded: true, inEffect: "15m"}
+	server := httptest.NewServer(api.handler())
+	t.Cleanup(server.Close)
+	p := openBrowser(t)
+	p.openProjectSettings(server.URL)
+	p.awaitText("#config-file", "read-only: they do not load")
+	p.awaitText("#config-load-error", "clone is a regular file")
+	p.awaitText("#config-load-error", "osmia project settings p_fake set clone=VALUE while the service is stopped")
+	p.await("no save offered", `document.querySelector('#project-config [type=submit]').disabled`)
+	var text string
+	p.eval(`document.querySelector('#project-config').textContent`, &text)
+	if strings.Contains(text, "config.toml") || strings.Contains(text, "by hand") {
+		t.Fatalf("the form tells the owner to edit a file:\n%s", text)
+	}
 }
