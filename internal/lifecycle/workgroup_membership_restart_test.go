@@ -55,8 +55,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	retained := config.WorkstreamID("w_00000000000000000000000000000102")
 	cleaned := config.WorkstreamID("w_00000000000000000000000000000103")
 	session := config.WorkstreamID("w_00000000000000000000000000000104")
-	cfg, err := config.Load(f.opts.Config)
-	must(t, err)
+	cfg := loadRegistered(t, f.opts.Config)
 	repo, err = trace.Open(cfg.Root, cfg.For(f.project).Project)
 	must(t, err)
 	for _, stream := range []config.WorkstreamID{live, retained} {

@@ -36,7 +36,7 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/events", Summary: "Follow the event stream", Response: api.Event{}, Stream: true},
 
 	{Method: http.MethodGet, Path: api.Prefix + "/config", Summary: "Show the loaded configuration, its disk drift and diagnostics", Response: api.ConfigResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/reload", Summary: "Reload the configuration files", Response: api.ReloadResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/reload", Summary: "Reload the top-level configuration file; project settings and the project registry are not reloaded", Response: api.ReloadResponse{}},
 	{Method: http.MethodPut, Path: api.Prefix + "/config/root", Summary: "Always refused with restart_required: the root changes only on restart", Response: api.ErrorResponse{}, Status: http.StatusConflict},
 	{Method: http.MethodPut, Path: api.Prefix + "/config/listen", Summary: "Always refused with restart_required: listeners change only on restart", Response: api.ErrorResponse{}, Status: http.StatusConflict},
 
@@ -56,8 +56,8 @@ var Routes = []Route{
 	{Method: http.MethodDelete, Path: api.Prefix + "/projects", Summary: "Remove a project from active work", Request: api.ProjectRemoveRequest{}, Response: api.ProjectResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: api.ProjectRebaseRequest{}, Response: api.ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: api.MemorySetup{}},
-	{Method: http.MethodGet, Path: api.Prefix + "/projects/config/{project}", Summary: "Read a project's config.toml as it is on disk: every setting's file value, whether it is a default, the value in effect and the pin of the file bytes", Response: api.ProjectConfigResponse{}},
-	{Method: http.MethodPut, Path: api.Prefix + "/projects/config/{project}", Summary: "Save changes to a project's config.toml, pinned to the bytes that were read; refused as a conflict when the file changed, and reported as saved_not_applied when the file was replaced but could not be applied", Request: api.ProjectConfigEdit{}, Response: api.ProjectConfigSaveResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/projects/config/{project}", Summary: "Read a project's stored settings: every setting's stored value, whether it is a default, the value in effect and the pin that names the stored revision", Response: api.ProjectConfigResponse{}},
+	{Method: http.MethodPut, Path: api.Prefix + "/projects/config/{project}", Summary: "Save changes to a project's stored settings as a new revision, pinned to the revision that was read; refused as a conflict when the stored revision changed, and reported as saved_not_applied when the revision was recorded but could not be applied", Request: api.ProjectConfigEdit{}, Response: api.ProjectConfigSaveResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/projects/charter/{project}", Summary: "Read a project's charter", Response: trace.Document{}},
 	{Method: http.MethodPut, Path: api.Prefix + "/projects/charter/{project}", Summary: "Save a project's charter", Request: api.CharterEdit{}, Response: trace.Document{}},
 

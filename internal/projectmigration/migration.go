@@ -87,14 +87,23 @@ func (p *Pipeline) Run(ctx context.Context) error {
 // Apply returns cfg with the registry's projects, in registry order, each
 // loaded from its stored settings. cfg is the top-level configuration of a root
 // whose import is complete. A leftover active_projects is ignored, with a load
-// warning. cfg is unchanged.
+// warning. cfg is unchanged. A project whose settings do not load is a
+// *projectstore.LoadError.
 func Apply(cfg *config.Config, home string) (*config.Config, error) {
 	out, err := projectstore.Open(cfg.Root).Apply(cfg, home)
 	if err != nil {
 		return nil, err
 	}
+	return Compose(cfg, out.Projects), nil
+}
+
+// Compose returns the top-level configuration cfg with projects as its active
+// projects, in that order. A leftover active_projects in cfg is ignored, with a
+// load warning that it has no effect. cfg is unchanged.
+func Compose(cfg *config.Config, projects []config.Project) *config.Config {
+	out := cfg.WithLoadedProjects(projects)
 	if len(cfg.ActiveProjects) > 0 {
 		out.Warnings = append(slices.Clone(cfg.Warnings), config.ActiveProjectsIgnored)
 	}
-	return out, nil
+	return out
 }

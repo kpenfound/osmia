@@ -263,9 +263,22 @@ func (s *Service) readPending() (*pendingProject, error) {
 		return nil, errors.New("invalid project creation journal")
 	}
 	if stored.Project.Source != "" && p.CharterCopy == nil {
-		cfg, err := s.current().AddProject(stored.Project.Source, s.options.Config.Home)
-		if err != nil {
-			return nil, err
+		cfg := s.current()
+		if !cfg.Active(stored.Project.Source) {
+			// Until the import, an earlier version's project files are the
+			// settings; after it the store holds them.
+			imported, err := s.settingsStore().Imported()
+			if err != nil {
+				return nil, err
+			}
+			if imported {
+				cfg, _, err = s.withStoredProject(cfg, stored.Project.Source)
+			} else {
+				cfg, err = cfg.AddProject(stored.Project.Source, s.options.Config.Home)
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
 		if err := projectmigration.MigrateTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
 			return nil, err
@@ -301,7 +314,7 @@ func tracePublished(directory string) (bool, error) {
 }
 
 // discardUnpublished removes an interrupted trace creation that never
-// committed, keeping the configuration file. A complete trace is never
+// committed, keeping a project file an earlier version wrote. A complete trace is never
 // touched.
 func discardUnpublished(directory string) error {
 	if published, err := tracePublished(directory); err != nil {
@@ -324,19 +337,31 @@ func discardUnpublished(directory string) error {
 	return nil
 }
 
+// errImportPending reports a registration that has done every step that does
+// not need the project store and waits for the project import to complete: a
+// root that is not imported yet has no registry to list the project in. The
+// journal stays, and the registration finishes once the import has.
+var errImportPending = errors.New("the project import is not complete")
+
 // complete runs every registration step that is not yet done, in order, and
 // activates the project unless startup will. The journal goes last, once the
-// project is listed and running. Each step inspects the disk before acting, so
-// running it again after an interruption neither repeats an effect nor skips
-// one.
+// project is registered and running. Each step inspects the disk before
+// acting, so running it again after an interruption neither repeats an effect
+// nor skips one. A root whose import is not complete yet is the root of an
+// earlier version's interrupted registration: its steps run up to the
+// registration, which waits for the import (errImportPending).
 func (s *Service) complete(ctx context.Context, pending pendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	root := s.current().Root
-	directory, err := root.ProjectTrace(p.ID)
+	imported, err := s.settingsStore().Imported()
 	if err != nil {
 		return p, err
 	}
 	projectPath, err := root.ProjectConfig(p.ID)
+	if err != nil {
+		return p, err
+	}
+	directory, err := root.ProjectTrace(p.ID)
 	if err != nil {
 		return p, err
 	}
@@ -349,12 +374,10 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if !published {
-		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
-			if err := config.WriteProjectConfig(projectPath, p); err != nil {
+		if imported {
+			if err := s.storeFirstSettings(p); err != nil {
 				return p, err
 			}
-		} else if err != nil {
-			return p, err
 		}
 		if err := s.step("project-config-written"); err != nil {
 			return p, err
@@ -395,21 +418,21 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		if err := s.step("project-charter-copied"); err != nil {
 			return p, err
 		}
-		if err := config.RemoveProjectGroup(projectPath); err != nil {
-			return p, err
+		if !imported {
+			// Until the import reads it, the project file an earlier version
+			// wrote still names the group.
+			if err := config.RemoveProjectGroup(projectPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return p, err
+			}
 		}
 		if err := s.step("project-group-removed"); err != nil {
 			return p, err
 		}
 	}
-	configPath, err := root.Config()
-	if err != nil {
-		return p, err
+	if !imported {
+		return p, errImportPending
 	}
-	if err := config.AddActiveProject(configPath, p.ID); err != nil {
-		return p, err
-	}
-	if err := s.recordRegistered(p.ID); err != nil {
+	if err := s.register(p); err != nil {
 		return p, err
 	}
 	if err := s.step("active-project-listed"); err != nil {
@@ -427,6 +450,26 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	return p, s.step("journal-removed")
+}
+
+// storeFirstSettings stores the settings a newly registered project starts with
+// as its first revision. A project that already has settings keeps them.
+func (s *Service) storeFirstSettings(p config.Project) error {
+	data, err := config.ProjectConfigBytes(p)
+	if err != nil {
+		return err
+	}
+	_, err = s.settingsStore().WriteFirst(p.ID, data)
+	return err
+}
+
+// register stores p's first settings, if they are not stored yet, and adds p
+// to the end of the registry. A project already registered keeps its place.
+func (s *Service) register(p config.Project) error {
+	if err := s.storeFirstSettings(p); err != nil {
+		return err
+	}
+	return s.settingsStore().Add(p.ID)
 }
 
 // resolveRuntime points the runtime store at cfg and the workstreams of the
@@ -479,7 +522,7 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 			return s.cfg.For(id).Project, nil
 		}
 	}
-	cfg, err := s.cfg.AddProject(id, s.options.Config.Home)
+	cfg, revision, err := s.withStoredProject(s.cfg, id)
 	if err != nil {
 		return config.Project{}, err
 	}
@@ -499,6 +542,7 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 		return config.Project{}, err
 	}
 	s.cfg, s.projects, s.pending = cfg, projects, nil
+	s.setEffective(id, revision)
 	if active != nil {
 		s.launch(active)
 	}
@@ -527,14 +571,20 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 		// steps find or make; registration alone would run on a clone that may
 		// not exist yet.
 		if _, err := s.runCreation(ctx, pending, false); err != nil {
+			if errors.Is(err, errImportPending) {
+				return cfg, err
+			}
 			return cfg, &creationError{ID: pending.Project.ID, Err: err}
 		}
 	} else if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
 	}
-	// Only the registered project's own file is read: the other projects are
-	// as cfg holds them.
-	loaded, err := cfg.AddProject(pending.Project.ID, s.options.Config.Home)
+	// Only the registered project's own settings are read: the other projects
+	// are as cfg holds them.
+	if cfg.Active(pending.Project.ID) {
+		return cfg, nil
+	}
+	loaded, _, err := s.withStoredProject(cfg, pending.Project.ID)
 	if err != nil {
 		return cfg, err
 	}
@@ -564,15 +614,8 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		return ProjectResponse{}, api
 	}
 	removed := cfg.For(req.Project).Project
-	configPath, err := cfg.Root.Config()
-	if err == nil {
-		err = config.RemoveActiveProject(configPath, req.Project)
-	}
-	if err != nil {
-		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot edit active_projects in config.toml; check the file and its permissions"}
-	}
-	if err := s.recordRemoved(req.Project); err != nil {
-		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot remove the project from the project store; check the root's project-store directory and its permissions"}
+	if err := s.settingsStore().Remove(req.Project); err != nil {
+		return ProjectResponse{}, &APIError{Code: Internal, Message: "cannot remove the project from the project registry; check the root's project-store directory and its permissions"}
 	}
 	s.mu.Lock()
 	var active *activeProject
@@ -582,6 +625,7 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		}
 	}
 	s.cfg = cfg.WithoutProjectID(req.Project)
+	delete(s.revisions, req.Project)
 	s.mu.Unlock()
 	var closed error
 	if active != nil {

@@ -462,6 +462,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Configuration: %s (%s)\n", cfg.Digest, cfg.Root)
 		showConfigDrift(stdout, cfg.Drift)
 		if cfg.Effective != nil {
+			showRegistry(stdout, cfg.Effective.Projects)
 			showErrorReports(stdout, cfg.Effective.ErrorReports)
 		}
 		diagnostics(stdout, cfg.Diagnostics)
@@ -1846,19 +1847,23 @@ func showDailyBudget(w io.Writer, b *wire.DailyBudgetStatus) {
 	fmt.Fprintln(w)
 }
 
-// showConfigDrift prints each configuration file's state against the loaded
-// configuration.
+// showConfigDrift prints the top-level configuration file's state against the
+// loaded configuration.
 func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 	for _, f := range d.Files {
-		line := "Config file: " + f.Path
-		if f.Project != "" {
-			line += " (project " + string(f.Project) + ")"
-		}
-		line += ": " + f.State
+		line := "Config file: " + f.Path + ": " + f.State
 		if f.Reason != "" {
 			line += ": " + f.Reason
 		}
 		fmt.Fprintln(w, line)
+	}
+}
+
+// showRegistry prints the active projects in registry order, each with the
+// settings it runs with, which come from the project store.
+func showRegistry(w io.Writer, projects []config.Project) {
+	for _, p := range projects {
+		fmt.Fprintf(w, "Registered project: %s (%s) upstream=%s push-repository=%s clone=%s base_branch=%s\n", p.ID, p.Name, p.Upstream, p.PushRepository(), p.Clone, p.BaseBranch)
 	}
 }
 

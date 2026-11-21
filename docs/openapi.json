@@ -2069,7 +2069,7 @@
     },
     "/v1/projects/config/{project}": {
       "get": {
-        "summary": "Read a project's config.toml as it is on disk: every setting's file value, whether it is a default, the value in effect and the pin of the file bytes",
+        "summary": "Read a project's stored settings: every setting's stored value, whether it is a default, the value in effect and the pin that names the stored revision",
         "operationId": "getProjectsConfigByProject",
         "parameters": [
           {
@@ -2107,7 +2107,7 @@
         }
       },
       "put": {
-        "summary": "Save changes to a project's config.toml, pinned to the bytes that were read; refused as a conflict when the file changed, and reported as saved_not_applied when the file was replaced but could not be applied",
+        "summary": "Save changes to a project's stored settings as a new revision, pinned to the revision that was read; refused as a conflict when the stored revision changed, and reported as saved_not_applied when the revision was recorded but could not be applied",
         "operationId": "putProjectsConfigByProject",
         "parameters": [
           {
@@ -2476,7 +2476,7 @@
     },
     "/v1/reload": {
       "post": {
-        "summary": "Reload the configuration files",
+        "summary": "Reload the top-level configuration file; project settings and the project registry are not reloaded",
         "operationId": "postReload",
         "responses": {
           "default": {
@@ -4954,9 +4954,6 @@
           "path": {
             "type": "string"
           },
-          "project": {
-            "type": "string"
-          },
           "reason": {
             "type": "string"
           },
@@ -5227,7 +5224,7 @@
             "$ref": "#/components/schemas/ProjectView"
           },
           "projects": {
-            "description": "Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep their active_projects order. Read effective.active_projects for the configuration file's order.",
+            "description": "Every active project, ordered by the creation time of its newest workstream (feature workstream, workgroup member, design session or exploratory session; archived ones count while their creation time can be read), newest first. Projects with equal newest times, and projects without a workstream, which come last, keep the project registry's order. Read effective.active_projects for the registry's order.",
             "items": {
               "$ref": "#/components/schemas/ProjectView"
             },
@@ -7406,11 +7403,11 @@
       "ProjectConfigError": {
         "properties": {
           "field": {
-            "description": "The setting at fault, empty when the whole file is.",
+            "description": "The setting at fault, empty when the whole revision is.",
             "type": "string"
           },
           "message": {
-            "description": "The loader's error for the file.",
+            "description": "The loader's error for the stored settings.",
             "type": "string"
           }
         },
@@ -7421,16 +7418,16 @@
           "error": {
             "$ref": "#/components/schemas/ProjectConfigError"
           },
-          "path": {
-            "description": "The configuration file the settings come from.",
-            "type": "string"
-          },
           "pin": {
-            "description": "Identifies the exact file bytes; send it with a save.",
+            "description": "Names the stored revision; send it with a save.",
             "type": "string"
           },
           "project": {
             "type": "string"
+          },
+          "revision": {
+            "description": "The number of the stored revision the settings come from.",
+            "type": "integer"
           },
           "settings": {
             "items": {
@@ -7456,12 +7453,8 @@
             ],
             "type": "string"
           },
-          "path": {
-            "description": "The configuration file the settings come from.",
-            "type": "string"
-          },
           "pin": {
-            "description": "Identifies the exact file bytes; send it with a save.",
+            "description": "Names the stored revision; send it with a save.",
             "type": "string"
           },
           "project": {
@@ -7470,6 +7463,10 @@
           "reason": {
             "description": "Why the saved values are not applied.",
             "type": "string"
+          },
+          "revision": {
+            "description": "The number of the stored revision the settings come from.",
+            "type": "integer"
           },
           "settings": {
             "items": {
@@ -7486,7 +7483,7 @@
       "ProjectConfigSetting": {
         "properties": {
           "default": {
-            "description": "True when the file leaves the setting out and Value is its default or inherited value.",
+            "description": "True when the stored settings leave the setting out and Value is its default or inherited value.",
             "type": [
               "null",
               "boolean"
@@ -7500,11 +7497,11 @@
             "type": "string"
           },
           "pending": {
-            "description": "True when Value differs from Effective: the file holds an edit that is not yet applied.",
+            "description": "True when Value differs from Effective: the stored settings hold an edit that is not yet applied.",
             "type": "boolean"
           },
           "value": {
-            "description": "The file's value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo and flake_fixes, or for hearsay_entities an object of local entity ID to Hearsay entity id."
+            "description": "The stored value, or the value it would take: a string, an integer, a boolean for hearsay_declare_repo and flake_fixes, or for hearsay_entities an object of local entity ID to Hearsay entity id."
           }
         },
         "type": "object"
@@ -8315,7 +8312,7 @@
             ]
           },
           "projects": {
-            "description": "Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in active_projects order.",
+            "description": "Each active project's context mode, in the same order as the projects of the configuration read: by the creation time of the project's newest workstream, newest first, with ties and projects without a workstream in registry order.",
             "items": {
               "$ref": "#/components/schemas/ProjectRuntime"
             },

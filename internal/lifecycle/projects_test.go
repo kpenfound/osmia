@@ -10,6 +10,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	kb "github.com/kpenfound/osmia/internal/kb"
+	projectstore "github.com/kpenfound/osmia/internal/projectstore"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -36,11 +37,40 @@ func projectDirectories(t *testing.T, root string) []string {
 
 var hasDiagnostic = intakefixture.HasDiagnostic
 
+// activeProjects is the project registry's list, in registry order.
 func activeProjects(t *testing.T, root string) []string {
 	t.Helper()
-	cfg, err := config.Load(config.Options{Root: root})
+	resolved, err := config.ResolveRoot(root, "")
 	must(t, err)
-	return cfg.ActiveProjects
+	ids, err := projectstore.Open(resolved).Projects()
+	must(t, err)
+	out := []string{}
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+// loadRegistered loads the configuration a start would run: the top-level file
+// with the registry's projects, each from its stored settings.
+func loadRegistered(t *testing.T, options config.Options) *config.Config {
+	t.Helper()
+	top, err := config.LoadTopLevel(options)
+	must(t, err)
+	cfg, err := projectstore.Open(top.Root).Apply(top, options.Home)
+	must(t, err)
+	return cfg
+}
+
+// storedSettings is the text of the current stored revision of project id's
+// settings.
+func storedSettings(t *testing.T, root string, id config.ProjectID) string {
+	t.Helper()
+	resolved, err := config.ResolveRoot(root, "")
+	must(t, err)
+	revision, err := projectstore.Open(resolved).Current(id)
+	must(t, err)
+	return string(revision.Data)
 }
 
 func TestZeroProjectStart(t *testing.T) {
@@ -104,12 +134,16 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
 	must(t, err)
-	want := strings.Replace(commentedConfig, "active_projects = []", `active_projects = ["`+string(id)+`"]`, 1)
-	if string(text) != want {
-		t.Fatalf("configuration text changed beyond the list:\n%s", text)
+	if string(text) != commentedConfig {
+		t.Fatalf("registration wrote the top-level file:\n%s", text)
 	}
-	projectText, err := os.ReadFile(filepath.Join(traceDir, "config.toml"))
-	must(t, err)
+	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(id)}) {
+		t.Fatalf("registry %v", got)
+	}
+	if _, err := os.Lstat(filepath.Join(traceDir, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("registration wrote a project file: %v", err)
+	}
+	projectText := storedSettings(t, root, id)
 	if string(projectText) != "version = 1\nname = \"dagger\"\nupstream = \"dagger/dagger\"\nfork = \"owner/dagger\"\nclone = "+fmt.Sprintf("%q", added.Project.Clone)+"\nbase_branch = \"main\"\nlanding = \"commit-per-unit\"\ndelivery = \"pull-request\"\n" {
 		t.Fatalf("project configuration:\n%s", projectText)
 	}
@@ -540,19 +574,18 @@ func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 	if names := projectDirectories(t, root); len(names) != 1 {
 		t.Fatal(names)
 	}
-	if _, err := config.Load(config.Options{Root: root}); err == nil {
-		t.Fatal("project configuration loaded with a file as clone")
+	top, err := config.LoadTopLevel(config.Options{Root: root})
+	must(t, err)
+	if _, err := projectstore.Open(top.Root).Apply(top, ""); err == nil {
+		t.Fatal("stored settings loaded with a file as clone")
 	}
 	if _, err := c.Health(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// traceState describes a project's trace for comparison: its commit count
-// and its configuration.
+// traceState describes a project's trace for comparison: its commit count.
 func traceState(t *testing.T, directory string) string {
 	t.Helper()
-	config, err := os.ReadFile(filepath.Join(directory, "config.toml"))
-	must(t, err)
-	return fmt.Sprintf("%d commits\n%s", traceCommits(t, directory), config)
+	return fmt.Sprintf("%d commits", traceCommits(t, directory))
 }

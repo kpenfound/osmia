@@ -59,6 +59,13 @@ func (p Project) SettingValue(name string) any {
 	return nil
 }
 
+// ProjectSettingsLabel names the stored settings of project id where an error
+// stands in for a file path: a FieldError about stored settings carries it as
+// its Path, so the owner is never pointed at a file Osmia no longer reads.
+func ProjectSettingsLabel(id ProjectID) string {
+	return "project " + string(id) + " settings"
+}
+
 // ProjectPin identifies the exact bytes of a project configuration file.
 func ProjectPin(data []byte) string {
 	sum := sha256.Sum256(data)

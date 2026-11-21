@@ -14,17 +14,17 @@ import (
 )
 
 // settingsAPI answers Project management's project settings the way the
-// service does, for one project whose file the test controls: a snapshot of
-// the file with a pin, and a save that is pinned to it. The first save
-// replaces the file but cannot apply it, so the snapshot after it shows the
-// saved value as not yet applied; later saves apply.
+// service does, for one project whose stored settings the test controls: a
+// snapshot of the current revision with a pin, and a save that is pinned to
+// it. The first save records a revision but cannot apply it, so the snapshot
+// after it shows the saved value as not yet applied; later saves apply.
 type settingsAPI struct {
 	*fakeAPI
 
 	mu       sync.Mutex
 	pin      string
-	timeout  string // checks_timeout in the file
-	landing  string // landing in the file
+	timeout  string // checks_timeout in the stored settings
+	landing  string // landing in the stored settings
 	inEffect string // checks_timeout in the loaded configuration
 	saves    []settingsSave
 }
@@ -34,12 +34,12 @@ type settingsSave struct {
 	Set map[string]json.RawMessage `json:"set"`
 }
 
-// snapshot is the project's file as the read reports it.
+// snapshot is the project's stored settings as the read reports them.
 func (a *settingsAPI) snapshot() map[string]any {
 	setting := func(name string, value, effective any, isDefault bool) map[string]any {
 		return map[string]any{"name": name, "value": value, "default": isDefault, "effective": effective, "pending": !reflect.DeepEqual(value, effective)}
 	}
-	return map[string]any{"project": "p_fake", "path": "/root/projects/p_fake/config.toml", "pin": a.pin, "settings": []any{
+	return map[string]any{"project": "p_fake", "revision": len(a.saves) + 1, "pin": a.pin, "settings": []any{
 		setting("upstream", "owner/shop", "owner/shop", false),
 		setting("landing", a.landing, "commit-per-unit", false),
 		setting("checks_timeout", a.timeout, a.inEffect, false),
@@ -124,14 +124,14 @@ func TestBrowserProjectSettingsShowASavedButNotAppliedOutcomeAndAdoptItsPin(t *t
 	p.run(chromedp.SetValue("#project-edit [name=project]", "p_fake", chromedp.ByQuery))
 	p.eval(`document.querySelector('#project-edit [name=project]').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
 	field := func(name string) string { return `#project-config [data-setting="` + name + `"] ` }
-	p.awaitText("#config-file", "/root/projects/p_fake/config.toml")
-	p.await("the file's value", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '15m'`)
+	p.awaitText("#config-file", "Stored settings of project p_fake, revision 1")
+	p.await("the stored value", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '15m'`)
 
 	p.eval(`document.querySelector(`+quote(field("checks_timeout")+"input")+`).value = '30m'`, nil)
 	p.click("#project-config [type=submit]")
 	p.await("the save shown as saved but not applied", `document.querySelector('#project-config .result').dataset.outcome === 'saved-not-applied'`)
 	p.awaitText("#project-config .result", "the stages could not be prepared.")
-	p.awaitText("#project-config .result", "Reload")
+	p.awaitText("#project-config .result", "next save or a restart")
 	p.awaitText(field("checks_timeout")+`[data-marker=pending]`, "Not yet applied. In effect: 15m")
 	p.await("the saved value kept and the returned pin adopted", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '30m' && document.querySelector('#project-config').dataset.pin === 'pin-2'`)
 	p.await("no stale notice", `document.querySelector('#config-changed').hidden`)

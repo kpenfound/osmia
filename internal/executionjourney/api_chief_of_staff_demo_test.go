@@ -140,14 +140,13 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 1 {
 		t.Fatalf("charter: %+v", cs)
 	}
+	cfg := s.current()
 	c.Close()
 	must(t, s.Close())
 
 	// The test fixture creates the workstream: two masons and a reviewer, each
 	// with one queued turn.
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	repo, err := trace.Open(cfg.Root, cfg.Project)
+	repo, err := trace.Open(cfg.Root, cfg.For(id).Project)
 	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), ownerActor))
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: id, Workstream: stream, At: clock.Now(), Actor: architectActor, Cause: "fixture", Depth: 1},
@@ -696,7 +695,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"message": 3, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
-	repo, err = trace.Open(cfg.Root, cfg.Project)
+	repo, err = trace.Open(cfg.Root, cfg.For(id).Project)
 	must(t, err)
 	defer repo.Close()
 	threads, err := repo.Threads(stream)

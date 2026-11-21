@@ -5105,8 +5105,8 @@
     return !!read && [...configRows.values()].some(row => settingChanged(read, row));
   }
 
-  // adoptConfig makes out the form's snapshot and shows its file values in
-  // the fields: the values in effect, read-only, when the file does not load.
+  // adoptConfig makes out the form's snapshot and shows its stored values in
+  // the fields: the values in effect, read-only, when they do not load.
   function adoptConfig(project, out) {
     const base = new Map();
     for (const setting of out.settings) {
@@ -5115,7 +5115,7 @@
       base.set(setting.name, text);
       row.input.value = text;
     }
-    configRead = { project, path: out.path, pin: out.pin || '', settings: out.settings, base, conflict: false,
+    configRead = { project, revision: out.revision, pin: out.pin || '', settings: out.settings, base, conflict: false,
       latestError: out.error || null, fieldErrors: new Map() };
   }
 
@@ -5151,11 +5151,11 @@
       if (message) row.input.setAttribute('aria-invalid', 'true');
       else row.input.removeAttribute('aria-invalid');
     }
-    byId('config-file').textContent = read ? 'Settings of ' + read.path + (read.pin ? '' : ' (read-only: the file does not load)') :
+    byId('config-file').textContent = read ? 'Stored settings of project ' + read.project + ', revision ' + read.revision + (read.pin ? '' : ' (read-only: they do not load)') :
       (project ? 'Reading the project settings…' : 'Choose a project to manage its settings.');
     const failed = read?.latestError;
     byId('config-load-error').hidden = !failed;
-    byId('config-load-error').textContent = failed ? 'The file does not load, so settings cannot be saved until it is fixed by hand: ' + failed.message : '';
+    byId('config-load-error').textContent = failed ? 'The stored settings do not load, so they cannot be saved here: ' + failed.message + ' Repair them with osmia project settings ' + read.project + ' set NAME=VALUE while the service is stopped.' : '';
     byId('config-changed').hidden = !read?.conflict;
     form.dataset.pin = read ? read.pin : '';
     block(form.querySelector('[type=submit]'), !read || !read.pin || !!read.latestError);
@@ -5210,7 +5210,7 @@
       return;
     }
     if (!Object.keys(edit.set).length && !edit.clear.length && !edit.clear_hearsay_entities.length) {
-      adoptConfig(read.project, { path: read.path, pin: read.pin, settings: read.settings });
+      adoptConfig(read.project, { revision: read.revision, pin: read.pin, settings: read.settings });
       configRead.conflict = read.conflict;
       renderProjectConfig();
       show(result, 'ok', 'No settings changed.');
@@ -5223,10 +5223,10 @@
       }
       mark(['status', 'config']);
       if (out.outcome === 'saved_not_applied') {
-        return { outcome: 'saved-not-applied', text: 'Saved to ' + out.path + ' but not applied: ' + out.reason +
-          ' The saved values are shown as not yet applied; Reload in Configuration applies them.' };
+        return { outcome: 'saved-not-applied', text: 'Saved as revision ' + out.revision + ' but not applied: ' + out.reason +
+          ' The saved values are shown as not yet applied; the next save or a restart applies them.' };
       }
-      return 'Saved project settings to ' + out.path + '.';
+      return 'Saved project settings as revision ' + out.revision + '.';
     }, err => {
       if (configRead !== read) return;
       if (err.code === 'conflict') read.conflict = true;
@@ -5477,7 +5477,7 @@
           adoptConfig(project, out);
           renderProjectConfig();
         }
-        return out.error ? { outcome: 'error', text: out.error.message } : 'Read the settings of ' + out.path + '.';
+        return out.error ? { outcome: 'error', text: out.error.message } : 'Read the settings of project ' + out.project + '.';
       });
     });
     byId('project-remove').addEventListener('click', event => {

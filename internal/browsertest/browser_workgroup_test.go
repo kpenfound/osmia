@@ -44,7 +44,7 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	cfg.Project.Name = "Uploads repo"
 	projectConfig, err := cfg.Root.ProjectConfig(project)
 	must(t, err)
-	must(t, config.WriteProjectConfig(projectConfig, cfg.Project))
+	fixturekit.WriteProjectFile(t, projectConfig, cfg.Project)
 	fixturekit.SeedPage(t, cfg)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -452,7 +452,7 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 		p.Name = names[id]
 		path, err := f.cfg.Root.ProjectConfig(id)
 		must(t, err)
-		must(t, config.WriteProjectConfig(path, p))
+		fixturekit.WriteProjectFile(t, path, p)
 		r, err := trace.Open(f.cfg.Root, p)
 		must(t, err)
 		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[id]})

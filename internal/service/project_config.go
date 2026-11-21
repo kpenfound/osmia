@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/redact"
 )
 
@@ -38,10 +38,10 @@ func (s *Service) projectConfigRequest(w http.ResponseWriter, r *http.Request, i
 }
 
 // readProjectConfig returns the editable snapshot of an active project's
-// config.toml: the bytes on disk decoded once, so the values, the markers and
-// the pin describe the same file. The loaded configuration supplies the
-// values in effect. A file that does not load yields the loader's error, the
-// values in effect and no pin.
+// stored settings: the current revision decoded once, so the values, the
+// markers and the pin describe the same revision. The loaded configuration
+// supplies the values in effect. Settings that do not load yield the loader's
+// error, the values in effect and no pin.
 func (s *Service) readProjectConfig(raw config.ProjectID) (ProjectConfigResponse, *APIError) {
 	id, api := s.projectFor(raw)
 	if api != nil {
@@ -51,32 +51,24 @@ func (s *Service) readProjectConfig(raw config.ProjectID) (ProjectConfigResponse
 	if !cfg.Active(id) {
 		return ProjectConfigResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("project %s is not an active project", id)}
 	}
-	path, err := cfg.Root.ProjectConfig(id)
+	revision, err := s.settingsStore().Current(id)
 	if err != nil {
-		return ProjectConfigResponse{}, &APIError{Code: Internal, Message: "cannot locate the project configuration file"}
+		return ProjectConfigResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the stored settings of project %s; check the root's project-store directory and its permissions", id)}
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		err = &config.FieldError{Path: path, Reason: "cannot be read", Err: err}
-	}
-	return s.projectConfigSnapshot(cfg, id, path, data, err), nil
+	return s.projectConfigSnapshot(cfg, id, revision), nil
 }
 
-// projectConfigSnapshot decodes data, the bytes of the project's file (or
-// readErr when they could not be read), against the loaded configuration cfg.
-func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID, path string, data []byte, readErr error) ProjectConfigResponse {
-	out := ProjectConfigResponse{Project: id, Path: path, Settings: []ProjectConfigSetting{}}
+// projectConfigSnapshot decodes revision, the project's stored settings,
+// against the loaded configuration cfg.
+func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID, revision projectstore.Revision) ProjectConfigResponse {
+	out := ProjectConfigResponse{Project: id, Revision: revision.Number, Settings: []ProjectConfigSetting{}}
 	loaded := cfg.For(id).Project
-	var file config.ProjectFile
-	err := readErr
-	if err == nil {
-		file, err = cfg.DecodeProject(id, s.options.Config.Home, data)
-	}
+	file, err := cfg.DecodeProject(id, s.options.Config.Home, revision.Data)
 	if err != nil {
-		failed := reloadError(err, time.Time{})
+		failed := reloadError(projectstore.Relabel(cfg.Root, id, err), time.Time{})
 		out.Error = &ProjectConfigError{Field: failed.Field, Message: failed.Message}
 	} else {
-		out.Pin = config.ProjectPin(data)
+		out.Pin = revision.Pin
 	}
 	for _, name := range config.ProjectSettings {
 		setting := ProjectConfigSetting{Name: name, Effective: settingValue(loaded, name)}
@@ -94,16 +86,17 @@ func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID,
 // settingValue is the value a project holds for a setting of its file.
 func settingValue(p config.Project, name string) any { return p.SettingValue(name) }
 
-// saveProjectConfig applies a pinned edit to an active project's config.toml.
+// saveProjectConfig applies a pinned edit to an active project's stored
+// settings.
 //
-// Under projectMu it checks the pin against the file on disk, edits the
-// pinned bytes as text, validates the result as loading does, and prepares the
-// running service's adoption of it before anything is written. Any failure
-// until then refuses the save and leaves the file and the loaded
-// configuration as they were. Only the saved project's settings are adopted;
-// other files with unapplied edits stay unapplied. Once the file is replaced
-// the outcome is never a refusal: a failure then is reported as saved but not
-// applied.
+// Under projectMu it checks the pin against the current stored revision, edits
+// the pinned revision's text, validates the result as loading does, and
+// prepares the running service's adoption of it before anything is written.
+// Any failure until then refuses the save and leaves the stored settings and
+// the loaded configuration as they were. Only the saved project's settings are
+// adopted; a revision saved earlier and not adopted stays pending until a save
+// builds on it. Once the revision is recorded the outcome is never a refusal: a
+// failure then is reported as saved but not applied.
 func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, edit ProjectConfigEdit) (ProjectConfigSaveResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -115,74 +108,74 @@ func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, e
 		return ProjectConfigSaveResponse{}, &APIError{Code: Validation, Field: "pin", Message: "pin: read the project configuration first and send its pin"}
 	}
 	cfg, projects := s.runtimes()
-	path, err := cfg.Root.ProjectConfig(id)
+	store := s.settingsStore()
+	current, err := store.Current(id)
 	if err != nil {
-		return ProjectConfigSaveResponse{}, &APIError{Code: Internal, Message: "cannot locate the project configuration file"}
+		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: fmt.Sprintf("the stored settings of project %s cannot be read", id)})
 	}
-	data, err := os.ReadFile(path)
+	stale := &APIError{Code: Conflict, Message: fmt.Sprintf("the settings of project %s changed since they were read; read them again before saving. Nothing was written", id)}
+	if current.Pin != edit.Pin {
+		return ProjectConfigSaveResponse{}, stale
+	}
+	// Stored settings that do not load are repaired offline: no save applies
+	// to them.
+	if _, err := cfg.DecodeProject(id, s.options.Config.Home, current.Data); err != nil {
+		err = projectstore.Relabel(cfg.Root, id, err)
+		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Validation, Message: "the stored settings do not load, so they cannot be saved here: " + reloadError(err, time.Time{}).Message + "; " + projectstore.RepairHint(id, err)})
+	}
+	edited, file, err := cfg.EditProject(id, s.options.Config.Home, current.Data, projectEdit(edit))
 	if err != nil {
-		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: path + ": cannot be read"})
-	}
-	if config.ProjectPin(data) != edit.Pin {
-		return ProjectConfigSaveResponse{}, &APIError{Code: Conflict, Message: path + " changed since it was read; read it again before saving. Nothing was written"}
-	}
-	// A file that does not load is fixed by hand: no save applies to it.
-	if _, err := cfg.DecodeProject(id, s.options.Config.Home, data); err != nil {
-		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Validation, Message: "the file does not load, so it cannot be saved until it is fixed by hand: " + reloadError(err, time.Time{}).Message})
-	}
-	edited, file, err := cfg.EditProject(id, s.options.Config.Home, data, projectEdit(edit))
-	if err != nil {
+		err = projectstore.Relabel(cfg.Root, id, err)
 		var field *config.FieldError
 		if errors.As(err, &field) {
 			return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Validation, Field: field.Field, Message: field.Error()})
 		}
-		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: path + ": cannot be edited"})
+		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: fmt.Sprintf("the stored settings of project %s cannot be edited", id)})
 	}
 	adoption, err := s.prepareProjectAdoption(ctx, cfg, projects, id, file.Project)
 	if err != nil {
 		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: "cannot apply the saved settings to the running service: " + redact.Secrets(err.Error(), redact.KnownSecrets()...)})
 	}
-	// Preparation may have taken a while: the pin must still describe the file.
-	if again, err := os.ReadFile(path); err != nil || !bytes.Equal(again, data) {
-		return ProjectConfigSaveResponse{}, &APIError{Code: Conflict, Message: path + " changed since it was read; read it again before saving. Nothing was written"}
-	}
 	werr := s.step("project-config-write")
+	var saved projectstore.Revision
 	if werr == nil {
-		werr = s.replaceProjectConfig(path, edited)
+		saved, werr = store.Replace(id, current.Pin, edited)
 	}
 	if werr != nil {
-		// Only a file that holds the edited bytes was replaced; a failure that
-		// leaves anything else is a refusal.
-		if now, err := os.ReadFile(path); err != nil || !bytes.Equal(now, edited) || bytes.Equal(data, edited) {
-			return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: path + ": cannot be written: " + redact.Secrets(werr.Error(), redact.KnownSecrets()...)})
+		if errors.Is(werr, projectstore.ErrStale) {
+			return ProjectConfigSaveResponse{}, stale
 		}
-		return s.notApplied(cfg, id, path, edited, "the file was replaced but writing it did not finish cleanly: "+redact.Secrets(werr.Error(), redact.KnownSecrets()...)), nil
-	}
-	if err := s.recordSaved(id, edited); err != nil {
-		return s.notApplied(cfg, id, path, edited, "the file was replaced but its settings could not be recorded in the project store: "+redact.Secrets(err.Error(), redact.KnownSecrets()...)), nil
+		// Only a recorded revision that holds the edited bytes is a save; a
+		// failure that leaves anything else is a refusal.
+		now, err := store.Current(id)
+		if err != nil || now.Number != current.Number+1 || !bytes.Equal(now.Data, edited) {
+			return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: fmt.Sprintf("the settings of project %s cannot be written: %s", id, redact.Secrets(werr.Error(), redact.KnownSecrets()...))})
+		}
+		return s.notApplied(cfg, id, now, "the revision was recorded but writing it did not finish cleanly: "+redact.Secrets(werr.Error(), redact.KnownSecrets()...)), nil
 	}
 	if err := s.step("project-config-written"); err != nil {
-		return s.notApplied(cfg, id, path, edited, redact.Secrets(err.Error(), redact.KnownSecrets()...)), nil
+		return s.notApplied(cfg, id, saved, redact.Secrets(err.Error(), redact.KnownSecrets()...)), nil
 	}
-	s.adoptProject(adoption, path)
-	s.log().Info("project configuration saved", "project", string(id), "pin", config.ProjectPin(edited))
-	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(adoption.next, id, path, edited, nil), Outcome: ProjectConfigApplied}, nil
+	s.adoptProject(adoption, id, saved.Number)
+	s.log().Info("project configuration saved", "project", string(id), "revision", saved.Number, "pin", saved.Pin)
+	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(adoption.next, id, saved), Outcome: ProjectConfigApplied}, nil
 }
 
 // refusedUnchanged finishes the message of a refusal with what it guarantees.
 func refusedUnchanged(e *APIError) *APIError {
-	e.Message += "; the file and the loaded configuration are unchanged"
+	e.Message += "; the stored settings and the loaded configuration are unchanged"
 	return e
 }
 
-// notApplied reports a save whose file was replaced but not adopted. The
-// snapshot is of the saved bytes against the configuration still in effect, so
-// the saved values read as not yet applied; a reload or a save with its pin
-// applies them.
-func (s *Service) notApplied(cfg *config.Config, id config.ProjectID, path string, saved []byte, reason string) ProjectConfigSaveResponse {
+// notApplied reports a save whose revision was recorded but not adopted. The
+// snapshot is of the saved revision against the configuration still in
+// effect, so the saved values read as not yet applied. They stay pending until
+// the project's next save, which builds on the revision, or a restart; a reload
+// does not adopt them.
+func (s *Service) notApplied(cfg *config.Config, id config.ProjectID, saved projectstore.Revision, reason string) ProjectConfigSaveResponse {
 	s.log().Error("project configuration saved but not applied", "project", string(id), "reason", reason)
 	s.hub.Publish(Event{Kind: EventConfig})
-	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(cfg, id, path, saved, nil), Outcome: ProjectConfigSavedNotApplied, Reason: reason}
+	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(cfg, id, saved), Outcome: ProjectConfigSavedNotApplied, Reason: reason}
 }
 
 // projectEdit translates a request into the settings the file edit changes.
@@ -249,36 +242,21 @@ func (s *Service) prepareProjectAdoption(ctx context.Context, cfg *config.Config
 
 // adoptProject publishes a prepared adoption: the loaded configuration
 // changes, the project's passes and conversations take its stages from their
-// next step, and clients are told. A reload failure recorded for this file is
-// stale once the file is applied.
-func (s *Service) adoptProject(a projectAdoption, path string) {
+// next step, and clients are told. revision is the stored revision the adopted
+// settings come from. A reload failure recorded for this project's settings is
+// stale once they are applied.
+func (s *Service) adoptProject(a projectAdoption, id config.ProjectID, revision int) {
 	s.mu.Lock()
 	s.cfg = a.next
+	s.setEffective(id, revision)
 	a.resolve()
 	if a.runtime != nil {
 		a.runtime.pipeline.next.Store(a.stage)
 		a.runtime.pipeline.conversation.Store(a.stage)
 	}
-	if s.reloadErr != nil && s.reloadErr.Path == path {
+	if s.reloadErr != nil && s.reloadErr.Path == config.ProjectSettingsLabel(id) {
 		s.reloadErr = nil
 	}
 	s.mu.Unlock()
 	s.hub.Publish(Event{Kind: EventResync}, Event{Kind: EventConfig})
-}
-
-// replaceProjectConfig replaces the file, through the test seam when set.
-func (s *Service) replaceProjectConfig(path string, data []byte) error {
-	s.boundaryMu.RLock()
-	write := s.configWrite
-	s.boundaryMu.RUnlock()
-	if write == nil {
-		write = config.ReplaceFile
-	}
-	return write(path, data)
-}
-
-func (s *Service) setConfigWriter(write func(path string, data []byte) error) {
-	s.boundaryMu.Lock()
-	s.configWrite = write
-	s.boundaryMu.Unlock()
 }

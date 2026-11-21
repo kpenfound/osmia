@@ -84,7 +84,7 @@ func TestOptionalForkRoundTrips(t *testing.T) {
 				t.Fatal(c.Project)
 			}
 			path := filepath.Join(c.Root.String(), "projects", pid, "config.toml")
-			if err := WriteProjectConfig(path, c.Project); err != nil {
+			if err := writeProjectConfig(path, c.Project); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(path)

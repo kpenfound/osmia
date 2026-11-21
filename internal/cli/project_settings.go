@@ -68,13 +68,10 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 		fmt.Fprintf(stderr, format+"\n", a...)
 		return 1
 	}
-	path, err := root.ProjectConfig(id)
-	if err != nil {
-		return refuse("invalid root; choose an accessible directory with --root")
-	}
 	var edit config.ProjectEdit
 	if verb != "show" {
-		if edit, err = parseSettingsEdit(path, verb, args); err != nil {
+		var err error
+		if edit, err = parseSettingsEdit(config.ProjectSettingsLabel(id), verb, args); err != nil {
 			return refuse("invalid settings: %v; nothing was written", err)
 		}
 	}
@@ -94,7 +91,7 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 			return refuse("project %s: %v", id, err)
 		}
 		if _, _, err := cfg.EditProject(id, "", current.Data, edit); err != nil {
-			return refuse("invalid settings: %v; nothing was written", err)
+			return refuse("invalid settings: %v; nothing was written", projectstore.Relabel(cfg.Root, id, err))
 		}
 	}
 	release, err := holdService(cfg.Root, id, verb != "show")
@@ -190,11 +187,12 @@ func showProjectSettings(cfg *config.Config, store *projectstore.Store, id confi
 
 // parseSettingsEdit turns the NAME=VALUE arguments of set, or the names of
 // clear, into an edit. A name that is no setting of a project, a value of the
-// wrong kind and a setting named twice are refused naming the setting; the
-// edit itself is validated as a settings save validates it.
-func parseSettingsEdit(path, verb string, args []string) (config.ProjectEdit, error) {
+// wrong kind and a setting named twice are refused naming the setting, under
+// the label of the project's stored settings; the edit itself is validated as a
+// settings save validates it.
+func parseSettingsEdit(label, verb string, args []string) (config.ProjectEdit, error) {
 	edit := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Bools: map[string]bool{}, Entities: map[string]string{}}
-	refused := func(field, reason string) error { return &config.FieldError{Path: path, Field: field, Reason: reason} }
+	refused := func(field, reason string) error { return &config.FieldError{Path: label, Field: field, Reason: reason} }
 	seen := map[string]bool{}
 	for _, arg := range args {
 		name, value, has := strings.Cut(arg, "=")

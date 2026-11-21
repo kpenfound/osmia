@@ -44,6 +44,45 @@ var (
 	ErrNotImported = errors.New("the project import is not complete")
 )
 
+// Relabel returns err with the path of a *config.FieldError about project id's
+// settings replaced by the settings' own label. Decoding names the project
+// file the bytes would have come from, which is no longer read; the label names
+// the project instead. Any other error is returned as it is.
+func Relabel(root config.Root, id config.ProjectID, err error) error {
+	var field *config.FieldError
+	if err == nil || !errors.As(err, &field) {
+		return err
+	}
+	if path, perr := root.ProjectConfig(id); perr != nil || field.Path != path {
+		return err
+	}
+	relabeled := *field
+	relabeled.Path = config.ProjectSettingsLabel(id)
+	return &relabeled
+}
+
+// RepairHint tells the owner how to correct stored settings that do not load,
+// naming the field the error is about when it names one.
+func RepairHint(id config.ProjectID, err error) string {
+	setting := "NAME"
+	var field *config.FieldError
+	if errors.As(err, &field) && field.Field != "" {
+		setting = field.Field
+	}
+	return fmt.Sprintf("correct it with osmia project settings %s set %s=VALUE while the service is stopped", id, setting)
+}
+
+// LoadError is a project whose stored settings do not load. Its message is the
+// loader's, naming the project, the field and the reason, followed by how to
+// repair them.
+type LoadError struct {
+	Project config.ProjectID
+	Err     error
+}
+
+func (e *LoadError) Error() string { return e.Err.Error() + "; " + RepairHint(e.Project, e.Err) }
+func (e *LoadError) Unwrap() error { return e.Err }
+
 // Revision is one stored revision of a project's settings. Pin names it: it
 // changes with every recorded revision, even one with the same bytes.
 type Revision struct {
@@ -362,6 +401,19 @@ func (s *Store) Current(id config.ProjectID) (Revision, error) {
 	return s.readRevision(id, numbers[len(numbers)-1])
 }
 
+// At returns revision number of id's settings, or ErrNotFound when the project
+// has no such revision.
+func (s *Store) At(id config.ProjectID, number int) (Revision, error) {
+	numbers, err := s.numbers(id)
+	if err != nil {
+		return Revision{}, err
+	}
+	if !slices.Contains(numbers, number) {
+		return Revision{}, fmt.Errorf("%w: %s has no revision %d", ErrNotFound, id, number)
+	}
+	return s.readRevision(id, number)
+}
+
 // Revisions returns every recorded revision of id's settings, oldest first.
 func (s *Store) Revisions(id config.ProjectID) ([]Revision, error) {
 	numbers, err := s.numbers(id)
@@ -468,7 +520,7 @@ func (s *Store) Save(cfg *config.Config, home string, id config.ProjectID, pin s
 	}
 	data, file, err := cfg.EditProject(id, home, current.Data, edit)
 	if err != nil {
-		return Revision{}, config.ProjectFile{}, err
+		return Revision{}, config.ProjectFile{}, Relabel(s.root, id, err)
 	}
 	revision, err := s.record(id, current.Number+1, data)
 	if err != nil {
@@ -487,7 +539,7 @@ func (s *Store) Load(cfg *config.Config, home string, id config.ProjectID) (conf
 		return config.ProjectFile{}, Revision{}, err
 	}
 	file, err := cfg.DecodeProject(id, home, revision.Data)
-	return file, revision, err
+	return file, revision, Relabel(s.root, id, err)
 }
 
 // Apply returns a copy of cfg whose active projects are the registry's, in
@@ -510,7 +562,7 @@ func (s *Store) Apply(cfg *config.Config, home string) (*config.Config, error) {
 	for _, id := range ids {
 		file, _, err := s.Load(cfg, home, id)
 		if err != nil {
-			return nil, err
+			return nil, &LoadError{Project: id, Err: err}
 		}
 		out.ActiveProjects = append(out.ActiveProjects, string(id))
 		out.Projects = append(out.Projects, file.Project)

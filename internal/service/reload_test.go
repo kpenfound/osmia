@@ -49,11 +49,11 @@ func reloadFails(t *testing.T, c *Client, path, field string) {
 	intakefixture.ReloadFails(t, c.Reload, path, field)
 }
 
-// A reload validates the top-level file and the project's file as one
-// candidate: a bad file in either leaves the loaded configuration and its
-// digest as they were, and the failure stays in the configuration view until
-// a reload succeeds.
-func TestReloadValidatesEveryFileBeforeApplying(t *testing.T) {
+// A reload validates the top-level file before applying it: a bad file leaves
+// the loaded configuration and its digest as they were, and the failure stays
+// in the configuration view until a reload succeeds. A project's retired file
+// is never read, whatever it holds.
+func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
@@ -62,15 +62,16 @@ func TestReloadValidatesEveryFileBeforeApplying(t *testing.T) {
 	before, err := c.Configuration(ctx)
 	must(t, err)
 
-	// A valid top-level change is not applied while the project file fails.
-	files.write(t, files.topText+"[capacity]\nmasons = 7\n", files.projectText+"landing = \"sideways\"\n")
-	reloadFails(t, c, files.project, "landing")
+	// The retired project file is not read: a valid top-level change applies
+	// while it holds a setting that would not load.
+	files.write(t, files.topText+"[capacity]\nmasons = 0\n", files.projectText+"landing = \"sideways\"\n")
+	reloadFails(t, c, files.top, "capacity.masons")
 	now, err := c.Configuration(ctx)
 	must(t, err)
 	if now.Digest != before.Digest || !reflect.DeepEqual(now.Effective, before.Effective) || now.Effective.Capacity.Masons != 4 {
 		t.Fatalf("a failed reload changed the loaded configuration: %+v", now)
 	}
-	if e := now.LastError; e == nil || e.Path != files.project || e.Field != "landing" || e.At.IsZero() {
+	if e := now.LastError; e == nil || e.Path != files.top || e.Field != "capacity.masons" || e.At.IsZero() {
 		t.Fatalf("last error: %+v", now.LastError)
 	}
 	if !hasCode(now.Diagnostics, "configuration", Validation) {
@@ -85,9 +86,6 @@ func TestReloadValidatesEveryFileBeforeApplying(t *testing.T) {
 		t.Fatalf("after the fix on disk: %+v", now)
 	}
 
-	// A bad top-level file fails the same way; the error names it instead.
-	files.write(t, files.topText+"[capacity]\nmasons = 0\n", files.projectText)
-	reloadFails(t, c, files.top, "capacity.masons")
 	// TOML that does not parse names the file and line, never its text.
 	files.write(t, files.topText+"credential = 'secret-reload-text'\n[broken", files.projectText)
 	_, err = c.Reload(ctx)
@@ -101,7 +99,7 @@ func TestReloadValidatesEveryFileBeforeApplying(t *testing.T) {
 		t.Fatalf("after an unparsable reload: %s", encoded)
 	}
 
-	files.write(t, files.topText+"[capacity]\nmasons = 7\n", files.projectText)
+	files.write(t, files.topText+"[capacity]\nmasons = 7\n", files.projectText+"landing = \"sideways\"\n")
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
@@ -109,7 +107,7 @@ func TestReloadValidatesEveryFileBeforeApplying(t *testing.T) {
 	if reloaded.Digest == before.Digest || reloaded.Digest != now.Digest || len(reloaded.RestartRequired) != 0 {
 		t.Fatalf("reload: %+v, configuration digest %s", reloaded, now.Digest)
 	}
-	if now.LastError != nil || len(now.Diagnostics) != 0 || now.Effective.Capacity.Masons != 7 {
+	if now.LastError != nil || len(now.Diagnostics) != 0 || now.Effective.Capacity.Masons != 7 || now.Effective.Project.Landing != "commit-per-unit" {
 		t.Fatalf("after a successful reload: %+v", now)
 	}
 }
@@ -140,14 +138,15 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 		t.Fatalf("diagnostics: %+v", now.Diagnostics)
 	}
 
-	// Removing a project applies live; its unlisted file is no longer loaded.
+	// A reload never removes a project: emptying the leftover active_projects
+	// list changes nothing.
 	unlisted := strings.Replace(files.topText, `active_projects = ["`+string(project)+`"]`, "active_projects = []", 1)
-	files.write(t, unlisted, files.projectText+"landing = \"sideways\"\n")
+	files.write(t, unlisted, files.projectText)
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
 	must(t, err)
-	if len(reloaded.RestartRequired) != 0 || len(now.Effective.Projects) != 0 || now.Effective.Listen.Socket != socket {
+	if len(reloaded.RestartRequired) != 0 || len(now.Effective.Projects) != 1 || now.Effective.Projects[0].ID != project || now.Effective.Listen.Socket != socket {
 		t.Fatalf("unlisted project: %+v %+v", reloaded, now.Effective)
 	}
 }

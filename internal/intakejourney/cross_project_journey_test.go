@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,7 +49,7 @@ func newSplitJourney(t *testing.T) *splitJourney {
 		p.Name = []string{"Server", "Client"}[i]
 		path, err := cfg.Root.ProjectConfig(id)
 		must(t, err)
-		must(t, config.WriteProjectConfig(path, p))
+		fixturekit.WriteProjectFile(t, path, p)
 		data, err := os.ReadFile(path)
 		must(t, err)
 		source := ""
@@ -63,6 +65,15 @@ func newSplitJourney(t *testing.T) *splitJourney {
 	storeDirectory, err := cfg.Root.ProjectStore()
 	must(t, err)
 	must(t, os.RemoveAll(storeDirectory))
+	top, err := cfg.Root.Config()
+	must(t, err)
+	text, err := os.ReadFile(top)
+	must(t, err)
+	listed := regexp.MustCompile(`(?m)^active_projects = .*$`).ReplaceAllString(string(text), fmt.Sprintf("active_projects = [%q, %q]", f.project, f.project2))
+	if listed == string(text) {
+		t.Fatal("fixture did not list the projects")
+	}
+	must(t, os.WriteFile(top, []byte(listed), 0600))
 	f.start(t)
 	j.checkSplit(t)
 	return j

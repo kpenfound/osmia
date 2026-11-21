@@ -55,7 +55,7 @@ type Config struct {
 	// project of a loaded configuration, or the project For selected. It is
 	// zero when no project, or more than one, is active.
 	Project Project `toml:"-" json:"project"`
-	// Projects holds every active project, in active_projects order.
+	// Projects holds every active project, in registry order.
 	Projects []Project `toml:"-" json:"projects,omitempty"`
 	// Warnings describes settings that loaded but have no effect, one
 	// sentence each. A service logs them when it loads or reloads.
@@ -553,7 +553,7 @@ func (c *Config) validateCommittee(path string) error {
 // zero.
 func (c *Config) HasProject() bool { return c.Project.ID != "" }
 
-// ProjectIDs returns the IDs of the active projects, in active_projects order.
+// ProjectIDs returns the IDs of the active projects, in registry order.
 func (c *Config) ProjectIDs() []ProjectID {
 	ids := make([]ProjectID, len(c.Projects))
 	for i, p := range c.Projects {
@@ -612,26 +612,6 @@ func (c *Config) AddProject(id ProjectID, home string) (*Config, error) {
 	out.ActiveProjects = append(slices.Clone(c.ActiveProjects), string(id))
 	out.Projects = append(slices.Clone(c.Projects), loaded.Project)
 	out.Project = Project{}
-	if len(out.Projects) == 1 {
-		out.Project = out.Projects[0]
-	}
-	return &out, nil
-}
-
-// WithProjects returns a copy of c whose active projects are ids, in that
-// order, each loaded and validated from its configuration file. The receiver
-// is unchanged.
-func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
-	out := *c
-	out.ActiveProjects, out.Projects, out.Project = []string{}, nil, Project{}
-	for _, id := range ids {
-		p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
-		if err != nil {
-			return nil, err
-		}
-		out.ActiveProjects = append(out.ActiveProjects, string(id))
-		out.Projects = append(out.Projects, p)
-	}
 	if len(out.Projects) == 1 {
 		out.Project = out.Projects[0]
 	}

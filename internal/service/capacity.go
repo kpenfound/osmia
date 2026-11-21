@@ -24,7 +24,7 @@ import (
 // masons, the ready units of list whose latest mason controller decision is
 // to wait for a slot. It reads no trace. The role slots are shared by every
 // project in the pool, so their use counts the turns in flight on all of
-// them, and the waiting turns are listed in active_projects order.
+// them, and the waiting turns are listed in registry order.
 // PerWorkstream is the only active project's limit, or the configured default
 // otherwise. Work a pause now in force holds, and work of an abandoned
 // workstream, is not waiting. Check slots come directly from the service pool,

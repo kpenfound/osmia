@@ -58,3 +58,15 @@ func EditProjectSettings(t *testing.T, rootDirectory string, id config.ProjectID
 		Must(t, os.WriteFile(path, []byte(edit(string(data))), 0600))
 	}
 }
+
+// WriteProjectFile writes p's settings at path as a project file, the way a
+// root of an earlier version holds them, creating the project's directory. A
+// service imports such a file when it starts on a root that has not been
+// imported; once it has, the file is retired and nothing reads it.
+func WriteProjectFile(t *testing.T, path string, p config.Project) {
+	t.Helper()
+	data, err := config.ProjectConfigBytes(p)
+	Must(t, err)
+	Must(t, os.MkdirAll(filepath.Dir(path), 0700))
+	Must(t, os.WriteFile(path, data, 0600))
+}

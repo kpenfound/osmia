@@ -12,8 +12,9 @@ import (
 // project import is complete the projects are the registry's, each loaded from
 // the store, and no project file is read. Before it, the journalled project
 // split finishes and the preflight checks that every listed project's file
-// loads, with nothing else modified, and the projects load from their files.
-// imported reports which of the two applied.
+// loads, with nothing else modified, and the projects load from their files
+// until completeMigration imports them. imported reports which of the two
+// applied.
 func loadForStart(ctx context.Context, options config.Options, step func(string) error) (cfg *config.Config, imported bool, err error) {
 	top, err := config.LoadTopLevel(options)
 	if err != nil {
@@ -35,9 +36,8 @@ func loadForStart(ctx context.Context, options config.Options, step func(string)
 }
 
 // completeMigration runs what loadForStart leaves of the migration: the split
-// of the listed projects and the import. The top-level file is read again,
-// since finishing a registration may have listed another project. It returns
-// the configuration with the projects loaded from the store.
+// of the listed projects and the import. It returns the configuration with the
+// projects loaded from the store.
 func completeMigration(ctx context.Context, options config.Options, step func(string) error) (*config.Config, error) {
 	top, err := config.LoadTopLevel(options)
 	if err != nil {

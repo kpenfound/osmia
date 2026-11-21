@@ -152,7 +152,8 @@ func TestProjectSettingsRefusesAnInvalidEditNamingTheField(t *testing.T) {
 	must(t, err)
 	current, err := r.store.Current(config.ProjectID(project))
 	must(t, err)
-	// A settings save of the same edit is refused with this text.
+	// A settings save of the same edit is refused with this text, which names the
+	// project's settings rather than a file.
 	_, _, saveErr := cfg.EditProject(config.ProjectID(project), "", current.Data, config.ProjectEdit{Strings: map[string]string{"checks_timeout": "soon"}})
 	if saveErr == nil {
 		t.Fatal("the edit is valid")
@@ -163,7 +164,7 @@ func TestProjectSettingsRefusesAnInvalidEditNamingTheField(t *testing.T) {
 		field string
 		text  string
 	}{
-		{[]string{"set", "checks_timeout=soon"}, "checks_timeout", saveErr.Error()},
+		{[]string{"set", "checks_timeout=soon"}, "checks_timeout", projectstore.Relabel(cfg.Root, config.ProjectID(project), saveErr).Error()},
 		{[]string{"set", "upstream=https://example.com/a/b"}, "upstream", "expected owner/repository"},
 		{[]string{"set", "capacity.git_operations=0"}, "capacity.git_operations", "must be positive"},
 		{[]string{"set", "capacity.git_operations=many"}, "capacity.git_operations", "must be a whole number"},
@@ -182,6 +183,9 @@ func TestProjectSettingsRefusesAnInvalidEditNamingTheField(t *testing.T) {
 		code, out, diag := r.run(c.args...)
 		if code == 0 || out != "" || !strings.Contains(diag, c.field+": ") || !strings.Contains(diag, c.text) || !strings.Contains(diag, "nothing was written") {
 			t.Fatalf("%v: %d\n%s\n%s", c.args, code, out, diag)
+		}
+		if strings.Contains(diag, "config.toml") || !strings.Contains(diag, config.ProjectSettingsLabel(project)+": "+c.field) {
+			t.Fatalf("%v: the refusal does not name the project's settings: %s", c.args, diag)
 		}
 		if strings.Contains(diag, "soon") && c.field != "checks_timeout" {
 			t.Fatalf("%v: %s", c.args, diag)

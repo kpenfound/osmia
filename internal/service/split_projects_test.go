@@ -384,7 +384,10 @@ func TestProjectSplitRecoversPendingRegistrationWithPinnedCharter(t *testing.T) 
 						reached = true
 						return interrupted
 					}
-					if strings.HasPrefix(at, "split-") {
+					// The registration lists its project once the import is
+					// complete, so the split of the listed projects runs before
+					// those last steps and after every other.
+					if strings.HasPrefix(at, "split-") && step != "active-project-listed" && step != "journal-removed" {
 						t.Fatal("config split began before registration recovery completed")
 					}
 					return nil

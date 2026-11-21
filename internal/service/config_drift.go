@@ -2,63 +2,28 @@ package service
 
 import (
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectmigration"
 )
 
-// configDrift compares the top-level configuration file and each loaded
-// project's file on disk with cfg, each on its own, and reads them without
-// applying anything. A file that cannot be read or does not validate is
-// invalid. reloaded is the error a reload of the files together fails with,
-// which also marks the file it names invalid, or adds it when it is another
-// project's.
+// configDrift compares the top-level configuration file on disk with cfg,
+// reading it without applying anything. It is the only file a reload reads. A
+// file that cannot be read or does not validate is invalid. reloaded is the
+// error a reload fails with, which also marks the file invalid.
 func (s *Service) configDrift(cfg *config.Config, reloaded error) ConfigDrift {
 	path, _ := cfg.Root.Config()
-	files := []ConfigFile{{Path: path, State: ConfigUnchanged}}
+	file := ConfigFile{Path: path, State: ConfigUnchanged}
 	if disk, err := config.LoadTopLevel(s.options.Config); err != nil {
-		files[0].State, files[0].Reason = ConfigInvalid, fileReason(err)
-	} else if topLevelDigest(disk) != topLevelDigest(cfg) {
-		files[0].State = ConfigChanged
+		file.State, file.Reason = ConfigInvalid, fileReason(err)
+	} else if digest(projectmigration.Compose(disk, cfg.Projects)) != digest(cfg) {
+		file.State = ConfigChanged
 	}
-	for _, p := range cfg.Projects {
-		path, _ := cfg.Root.ProjectConfig(p.ID)
-		file := ConfigFile{Path: path, Project: p.ID, State: ConfigUnchanged}
-		if disk, err := cfg.WithProject(p.ID, s.options.Config.Home); err != nil {
-			file.State, file.Reason = ConfigInvalid, fileReason(err)
-		} else if digest(&config.Config{Project: disk.Project}) != digest(&config.Config{Project: p}) {
-			file.State = ConfigChanged
-		}
-		files = append(files, file)
+	if reloaded != nil && file.State != ConfigInvalid {
+		file.State, file.Reason = ConfigInvalid, fileReason(reloaded)
 	}
-	if reloaded != nil {
-		i := 0
-		var field *config.FieldError
-		if errors.As(reloaded, &field) {
-			i = slices.IndexFunc(files, func(f ConfigFile) bool { return f.Path == field.Path })
-			if i < 0 {
-				files, i = append(files, ConfigFile{Path: field.Path}), len(files)
-			}
-		}
-		if files[i].State != ConfigInvalid {
-			files[i].State, files[i].Reason = ConfigInvalid, fileReason(reloaded)
-		}
-	}
-	differs := slices.ContainsFunc(files, func(f ConfigFile) bool { return f.State != ConfigUnchanged })
-	return ConfigDrift{Differs: differs, Files: files}
-}
-
-// topLevelDigest is the digest of c's top-level settings: every setting but
-// the project's own.
-func topLevelDigest(c *config.Config) string {
-	top := *c
-	top.Project = config.Project{}
-	top.Projects = nil
-	if len(top.ActiveProjects) == 0 {
-		top.ActiveProjects = nil
-	}
-	return digest(&top)
+	return ConfigDrift{Differs: file.State != ConfigUnchanged, Files: []ConfigFile{file}}
 }
 
 // fileReason says why a configuration file fails to load, without its path,
