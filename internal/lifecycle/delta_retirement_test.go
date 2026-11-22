@@ -169,8 +169,11 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	if unavailable {
 		// The archived member's slice is frozen: the draft is refused with a
 		// reason naming it, and the turn ends without a proposal.
-		lifecycleAwait(t, f, "survivor draft refused", func() bool {
-			return currentChange(t, f.s, survivor, c.ID).State == "failed"
+		// The failed change settles its requester and tells the chief once;
+		// the decision is stable from then on.
+		lifecycleAwait(t, f, "survivor draft refused and settled", func() bool {
+			c := currentChange(t, f.s, survivor, c.ID)
+			return c.State == "failed" && c.FailureSettled
 		})
 		assertFrozenSliceRefusal(t, f, survivor, c.ID, address)
 	} else {
