@@ -27,6 +27,35 @@ func TestRoleSkills(t *testing.T) {
 	}
 }
 
+// roleSkillBrief writes each skill name as a reference into
+// https://github.com/kpenfound/skills.
+func roleSkillBrief(names ...string) []string {
+	refs := make([]string, len(names))
+	for i, name := range names {
+		refs[i] = "https://github.com/kpenfound/skills#" + name
+	}
+	return refs
+}
+
+func TestKpenfoundSkillListsLoad(t *testing.T) {
+	mason := roleSkillBrief("behavioral-testing", "simple-code", "no-deltas", "lint-discipline", "unslop", "typescript-best-practices")
+	reviewer := roleSkillBrief("pr-review", "simple-code", "no-deltas", "behavioral-testing")
+	quoted := func(refs []string) string { return "['" + strings.Join(refs, "', '") + "']" }
+	text := topConfig + "[roles.mason]\nskills = " + quoted(mason) + "\n[roles.reviewer]\nskills = " + quoted(reviewer) + "\n"
+	c, err := LoadTopLevel(fixture(t, text, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.Roles["mason"].Skills, mason) || !slices.Equal(c.Roles["reviewer"].Skills, reviewer) {
+		t.Fatalf("mason %v reviewer %v", c.Roles["mason"].Skills, c.Roles["reviewer"].Skills)
+	}
+	for role, want := range map[string][]string{"mason": mason, "reviewer": reviewer} {
+		if _, settings, err := c.Execution(role, "default"); err != nil || !slices.Equal(settings.Skills, want) {
+			t.Fatalf("%s settings %+v: %v", role, settings, err)
+		}
+	}
+}
+
 func TestInvalidRoleSkills(t *testing.T) {
 	for name, c := range map[string]struct{ top, want string }{
 		"empty reference":   {"[roles.mason]\nskills = ['']\n", "roles.mason.skills[0]"},

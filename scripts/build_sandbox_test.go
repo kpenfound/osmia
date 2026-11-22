@@ -36,6 +36,7 @@ type guest struct {
 	probe      string
 	noClaude   bool
 	daggerTag  string
+	codexOut   string
 }
 
 func newGuest(t *testing.T) *guest {
@@ -160,6 +161,9 @@ func (g *guest) run(t *testing.T) result {
 	}
 	if g.daggerTag != "" {
 		env = append(env, "FAKE_SBX_DAGGER_VERSION="+g.daggerTag)
+	}
+	if g.codexOut != "" {
+		env = append(env, "FAKE_SBX_CODEX_OUTPUT="+g.codexOut)
 	}
 	cmd.Env = env
 	out, runErr := cmd.CombinedOutput()
@@ -403,4 +407,33 @@ func TestBuildSandboxKeepsVersionChecks(t *testing.T) {
 		g.daggerTag = "v0.1.0"
 		g.run(t).wantRefused(t, "Expected Dagger v0.19.0")
 	})
+}
+
+func TestBuildSandboxChecksTheCodexMinimum(t *testing.T) {
+	for _, tt := range []struct {
+		name, version string
+		saved         bool
+	}{
+		{"older release", "codex-cli 0.135.0", false},
+		{"older patch of an older minor", "codex-cli 0.99.9", false},
+		{"unreadable version", "codex-cli unknown", false},
+		{"minimum release", "codex-cli 0.136.0", true},
+		{"newer patch", "codex-cli 0.136.1", true},
+		{"newer minor with prerelease", "codex-cli 0.173.0-alpha.4", true},
+		{"newer major", "codex-cli 1.0.0", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newGuest(t)
+			g.codexOut = tt.version
+			res := g.run(t)
+			if tt.saved {
+				res.wantSaved(t)
+				return
+			}
+			res.wantRefused(t, "0.136.0", "skills/extraRoots/set")
+			if n := res.count("claude --version"); n != 0 {
+				t.Errorf("build went on after the Codex check: %v", res.calls)
+			}
+		})
+	}
 }

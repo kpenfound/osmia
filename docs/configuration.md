@@ -699,12 +699,12 @@ it has no effect. Role keys:
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
 | `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
-| `skills` | `[]` | Skills by git reference, given to the role's Claude turns; see [Role skills](#role-skills) |
+| `skills` | `[]` | Skills by git reference, given to the role's Claude and Codex turns; OpenCode and Pi turns get none; see [Role skills](#role-skills) |
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
 accepted from these files; a role's `skills` add only the read-only skill cache
-and the tool that loads skills. Sandbox settings describe requested execution. A turn
+and, on Claude, the tool that loads skills. Sandbox settings describe requested execution. A turn
 runs in any mode the platform can confine; one it cannot (for example `claude`
 on Linux) fails before launch with core's reason. Successful configuration
 loading does not imply that execution is available.
@@ -835,6 +835,12 @@ refuses when:
 The reachability probe asks each socket or address directly with `curl`. It
 does not use the Docker CLI, whose absence would prove nothing. The script also
 keeps its version checks for Codex, Claude Code and the host's Dagger release.
+Codex must be at least 0.136.0, the first release whose app-server answers
+`skills/extraRoots/set`, the request that gives a Codex turn its role's
+[skills](#role-skills); the script refuses to save the template with an older
+Codex. The release comes from the app-server protocol of
+[openai/codex](https://github.com/openai/codex): the method was added in pull
+request 24977 and first shipped in `rust-v0.136.0`.
 
 Under each role that should use this template, set `sandbox = "sbx"` and
 `image = "osmia:latest"` in the existing role configuration, then run
@@ -1213,8 +1219,10 @@ must be able to open that socket.
 ### Role skills
 
 A role may name skills by git reference. Osmia clones each one into
-`<root>/skills/` and gives the role's Claude turns a generated plugin that holds
-only the skills:
+`<root>/skills/` and gives the role's Claude and Codex turns only those skills.
+A Claude turn receives a generated plugin that holds them; a Codex turn has its
+app-server register their directories through `skills/extraRoots/set` before
+its thread starts:
 
 ```toml
 [roles.reviewer]
@@ -1235,9 +1243,13 @@ inside the repository. Two references of one role may not end in the same
 name, since that name identifies the generated plugin.
 
 A turn of a role with skills mounts the skill cache read-only in every
-sandbox, and Claude's `Skill` tool joins its native tools. Codex and OpenCode
-turns receive no skills, so a role whose fallback runs another agent loses its
-skills for those turns.
+sandbox. Claude's `Skill` tool joins a Claude turn's native tools; a Codex turn
+keeps Codex's own tools. OpenCode and Pi turns receive no skills, no skill
+mounts and no skill tool, so a role whose fallback runs OpenCode or Pi loses its
+skills for those turns. A Codex turn of a role with skills fails when its
+app-server does not accept the skills (a Codex older than the
+minimum named under "Building the Osmia template", for example);
+Osmia never runs it without them.
 
 Osmia clones a missing reference when a turn needs it, with the service's own
 `git` and credentials and without prompting. A failed clone fails the turn. A
