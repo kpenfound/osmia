@@ -1097,7 +1097,7 @@ this.
 
 ## Service log
 
-While `osmia serve` runs, foreground, detached or under systemd, everything it writes to its
+While `osmia serve` runs, foreground, detached or under a supervisor, everything it writes to its
 standard output and standard error is a structured log record: one JSON
 object per line, with a `time`, a `level` and a `msg`, and the record's
 details as named fields rather than only in the message text. In detached
@@ -1121,33 +1121,30 @@ Filter the stream with any JSON-lines tool, for example `jq`:
 osmia serve 2>&1 | jq -c 'select(.level == "ERROR")'
 ```
 
-### Running under systemd
+### Running under a supervisor
 
-The [systemd user unit](getting-started.md#run-it-as-a-service) runs the
-service in the foreground, so its log goes to the user journal and
-`<root>/service.log` is not written. `osmia serve --detach` is not used under
-systemd. Read the records with `-o cat`, which prints the JSON lines as
-written:
+Osmia ships no systemd unit. The lab deploys Osmia from the Apiary repository.
+A supervisor such as systemd that you configure yourself needs to provide:
 
-```sh
-journalctl --user -u osmia -o cat | jq -c 'select(.level == "ERROR")'
-journalctl --user -u osmia -o cat -f | jq -c .   # follow
-```
+- The service runs as the login user, in the foreground. Do not use
+  `osmia serve --detach` under a supervisor; the log goes to the supervisor's
+  journal and `<root>/service.log` is not written.
+- The user has the agent CLI logins and the project clones, and Docker access
+  for the managed Dagger engine. The default root is under
+  `~/.local/share/osmia`; add `--root PATH` for a self-contained root.
+- Its `PATH` finds the agent CLI (`claude`, `codex` or `opencode`), `dagger`,
+  `jj` and `docker`. Supervisors often start services with a minimal `PATH`.
+- Secrets such as `GITHUB_TOKEN`, `TS_AUTHKEY` for the first tailnet login and
+  the Dagger Cloud token variables that
+  [`dagger.cloud_compute_token_env` and `dagger.cloud_api_token_env`](configuration.md#dagger-engine)
+  name come from its environment, never a committed file.
+- On SIGTERM the service drains and exits, so allow the supervisor's stop
+  timeout about 90 seconds before it kills what remains. The managed Dagger
+  engine is a Docker container outside the service, so it keeps running.
 
-Manage the service with `systemctl --user`:
-
-```sh
-systemctl --user start osmia
-systemctl --user stop osmia
-systemctl --user restart osmia
-systemctl --user status osmia
-```
-
-Stopping sends SIGTERM to `osmia serve` and waits up to 90 seconds for it to
-drain and exit before killing what remains of the unit's processes. The managed
-Dagger engine is a Docker container outside the unit, so it keeps running.
 `osmia reload` applies configuration changes without a restart
-([reload](#reload)).
+([reload](#reload)). Under systemd, read the JSON-lines records with
+`journalctl -o cat`, which prints them as written.
 
 ### GitHub activity log
 

@@ -61,8 +61,8 @@ func TestTelemetryPageListsWhatTheCodeSends(t *testing.T) {
 	}
 }
 
-// The five questions have a worked query each, against the table the
-// deploy/telemetry collector writes.
+// The five questions have a worked query each, against the otel.otel_traces
+// table the collector's ClickHouse exporter writes.
 func TestTelemetryPageHasTheFiveQueries(t *testing.T) {
 	if n := strings.Count(telemetryDoc, "```sql"); n != 5 {
 		t.Fatalf("docs/telemetry.md has %d SQL queries, want 5", n)
