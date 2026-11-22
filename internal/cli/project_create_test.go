@@ -156,3 +156,20 @@ func TestInboxNamesTheCommandThatRetriesAStuckCreation(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxTellsHowARefusedStartsProjectIsCreated(t *testing.T) {
+	var out bytes.Buffer
+	showInbox(&out, wire.InboxResponse{Entries: []wire.InboxEntry{{
+		Kind: wire.InboxProjectCreation, Question: "Creating the project for gadget was refused before it began: GITHUB_TOKEN is not set.", Blocked: "Starting the workgroup: the new project is allocated once it is created.",
+		Options: []string{"retry"}, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/projects/create", Body: map[string]any{"id": "p_0123456789abcdef0123456789abcdef", "name": "Gadget", "repo": "gadget", "charter": "Keep it small."}},
+	}}})
+	text := out.String()
+	for _, want := range []string{"[project-creation]", "the service creates Gadget (repository gadget) under p_0123456789abcdef0123456789abcdef on its next pass"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inbox lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "osmia project create --id") {
+		t.Fatalf("inbox offers a command that cannot create a refused start's project:\n%s", text)
+	}
+}

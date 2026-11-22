@@ -69,6 +69,14 @@ func (s *Controller) ShedAction(raw string, states ...string) (*ShedOwner, *APIE
 	if err != nil {
 		return nil, failed
 	}
+	if feature.Value == HandedState {
+		d := &Drafter{S: s.DrafterDependencies(), Repository: repository}
+		wait, _, err := d.DraftWait(stream)
+		if err != nil {
+			return nil, failed
+		}
+		return nil, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and has no accepted spec and plan in the shed yet: %s", stream, HandedState, wait)}
+	}
 	if !slices.Contains(states, feature.Value) {
 		return nil, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s; the owner takes part in the shed while it is %s", stream, FeatureState(feature.Value), strings.Join(states, " or "))}
 	}
@@ -289,6 +297,9 @@ func (s *Controller) DisposeBy(ctx context.Context, o *ShedOwner, objection stri
 // change. The controller asks the architect for the redraft and debate
 // resumes with the round that reads it.
 func (s *Controller) ShedRedraft(ctx context.Context, raw string, req ShedRedraftRequest) (ShedResponse, *APIError) {
+	if out, handed, api := s.redraftHanded(ctx, raw, req.Note); handed {
+		return out, api
+	}
 	o, api := s.ShedAction(raw, InShedState)
 	if api != nil {
 		return ShedResponse{}, api
@@ -320,6 +331,33 @@ func (s *Controller) ShedRedraft(ctx context.Context, raw string, req ShedRedraf
 		return ShedResponse{}, api
 	}
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: n, Action: "redraft", Detail: reason}, nil
+}
+
+// redraftHanded asks the architect for a new run of drafts of a handed
+// workstream whose drafting stopped, with the owner's note. handed is false
+// for any other workstream, whose redraft is a shed action.
+func (s *Controller) redraftHanded(ctx context.Context, raw, note string) (ShedResponse, bool, *APIError) {
+	project, stream, repository, api := s.ConversationTrace(raw)
+	if api != nil {
+		return ShedResponse{}, false, nil
+	}
+	feature, err := repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil || feature.Value != HandedState {
+		return ShedResponse{}, false, nil
+	}
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return ShedResponse{}, true, &APIError{Code: Validation, Message: "a redraft requires a note saying what to change"}
+	}
+	d := &Drafter{S: s.DrafterDependencies(), Repository: repository}
+	detail, refused, err := d.RequestAgain(ctx, stream, note, OwnerActor)
+	switch {
+	case err != nil:
+		return ShedResponse{}, true, &APIError{Code: Internal, Message: fmt.Sprintf("cannot ask the architect for another run of drafts of workstream %s; check the trace repository", stream)}
+	case refused != "":
+		return ShedResponse{}, true, &APIError{Code: Conflict, Message: refused}
+	}
+	return ShedResponse{Project: project, Workstream: stream, Action: "redraft", Detail: detail}, true, nil
 }
 
 // shedSkip records that the owner skips debate. No further committee turn

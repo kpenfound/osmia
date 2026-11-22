@@ -2212,7 +2212,13 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 				block("Answer", fmt.Sprintf("none while its base is unavailable; or osmia abandon %s \"...\"", stream))
 			}
 		case wire.InboxProjectCreation:
-			block("Answer", fmt.Sprintf("osmia project create --id %v once the cause is fixed; the retry reuses only the repository this creation made", e.Answer.Body["id"]))
+			if name, refused := e.Answer.Body["name"]; refused {
+				// A creation refused before it began carries its whole request;
+				// --id alone only finishes a creation that started.
+				block("Answer", fmt.Sprintf("none once the cause is fixed: the service creates %v (repository %v) under %v on its next pass; retry from the web inbox to try now", name, e.Answer.Body["repo"], e.Answer.Body["id"]))
+			} else {
+				block("Answer", fmt.Sprintf("osmia project create --id %v once the cause is fixed; the retry reuses only the repository this creation made", e.Answer.Body["id"]))
+			}
 		case wire.InboxLoop:
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case wire.InboxNotices:

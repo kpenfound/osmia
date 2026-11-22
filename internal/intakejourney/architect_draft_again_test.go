@@ -108,3 +108,39 @@ func containsTransition(transitions []trace.Transition, match func(trace.Transit
 	}
 	return false
 }
+
+// The owner's shed actions on a handed workstream say that drafting has no
+// accepted spec and plan yet, and the owner's redraft of one whose drafting
+// stopped starts a new run of drafts with the note.
+func TestTheOwnersRedraftDraftsAStoppedWorkstreamAgain(t *testing.T) {
+	t.Parallel()
+	f := newArchitectFixture(t)
+	defer f.stop(t)
+	ctx := context.Background()
+	for n := 1; n <= maxDrafts; n++ {
+		f.script(fmt.Sprintf("draft-%d-1", n), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan}, nil)
+	}
+	f.script(fmt.Sprintf("draft-%d-1", maxDrafts+1), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, draftAt("exhausted"))
+
+	if _, err := f.c.ShedObject(ctx, stream, "No."); !failed(err, Conflict) || !strings.Contains(err.Error(), "has no accepted spec and plan in the shed yet") || !strings.Contains(err.Error(), "drafting stopped after 3 refused drafts") {
+		t.Fatalf("shed objection on a stopped workstream: %v", err)
+	}
+	if _, err := f.c.ShedRedraft(ctx, stream, " "); !failed(err, Validation) {
+		t.Fatalf("redraft without a note: %v", err)
+	}
+	note := "Drop the dependency between the units."
+	if _, err := f.c.ShedRedraft(ctx, stream, note); err != nil {
+		t.Fatal(err)
+	}
+	f.await(t, stream, sketched)
+	if tr := f.transitions(t, stream); !containsTransition(tr, func(tr trace.Transition) bool {
+		return tr.ID == fmt.Sprintf("draft-%d", maxDrafts+1) && tr.Actor == ownerActor && tr.Cause == intake.DraftAgainCause && strings.Contains(tr.Reason, note)
+	}) {
+		t.Fatalf("owner's run not recorded: %+v", tr)
+	}
+	if _, err := f.c.ShedRedraft(ctx, stream, note); err == nil || strings.Contains(err.Error(), "has no accepted spec and plan") {
+		t.Fatalf("a sketched workstream's redraft took the handed path: %v", err)
+	}
+}
