@@ -37,8 +37,8 @@ ExecStart=/usr/local/bin/osmia serve
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 # Optional secrets, one KEY=value per line, for example GITHUB_TOKEN,
-# TS_AUTHKEY (first tailnet login) and the Dagger Cloud token variables that
-# dagger.cloud_compute_token_env and dagger.cloud_api_token_env name. The unit starts without this file. Keep
+# TS_AUTHKEY (first tailnet login) and the Dagger Cloud token variable that
+# dagger.cloud_token_env names. The unit starts without this file. Keep
 # secrets in it, never in this unit file, and make it readable only by you
 # (chmod 600).
 EnvironmentFile=-%h/.config/osmia/osmia.env
