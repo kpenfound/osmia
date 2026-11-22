@@ -254,17 +254,7 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 		}
 	}
 	reason := fmt.Sprintf("every unit of the sealed plan has merged onto %s: %s; the feature branch is rebased onto upstream and read against the sealed spec and the charter next", featureBranch(stream), strings.Join(ids, ", "))
-	id := AssembledState
-	for _, t := range transitions {
-		if t.ID == AssembledState {
-			sealed, _, _, err := seal.Latest(a.Repository, stream)
-			if err != nil {
-				return err
-			}
-			id = fmt.Sprintf("assembled-seal-%d", sealed.Seal)
-			break
-		}
-	}
+	id := AssemblyID(transitions)
 	feature, err := a.Repository.RawWorkflow(stream, trace.FeatureSubject)
 	if err != nil || feature.Value != BuildingState {
 		return err
@@ -277,6 +267,32 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 		Target: intake.TargetAssembled, Description: "Assemble the workstream: every unit of the sealed plan has merged.",
 		Events: []trace.Event{intake.FeatureProgress(id, BuildingState, AssembledState, reason)},
 	}.Exit())
+}
+
+// AssemblyID returns the ID of the workstream's next assembly given its
+// transitions: assembled for the first, and assembled-N for the Nth move of
+// the feature to assembled, skipping any ID already taken. It depends only on
+// the trace, so a retry of an assembly that was not recorded reuses its ID,
+// and every assembly after a reopen gets its own, whether or not a revision
+// changed the seal.
+func AssemblyID(transitions []trace.Transition) string {
+	taken := map[string]bool{}
+	n := 0
+	for _, t := range transitions {
+		taken[t.ID] = true
+		if t.Subject == trace.FeatureSubject && t.To == AssembledState {
+			n++
+		}
+	}
+	id := AssembledState
+	if n > 0 {
+		id = fmt.Sprintf("%s-%d", AssembledState, n+1)
+	}
+	for taken[id] {
+		n++
+		id = fmt.Sprintf("%s-%d", AssembledState, n+1)
+	}
+	return id
 }
 
 // AllMerged reports whether the building workstream's plan has units and
