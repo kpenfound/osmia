@@ -43,6 +43,7 @@ const (
 	TriggerQuestionFollow    = "unit.question_follow"
 	TriggerRebased           = "unit.rebased"
 	TriggerRebaseConflicted  = "unit.rebase_conflicted"
+	TriggerRebaseRefused     = "unit.rebase_refused"
 	TriggerLanded            = "unit.landed"
 	TriggerLandingRefused    = "unit.landing_refused"
 	TriggerMoveOwner         = "unit.move_owner"

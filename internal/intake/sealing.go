@@ -520,6 +520,21 @@ func (z *Sealer) Fail(ctx context.Context, stream config.WorkstreamID, in SealIn
 	}
 	recorded := fmt.Sprintf("sealing %d of %s failed: %s", in.Seal, in.Pin(), reason)
 	body := fmt.Sprintf("The sealing of %s failed and the workstream is not ratified: %s. Once that is put right, ratifying the same revisions again asks for the sealing again.", in.Pin(), reason)
+	group, err := z.Repository.GroupApprovalRequired(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if group {
+		id, err := z.Repository.CrossRepoWorkgroupOf(stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		body = fmt.Sprintf("The sealing of member %s at %s failed after the owner's group approval, so workgroup %s stays unratified and no member builds: %s. "+
+			"The group approval is fixed: its spec and plan are not redrafted, debated or amended while any member is unsealed. "+
+			"Once the cause is put right, the owner ratifies the workgroup again at the approved revisions (you can propose it with move_workstream to ratified), which asks for this member's sealing again. "+
+			"A footprint the entity map does not resolve resolves once what it names exists upstream. If the approved plan itself must change, the only way is for the owner to cancel the workgroup and hand it in again; tell the owner in plain words what happened.",
+			stream, in.Pin(), id, reason)
+	}
 	// A failed sealing has one way out, which the owner takes by ratifying
 	// again; the router records it as the exit's default.
 	x := z.failedExit(stream, state, to, id, transition, recorded, body)

@@ -108,9 +108,11 @@ var chiefRulingsLeft = execution.ChiefRulingsLeft
 var contestRaised = execution.ContestRaised
 
 const maxRecoveries = execution.MaxRecoveries
+const maxRefusedRebases = execution.MaxRefusedRebases
 
 var failedReview = execution.FailedReview
 var checksContest = execution.ChecksContest
+var rebaseContest = execution.RebaseContest
 var bounceContest = execution.BounceContest
 
 type UnitCheckSelection = execution.UnitCheckSelection

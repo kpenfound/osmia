@@ -556,6 +556,7 @@ var FailureContestID = failureContestID
 var ContestFailure = contestFailure
 
 const MaxRecoveries = maxRecoveries
+const MaxRefusedRebases = maxRefusedRebases
 
 var InterruptedInARow = interruptedInARow
 var ContestInterrupted = contestInterrupted
@@ -566,6 +567,7 @@ func (m *masons) ContestFailure(ctx context.Context, stream config.WorkstreamID,
 
 var FailedReview = failedReview
 var ChecksContest = checksContest
+var RebaseContest = rebaseContest
 var BounceContest = bounceContest
 var CheckSelectionDocument = checkSelectionDocument
 var CheckSelectionPath = checkSelectionPath

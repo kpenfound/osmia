@@ -151,7 +151,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 				}
 				if o.Result == nil {
 					rebasing[stream][in.Unit] = true
-				} else {
+				} else if o.Result.Outcome == "succeeded" {
 					rebased[stream][in.Unit] = append(rebased[stream][in.Unit], in.Onto)
 				}
 			default:

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -300,5 +303,183 @@ func TestAStallNoticeTurnThatEndsWithoutActionGetsACheckBack(t *testing.T) {
 	acted.pass(t)
 	if pending := acted.pending(t); len(pending) != 0 {
 		t.Fatalf("a stall turn that queued work got a check-back: %+v", pending)
+	}
+}
+
+func followUpProfile() (coreadapter.Profile, error) {
+	return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
+}
+
+// endFollowUpTurn claims the chief's oldest queued turn, which must be the
+// follow-up turn named, and ends it failed, or interrupted when cancelled.
+func (k *followUpKit) endFollowUpTurn(t *testing.T, turn string, cancelled bool) {
+	t.Helper()
+	ctx := context.Background()
+	q, err := k.repo.ClaimTurn(ctx, k.stream, trace.ChiefOfStaff, "token-"+turn, filepath.Join(t.TempDir(), "session"), k.at)
+	must(t, err)
+	if q.Request.TurnID != turn {
+		t.Fatalf("claimed turn %s, want %s", q.Request.TurnID, turn)
+	}
+	h := q.Request.Header
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), k.at
+	result := coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, IsError: true, Cancelled: cancelled}
+	must(t, k.repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: result, Failure: "the backend failed"}))
+	must(t, k.repo.CompleteTurn(ctx, k.stream, trace.ChiefOfStaff, turn, q.Claim.Token, k.at))
+}
+
+// A whole-workgroup check-back fires although one member was archived and
+// its trace removed: the prompt names that member archived. A follow-up
+// naming a member in another project whose trace is gone fires too.
+func TestAWholeWorkgroupFollowUpFiresPastAnArchivedMember(t *testing.T) {
+	t.Parallel()
+	for _, cross := range []bool{false, true} {
+		t.Run(fmt.Sprint("cross=", cross), func(t *testing.T) {
+			t.Parallel()
+			wholeWorkgroupFollowUpPastArchivedMember(t, cross)
+		})
+	}
+}
+
+func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
+	s, chief, g := workgroupFeedFixture(t, cross, 2)
+	ctx := context.Background()
+	host, gone := g.Members[0], fixturekit.Quiet
+	if host == gone {
+		t.Fatalf("the archived member %s hosts the chief", gone)
+	}
+	member := s.projects[len(s.projects)-1].repository
+	f := followUp{ID: followUpID(trace.ChiefOfStaff, ""), Reason: stallFollowUpReason, ScheduledAt: demoStart, Due: demoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
+	must(t, recordFollowUp(ctx, chief, host, 1, f, followUpActor, "test", demoStart))
+	must(t, s.store.SetArchived(runtime.Archive{Workgroup: g.ID, Project: member.Project(), Workstream: gone, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: demoStart, CleanupStartedAt: demoStart, CleanedAt: demoStart}))
+	_, err := member.MarkWorkstreamTraceForDeletion(gone)
+	must(t, err)
+	must(t, trace.FinishWorkstreamTraceDeletion(s.cfg.Root, member.Project(), gone))
+
+	now := demoStart.Add(time.Hour)
+	pass := func(archived func(string) (runtime.Archive, bool)) {
+		t.Helper()
+		fu := followUps{now: func() time.Time { return now }, window: config.DefaultStallAfter, profile: followUpProfile, archived: archived}
+		must(t, fu.pass(ctx, chief, []config.WorkstreamID{host}))
+	}
+	prompts := func() []string {
+		t.Helper()
+		th, err := chief.Thread(host, trace.ChiefOfStaff)
+		must(t, err)
+		var out []string
+		for _, q := range th.Turns {
+			if strings.HasPrefix(q.Request.TurnID, followUpTurnPrefix) {
+				out = append(out, q.Request.Prompt)
+			}
+		}
+		return out
+	}
+	pass(s.archivedWorkstream)
+	got := prompts()
+	if len(got) != 1 || !strings.Contains(got[0], "Workstream "+string(gone)+": archived ("+AbandonedState+", cancelled).") || !strings.Contains(got[0], "Workstream "+string(host)+" is ") {
+		t.Fatalf("whole-workgroup follow-up prompts: %q", got)
+	}
+	recs, err := readFollowUps(chief, host)
+	must(t, err)
+	if len(recs.pending()) != 0 {
+		t.Fatalf("the follow-up is still pending: %+v", recs.pending())
+	}
+	if !cross {
+		return
+	}
+
+	named := followUp{ID: followUpID(trace.ChiefOfStaff, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
+	must(t, recordFollowUp(ctx, chief, host, 1, named, followUpActor, "test", now))
+	now = now.Add(time.Hour)
+	pass(nil)
+	got = prompts()
+	if len(got) != 2 || !strings.Contains(got[1], "Workstream "+string(gone)+": archived (retired from the workgroup).") {
+		t.Fatalf("named follow-up prompts: %q", got)
+	}
+
+	// Without an archive record, a member whose trace is gone still reads
+	// as archived.
+	must(t, s.store.ClearArchived(gone))
+	named.ScheduledAt, named.Due = now, now.Add(time.Minute)
+	must(t, recordFollowUp(ctx, chief, host, 3, named, followUpActor, "test", now))
+	now = now.Add(time.Hour)
+	pass(nil)
+	got = prompts()
+	if len(got) != 3 || !strings.Contains(got[2], "Workstream "+string(gone)+": archived (its trace was removed).") {
+		t.Fatalf("follow-up prompts without an archive record: %q", got)
+	}
+}
+
+// A follow-up that cannot fire does not hold back a later one of the same
+// thread, and fires on a later pass.
+func TestAFailingFollowUpDoesNotBlockALaterOne(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	scope := k.turn(t, "message_1", "Check back twice.")
+	tool, _ := k.tools(scope)
+	intakefixture.Handle(t, tool, `{"after":"10m","reason":"whole thread"}`)
+	intakefixture.Handle(t, tool, `{"after":"20m","reason":"named","workstream":"`+string(k.stream)+`"}`)
+	k.finish(t, "message_1")
+	k.at = k.at.Add(time.Hour)
+	calls := 0
+	f := followUps{now: k.now, window: config.DefaultStallAfter, profile: func() (coreadapter.Profile, error) {
+		calls++
+		if calls == 1 {
+			return coreadapter.Profile{}, errors.New("no profile")
+		}
+		return followUpProfile()
+	}}
+	if err := f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}); err == nil || !strings.Contains(err.Error(), "no profile") {
+		t.Fatalf("pass error: %v", err)
+	}
+	if turns, pending := k.followUpTurns(t), k.pending(t); len(turns) != 1 || len(pending) != 1 {
+		t.Fatalf("after one failing follow-up: %d turns, pending %+v", len(turns), pending)
+	}
+	must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
+	if turns, pending := k.followUpTurns(t), k.pending(t); len(turns) != 2 || len(pending) != 0 {
+		t.Fatalf("after the retry: %d turns, pending %+v", len(turns), pending)
+	}
+}
+
+// A follow-up whose turn ended failed or interrupted fires again after a
+// growing delay, at most maxFollowUpRefires times; a pass that finds it
+// already put back records nothing more.
+func TestAFollowUpWhoseTurnFailedFiresAgainBounded(t *testing.T) {
+	t.Parallel()
+	k := newFollowUpKit(t)
+	scope := k.turn(t, "message_1", "Check back.")
+	tool, _ := k.tools(scope)
+	intakefixture.Handle(t, tool, `{"after":"10m","reason":"Check the upload unit."}`)
+	k.finish(t, "message_1")
+	k.at = k.at.Add(11 * time.Minute)
+	k.pass(t)
+	for n := 1; n <= maxFollowUpRefires; n++ {
+		turns := k.followUpTurns(t)
+		if len(turns) != n {
+			t.Fatalf("fire %d: %d follow-up turns", n, len(turns))
+		}
+		k.endFollowUpTurn(t, turns[n-1].Request.TurnID, n == 2)
+		k.pass(t)
+		k.pass(t)
+		pending := k.pending(t)
+		if len(pending) != 1 || pending[0].Refires != n || !pending[0].Due.Equal(k.at.Add(followUpRefireDelay(n))) || pending[0].Reason != "Check the upload unit." {
+			t.Fatalf("after failed fire %d: pending %+v", n, pending)
+		}
+		k.at = k.at.Add(followUpRefireDelay(n) - time.Second)
+		k.pass(t)
+		if got := len(k.followUpTurns(t)); got != n {
+			t.Fatalf("refire %d came early: %d turns", n, got)
+		}
+		k.at = k.at.Add(time.Second)
+		k.pass(t)
+	}
+	turns := k.followUpTurns(t)
+	if len(turns) != maxFollowUpRefires+1 || !strings.Contains(turns[len(turns)-1].Request.Prompt, "Reason: Check the upload unit.") {
+		t.Fatalf("follow-up turns after the refires: %d", len(turns))
+	}
+	k.endFollowUpTurn(t, turns[len(turns)-1].Request.TurnID, false)
+	k.at = k.at.Add(time.Hour)
+	k.pass(t)
+	if got, pending := len(k.followUpTurns(t)), k.pending(t); got != maxFollowUpRefires+1 || len(pending) != 0 {
+		t.Fatalf("the follow-up fired past its bound: %d turns, pending %+v", got, pending)
 	}
 }

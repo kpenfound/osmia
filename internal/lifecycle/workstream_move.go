@@ -130,14 +130,17 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	if held, err := ChangeHeld(repo, stream); err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workgroup change"}
 	} else if held {
-		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "a workgroup change holds the workstream; it moves once the change is applied"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: s.ChangeHoldRefusal(ctx, repo, stream)}
 	}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	}
-	if feature.Value == SketchedState && (req.To == SketchedState || req.To == InShedState) {
-		if out, waiting, api := s.moveWaitingMember(ctx, repo, stream, req.To, note, actor); api != nil || waiting {
+	if feature.Value == intake.HandedState && (req.To == SketchedState || req.To == InShedState) {
+		return s.moveHanded(ctx, repo, stream, req.To, note, actor)
+	}
+	if req.To == SketchedState || feature.Value == SketchedState && req.To == InShedState {
+		if out, waiting, api := s.moveWaitingMember(ctx, repo, stream, feature.Value, req.To, note, actor); api != nil || waiting {
 			return out, api
 		}
 	}
@@ -260,12 +263,15 @@ func (s *Controller) proposeGate(ctx context.Context, repo *trace.Repository, st
 	return &APIError{Code: Conflict, Message: pendingOwnerMove(stream, to, res, card)}
 }
 
-// moveWaitingMember handles a move of a sketched member of a cross-repo
-// workgroup whose committee review waits for the workgroup spec. A move to
-// sketched asks the architect for another draft of a workgroup spec whose
-// drafting failed; a move to in-shed is refused with what the member waits
-// for. waiting is false for any other workstream, which moves as usual.
-func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor) (WorkstreamMoveResponse, bool, *APIError) {
+// moveWaitingMember handles a move of a member of a cross-repo workgroup that
+// waits for the workgroup spec's drafting. For a sketched member whose
+// committee review waits for the first workgroup spec, a move to sketched
+// asks the architect for another draft of a workgroup spec whose drafting
+// failed, and a move to in-shed is refused with what the member waits for.
+// For any member of a workgroup whose guarded contract redraft the service
+// stopped asking for, a move to sketched asks for another redraft. waiting is
+// false for any other move, which moves as usual.
+func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature, to, note string, actor trace.Actor) (WorkstreamMoveResponse, bool, *APIError) {
 	unreadable := &APIError{Code: Internal, Message: "cannot read the workstream's workgroup"}
 	required, err := repo.GroupApprovalRequired(stream)
 	if err != nil {
@@ -283,10 +289,39 @@ func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Reposito
 		return WorkstreamMoveResponse{}, true, unreadable
 	}
 	if drafted {
+		// A guarded contract redraft the service stopped asking for is
+		// asked for again by a move of any member to sketched.
+		if to != SketchedState {
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		stopped, err := s.ProjectSpecRedraftStopped(id)
+		if errors.Is(err, trace.ErrLocked) {
+			// A redraft that stopped leaves the workgroup idle; a busy
+			// workgroup is drafting or refreshing, and the member moves as
+			// usual.
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		if err != nil {
+			return WorkstreamMoveResponse{}, true, unreadable
+		}
+		if !stopped {
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		detail, api := s.RequestProjectSpecDraftAgain(ctx, id, note, actor)
+		if api != nil {
+			return WorkstreamMoveResponse{}, true, api
+		}
+		after, err := repo.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return WorkstreamMoveResponse{}, true, &APIError{Code: Internal, Message: "cannot read the workstream state"}
+		}
+		return WorkstreamMoveResponse{Workstream: stream, State: after.Value, Detail: detail}, true, nil
+	}
+	if feature != SketchedState {
 		return WorkstreamMoveResponse{}, false, nil
 	}
 	if to == InShedState {
-		wait, err := s.ProjectSpecDraftWait(id)
+		wait, err := s.ProjectSpecDraftWait(ctx, id)
 		if errors.Is(err, trace.ErrLocked) {
 			return WorkstreamMoveResponse{}, true, &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup %s is busy; ask again in a moment", id)}
 		}
@@ -302,9 +337,60 @@ func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Reposito
 	return WorkstreamMoveResponse{Workstream: stream, State: SketchedState, Detail: detail}, true, nil
 }
 
+// ChangeHoldRefusal says why a workgroup change's boundary holds stream: the
+// change, its state, the failure or hold recorded on it, and what moves it on.
+func (s *Controller) ChangeHoldRefusal(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) string {
+	boundary, err := repo.Workflow(stream, ChangeBoundarySubject)
+	if err != nil {
+		return "a workgroup change holds the workstream; it moves once the change is applied"
+	}
+	id := boundary.Value
+	unread := fmt.Sprintf("workgroup change %s holds the workstream at a unit boundary; it moves once the change is applied or released", id)
+	wt, g, _, close, err := s.ChangeContext(ctx, string(stream))
+	if err != nil {
+		return unread
+	}
+	defer close()
+	changes, err := ReadChanges(wt, g.Members[0])
+	if err != nil {
+		return unread
+	}
+	i := slices.IndexFunc(changes, func(c WorkgroupChange) bool { return c.ID == id })
+	if i < 0 {
+		return unread
+	}
+	return ChangeHoldMessage(changes[i])
+}
+
+// ChangeHoldMessage describes change c holding a member workstream at its
+// boundary, and the lever that moves it on in its state.
+func ChangeHoldMessage(c WorkgroupChange) string {
+	message := fmt.Sprintf("workgroup change %s (%s) holds the workstream at a unit boundary and is %s", c.ID, c.Request.Kind, c.State)
+	if c.Failure != "" {
+		message += ": " + strings.TrimRight(c.Failure, ". ")
+	}
+	var lever string
+	switch c.State {
+	case "drafting", "debating", "answering":
+		lever = fmt.Sprintf("retry_change with id %s starts its drafting and debate again, or the owner ends it on its recovery card", c.ID)
+	case "presenting", "presented":
+		lever = fmt.Sprintf("it waits for the owner's decision on its impact summary, which decide_change with id %s records", c.ID)
+	case "approved", "applying", "releasing":
+		if c.Failure != "" {
+			lever = "its application is held and does not resume by itself; tell the owner, whose decision it waits on"
+		} else {
+			lever = "the service applies it on its next pass, and the workstream moves once it is applied"
+		}
+	default:
+		lever = "it releases the workstream on the service's next pass"
+	}
+	return message + ". " + lever
+}
+
 // ProjectSpecDraftWait describes where drafting workgroup id's first
-// workgroup spec stands, for a member that waits for it.
-func (s *Controller) ProjectSpecDraftWait(id config.WorkgroupID) (string, error) {
+// workgroup spec stands, for a member that waits for it. Before the first
+// draft, it names each member that is not sketched yet and what it waits for.
+func (s *Controller) ProjectSpecDraftWait(ctx context.Context, id config.WorkgroupID) (string, error) {
 	wt, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
 	if err != nil {
 		if wt != nil {
@@ -328,7 +414,15 @@ func (s *Controller) ProjectSpecDraftWait(id config.WorkgroupID) (string, error)
 	}
 	switch state.Value {
 	case "":
-		return "the architect drafts it once every member is sketched", nil
+		members, err := s.CrossRepoMemberRepos(ctx, groups[i])
+		if err != nil {
+			return "", err
+		}
+		waiting, err := s.UnsketchedMembers(members)
+		if err != nil || waiting == "" {
+			return "the architect drafts it once every member is sketched", err
+		}
+		return "the architect drafts it once every member is sketched; " + waiting, nil
 	case "drafting":
 		return "the architect is drafting it now", nil
 	case "failed":
@@ -342,6 +436,93 @@ func (s *Controller) ProjectSpecDraftWait(id config.WorkgroupID) (string, error)
 		return fmt.Sprintf("its last draft was refused because %s; the service asks the architect again on its next pass", last.Reason), nil
 	}
 	return "its draft is " + state.Value, nil
+}
+
+// ProjectSpecRedraftStopped reports whether workgroup id, before its group
+// approval, has a recorded project spec whose guarded contract redraft was
+// refused ProjectSpecDraftAttempts times in a row, so the service asks for no
+// further redraft on its own.
+func (s *Controller) ProjectSpecRedraftStopped(id config.WorkgroupID) (bool, error) {
+	wt, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
+	if err != nil {
+		if wt != nil {
+			wt.Close()
+		}
+		return false, err
+	}
+	defer wt.Close()
+	groups, _, err := trace.Workgroups(wt)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(groups, func(g trace.Workgroup) bool { return g.ID == id })
+	if i < 0 || len(groups[i].Members) == 0 {
+		return false, fmt.Errorf("workgroup %s is not recorded", id)
+	}
+	host := groups[i].Members[0]
+	if _, _, approved, err := trace.ReadGroupApproval(wt, host); err != nil || approved {
+		return false, err
+	}
+	state, err := wt.Workflow(host, ProjectSpecDraftSubject)
+	if err != nil || state.Value != "failed" {
+		return false, err
+	}
+	failures, _, err := ProjectSpecDraftFailures(wt, host)
+	return failures >= ProjectSpecDraftAttempts, err
+}
+
+// UnsketchedMembers names each workgroup member that is not sketched yet, its
+// state and, for a handed member, where drafting its spec and plan stands, or
+// "" when every member is sketched.
+func (s *Controller) UnsketchedMembers(members []trace.CrossRepoMember) (string, error) {
+	var parts []string
+	for _, m := range members {
+		feature, err := m.Project.Workflow(m.Workstream, trace.FeatureSubject)
+		if err != nil {
+			return "", err
+		}
+		if feature.Value == SketchedState {
+			continue
+		}
+		part := fmt.Sprintf("member %s is %s", m.Workstream, intake.FeatureState(feature.Value))
+		if feature.Value == intake.HandedState {
+			d := &intake.Drafter{S: s.Intake().DrafterDependencies(), Repository: m.Project}
+			wait, _, err := d.DraftWait(m.Workstream)
+			if err != nil {
+				return "", err
+			}
+			part += ": " + wait
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; "), nil
+}
+
+// moveHanded handles a move to sketched or in-shed of a handed workstream,
+// whose spec and plan are not accepted yet. A move to sketched after drafting
+// stopped asks the architect for a new run of drafts with the note; any other
+// such move is refused with where drafting stands.
+func (s *Controller) moveHanded(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor) (WorkstreamMoveResponse, *APIError) {
+	d := &intake.Drafter{S: s.Intake().DrafterDependencies(), Repository: repo}
+	if to == InShedState {
+		wait, stopped, err := d.DraftWait(stream)
+		if err != nil {
+			return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's drafts"}
+		}
+		next := "its committee review starts by itself once a draft is accepted and it is sketched"
+		if !stopped {
+			next = "it moves to sketched by itself once a draft is accepted, and its committee review starts then"
+		}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and has no accepted spec and plan to debate: %s; %s", stream, intake.HandedState, wait, next)}
+	}
+	detail, refused, err := d.RequestAgain(ctx, stream, note, actor)
+	switch {
+	case err != nil:
+		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot ask the architect for another run of drafts"}
+	case refused != "":
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: refused}
+	}
+	return WorkstreamMoveResponse{Workstream: stream, State: intake.HandedState, Detail: detail}, nil
 }
 
 // proposeShed routes the chief of staff's proposal to ask the architect for a
@@ -494,7 +675,7 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 	tool := coreadapter.Tool{Name: MoveWorkstreamTool, Effect: coreadapter.ToolMemory, Description: "Move this workstream to another feature state when the state machine leaves it stuck or wrong. The move is your decision: the service makes it unless a hard prerequisite refuses it (a landing, rebase or publication in flight, a pause or the budget), and the result says what happened. " +
 		"to: building (reopen an assembled workstream, or a delivered one whose pull request is open, on its existing feature branch; it stays building until a revision you file afterwards with route_amendment is decided and its units land; route_amendment reopens the workstream itself, so you rarely need this move), " +
 		"assembled (run a fresh final review of the branch as it is: after a failed or stuck final review, after a drift rebase, or to return a delivered workstream with an open pull request to final review), " +
-		"sketched (the architect redrafts the spec and the plan with the note, once debate concluded; for a sketched member of a cross-repo workgroup that has no workgroup spec yet, the architect drafts the workgroup spec again with the note after its drafting failed), in-shed (one more round of debate, once debate concluded; a sketched member of a cross-repo workgroup enters review by itself once its workgroup spec is recorded, and the refusal says where that stands), delivered (return a reopened workstream whose branch is unchanged since its pull request was published), " +
+		"sketched (the architect redrafts the spec and the plan with the note, once debate concluded; for a sketched member of a cross-repo workgroup that has no workgroup spec yet, the architect drafts the workgroup spec again with the note after its drafting failed; for a handed workstream whose drafting stopped after its drafts were refused, the architect starts a new run of drafts with the note), in-shed (one more round of debate, once debate concluded; a sketched member of a cross-repo workgroup enters review by itself once its workgroup spec is recorded, and the refusal says where that stands), delivered (return a reopened workstream whose branch is unchanged since its pull request was published), " +
 		"or ratified and abandoned, which are the owner's decisions: the proposal waits as a pending owner decision on a card. " +
 
 		"A delivered workstream's open pull request is updated only after a fresh final review and the owner's delivery approval. note: what is stuck or wrong and what should happen next; the final reviewer receives it. Report to the owner what the result says happened. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","enum":["sketched","in-shed","ratified","building","assembled","delivered","abandoned"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["to","note"],"additionalProperties":false}`)}

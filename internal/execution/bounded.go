@@ -238,10 +238,10 @@ func (r rebaser) giveUp(ctx context.Context, op coreadapter.Operation, why recon
 	switch {
 	case err == nil:
 		reason := fmt.Sprintf("%s (%s); the rebase is confirmed absent: %s", RefusedAfterRetries, why.Summary(), absent)
-		return r.refuseWith(write, stream, in, reason, fmt.Sprintf("Unit %s was not rebased onto %s: %s. The foreman made no change to the unit's workspace; what happens to the unit next is for the router to decide.", in.Unit, in.Onto, reason))
+		return r.refuseWith(write, stream, in, reason, fmt.Sprintf("Unit %s was not rebased onto %s: %s. The foreman made no change to the unit's workspace. It asks for the rebase again on a later pass; once %d rebases onto that commit are refused, the unit is contested.", in.Unit, in.Onto, reason, maxRefusedRebases))
 	case unreadableFailure(err) || ctx.Err() != nil:
 		reason := unreadableReason(err, why)
-		return r.refuseWith(write, stream, in, reason, fmt.Sprintf("Unit %s may or may not have been rebased onto %s: %s. The foreman made no further change to the unit's workspace.", in.Unit, in.Onto, reason))
+		return r.refuseWith(write, stream, in, reason, fmt.Sprintf("Unit %s may or may not have been rebased onto %s: %s. The foreman made no further change to the unit's workspace. It asks for the rebase again on a later pass; once %d rebases onto that commit are refused, the unit is contested.", in.Unit, in.Onto, reason, maxRefusedRebases))
 	}
 	return coreadapter.OperationResult{}, err
 }

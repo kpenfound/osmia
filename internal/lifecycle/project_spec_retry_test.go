@@ -54,6 +54,25 @@ func projectSpecRecorded(t *testing.T, f *crossRepoRatifyFixture, id config.Work
 	return found
 }
 
+// leaderNotices returns the notices for the chief of staff on the workgroup
+// leader's outbox whose body contains text.
+func leaderNotices(t *testing.T, f *crossRepoRatifyFixture, text string) []string {
+	t.Helper()
+	leader, leaderProject := f.stream1, f.project
+	if f.stream2 < f.stream1 {
+		leader, leaderProject = f.stream2, f.project2
+	}
+	entries, err := mustRepo(t, f.s, leaderProject).Outbox(leader)
+	must(t, err)
+	var bodies []string
+	for _, e := range entries {
+		if strings.Contains(e.Event.Body, text) {
+			bodies = append(bodies, e.Event.Body)
+		}
+	}
+	return bodies
+}
+
 func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
@@ -83,6 +102,9 @@ func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 	f.awaitProjectSpec(t)
 	if first.Load() != 1 || second.Load() != 1 || !projectSpecRecorded(t, f, id) {
 		t.Fatalf("refused first draft was not retried once: first=%d second=%d", first.Load(), second.Load())
+	}
+	if got := leaderNotices(t, f, "The workgroup spec is recorded"); len(got) != 0 {
+		t.Fatalf("a recorded draft whose refusals were never reported told the chief: %v", got)
 	}
 	if prompt, _ := firstPrompt.Load().(string); !strings.Contains(prompt, string(f.project2)+" (its charter has no numbered rules") {
 		t.Fatalf("prompt offers citations of a charter without rules: %s", prompt)
@@ -155,8 +177,12 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("in-shed move does not explain the wait: %v", api)
 	}
 	note := "Cite no charter rule; neither charter numbers any."
-	var prompt atomic.Value
-	scriptProjectSpecTurn(f, "project-spec-draft-7", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	var requested, prompt atomic.Value
+	scriptProjectSpecTurn(f, "project-spec-draft-7", func(_ context.Context, req agent.Request, _ *mcp.ClientSession) error {
+		requested.Store(req.Prompt)
+		return nil
+	})
+	scriptProjectSpecTurn(f, "project-spec-draft-9", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		prompt.Store(req.Prompt)
 		_, err := callTool(ctx, tools, ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
@@ -172,11 +198,24 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("second request while drafting: %v", api)
 	}
 	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	if projectSpecRecorded(t, f, id) {
+		t.Fatal("a refused requested draft was recorded")
+	}
+	if p, _ := requested.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
+		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
+	}
+	// The automatic retry of a requested run keeps the request's note.
+	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	if !projectSpecRecorded(t, f, id) {
-		t.Fatal("requested draft not recorded")
+		t.Fatal("retry of the requested draft not recorded")
 	}
 	if p, _ := prompt.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
-		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
+		t.Fatalf("retry prompt lacks the note or the refusal: %s", p)
+	}
+	recorded := "The workgroup spec is recorded; each member's committee review starts now."
+	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	if got := leaderNotices(t, f, recorded); len(got) != 1 {
+		t.Fatalf("recorded workgroup spec reported %d times after the reported refusals", len(got))
 	}
 	if _, api := f.s.lifecycle().MoveWorkstream(ctx, repo, f.stream1, WorkstreamMoveRequest{To: SketchedState, Note: note}, chief, "chief-turn-4"); api == nil || containsMessage(asError(api), "drafts the workgroup spec again") {
 		t.Fatalf("a recorded workgroup spec was drafted again: %v", api)

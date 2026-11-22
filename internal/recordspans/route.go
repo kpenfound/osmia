@@ -75,7 +75,7 @@ var RouteTriggers = []string{
 	"unit.mason_done", "unit.mason_ended_clean", "unit.markers_left", "unit.turn_failed",
 	"unit.checks_passed", "unit.checks_failed", "unit.checks_incomplete",
 	"unit.review_approved", "unit.review_rejected", "unit.review_no_verdict", "unit.review_refused", "unit.review_needs_checks",
-	"unit.rebased", "unit.rebase_conflicted", "unit.landed", "unit.landing_refused",
+	"unit.rebased", "unit.rebase_conflicted", "unit.rebase_refused", "unit.landed", "unit.landing_refused",
 	"unit.move_owner", "unit.move_proposal", "unit.stalled",
 	"ws.handed", "ws.draft_accepted", "ws.shed_entered", "ws.build_started", "ws.units_merged",
 	"ws.draft_exhausted", "ws.shed_concluded", "ws.ratified", "ws.seal_failed",

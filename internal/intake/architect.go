@@ -67,11 +67,22 @@ type Architect struct {
 
 // draftInput numbers the draft an operation runs. Resume numbers the
 // operation that runs the draft again after it parked on the architect's
-// question, from 1; the draft's own operation has none.
+// question, from 1; the draft's own operation has none. Note is what the
+// owner or the chief of staff asked of a run of drafts started after drafting
+// stopped; every draft of that run carries it.
 type DraftInput struct {
-	Draft  int `json:"draft"`
-	Resume int `json:"resume,omitempty"`
+	Draft  int    `json:"draft"`
+	Resume int    `json:"resume,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
+
+// DraftAgainCause is the cause of the first draft of a run that the owner or
+// the chief of staff asked for after drafting stopped.
+const DraftAgainCause = "draft-again"
+
+// DraftExhausted is the draft-subject state of a workstream whose drafting
+// stopped after a run of MaxDrafts refused drafts.
+const DraftExhausted = "exhausted"
 
 // runIDs returns the transition and event of the operation that runs the
 // draft: the draft's own, or the resumption the input numbers.
@@ -185,23 +196,29 @@ func (d *Drafter) Reconcile(ctx context.Context, stream config.WorkstreamID) err
 		return d.Request(ctx, stream, state, DraftInput{Draft: 1}, HandInTransition, "the workstream was handed in; the architect is asked for draft 1 of the spec and plan")
 	}
 	kind, n, ok := DraftState(state.Value)
-	switch {
-	case !ok || kind == "drafting":
+	if !ok || kind == "drafting" {
 		return nil
+	}
+	first, note, err := d.Run(stream)
+	if err != nil {
+		return err
+	}
+	drafts := n - first + 1
+	switch {
 	case kind == "waiting":
-		return d.Resume(ctx, stream, state, n)
-	case n < MaxDrafts:
-		return d.Request(ctx, stream, state, DraftInput{Draft: n + 1}, fmt.Sprintf("draft-%d-%s", n, kind), fmt.Sprintf("draft %d was %s; the architect is asked for draft %d", n, kind, n+1))
+		return d.Resume(ctx, stream, state, n, note)
+	case drafts < MaxDrafts:
+		return d.Request(ctx, stream, state, DraftInput{Draft: n + 1, Note: note}, fmt.Sprintf("draft-%d-%s", n, kind), fmt.Sprintf("draft %d was %s; the architect is asked for draft %d", n, kind, n+1))
 	}
 	last, err := d.Transition(stream, fmt.Sprintf("draft-%d-%s", n, kind))
 	if err != nil {
 		return err
 	}
-	reason := fmt.Sprintf("none of the architect's %d drafts of the spec and plan was accepted; drafting stops and the workstream stays %s", n, HandedState)
-	body := fmt.Sprintf("None of the architect's %d drafts of the spec and plan was accepted and drafting has stopped; the workstream stays %s. Last draft: %s", n, HandedState, last.Reason)
+	reason := fmt.Sprintf("none of the architect's %d drafts of the spec and plan was accepted; drafting stops and the workstream stays %s", drafts, HandedState)
+	body := fmt.Sprintf("None of the architect's %d drafts of the spec and plan was accepted and drafting has stopped; the workstream stays %s. Last draft: %s. Ask for another run of %d drafts with move_workstream to sketched and a note telling the architect what to change.", drafts, HandedState, last.Reason, MaxDrafts)
 	// Stopping is today's default; one more draft is a departure the router
 	// takes only at the strict bar.
-	x := d.exhaustedExit(stream, state, n, last, reason, body)
+	x := d.exhaustedExit(stream, state, n, first, drafts, last, reason, body)
 	if rec, err := router.Lookup(d.Repository, stream, x); err != nil || rec != nil && rec.Finished() {
 		// The exit was decided and held: it stays with the chief of staff, the
 		// stall watchdog and the recovery card.
@@ -238,12 +255,159 @@ func (d *Drafter) EnsureThread(ctx context.Context, stream config.WorkstreamID) 
 	return d.Repository.CreateThread(ctx, identity)
 }
 
+// Run returns the first draft of the workstream's current run of drafts and
+// the note it carries: draft 1 with no note until the owner or the chief of
+// staff asks for another run after drafting stopped.
+func (d *Drafter) Run(stream config.WorkstreamID) (int, string, error) {
+	transitions, err := trace.Read[trace.Transition](d.Repository, stream)
+	if err != nil {
+		return 0, "", err
+	}
+	first, again := 1, false
+	for _, t := range transitions {
+		if t.Subject != DraftSubject || t.Cause != DraftAgainCause {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(t.ID, "draft-")); err == nil && n > 0 {
+			first, again = n, true
+		}
+	}
+	if !again {
+		return first, "", nil
+	}
+	records, err := d.Repository.Operations(stream)
+	if err != nil {
+		return 0, "", err
+	}
+	_, event := DraftIDs(first)
+	for _, r := range records {
+		if r.EventID != event || r.Operation.Action != DraftAction {
+			continue
+		}
+		in, err := DecodeDraft(r.Operation)
+		if err != nil {
+			return 0, "", err
+		}
+		return first, in.Note, nil
+	}
+	return first, "", nil
+}
+
+// DraftWait describes where drafting the workstream's spec and plan stands,
+// for a move that waits for it, and whether drafting stopped after a run of
+// refused drafts.
+func (d *Drafter) DraftWait(stream config.WorkstreamID) (string, bool, error) {
+	state, err := d.Repository.Workflow(stream, DraftSubject)
+	if err != nil {
+		return "", false, err
+	}
+	if state.Value == DraftExhausted {
+		n, last, err := d.Stopped(stream)
+		if err != nil {
+			return "", false, err
+		}
+		first, _, err := d.Run(stream)
+		if err != nil {
+			return "", false, err
+		}
+		return fmt.Sprintf("its drafting stopped after %d refused drafts, most recently because %s; move it to sketched with a note to ask the architect for another run of %d drafts", n-first+1, last.Reason, MaxDrafts), true, nil
+	}
+	kind, n, ok := DraftState(state.Value)
+	switch {
+	case !ok:
+		return "the architect drafts its spec and plan", false, nil
+	case kind == "drafting":
+		return fmt.Sprintf("the architect is writing draft %d of its spec and plan", n), false, nil
+	case kind == "waiting":
+		return fmt.Sprintf("draft %d of its spec and plan waits for the answer to the architect's question", n), false, nil
+	}
+	return fmt.Sprintf("draft %d of its spec and plan was %s, and the service asks the architect for the next draft", n, kind), false, nil
+}
+
+// Stopped returns the last draft of a workstream whose drafting stopped and
+// the transition that ended that draft.
+func (d *Drafter) Stopped(stream config.WorkstreamID) (int, trace.Transition, error) {
+	transitions, err := trace.Read[trace.Transition](d.Repository, stream)
+	if err != nil {
+		return 0, trace.Transition{}, err
+	}
+	for i := len(transitions) - 1; i >= 0; i-- {
+		t := transitions[i]
+		if t.Subject != DraftSubject || t.To != DraftExhausted {
+			continue
+		}
+		kind, n, ok := DraftState(t.From)
+		if !ok {
+			return 0, trace.Transition{}, fmt.Errorf("drafting stopped from %q, which numbers no draft", t.From)
+		}
+		last, err := d.Transition(stream, fmt.Sprintf("draft-%d-%s", n, kind))
+		return n, last, err
+	}
+	return 0, trace.Transition{}, errors.New("drafting has not stopped")
+}
+
+// RequestAgain starts a new run of MaxDrafts drafts of a handed workstream
+// whose drafting stopped, asked by the owner or the chief of staff with note.
+// Every draft of the run carries the note, and its first draft's prompt says
+// why the last draft was refused. It returns what happens next, or refused:
+// why nothing was asked.
+func (d *Drafter) RequestAgain(ctx context.Context, stream config.WorkstreamID, note string, by trace.Actor) (detail, refused string, err error) {
+	feature, err := d.Repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return "", "", err
+	}
+	if feature.Value != HandedState {
+		return "", fmt.Sprintf("workstream %s is %s; only a handed workstream whose drafting stopped is drafted again", stream, FeatureState(feature.Value)), nil
+	}
+	wait, stopped, err := d.DraftWait(stream)
+	if err != nil {
+		return "", "", err
+	}
+	if !stopped {
+		return "", fmt.Sprintf("workstream %s stays %s: %s; it moves to sketched by itself once a draft is accepted", stream, HandedState, wait), nil
+	}
+	if _, paused := d.S.Pausing(d.Repository.Project(), stream); paused {
+		return "", fmt.Sprintf("workstream %s is paused; the architect is asked for nothing until the pause lifts", stream), nil
+	}
+	state, err := d.Repository.Workflow(stream, DraftSubject)
+	if err != nil {
+		return "", "", err
+	}
+	n, _, err := d.Stopped(stream)
+	if err != nil {
+		return "", "", err
+	}
+	if err := d.EnsureThread(ctx, stream); err != nil {
+		return "", "", err
+	}
+	asker := by.Kind + " " + by.ID
+	switch {
+	case by.Kind == OwnerActor.Kind:
+		asker = "the owner"
+	case by.ID == trace.ChiefOfStaff:
+		asker = "the chief of staff"
+	}
+	reason := fmt.Sprintf("drafting had stopped; %s asked for another run of %d drafts: %s", asker, MaxDrafts, note)
+	if err := d.request(ctx, stream, state, DraftInput{Draft: n + 1, Note: note}, DraftAgainCause, reason, by); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return "", fmt.Sprintf("workstream %s changed since it was read; read it again", stream), nil
+		}
+		return "", "", err
+	}
+	return fmt.Sprintf("the architect writes draft %d of the spec and plan with your note and the last draft's refusal, in a new run of up to %d drafts", n+1, MaxDrafts), "", nil
+}
+
 // request publishes the draft the input numbers as a durable operation.
 func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in DraftInput, cause, reason string) error {
 	// A paused workstream is asked for nothing until the pause is lifted.
 	if _, paused := d.S.Pausing(d.Repository.Project(), stream); paused {
 		return nil
 	}
+	return d.request(ctx, stream, state, in, cause, reason, DraftingActor)
+}
+
+// request records the draft's transition, as by, with its operation.
+func (d *Drafter) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in DraftInput, cause, reason string, by trace.Actor) error {
 	transition, event := in.RunIDs()
 	input, err := marshalDraft(in)
 	if err != nil {
@@ -254,8 +418,10 @@ func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state
 		body += ", resumed"
 	}
 	op := draftOperation(d.Repository.Project(), stream, event, input)
+	header := d.Header(transition, stream, cause, d.S.Now())
+	header.Actor = by
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.Header(transition, stream, cause, d.S.Now()), Subject: DraftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", in.Draft), Reason: reason},
+		Transition: trace.Transition{Header: header, Subject: DraftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", in.Draft), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: "draft", Body: body, Operation: &op}}}
 	_, err = d.Repository.TransactWhileFeature(ctx, tx, HandedState)
 	if errors.Is(err, trace.ErrFeatureState) {
@@ -265,8 +431,9 @@ func (d *Drafter) Request(ctx context.Context, stream config.WorkstreamID, state
 }
 
 // resume requests draft n again once the answer to the architect's question
-// is queued on its thread, caused by the transition that parked the draft.
-func (d *Drafter) Resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
+// is queued on its thread, caused by the transition that parked the draft,
+// with the note of the run it belongs to.
+func (d *Drafter) Resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, note string) error {
 	chain, asked, err := d.Chain(stream, n)
 	if err != nil {
 		return err
@@ -287,7 +454,7 @@ func (d *Drafter) Resume(ctx context.Context, stream config.WorkstreamID, state 
 	if len(parks) == 0 {
 		return fmt.Errorf("draft %d is parked without a parking transition", n)
 	}
-	return d.Request(ctx, stream, state, DraftInput{Draft: n, Resume: len(parks)}, parks[len(parks)-1].ID, fmt.Sprintf("draft %d resumes: the architect's question is answered", n))
+	return d.Request(ctx, stream, state, DraftInput{Draft: n, Resume: len(parks), Note: note}, parks[len(parks)-1].ID, fmt.Sprintf("draft %d resumes: the architect's question is answered", n))
 }
 
 // chain returns the architect's turns of draft n in thread order, its
@@ -547,7 +714,7 @@ func (d *Drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				}
 				continue
 			}
-			if err := d.Enqueue(ctx, cfg, stream, n, len(tries)+1, op.ID, Received(t, origins, asked)); err != nil {
+			if err := d.Enqueue(ctx, cfg, stream, in, len(tries)+1, op.ID, Received(t, origins, asked)); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
 		case last.Status() == "idle":
@@ -601,9 +768,11 @@ func (d *Drafter) End(ctx context.Context, operation string, stream config.Works
 
 // enqueue accepts the architect turn of one draft attempt, fixing its profile
 // and prompts. The turn of a later draft lists why the previous one was not
-// accepted, and a later attempt repeats the answers the architect received
-// in the draft, whose turns a service stop interrupted.
-func (d *Drafter) Enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, n, attempt int, operation string, answers []string) error {
+// accepted, a draft of a run asked for after drafting stopped carries the
+// note it was asked with, and a later attempt repeats the answers the
+// architect received in the draft, whose turns a service stop interrupted.
+func (d *Drafter) Enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in DraftInput, attempt int, operation string, answers []string) error {
+	n := in.Draft
 	profile, _, err := d.S.RoleExecution(cfg, ArchitectRole)
 	if err != nil {
 		return err
@@ -629,7 +798,7 @@ func (d *Drafter) Enqueue(ctx context.Context, cfg *config.Config, stream config
 	}
 	turn := DraftTurnID(n, attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.Repository.Project(), Workstream: stream, At: d.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1},
-		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ArchitectSystemPrompt(cfg.Project), Prompt: ArchitectPrompt(handed.Path, n, previous, drafted, answers)}
+		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ArchitectSystemPrompt(cfg.Project), Prompt: ArchitectPrompt(handed.Path, n, previous, drafted, in.Note, answers)}
 	_, err = d.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -1076,9 +1245,12 @@ func ArchitectSystemPrompt(p config.Project) string {
 	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its entity map, in the vocabulary the entity map gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
-func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
+func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, note string, answers []string) string {
 	var b strings.Builder
 	draft := ""
+	if note != "" {
+		fmt.Fprintf(&b, "Your earlier drafts were refused and drafting stopped; you were asked for another run of drafts with this note:\n%s\n\n", note)
+	}
 	switch {
 	case n > 1 && drafted:
 		fmt.Fprintf(&b, "Draft %d was not accepted:\n%s\n\nYour previous spec.md and plan.json are in draft/. Deliver corrected files.\n\n", n-1, previous)
