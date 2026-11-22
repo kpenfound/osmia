@@ -130,7 +130,7 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	if held, err := ChangeHeld(repo, stream); err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workgroup change"}
 	} else if held {
-		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: "a workgroup change holds the workstream; it moves once the change is applied"}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: s.ChangeHoldRefusal(ctx, repo, stream)}
 	}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -332,6 +332,56 @@ func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Reposito
 		return WorkstreamMoveResponse{}, true, api
 	}
 	return WorkstreamMoveResponse{Workstream: stream, State: SketchedState, Detail: detail}, true, nil
+}
+
+// ChangeHoldRefusal says why a workgroup change's boundary holds stream: the
+// change, its state, the failure or hold recorded on it, and what moves it on.
+func (s *Controller) ChangeHoldRefusal(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) string {
+	boundary, err := repo.Workflow(stream, ChangeBoundarySubject)
+	if err != nil {
+		return "a workgroup change holds the workstream; it moves once the change is applied"
+	}
+	id := boundary.Value
+	unread := fmt.Sprintf("workgroup change %s holds the workstream at a unit boundary; it moves once the change is applied or released", id)
+	wt, g, _, close, err := s.ChangeContext(ctx, string(stream))
+	if err != nil {
+		return unread
+	}
+	defer close()
+	changes, err := ReadChanges(wt, g.Members[0])
+	if err != nil {
+		return unread
+	}
+	i := slices.IndexFunc(changes, func(c WorkgroupChange) bool { return c.ID == id })
+	if i < 0 {
+		return unread
+	}
+	return ChangeHoldMessage(changes[i])
+}
+
+// ChangeHoldMessage describes change c holding a member workstream at its
+// boundary, and the lever that moves it on in its state.
+func ChangeHoldMessage(c WorkgroupChange) string {
+	message := fmt.Sprintf("workgroup change %s (%s) holds the workstream at a unit boundary and is %s", c.ID, c.Request.Kind, c.State)
+	if c.Failure != "" {
+		message += ": " + strings.TrimRight(c.Failure, ". ")
+	}
+	var lever string
+	switch c.State {
+	case "drafting", "debating", "answering":
+		lever = fmt.Sprintf("retry_change with id %s starts its drafting and debate again, or the owner ends it on its recovery card", c.ID)
+	case "presenting", "presented":
+		lever = fmt.Sprintf("it waits for the owner's decision on its impact summary, which decide_change with id %s records", c.ID)
+	case "approved", "applying", "releasing":
+		if c.Failure != "" {
+			lever = "its application is held and does not resume by itself; tell the owner, whose decision it waits on"
+		} else {
+			lever = "the service applies it on its next pass, and the workstream moves once it is applied"
+		}
+	default:
+		lever = "it releases the workstream on the service's next pass"
+	}
+	return message + ". " + lever
 }
 
 // ProjectSpecDraftWait describes where drafting workgroup id's first

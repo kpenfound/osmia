@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -74,6 +75,48 @@ func TestAStalledChangeEndsOnlyAtThePinnedRevision(t *testing.T) {
 	}
 	if _, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "after-stall", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"}); api != nil {
 		t.Fatalf("a new change after the ended one: %+v", api)
+	}
+}
+
+// A move of a workstream a workgroup change holds is refused with the change,
+// its state, its recorded hold and what moves it on.
+func TestAMoveRefusedByAChangeHoldNamesTheChange(t *testing.T) {
+	t.Parallel()
+	f, stream, repo := newApprovedFixture(t, "change-hold-move")
+	defer repo.Close()
+	f.s.setSole(runtimeFor(repo))
+	ctx := context.Background()
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
+	must(t, err)
+	c, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "held-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	c = currentChange(t, f.s, stream, c.ID)
+	c.State, c.Failure = "approved", fmt.Sprintf("%s: workstream %s", trace.ErrMemberRetired, stream)
+	must(t, f.s.saveChange(ctx, repo, &c))
+	st, err := repo.Workflow(stream, lifecycle.ChangeBoundarySubject)
+	must(t, err)
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "change-" + c.ID + "-boundary-false", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: serviceActor, Cause: "fixture"},
+		Subject: lifecycle.ChangeBoundarySubject, From: st.Value, To: c.ID, Reason: "owner-approved change stops at a unit boundary",
+	}})
+	must(t, err)
+	_, api = f.s.ownerMoveWorkstream(ctx, string(stream), WorkstreamMoveRequest{To: InShedState, Note: "Debate it again."})
+	for _, text := range []string{"workgroup change " + c.ID, "is approved", trace.ErrMemberRetired.Error(), "does not resume by itself", "the owner"} {
+		if api == nil || api.Code != Conflict || !strings.Contains(api.Message, text) {
+			t.Fatalf("change-hold refusal lacks %q: %v", text, api)
+		}
+	}
+	for state, lever := range map[string]string{"drafting": "retry_change with id " + c.ID, "presented": "decide_change with id " + c.ID, "applying": "applies it on its next pass"} {
+		held := c
+		held.State = state
+		if state != "drafting" {
+			held.Failure = ""
+		}
+		if message := lifecycle.ChangeHoldMessage(held); !strings.Contains(message, "is "+state) || !strings.Contains(message, lever) {
+			t.Fatalf("a %s change's hold reads %q", state, message)
+		}
 	}
 }
 
