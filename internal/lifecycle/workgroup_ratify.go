@@ -614,6 +614,13 @@ func (s *Controller) RequestProjectSpecDraftAgain(ctx context.Context, id config
 	case found && state.Value != "failed":
 		return "", recorded
 	case state.Value != "failed":
+		waiting, err := s.UnsketchedMembers(members)
+		if err != nil {
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the members of workgroup %s: %v", id, err)}
+		}
+		if waiting != "" {
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the workgroup spec of %s is drafted once every member is sketched, and %s", id, waiting)}
+		}
 		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the workgroup spec of %s is drafted once every member is sketched; nothing has failed to retry", id)}
 	}
 	_, last, err := ProjectSpecDraftFailures(wt, host)
