@@ -29,17 +29,18 @@ type ProjectSpecDraftInput struct {
 	Note     string                           `json:"note,omitempty"`
 }
 
-// ProjectSpecDraftAttempts is how many drafts of a workgroup's first project
-// spec the service asks for on its own. Once that many are refused in a row,
-// the chief of staff is told and the next draft waits for its request.
+// ProjectSpecDraftAttempts is how many drafts of a workgroup's project spec,
+// its first draft or a guarded contract redraft, the service asks for on its
+// own. Once that many are refused in a row, the chief of staff is told and the
+// next draft waits for its request.
 const ProjectSpecDraftAttempts = 3
 
 // ProjectSpecDraftRequestCause is the cause of a drafting transition the chief
 // of staff or the owner asked for. It starts a new run of attempts.
 const ProjectSpecDraftRequestCause = "project-spec-draft-request"
 
-// ProjectSpecDraftFailures returns how many first-draft attempts have been
-// refused since the latest requested draft, and the latest refusal.
+// ProjectSpecDraftFailures returns how many drafts have been refused since the
+// latest requested draft or the latest recorded one, and the latest refusal.
 func ProjectSpecDraftFailures(wt *trace.Repository, host config.WorkstreamID) (int, trace.Transition, error) {
 	transitions, err := trace.Read[trace.Transition](wt, host)
 	if err != nil {
@@ -51,7 +52,7 @@ func ProjectSpecDraftFailures(wt *trace.Repository, host config.WorkstreamID) (i
 			continue
 		}
 		switch {
-		case tr.To == "drafting" && tr.Cause == ProjectSpecDraftRequestCause:
+		case tr.To == "drafting" && tr.Cause == ProjectSpecDraftRequestCause, tr.To == "drafted":
 			failures, last = 0, trace.Transition{}
 		case tr.To == "failed":
 			failures, last = failures+1, tr

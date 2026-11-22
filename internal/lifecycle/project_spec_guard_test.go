@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -510,6 +511,75 @@ func TestProjectSpecContractGuardFailureAndRetry(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatalf("failed redraft did not retry: %d", calls.Load())
 	}
+	assertGuardRatifiable(t, f, id, 2, old.Revision+1)
+}
+func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, id, _ := projectSliceRefreshFixture(t)
+	old := refreshDocument(t, f, id)
+	spec := strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
+	reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, spec)
+	var refused atomic.Int32
+	var retryPrompt atomic.Value
+	for _, turn := range []string{"project-spec-draft-3", "project-spec-draft-5", "project-spec-draft-7"} {
+		scriptProjectSpecTurn(f, turn, func(_ context.Context, req agent.Request, _ *mcp.ClientSession) error {
+			if refused.Add(1) == 2 {
+				retryPrompt.Store(req.Prompt)
+			}
+			return nil
+		})
+	}
+	repo := mustRepo(t, f.s, f.project)
+	for range lifecycle.ProjectSpecDraftAttempts + 2 {
+		must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+	}
+	if refused.Load() != lifecycle.ProjectSpecDraftAttempts || !reflect.DeepEqual(refreshDocument(t, f, id), old) {
+		t.Fatalf("guarded redraft did not stop after %d refusals: calls=%d", lifecycle.ProjectSpecDraftAttempts, refused.Load())
+	}
+	if p, _ := retryPrompt.Load().(string); !strings.Contains(p, "Your previous draft was refused") || !strings.Contains(p, "ended without delivering") {
+		t.Fatalf("guarded retry prompt lacks the refusal: %s", p)
+	}
+	notices := leaderNotices(t, f, "contracts could not be redrafted")
+	if len(notices) != 1 || !strings.Contains(notices[0], "last 3 redrafts were refused") || !strings.Contains(notices[0], "move_workstream to sketched") {
+		t.Fatalf("chief notice of the stopped redraft: %v", notices)
+	}
+	assertGuardRefusal(t, f, id, 2, "ended without delivering")
+
+	note := "Keep the acknowledgment contract on criterion 2."
+	var prompt atomic.Value
+	var calls atomic.Int32
+	scriptProjectSpecTurn(f, "project-spec-draft-9", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		calls.Add(1)
+		prompt.Store(req.Prompt)
+		_, err := callTool(ctx, tools, ProjectSpecDraftTool, map[string]any{
+			"behavior":  "Redrafted upload contract.",
+			"contracts": []map[string]any{{"name": "acknowledgment", "text": "The reviewed acknowledgment."}},
+			"slices": []map[string]any{
+				{"workstream": string(f.stream1), "contract_criteria": []int{2}},
+				{"workstream": string(f.stream2), "contract_criteria": []int{1}},
+			},
+		})
+		return err
+	})
+	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	out, api := f.s.lifecycle().MoveWorkstream(ctx, mustRepo(t, f.s, f.project2), f.stream2, WorkstreamMoveRequest{To: SketchedState, Note: note}, chief, "chief-turn-1")
+	if api != nil {
+		t.Fatal(api)
+	}
+	if !strings.Contains(out.Detail, "redrafts the workgroup spec's contracts again") {
+		t.Fatalf("chief's request not taken: %+v", out)
+	}
+	for range 2 {
+		must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("requested redraft ran %d times", calls.Load())
+	}
+	if p, _ := prompt.Load().(string); !strings.Contains(p, note) {
+		t.Fatalf("requested redraft prompt lacks the note: %s", p)
+	}
+	runRefresh(t, f)
 	assertGuardRatifiable(t, f, id, 2, old.Revision+1)
 }
 func TestProjectSpecContractGuardHonorsApprovalDuringRedraft(t *testing.T) {

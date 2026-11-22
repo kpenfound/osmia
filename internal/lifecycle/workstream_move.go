@@ -136,8 +136,8 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	if err != nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream state"}
 	}
-	if feature.Value == SketchedState && (req.To == SketchedState || req.To == InShedState) {
-		if out, waiting, api := s.moveWaitingMember(ctx, repo, stream, req.To, note, actor); api != nil || waiting {
+	if req.To == SketchedState || feature.Value == SketchedState && req.To == InShedState {
+		if out, waiting, api := s.moveWaitingMember(ctx, repo, stream, feature.Value, req.To, note, actor); api != nil || waiting {
 			return out, api
 		}
 	}
@@ -260,12 +260,15 @@ func (s *Controller) proposeGate(ctx context.Context, repo *trace.Repository, st
 	return &APIError{Code: Conflict, Message: pendingOwnerMove(stream, to, res, card)}
 }
 
-// moveWaitingMember handles a move of a sketched member of a cross-repo
-// workgroup whose committee review waits for the workgroup spec. A move to
-// sketched asks the architect for another draft of a workgroup spec whose
-// drafting failed; a move to in-shed is refused with what the member waits
-// for. waiting is false for any other workstream, which moves as usual.
-func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor) (WorkstreamMoveResponse, bool, *APIError) {
+// moveWaitingMember handles a move of a member of a cross-repo workgroup that
+// waits for the workgroup spec's drafting. For a sketched member whose
+// committee review waits for the first workgroup spec, a move to sketched
+// asks the architect for another draft of a workgroup spec whose drafting
+// failed, and a move to in-shed is refused with what the member waits for.
+// For any member of a workgroup whose guarded contract redraft the service
+// stopped asking for, a move to sketched asks for another redraft. waiting is
+// false for any other move, which moves as usual.
+func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature, to, note string, actor trace.Actor) (WorkstreamMoveResponse, bool, *APIError) {
 	unreadable := &APIError{Code: Internal, Message: "cannot read the workstream's workgroup"}
 	required, err := repo.GroupApprovalRequired(stream)
 	if err != nil {
@@ -283,6 +286,35 @@ func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Reposito
 		return WorkstreamMoveResponse{}, true, unreadable
 	}
 	if drafted {
+		// A guarded contract redraft the service stopped asking for is
+		// asked for again by a move of any member to sketched.
+		if to != SketchedState {
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		stopped, err := s.ProjectSpecRedraftStopped(id)
+		if errors.Is(err, trace.ErrLocked) {
+			// A redraft that stopped leaves the workgroup idle; a busy
+			// workgroup is drafting or refreshing, and the member moves as
+			// usual.
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		if err != nil {
+			return WorkstreamMoveResponse{}, true, unreadable
+		}
+		if !stopped {
+			return WorkstreamMoveResponse{}, false, nil
+		}
+		detail, api := s.RequestProjectSpecDraftAgain(ctx, id, note, actor)
+		if api != nil {
+			return WorkstreamMoveResponse{}, true, api
+		}
+		after, err := repo.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return WorkstreamMoveResponse{}, true, &APIError{Code: Internal, Message: "cannot read the workstream state"}
+		}
+		return WorkstreamMoveResponse{Workstream: stream, State: after.Value, Detail: detail}, true, nil
+	}
+	if feature != SketchedState {
 		return WorkstreamMoveResponse{}, false, nil
 	}
 	if to == InShedState {
@@ -342,6 +374,39 @@ func (s *Controller) ProjectSpecDraftWait(id config.WorkgroupID) (string, error)
 		return fmt.Sprintf("its last draft was refused because %s; the service asks the architect again on its next pass", last.Reason), nil
 	}
 	return "its draft is " + state.Value, nil
+}
+
+// ProjectSpecRedraftStopped reports whether workgroup id, before its group
+// approval, has a recorded project spec whose guarded contract redraft was
+// refused ProjectSpecDraftAttempts times in a row, so the service asks for no
+// further redraft on its own.
+func (s *Controller) ProjectSpecRedraftStopped(id config.WorkgroupID) (bool, error) {
+	wt, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
+	if err != nil {
+		if wt != nil {
+			wt.Close()
+		}
+		return false, err
+	}
+	defer wt.Close()
+	groups, _, err := trace.Workgroups(wt)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(groups, func(g trace.Workgroup) bool { return g.ID == id })
+	if i < 0 || len(groups[i].Members) == 0 {
+		return false, fmt.Errorf("workgroup %s is not recorded", id)
+	}
+	host := groups[i].Members[0]
+	if _, _, approved, err := trace.ReadGroupApproval(wt, host); err != nil || approved {
+		return false, err
+	}
+	state, err := wt.Workflow(host, ProjectSpecDraftSubject)
+	if err != nil || state.Value != "failed" {
+		return false, err
+	}
+	failures, _, err := ProjectSpecDraftFailures(wt, host)
+	return failures >= ProjectSpecDraftAttempts, err
 }
 
 // proposeShed routes the chief of staff's proposal to ask the architect for a

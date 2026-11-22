@@ -54,6 +54,25 @@ func projectSpecRecorded(t *testing.T, f *crossRepoRatifyFixture, id config.Work
 	return found
 }
 
+// leaderNotices returns the notices for the chief of staff on the workgroup
+// leader's outbox whose body contains text.
+func leaderNotices(t *testing.T, f *crossRepoRatifyFixture, text string) []string {
+	t.Helper()
+	leader, leaderProject := f.stream1, f.project
+	if f.stream2 < f.stream1 {
+		leader, leaderProject = f.stream2, f.project2
+	}
+	entries, err := mustRepo(t, f.s, leaderProject).Outbox(leader)
+	must(t, err)
+	var bodies []string
+	for _, e := range entries {
+		if strings.Contains(e.Event.Body, text) {
+			bodies = append(bodies, e.Event.Body)
+		}
+	}
+	return bodies
+}
+
 func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
