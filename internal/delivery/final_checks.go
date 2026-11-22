@@ -146,7 +146,9 @@ func FinalCheckAttemptPath(review, attempt int) string {
 // request time, the failing "Run Dagger Checks" posting that asked for it and
 // the checks that failed in it; that posting stays the push's result until
 // a fresh posting settles the rerun. Counts are the counts of the failing
-// posting. FinishedAt and Error say how the request itself ended.
+// posting. FinishedAt and Error say how the request itself ended: a request
+// that finished with an Error was refused, so no rerun was made, and Attempt
+// counts the requests made for the push.
 type FinalCheckRerunRecord struct {
 	Review       int              `json:"review"`
 	Push         int              `json:"push"`
@@ -155,7 +157,15 @@ type FinalCheckRerunRecord struct {
 	Command      []string         `json:"command"`
 	Counts       *api.CheckCounts `json:"counts,omitempty"`
 	FinishedAt   time.Time        `json:"finished_at,omitzero"`
+	Attempt      int              `json:"attempt,omitempty"`
 	api.CheckRerun
+}
+
+// refused reports whether the request finished with an error, so Dagger Cloud
+// made no rerun. A request with no recorded end may have reached Dagger Cloud
+// before a restart, so it counts as made.
+func (r *FinalCheckRerunRecord) refused() bool {
+	return r != nil && !r.FinishedAt.IsZero() && r.Error != ""
 }
 
 func FinalCheckRerunDocument(review, push int) string {
@@ -231,6 +241,8 @@ func (e *WaitingChecksError) Error() string {
 //     FinalCheckDelay;
 //   - a completed failure asks Dagger Cloud once to rerun the failed checks
 //     (see rerunChecks), and only a fresh completed posting settles the push;
+//     a request Dagger Cloud refuses is recorded as an incomplete run, and the
+//     next status read after its wait requests the rerun again;
 //   - the owner's choice to continue without check results for the push
 //     (see AnswerChecksChoice) is recorded as a "continued" record that holds no
 //     result, and applies to that push alone.
@@ -309,7 +321,10 @@ type finalWatch struct {
 	stream config.WorkstreamID
 	report FinalReport
 	push   Push
-	rerun  *FinalCheckRerunRecord
+	// rerun is the push's rerun record when Dagger Cloud made the rerun it
+	// requested; refusedRerun is the record when it refused the request.
+	rerun        *FinalCheckRerunRecord
+	refusedRerun *FinalCheckRerunRecord
 }
 
 func (w *finalWatch) waiting(reason string, next time.Time) error {
@@ -338,6 +353,9 @@ func (w *finalWatch) step(ctx context.Context, incomplete int, latest FinalCheck
 	rerun, err := ReadFinalCheckRerun(a.Repository, w.stream, w.report.Review, w.push.Number)
 	if err != nil {
 		return FinalCheckRun{}, err
+	}
+	if rerun.refused() {
+		w.refusedRerun, rerun = rerun, nil
 	}
 	w.rerun = rerun
 	deadline := w.push.At.Add(w.cfg.Project.CheckTimeout())
@@ -390,6 +408,9 @@ func (w *finalWatch) step(ctx context.Context, incomplete int, latest FinalCheck
 	if rerun == nil {
 		if err := w.rerunChecks(ctx, result); err != nil {
 			return FinalCheckRun{}, err
+		}
+		if w.refusedRerun != nil {
+			return w.recordIncomplete(ctx, incomplete, latest, &result, fmt.Sprintf("Dagger Cloud refused the rerun of the failed checks: %s; check that the token dagger.cloud_api_token_env names is a Dagger Cloud API token of the organization that runs the pull request's checks", w.refusedRerun.Error))
 		}
 		return FinalCheckRun{}, w.waiting("the failed checks were rerun, and the failure still showing is not the rerun's result", now.Add(w.cfg.Project.PullRequestPollInterval()))
 	}
@@ -485,8 +506,11 @@ func (w *finalWatch) recordIncomplete(ctx context.Context, incomplete int, lates
 	if latest.Commit == w.report.Commit && latest.Source != "" && !latest.FinishedAt.IsZero() {
 		run.StartedAt = latest.FinishedAt
 	}
-	if w.rerun != nil {
+	switch {
+	case w.rerun != nil:
 		run.Reruns = []api.CheckRerun{w.rerun.CheckRerun}
+	case w.refusedRerun != nil:
+		run.Reruns = []api.CheckRerun{w.refusedRerun.CheckRerun}
 	}
 	w.captureEvidence(&run, base)
 	if err := w.write(ctx, &run); err != nil {
@@ -569,8 +593,10 @@ func ReadFinalCheckRerun(repository *trace.Repository, stream config.WorkstreamI
 // the time and the identity of the failing posting and its failed checks,
 // before the command runs, so a restart that finds the record never runs it
 // again, and the failing posting that stays on the commit is told apart from
-// the rerun's own. The command runs in the workstream's checkout with the
-// token cloud_token_env names, in the organization rerunOrganization gives.
+// the rerun's own. The command runs in the workstream's checkout with the API
+// token cloud_api_token_env names, in the organization rerunOrganization
+// gives. When Dagger Cloud refuses the request, the finished record is kept
+// in w.refusedRerun and w.rerun stays nil.
 func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResult) error {
 	a := w.a
 	rerunner := a.S.CloudRerun
@@ -578,7 +604,7 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 		return fmt.Errorf("final review %d cannot rerun the failed checks of push %d: the service has no Dagger Cloud rerun runner", w.report.Review, w.push.Number)
 	}
 	if err := rerunner.CanRerun(); err != nil {
-		return fmt.Errorf("final review %d cannot rerun the failed checks of push %d: %w; set the environment variable dagger.cloud_token_env names", w.report.Review, w.push.Number, err)
+		return fmt.Errorf("final review %d cannot rerun the failed checks of push %d: %w; set the environment variable dagger.cloud_api_token_env names", w.report.Review, w.push.Number, err)
 	}
 	org := rerunOrganization(w.cfg)
 	record := FinalCheckRerunRecord{Review: w.report.Review, Push: w.push.Number, PullRequest: w.push.PullRequest, PushedCommit: w.push.Commit, Command: append([]string{"dagger"}, checkrun.RerunCommand(w.push.PullRequest, org)...)}
@@ -587,6 +613,11 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 		record.Counts = &api.CheckCounts{Total: result.Counts.Total, Passed: result.Counts.Passed, Failed: result.Counts.Failed, Cancelled: result.Counts.Cancelled}
 	}
 	record.Failed = checkrun.CloudFailures(result)
+	record.Attempt = 1
+	if w.refusedRerun != nil {
+		record.Attempt = w.refusedRerun.Attempt + 1
+	}
+	w.refusedRerun = nil
 	if err := w.writeRerun(ctx, record); err != nil {
 		return err
 	}
@@ -604,6 +635,9 @@ func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResul
 	}
 	if err := w.writeRerun(ctx, record); err != nil {
 		return err
+	}
+	if record.refused() {
+		w.refusedRerun = &record
 	}
 	return a.S.Step("final-checks-rerun-run")
 }

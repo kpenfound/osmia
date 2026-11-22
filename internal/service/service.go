@@ -114,11 +114,11 @@ type Options struct {
 	// reads statuses, as the GitHub client does.
 	CloudStatuses pulls.StatusReader
 	// CloudRerun requests the rerun of a pull request's failed Cloud checks.
-	// It defaults to the Dagger CLI with the token dagger.cloud_token_env
-	// names.
+	// It defaults to the Dagger CLI with the API token
+	// dagger.cloud_api_token_env names.
 	CloudRerun CloudRerunner
 	// CloudTrace fetches the output of a Dagger Cloud trace. It defaults to
-	// the Dagger CLI with the token dagger.cloud_token_env names.
+	// the Dagger CLI with the API token dagger.cloud_api_token_env names.
 	CloudTrace TraceRunner
 	// CloudTraceTimeout replaces the time one automatic trace fetch of a
 	// failed check may hold the final review. Zero keeps the default.

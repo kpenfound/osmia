@@ -47,7 +47,7 @@ type Config struct {
 	Telemetry      Telemetry          `toml:"telemetry" json:"telemetry"`
 	Notify         Notify             `toml:"notify" json:"notify"`
 	ErrorReports   ErrorReports       `toml:"error_reports" json:"error_reports"`
-	Skills        Skills             `toml:"skills" json:"skills"`
+	Skills         Skills             `toml:"skills" json:"skills"`
 	// ProjectCreation is the [projects] table. Its JSON name differs because
 	// Projects lists the active projects.
 	ProjectCreation ProjectCreation `toml:"projects" json:"project_creation"`
@@ -230,7 +230,7 @@ func (c *Config) masonDagger(sandbox string) (*agent.Dagger, string) {
 	engine := c.Dagger.Resolve()
 	switch {
 	case engine.Mode == DaggerEngineCloud:
-		return nil, engine.CloudTokenEnv
+		return nil, engine.CloudComputeTokenEnv
 	case engine.Address != "":
 		return &agent.Dagger{Engine: engine.Address, Version: c.Dagger.Version}, ""
 	}
@@ -884,7 +884,7 @@ func knownKey(key toml.Key, project bool) bool {
 		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
-		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_token_env", "check_fallback", "organization"}, key[1])
+		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_compute_token_env", "cloud_api_token_env", "check_fallback", "organization"}, key[1])
 	}
 	// A leftover [beekeeper] section from the removed Beekeeper feature is
 	// accepted and ignored, never decoded into any field, so a top-level
@@ -935,6 +935,9 @@ func unsupportedKey(key toml.Key) string {
 	switch key[0] {
 	case "pause", "priority":
 		return "runtime overrides belong in runtime.json; use osmia pause or osmia priority"
+	}
+	if key.String() == "dagger.cloud_token_env" {
+		return "is not a key: set cloud_compute_token_env to the token that runs checks and masons on the Cloud engine, and cloud_api_token_env to the API token that reruns Cloud checks and reads Cloud traces"
 	}
 	return "unknown configuration key"
 }

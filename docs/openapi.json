@@ -4868,7 +4868,10 @@
           "check_fallback": {
             "type": "string"
           },
-          "cloud_token_env": {
+          "cloud_api_token_env": {
+            "type": "string"
+          },
+          "cloud_compute_token_env": {
             "type": "string"
           },
           "engine": {

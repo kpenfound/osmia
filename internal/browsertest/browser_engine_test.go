@@ -23,7 +23,7 @@ func engineWebFixture(t *testing.T, mode string) (*Service, fixturekit.EngineCLI
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
 	must(t, err)
-	data = append(data, []byte(fmt.Sprintf("\n[dagger]\nengine = %q\nversion = 'v0.20.5'\ncloud_token_env = 'OSMIA_BROWSER_ENGINE_TOKEN'\n", mode))...)
+	data = append(data, []byte(fmt.Sprintf("\n[dagger]\nengine = %q\nversion = 'v0.20.5'\ncloud_compute_token_env = 'OSMIA_BROWSER_ENGINE_TOKEN'\n", mode))...)
 	must(t, os.WriteFile(path, data, 0600))
 	s, _ := start(t, opts)
 	return s, fake
@@ -93,7 +93,7 @@ func TestBrowserEngineNonManagedRefusals(t *testing.T) {
 			if mode == "cloud" {
 				p.AwaitText("#engine-status [data-field=version]", "Unknown")
 				p.AwaitText("#engine-status [data-field=reachable]", "Unreachable")
-				p.AwaitText("#engine-status [data-field=reachability-error]", "configured Cloud token is not set")
+				p.AwaitText("#engine-status [data-field=reachability-error]", "configured Cloud compute token is not set")
 				p.AwaitText("#engine-status [data-field=cache-size]", "Unknown")
 			} else {
 				p.AwaitText("#engine-status [data-field=version]", "v0.19.0")

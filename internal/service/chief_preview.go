@@ -291,7 +291,7 @@ func (s *Service) capturePreview(ctx context.Context, cfg *config.Config, repo *
 			return nil, fmt.Errorf("preview source export: %w", err)
 		}
 		resolved := cfg.Dagger.Resolve()
-		token := os.Getenv(resolved.CloudTokenEnv)
+		token := os.Getenv(resolved.CloudComputeTokenEnv)
 		redact.Register(token)
 		selection := string(resolved.Mode)
 		if resolved.Address != "" {

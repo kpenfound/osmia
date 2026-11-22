@@ -41,8 +41,8 @@ func TestMasonDaggerFollowsTheServiceEngine(t *testing.T) {
 		{"managed", managedDagger, "docker-container://osmia-dagger-engine", ""},
 		{"socket", "[dagger]\nengine = 'unix:///var/run/dagger/engine.sock'\nversion = 'v0.20.5'\n", "unix:///var/run/dagger/engine.sock", ""},
 		{"container", "[dagger]\nengine = 'docker-container://dagger-engine-v0.20.5'\nversion = 'v0.20.5'\n", "docker-container://dagger-engine-v0.20.5", ""},
-		{"cloud", "[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_CLOUD_TOKEN'\n", "", "OSMIA_CLOUD_TOKEN"},
-		{"managed with cloud fallback", "[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\ncloud_token_env = 'OSMIA_CLOUD_TOKEN'\ncheck_fallback = 'cloud'\n", "docker-container://osmia-dagger-engine", ""},
+		{"cloud", "[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_CLOUD_TOKEN'\n", "", "OSMIA_CLOUD_TOKEN"},
+		{"managed with cloud fallback", "[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\ncloud_compute_token_env = 'OSMIA_CLOUD_TOKEN'\ncheck_fallback = 'cloud'\n", "docker-container://osmia-dagger-engine", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := Load(fixture(t, topConfig+"[roles.mason]\nsandbox = 'sbx'\n"+tc.dagger, projectConfig))

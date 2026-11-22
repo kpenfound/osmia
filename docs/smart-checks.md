@@ -182,7 +182,7 @@ is the latest link any command printed, however the run ended (passed, failed,
 timed out, lost its engine, or ended incomplete after the cloud fallback); a
 command that prints no link leaves the earlier one in place, and after the
 cloud fallback the link is the cloud run's when it printed one. Links are read
-only when a Dagger Cloud token is configured; without one no record carries
+only when a Dagger Cloud compute token is configured; without one no record carries
 `trace_url`.
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
@@ -432,7 +432,7 @@ or its cleanup.
 With `[dagger] check_fallback = "cloud"` and an `engine` other than `cloud`
 ([configuration](configuration.md#cloud-fallback-for-checks)), unit
 and session check runs retry on the Dagger Cloud engine, with the
-token named by `cloud_token_env`, the work that cannot finish locally. With the
+compute token named by `cloud_compute_token_env`, the work that cannot finish locally. With the
 key off, or with `engine = "cloud"`, none of this applies.
 
 **What escalates to cloud.** A local attempt that is incomplete because it

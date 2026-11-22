@@ -349,7 +349,7 @@ func TestMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
 	ctx := context.Background()
 	for name, dagger := range map[string]string{
 		"host engine":  "[dagger]\nversion = 'v0.20.5'\nengine = 'tcp://127.0.0.1:1234'\n",
-		"Dagger Cloud": "[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_UNITS_TEST_TOKEN'\n",
+		"Dagger Cloud": "[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_UNITS_TEST_TOKEN'\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()

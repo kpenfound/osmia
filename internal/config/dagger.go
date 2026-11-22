@@ -26,16 +26,20 @@ const DaggerCheckFallbackCloud = "cloud"
 var daggerOrganization = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // DaggerConfig selects the service's engine and names its optional Cloud
-// credential. Loading configuration never reads the credential's value.
-// CheckFallback is empty (off) or DaggerCheckFallbackCloud. Organization is
-// the Dagger Cloud organization the token belongs to, named on the Cloud
-// check reruns of projects without a fork.
+// credentials. Loading configuration never reads a credential's value.
+// CloudComputeTokenEnv names the token that runs checks and masons on the
+// Cloud engine; CloudAPITokenEnv names the token that reruns a pull request's
+// Cloud checks and reads Cloud traces. CheckFallback is empty (off) or
+// DaggerCheckFallbackCloud. Organization is the Dagger Cloud organization the
+// API token belongs to, named on the Cloud check reruns of projects without a
+// fork.
 type DaggerConfig struct {
-	Version       string `toml:"version" json:"version,omitempty"`
-	Engine        string `toml:"engine" json:"engine"`
-	CloudTokenEnv string `toml:"cloud_token_env" json:"cloud_token_env,omitempty"`
-	CheckFallback string `toml:"check_fallback" json:"check_fallback,omitempty"`
-	Organization  string `toml:"organization" json:"organization,omitempty"`
+	Version              string `toml:"version" json:"version,omitempty"`
+	Engine               string `toml:"engine" json:"engine"`
+	CloudComputeTokenEnv string `toml:"cloud_compute_token_env" json:"cloud_compute_token_env,omitempty"`
+	CloudAPITokenEnv     string `toml:"cloud_api_token_env" json:"cloud_api_token_env,omitempty"`
+	CheckFallback        string `toml:"check_fallback" json:"check_fallback,omitempty"`
+	Organization         string `toml:"organization" json:"organization,omitempty"`
 }
 
 // ResolvedDagger describes a validated service engine. Version is the expected
@@ -43,17 +47,18 @@ type DaggerConfig struct {
 // Address is set only for managed and explicit-address engines. CheckFallbackCloud
 // is true only when check_fallback is "cloud" and Mode is not already cloud.
 type ResolvedDagger struct {
-	Mode               DaggerEngineMode
-	Address            string
-	Version            string
-	CloudTokenEnv      string
-	CheckFallbackCloud bool
+	Mode                 DaggerEngineMode
+	Address              string
+	Version              string
+	CloudComputeTokenEnv string
+	CloudAPITokenEnv     string
+	CheckFallbackCloud   bool
 }
 
 // Resolve returns the engine selection without probing engines or reading secrets.
 // The zero value selects auto, as does an omitted [dagger] section.
 func (d DaggerConfig) Resolve() ResolvedDagger {
-	r := ResolvedDagger{Version: d.Version, CloudTokenEnv: d.CloudTokenEnv}
+	r := ResolvedDagger{Version: d.Version, CloudComputeTokenEnv: d.CloudComputeTokenEnv, CloudAPITokenEnv: d.CloudAPITokenEnv}
 	switch d.Engine {
 	case "", string(DaggerEngineAuto):
 		r.Mode = DaggerEngineAuto
@@ -83,20 +88,23 @@ func (d DaggerConfig) validate(path string, versionSet bool) error {
 			return fieldError(path, "dagger.engine", "must be auto, managed, cloud, unix://<absolute socket path>, tcp://<host>:<port> or docker-container://<container name>")
 		}
 	}
-	if d.CloudTokenEnv != "" && !environmentName.MatchString(d.CloudTokenEnv) {
-		return fieldError(path, "dagger.cloud_token_env", "must name an environment variable")
+	if d.CloudComputeTokenEnv != "" && !environmentName.MatchString(d.CloudComputeTokenEnv) {
+		return fieldError(path, "dagger.cloud_compute_token_env", "must name an environment variable")
+	}
+	if d.CloudAPITokenEnv != "" && !environmentName.MatchString(d.CloudAPITokenEnv) {
+		return fieldError(path, "dagger.cloud_api_token_env", "must name an environment variable")
 	}
 	if d.Organization != "" && !daggerOrganization.MatchString(d.Organization) {
 		return fieldError(path, "dagger.organization", "must be a Dagger Cloud organization name")
 	}
-	if d.Engine == string(DaggerEngineCloud) && d.CloudTokenEnv == "" {
-		return fieldError(path, "dagger.cloud_token_env", "is required for the cloud engine")
+	if d.Engine == string(DaggerEngineCloud) && d.CloudComputeTokenEnv == "" {
+		return fieldError(path, "dagger.cloud_compute_token_env", "is required for the cloud engine")
 	}
 	switch d.CheckFallback {
 	case "":
 	case DaggerCheckFallbackCloud:
-		if d.CloudTokenEnv == "" {
-			return fieldError(path, "dagger.cloud_token_env", "is required for check_fallback = \"cloud\"")
+		if d.CloudComputeTokenEnv == "" {
+			return fieldError(path, "dagger.cloud_compute_token_env", "is required for check_fallback = \"cloud\"")
 		}
 	default:
 		return fieldError(path, "dagger.check_fallback", "must be empty or cloud")

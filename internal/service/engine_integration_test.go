@@ -30,7 +30,7 @@ func engineConfig(mode, token string) string {
 	if mode == "" {
 		return ""
 	}
-	return fmt.Sprintf("\n[dagger]\nengine = %q\nversion = 'v0.20.5'\ncloud_token_env = %q\n", mode, token)
+	return fmt.Sprintf("\n[dagger]\nengine = %q\nversion = 'v0.20.5'\ncloud_compute_token_env = %q\n", mode, token)
 }
 
 // Serial: fake commands and planted host engine selectors are process-wide.

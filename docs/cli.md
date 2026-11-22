@@ -1047,7 +1047,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
     service. It reads only the top-level file: no project file, no project
     store, no trace, no runtime state. It creates no file or directory, the root
     included, and makes no network call. It never reads the value of an
-    environment variable a setting names (`cloud_token_env`, `headers_env`,
+    environment variable a setting names (`cloud_compute_token_env`, `headers_env`,
     `api_key_env` and the like), so it passes whether or not the variable is
     set. It does not check the host, such as whether a clone exists or a port is
     free.

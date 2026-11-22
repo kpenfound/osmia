@@ -162,7 +162,7 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 	}{
 		{"without Dagger", config.DaggerConfig{}},
 		{"with Dagger", config.DaggerConfig{Engine: "docker-container://fake", Version: "v0.20.5"}},
-		{"with Dagger Cloud", config.DaggerConfig{Engine: "cloud", CloudTokenEnv: "OSMIA_GATE_TEST_TOKEN"}},
+		{"with Dagger Cloud", config.DaggerConfig{Engine: "cloud", CloudComputeTokenEnv: "OSMIA_GATE_TEST_TOKEN"}},
 	} {
 		// A mason turn on Dagger Cloud uses no engine of the service's, so it
 		// holds back no restart or prune.

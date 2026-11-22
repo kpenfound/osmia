@@ -70,7 +70,7 @@ func TestChiefPreviewExactSourceAndRestart(t *testing.T) {
 	}
 	f, stream, repo, _ := newFinalFixture(t, "preview-source")
 	cfg := f.s.about(repo)
-	cfg.Dagger = config.DaggerConfig{Engine: "tcp://preview-engine:1234", CloudTokenEnv: "OSMIA_PREVIEW_TOKEN"}
+	cfg.Dagger = config.DaggerConfig{Engine: "tcp://preview-engine:1234", CloudComputeTokenEnv: "OSMIA_PREVIEW_TOKEN"}
 	candidate := moveFeature(t, f, stream, map[string]string{"preview-source.txt": "unit candidate\n"})
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument("resume"), Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: serviceActor, Cause: "preview"}
 	report, _ := json.Marshal(UnitReport{Candidate: candidate})
@@ -402,7 +402,7 @@ func TestChiefPreviewFailureDiagnostic(t *testing.T) {
 	t.Setenv("OSMIA_PREVIEW_TOKEN", secret)
 	f, stream, repo, _ := newFinalFixture(t, "preview-failure")
 	cfg := f.s.about(repo)
-	cfg.Dagger = config.DaggerConfig{Engine: "cloud", CloudTokenEnv: "OSMIA_PREVIEW_TOKEN"}
+	cfg.Dagger = config.DaggerConfig{Engine: "cloud", CloudComputeTokenEnv: "OSMIA_PREVIEW_TOKEN"}
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "failure\n"})
 	scope := previewScope(t, repo, stream, f.s.now)
 	raw := json.RawMessage(`{"call":["broken"],"port":8080}`)
@@ -508,7 +508,7 @@ func TestChiefPreviewTimedOutAndCancelledCapture(t *testing.T) {
 	fake := fixturekit.InstallPreviewCLIs(t, attachmentPNG(t))
 	f, stream, repo, _ := newFinalFixture(t, "preview-timeout")
 	cfg := f.s.about(repo)
-	cfg.Dagger = config.DaggerConfig{Engine: "cloud", CloudTokenEnv: "OSMIA_PREVIEW_TOKEN"}
+	cfg.Dagger = config.DaggerConfig{Engine: "cloud", CloudComputeTokenEnv: "OSMIA_PREVIEW_TOKEN"}
 	secret := "synthetic-preview-timeout-token"
 	t.Setenv("OSMIA_PREVIEW_TOKEN", secret)
 	commit := moveFeature(t, f, stream, map[string]string{"preview-source.txt": "blocked capture\n"})

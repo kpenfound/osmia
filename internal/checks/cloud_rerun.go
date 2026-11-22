@@ -30,7 +30,7 @@ type CloudRerunner interface {
 
 // ErrCloudRerunUnavailable is a rerun that cannot be requested because no
 // Dagger Cloud token is available.
-var ErrCloudRerunUnavailable = errors.New("a Dagger Cloud rerun needs a Dagger Cloud token")
+var ErrCloudRerunUnavailable = errors.New("a Dagger Cloud rerun needs a Dagger Cloud API token")
 
 // maxRerunOutput bounds the output of the rerun command kept in an error.
 const maxRerunOutput = 2048
