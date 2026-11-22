@@ -274,10 +274,8 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 	if err := add(s.LegacyProjectsEntry(repository, w.Workstream)); err != nil {
 		return nil, err
 	}
-	if w.State == InShedState || w.State == SketchedState {
-		if err := add(s.ratificationEntry(repository, w.Workstream)); err != nil {
-			return nil, err
-		}
+	if err := add(s.ratificationCard(repository, w.Workstream, w.State)); err != nil {
+		return nil, err
 	}
 	for _, gate := range w.Gates {
 		if gate.Kind != UnitContested {
@@ -349,6 +347,15 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// ratificationCard is the workstream's ratification card as the inbox lists
+// it: only while the workstream, in state, is sketched or in the shed.
+func (s *Controller) ratificationCard(repository *trace.Repository, stream config.WorkstreamID, state string) (InboxEntry, bool, error) {
+	if state != InShedState && state != SketchedState {
+		return InboxEntry{}, false, nil
+	}
+	return s.ratificationEntry(repository, stream)
 }
 
 // loopEntry is the loop guard's pause of the workstream while it holds,
