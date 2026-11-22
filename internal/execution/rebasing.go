@@ -60,8 +60,11 @@ func resolveTurnID(unit string, k int) string {
 // rebased once no mason turn of it is claimed or dispatched: its rebase is
 // published as a durable operation. rebasing names the units with a rebase
 // in flight, dispatched the thread turns an operation names and rebased the
-// feature branch commits each unit's finished rebases were onto. refresh
-// reports whether every unit is current, so a landing may be asked for.
+// feature branch commits each unit's recorded rebases were onto. A refused
+// rebase is asked for again until maxRefusedRebases onto the same commit are
+// refused; the unit is then contested, and it waits outside the landing for
+// its ruling. refresh reports whether every unit is current, so a landing may
+// be asked for.
 func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]bool, dispatched map[string]bool, rebased map[string][]string) (bool, error) {
 	units := newUnitWorkspaces(f.cfg, f.repository)
 	g, err := units.Of(b.stream)
@@ -73,6 +76,7 @@ func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]b
 		return true, err
 	}
 	current := true
+	var refusals refusedRebases
 	for _, u := range b.plan.Units {
 		state := b.states[trace.UnitSubject(u.ID)]
 		if state.Value == "" || state.Value == UnitPlanned || state.Value == UnitMerged {
@@ -97,6 +101,19 @@ func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]b
 		if slices.Contains(rebased[u.ID], tip) {
 			continue
 		}
+		if refusals == nil {
+			if refusals, err = f.refusedRebases(b); err != nil {
+				return false, err
+			}
+		}
+		if onTip := refusals.onto(u.ID, tip); len(onTip) >= maxRefusedRebases {
+			if state.Value != UnitContested {
+				if err := f.contestRefusedRebases(ctx, b.stream, u.ID, state, tip, onTip); err != nil {
+					return false, fmt.Errorf("unit %s: %w", u.ID, err)
+				}
+			}
+			continue
+		}
 		current = false
 		if writing, err := f.writing(b.stream, u.ID, dispatched); err != nil || writing {
 			if err != nil {
@@ -109,6 +126,106 @@ func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]b
 		}
 	}
 	return current, nil
+}
+
+// maxRefusedRebases is how many rebases of one unit onto one feature branch
+// commit may be refused, since the unit last left a contest, before the
+// foreman stops asking for another and contests the unit.
+const maxRefusedRebases = 3
+
+// refusedRebase is a rebase whose refusal is recorded, with the refusal's
+// reason.
+type refusedRebase struct {
+	rebaseInput
+	reason string
+}
+
+// refusedRebases are the refused rebases of each unit of a workstream that
+// were asked for after the unit last left a contest, in the order they were
+// asked for.
+type refusedRebases map[string][]refusedRebase
+
+// onto returns the unit's refused rebases onto the feature branch commit tip.
+func (r refusedRebases) onto(unit, tip string) []refusedRebase {
+	var onTip []refusedRebase
+	for _, in := range r[unit] {
+		if in.Onto == tip {
+			onTip = append(onTip, in)
+		}
+	}
+	return onTip
+}
+
+// refusedRebases reads the refused rebases of the workstream's units. A unit
+// that leaves a contest, whoever moved it, starts with none: the rebases
+// asked for before that move no longer count.
+func (f *foreman) refusedRebases(b building) (refusedRebases, error) {
+	units := map[string]string{}
+	for _, u := range b.plan.Units {
+		units[trace.UnitSubject(u.ID)], units[rebaseSubject(u.ID)] = u.ID, u.ID
+	}
+	transitions, err := trace.Read[trace.Transition](f.repository, b.stream)
+	if err != nil {
+		return nil, err
+	}
+	asked, since := map[string]int{}, map[string]int{}
+	for _, t := range transitions {
+		unit, ok := units[t.Subject]
+		if !ok {
+			continue
+		}
+		if t.Subject == rebaseSubject(unit) {
+			var k int
+			if _, err := fmt.Sscanf(t.To, "requested-%d", &k); err == nil {
+				asked[unit] = max(asked[unit], k)
+			}
+		} else if t.From == UnitContested && t.To != UnitContested {
+			since[unit] = asked[unit]
+		}
+	}
+	ops, err := f.repository.Operations(b.stream)
+	if err != nil {
+		return nil, err
+	}
+	refused := refusedRebases{}
+	for _, o := range ops {
+		if o.Operation.Action != RebaseAction || o.Result == nil || o.Result.Outcome != "failed" {
+			continue
+		}
+		in, err := decodeRebase(o.Operation)
+		if err != nil {
+			return nil, err
+		}
+		if in.Rebase > since[in.Unit] {
+			refused[in.Unit] = append(refused[in.Unit], refusedRebase{in, o.Result.Evidence})
+		}
+	}
+	for _, r := range refused {
+		slices.SortFunc(r, func(a, b refusedRebase) int { return a.Rebase - b.Rebase })
+	}
+	return refused, nil
+}
+
+// contestRefusedRebases contests a unit whose rebases onto the feature branch
+// commit tip were refused maxRefusedRebases times, with a notice for the chief
+// of staff that names the latest refusal. The foreman asks for no further
+// rebase onto tip until a ruling or a move takes the unit out of the contest,
+// and a contested unit holds no mason slot.
+func (f *foreman) contestRefusedRebases(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, tip string, refused []refusedRebase) error {
+	last := refused[len(refused)-1]
+	transition, _ := rebaseIDs(unit, last.Rebase)
+	id := fmt.Sprintf("%s-%s-rebase-%d", trace.UnitSubject(unit), UnitContested, last.Rebase)
+	reason := fmt.Sprintf("the service refused %d rebases of unit %s's workspace onto feature branch %s at %s, the latest because %s; the unit is contested instead of a rebase being asked for again, and a ruling or move that takes it out of the contest gets it a fresh rebase", len(refused), unit, featureBranch(stream), tip, last.reason)
+	_, err := f.s.raise(ctx, true, UnitExitInput{
+		Repo: f.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerRebaseRefused, Cause: transition + "-refused",
+		Default: UnitContested, Targets: []string{UnitContested}, Actor: foremanActor,
+		ID: id, HeaderCause: transition + "-refused", Reason: reason,
+		Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+		Note:   reason,
+		Evidence: router.Evidence{Facts: map[string]any{"refused_rebases": len(refused), "max_refused_rebases": maxRefusedRebases},
+			Records: []router.Entry{{Kind: "rebase", ID: transition, Text: last.reason}}},
+	})
+	return err
 }
 
 // writing reports whether a turn of the unit's mason is claimed, running or

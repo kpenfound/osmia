@@ -166,6 +166,12 @@ func checksContest(contest trace.Transition, unit string) bool {
 	return contest.To == UnitContested && contest.From == UnitChecking && contest.Actor == checksActor && contest.Cause != reviewDocument(unit)
 }
 
+// rebaseContest reports whether a contest was raised because the foreman's
+// rebases of the unit onto one feature branch commit kept being refused.
+func rebaseContest(contest trace.Transition, unit string) bool {
+	return contest.To == UnitContested && contest.Actor == foremanActor && strings.HasPrefix(contest.Cause, rebaseSubject(unit)+"-") && strings.HasSuffix(contest.Cause, "-refused")
+}
+
 // bounceContest reports whether a contest was raised because send-backs, by
 // reviewer verdicts and failed checks together, reached shed.max_bounces.
 func bounceContest(contest trace.Transition, unit string) bool {

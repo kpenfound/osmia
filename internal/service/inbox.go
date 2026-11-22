@@ -118,7 +118,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	}
 	options := contestOptions(contest, unit, mason)
 	switch {
-	case failedReview(contest, unit), mason, moveContest(contest, unit), checksContest(contest, unit):
+	case failedReview(contest, unit), mason, moveContest(contest, unit), checksContest(contest, unit), rebaseContest(contest, unit):
 	default:
 		r := &reviewers{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}
 		result, ok, err := r.storedResult(stream, unit, state)
