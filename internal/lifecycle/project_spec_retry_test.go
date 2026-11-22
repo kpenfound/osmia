@@ -103,6 +103,9 @@ func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 	if first.Load() != 1 || second.Load() != 1 || !projectSpecRecorded(t, f, id) {
 		t.Fatalf("refused first draft was not retried once: first=%d second=%d", first.Load(), second.Load())
 	}
+	if got := leaderNotices(t, f, "The workgroup spec is recorded"); len(got) != 0 {
+		t.Fatalf("a recorded draft whose refusals were never reported told the chief: %v", got)
+	}
 	if prompt, _ := firstPrompt.Load().(string); !strings.Contains(prompt, string(f.project2)+" (its charter has no numbered rules") {
 		t.Fatalf("prompt offers citations of a charter without rules: %s", prompt)
 	}
@@ -196,6 +199,11 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	}
 	if p, _ := prompt.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
 		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
+	}
+	recorded := "The workgroup spec is recorded; each member's committee review starts now."
+	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	if got := leaderNotices(t, f, recorded); len(got) != 1 {
+		t.Fatalf("recorded workgroup spec reported %d times after the reported refusals", len(got))
 	}
 	if _, api := f.s.lifecycle().MoveWorkstream(ctx, repo, f.stream1, WorkstreamMoveRequest{To: SketchedState, Note: note}, chief, "chief-turn-4"); api == nil || containsMessage(asError(api), "drafts the workgroup spec again") {
 		t.Fatalf("a recorded workgroup spec was drafted again: %v", api)

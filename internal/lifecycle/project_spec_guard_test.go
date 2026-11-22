@@ -579,6 +579,9 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 	if p, _ := prompt.Load().(string); !strings.Contains(p, note) {
 		t.Fatalf("requested redraft prompt lacks the note: %s", p)
 	}
+	if got := leaderNotices(t, f, "contract redraft is recorded"); len(got) != 1 {
+		t.Fatalf("recorded redraft reported %d times", len(got))
+	}
 	runRefresh(t, f)
 	assertGuardRatifiable(t, f, id, 2, old.Revision+1)
 }

@@ -396,6 +396,11 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 		if err != nil {
 			return ProjectSpecDraftInput{}, false, err
 		}
+		if state.Value == "drafted" {
+			if err := s.ReportProjectSpecDraftRecorded(ctx, wt, host, members); err != nil {
+				return ProjectSpecDraftInput{}, false, err
+			}
+		}
 		if found && len(next.Guarded) == 0 {
 			return ProjectSpecDraftInput{}, false, nil
 		}
@@ -443,6 +448,53 @@ func (s *Controller) ReportProjectSpecDraftFailure(ctx context.Context, members 
 		body = fmt.Sprintf("The workgroup spec's contracts could not be redrafted: a member changed the text of a contract criterion, and the architect's last %d redrafts were refused, most recently because %s. Ratification stays refused for that member until a redraft is recorded, and the workgroup cannot be approved. The service asks for no further redraft on its own. Ask for another with move_workstream to sketched on any member, with a note telling the architect what to change, and tell the owner in plain words what happened.", failures, failure.Reason)
 	}
 	return s.NoticeWorkgroupLeader(ctx, members, failure.ID+"-reported", failure.ID, failure.Reason, body)
+}
+
+// ReportProjectSpecDraftRecorded tells the chief of staff, through the
+// workgroup leader's own events, that the latest project spec draft is
+// recorded, when the chief was told that the drafts before it were refused.
+// It is recorded once per recorded draft.
+func (s *Controller) ReportProjectSpecDraftRecorded(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, members []trace.CrossRepoMember) error {
+	transitions, err := trace.Read[trace.Transition](wt, host)
+	if err != nil {
+		return err
+	}
+	// The latest recorded draft, and the refusals between it and the draft
+	// recorded before it, whichever runs of attempts they belong to.
+	var drafted trace.Transition
+	var refused, pending []string
+	guarded := false
+	for _, tr := range transitions {
+		if tr.Subject != ProjectSpecDraftSubject {
+			continue
+		}
+		switch tr.To {
+		case "drafted":
+			guarded = drafted.ID != ""
+			drafted, refused, pending = tr, pending, nil
+		case "failed":
+			pending = append(pending, tr.ID)
+		}
+	}
+	if len(refused) == 0 {
+		return nil
+	}
+	leader, repo := WorkgroupLeaderOf(members)
+	leaderTransitions, err := trace.Read[trace.Transition](repo, leader)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(leaderTransitions, func(t trace.Transition) bool {
+		failure, reported := strings.CutSuffix(t.ID, "-reported")
+		return reported && slices.Contains(refused, failure)
+	}) {
+		return nil
+	}
+	body := "The workgroup spec is recorded; each member's committee review starts now."
+	if guarded {
+		body = "The workgroup spec's contract redraft is recorded; each changed member's ratification packet carries it now."
+	}
+	return s.NoticeWorkgroupLeader(ctx, members, drafted.ID+"-reported", drafted.ID, "the project spec is recorded after its refused drafts were reported", body)
 }
 
 // WorkgroupLeaderOf returns the workgroup leader among members, the
@@ -682,7 +734,14 @@ func (s *Controller) DispatchProjectSpecDraft(ctx context.Context, wt *trace.Rep
 		// again on a later pass.
 		return nil
 	}
-	return s.RecordProjectSpecDraft(ctx, wt, g, host, turn, result)
+	if err := s.RecordProjectSpecDraft(ctx, wt, g, host, turn, result); err != nil {
+		return err
+	}
+	state, err := wt.Workflow(host, ProjectSpecDraftSubject)
+	if err != nil || state.Value != "drafted" {
+		return err
+	}
+	return s.ReportProjectSpecDraftRecorded(ctx, wt, host, members)
 }
 func (s *Controller) EnqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, input ProjectSpecDraftInput) error {
 	turn := input.Turn
