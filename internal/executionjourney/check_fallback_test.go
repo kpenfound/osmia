@@ -14,7 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const fallbackConfig = "\n[dagger]\ncloud_token_env = 'OSMIA_FALLBACK_TEST_TOKEN'\ncheck_fallback = 'cloud'\n"
+const fallbackConfig = "\n[dagger]\ncloud_compute_token_env = 'OSMIA_FALLBACK_TEST_TOKEN'\ncheck_fallback = 'cloud'\n"
 
 var engineFailure = CheckResult{ExitCode: 1, Output: "Error: the engine session was lost\n"}
 
@@ -70,7 +70,7 @@ func TestServiceCloudEngineKeepsItsPrimaryRunnerUnderTheFallbackKey(t *testing.T
 	t.Parallel()
 	local := &fakeChecks{Outcomes: []checkOutcome{{Result: engineFailure}}}
 	cloud := &fakeChecks{Outcomes: passing()}
-	extra := "\n[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_FALLBACK_TEST_TOKEN'\ncheck_fallback = 'cloud'\n"
+	extra := "\n[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_FALLBACK_TEST_TOKEN'\ncheck_fallback = 'cloud'\n"
 	f, stream, repository := newFallbackChecksFixture(t, "fallback-cloud-engine", extra, local, cloud)
 	runChecks(t, f.s, repository, stream)
 	run := onlyRun(t, repository, stream)

@@ -343,8 +343,8 @@ func (c *Controller) invokeTimeout(ctx context.Context, timeout time.Duration, n
 	if err != nil {
 		return "", fmt.Errorf("%s is not on PATH", name)
 	}
-	if engine && c.config.Mode == config.DaggerEngineCloud && c.options.Getenv(c.config.CloudTokenEnv) == "" {
-		return "", errors.New("configured Cloud token is not set")
+	if engine && c.config.Mode == config.DaggerEngineCloud && c.options.Getenv(c.config.CloudComputeTokenEnv) == "" {
+		return "", errors.New("configured Cloud compute token is not set")
 	}
 	env := c.environment(engine)
 	out, err := c.options.Command(ctx, path, env, args...)
@@ -378,7 +378,7 @@ func (c *Controller) environment(engine bool) []string {
 		}
 	case config.DaggerEngineCloud:
 		env = append(env, "DAGGER_ENGINE=cloud", "DAGGER_CLOUD_ENGINE=1")
-		token := c.options.Getenv(c.config.CloudTokenEnv)
+		token := c.options.Getenv(c.config.CloudComputeTokenEnv)
 		redact.Register(token)
 		env = append(env, "DAGGER_CLOUD_TOKEN="+token)
 	default:

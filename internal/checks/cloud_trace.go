@@ -42,7 +42,7 @@ const (
 type TraceFailureReason string
 
 const (
-	// TraceNoToken is a service with no Dagger Cloud token.
+	// TraceNoToken is a service with no Dagger Cloud API token.
 	TraceNoToken TraceFailureReason = "no_token"
 	// TraceTokenRejected is a token Dagger Cloud refused.
 	TraceTokenRejected TraceFailureReason = "token_rejected"
@@ -150,7 +150,7 @@ func TraceFetchCommand(traceID, check string) []string {
 // be validated by the caller.
 func (d DaggerChecks) FetchTrace(ctx context.Context, traceID, check string) (TraceOutput, *TraceFailure) {
 	if d.CloudToken == "" {
-		return TraceOutput{}, traceFailure(TraceNoToken, "no Dagger Cloud token is configured for the service")
+		return TraceOutput{}, traceFailure(TraceNoToken, "no Dagger Cloud API token is configured for the service")
 	}
 	redact.Register(d.CloudToken)
 	home, err := os.MkdirTemp("", "osmia-trace-home-")

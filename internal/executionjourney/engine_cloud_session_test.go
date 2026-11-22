@@ -23,7 +23,7 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 		path := filepath.Join(o.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		must(t, err)
-		data = append(data, []byte("\n[dagger]\nengine = 'cloud'\ncloud_token_env = 'OSMIA_ENGINE_TEST_TOKEN'\n")...)
+		data = append(data, []byte("\n[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_ENGINE_TEST_TOKEN'\n")...)
 		must(t, os.WriteFile(path, data, 0600))
 	})
 	// Use production check composition, with the fixture retaining fake agent turns.

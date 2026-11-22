@@ -473,25 +473,28 @@ statuses of the pushed head commit in the upstream repository:
   completes.
 - On a failure the service asks Dagger Cloud once to rerun the failed checks:
   `dagger cloud checks rerun --failed --pr <N>`, run from the workstream's
-  checkout with the token the `[dagger] cloud_token_env` setting names. For a
-  project without a fork, `--org` names the `[dagger] organization` setting,
-  which an organization token needs; a project with a fork reruns without it,
-  so an organization token can rerun only the checks of projects without one. The
-  `dagger` CLI must be on the service's search path and the variable must be set
-  in its environment; without them the rerun cannot be made and the final
-  review keeps waiting and says so. The rerun runs on the same commit, so the
+  checkout with the API token the `[dagger] cloud_api_token_env` setting names.
+  For a project without a fork, `--org` names the `[dagger] organization`
+  setting, which an organization token needs; a project with a fork reruns
+  without it, so an organization token can rerun only the checks of projects
+  without one. The `dagger` CLI must be on the service's search path and the
+  variable must be set in its environment; without them the rerun cannot be
+  made and the final review keeps waiting and says so. When Dagger Cloud
+  refuses the request, for example because the token is a compute token rather
+  than an API token, the run is recorded as incomplete with the refusal, and
+  the request is made again after the run's wait. The rerun runs on the same commit, so the
   original failure keeps showing; it is never taken as the rerun's result. Only
   a **Run Dagger Checks** status posted after the request settles it, and when
   none completes within `checks_timeout` of the request the run is incomplete. A
   check that failed and then passed on the rerun is recorded as flaky and
   counts as a pass; one that fails again stays failed. At most one rerun is made
-  for a push.
+  for a push that Dagger Cloud accepted.
 - The chief of staff and the final reader can read why a check failed with the
   `read_cloud_trace` action, which no other role holds. It takes the trace ID a
   failed check's `dagger trace <id>` command names and, optionally, that check's
   name, and returns the output `dagger trace <id>` shows: for the whole trace, or
   for the one check when `check` is given. The service runs the `dagger` CLI
-  itself, with the Dagger Cloud token `cloud_token_env` names, which only the
+  itself, with the Dagger Cloud API token `cloud_api_token_env` names, which only the
   command's environment holds, never a role. The trace ID must start with a
   letter or digit and hold only letters, digits, `_` and `-`, up to 64
   characters, and a check name is up to 256 bytes without control characters;

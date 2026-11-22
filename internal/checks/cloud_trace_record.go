@@ -136,7 +136,7 @@ func (f TraceFetcher) Fetch(ctx context.Context, caller TraceCaller, traceID, ch
 		return got, nil, err
 	}
 	if f.Runner == nil {
-		return TraceFetch{}, traceFailure(TraceNoToken, "no Dagger Cloud token is configured for the service"), nil
+		return TraceFetch{}, traceFailure(TraceNoToken, "no Dagger Cloud API token is configured for the service"), nil
 	}
 	out, failure := f.Runner.FetchTrace(ctx, traceID, check)
 	if failure != nil {

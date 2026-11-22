@@ -196,7 +196,7 @@ The command is offline. It needs no running service or socket, opens no trace,
 store or other state, creates no file or directory (a missing root stays
 missing), makes no network call and reads no file but the one it validates. It
 never reads the value of an environment variable a setting names, such as
-`cloud_token_env`, `headers_env` or `api_key_env`; it checks the names only. A
+`cloud_compute_token_env`, `headers_env` or `api_key_env`; it checks the names only. A
 top-level file that still carries a well-formed `active_projects` list validates,
 so one file is accepted both before and after the project import.
 
@@ -962,8 +962,10 @@ further run, up to an hour. The final reader's prompt carries the result; neithe
 it nor a unit reviewer runs checks. A completed result is read back instead of
 read again. The one `dagger cloud checks rerun --failed --pr <N>` of a failure,
 with `--org` set from `dagger.organization` for a project without a fork, runs from the workstream's checkout and receives PATH, a temporary HOME and
-the Dagger Cloud token `cloud_token_env` names, without engine, provider,
-GitHub or SSH credentials. Final reviews take no check slot.
+the Dagger Cloud API token `cloud_api_token_env` names, without engine,
+provider, GitHub or SSH credentials. A request Dagger Cloud refuses, such as
+one made with a token that is not an API token, is recorded as an incomplete
+run with the refusal, and the request is made again after that run's wait. Final reviews take no check slot.
 There is no command fallback.
 
 The chief of staff and the final reader can read a failed check's trace through
@@ -971,9 +973,9 @@ the service-run `read_cloud_trace` action: a trace ID, as a failed check's
 `dagger trace <id>` command names it, and optionally the check's name to narrow
 the output to that check. The service runs `dagger cloud traces view`
 for it, with a check passed as the single element `--check=<name>`, in a private
-temporary HOME with PATH, NO_COLOR and the Dagger Cloud token `cloud_token_env`
-names and nothing else, under a two-minute timeout. A fetch with no token
-configured returns the reason `no_token`. The scrubbed output, at most 64 KiB
+temporary HOME with PATH, NO_COLOR and the Dagger Cloud API token
+`cloud_api_token_env` names and nothing else, under a two-minute timeout. A
+fetch with no API token configured returns the reason `no_token`. The scrubbed output, at most 64 KiB
 and its end when longer, is recorded as `traces/<trace ID>-all.json` for the
 whole trace or `traces/<trace ID>-check-<digest>.json` for one check, readable
 by every role with `factory_context`, and a later request for the same trace ID
@@ -1021,7 +1023,8 @@ The top-level `[dagger]` section selects the service's engine:
 [dagger]
 engine = "managed"
 version = "v0.20.5"
-cloud_token_env = "OSMIA_DAGGER_CLOUD_TOKEN"
+cloud_compute_token_env = "OSMIA_DAGGER_CLOUD_COMPUTE_TOKEN"
+cloud_api_token_env = "OSMIA_DAGGER_CLOUD_API_TOKEN"
 organization = "my-org"
 ```
 
@@ -1029,8 +1032,9 @@ organization = "my-org"
 | --- | --- | --- |
 | `engine` | `"auto"` | `auto`, `managed`, `cloud` or an explicit `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` address |
 | `version` | Host Dagger CLI release, resolved at runtime | Expected engine release, such as `v0.20.5` or `0.20.5`; a mismatch is reported rather than enforced |
-| `cloud_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token; required for `engine = "cloud"` and for `check_fallback = "cloud"`, and used for the `dagger cloud checks rerun` of a pull request's failed Cloud checks, which cannot be requested without it |
-| `organization` | Unset | The Dagger Cloud organization the token belongs to. A project without a `fork` passes it as `--org` to its `dagger cloud checks rerun` commands, which an organization token needs; a project with a fork runs its reruns without `--org`, because its pull request's checks run in the upstream's organization. Must be a Dagger Cloud organization name |
+| `cloud_compute_token_env` | Unset | Environment variable name holding the dedicated Dagger Cloud token that runs engines: the service's checks and previews, the Cloud fallback, and masons under `engine = "cloud"`. Required for `engine = "cloud"` and for `check_fallback = "cloud"` |
+| `cloud_api_token_env` | Unset | Environment variable name holding a Dagger Cloud API token of the organization that runs the pull requests' checks. The service uses it for `dagger cloud checks rerun` and `dagger cloud traces view`, and never gives it to an agent. Without it, failed Cloud checks cannot be rerun and Cloud traces cannot be read |
+| `organization` | Unset | The Dagger Cloud organization the API token belongs to. A project without a `fork` passes it as `--org` to its `dagger cloud checks rerun` commands, which an organization token needs; a project with a fork runs its reruns without `--org`, because its pull request's checks run in the upstream's organization. Must be a Dagger Cloud organization name |
 | `check_fallback` | `""` (off) | `""` or `"cloud"`. With `"cloud"`, a check run that cannot finish on the service's engine is retried on the Dagger Cloud engine; see [Cloud fallback for checks](#cloud-fallback-for-checks). Any other value fails to load, naming `dagger.check_fallback` |
 
 `auto` lets the host CLI choose an engine. `managed` selects Osmia's
@@ -1039,21 +1043,29 @@ organization = "my-org"
 engine the owner operates. `cloud` selects a Dagger Cloud engine. A mason in
 `sbx` runs Dagger on the same engine; see [Dagger for masons](#dagger-for-masons).
 
-Cloud authentication is independent of engine selection: a token can
-authenticate checks using `auto`, `managed` or an explicit address as well.
-The setting names an environment variable, never the token itself. Loading
-configuration does not read the variable or contact an engine. Only the
-service's check client and, under `engine = "cloud"`, each mason sandbox
-receive the token; under any other engine no sandbox does. Code under check can probably read the check
-client's environment, for example through `env://`, and with it the Cloud
-token. Use a dedicated, narrowly scoped token.
+The two tokens do different jobs, and one does not stand in for the other. A
+compute token runs Cloud engines but cannot rerun Cloud checks or read traces;
+an API token does those but cannot run engines. Cloud authentication is
+independent of engine selection: the compute token can authenticate checks
+using `auto`, `managed` or an explicit address as well. Each setting names an
+environment variable, never the token itself. Loading configuration does not
+read the variables or contact an engine. Only the service's check client and,
+under `engine = "cloud"`, each mason sandbox receive the compute token; under
+any other engine no sandbox does. Code under check can probably read the check
+client's environment, for example through `env://`, and with it the compute
+token. Use a dedicated, narrowly scoped token. The API token reaches only the
+service's own rerun and trace commands.
+
+`dagger.cloud_token_env` is not a key: a configuration that sets it fails to
+load with an error that names `cloud_compute_token_env` and
+`cloud_api_token_env`.
 
 #### Cloud fallback for checks
 
 `check_fallback = "cloud"` opts in to retrying check work that cannot finish on
-the service's engine on the Dagger Cloud engine. It reuses the token named by
-`cloud_token_env`, which must be set: configuration fails to load with
-`check_fallback = "cloud"` and no `cloud_token_env`. It adds no timeout and no
+the service's engine on the Dagger Cloud engine. It reuses the compute token
+named by `cloud_compute_token_env`, which must be set: configuration fails to
+load with `check_fallback = "cloud"` and no `cloud_compute_token_env`. It adds no timeout and no
 credential setting; the operation's time budget is the project's
 `checks_timeout`. The default `""` leaves check runs on the configured engine
 with a single `checks_timeout`.
@@ -1149,8 +1161,8 @@ mason's only validation route.
 #### Dagger Cloud
 
 Under `engine = "cloud"` the mason's sandbox gets `DAGGER_ENGINE=cloud` and
-`DAGGER_CLOUD_TOKEN`, which holds the value of the variable `cloud_token_env`
-names, both passed to the sandbox by name. Nothing is forwarded and no host
+`DAGGER_CLOUD_TOKEN`, which holds the value of the variable
+`cloud_compute_token_env` names, both passed to the sandbox by name. Nothing is forwarded and no host
 port is allowed. The sandbox's own Dagger CLI runs the checks, so the mason's
 `image` must include it; `scripts/build-sandbox.sh` installs the host's
 release. The sbx network policy must allow Dagger Cloud. A turn fails before

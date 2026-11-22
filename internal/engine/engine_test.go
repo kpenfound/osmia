@@ -204,7 +204,7 @@ func TestHostReleaseSelectionInEveryMode(t *testing.T) {
 				}
 				return baseGetenv(name)
 			}
-			cfg := config.DaggerConfig{Engine: mode, CloudTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
+			cfg := config.DaggerConfig{Engine: mode, CloudComputeTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
 			s, err := New(cfg, o).Status(context.Background())
 			must(t, err)
 			if s.CLIVersion != "v0.22.0-beta.3" || s.ExpectedVersion != "v0.22.0-beta.3" || s.Version != "v0.22.0-beta.3" || s.VersionMismatch || s.ConfiguredVersionMismatch {
@@ -238,7 +238,7 @@ func TestStatusEveryMode(t *testing.T) {
 				}
 				return baseGetenv(name)
 			}
-			cfg := config.DaggerConfig{Engine: mode, Version: "v1.0.0-beta.17", CloudTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
+			cfg := config.DaggerConfig{Engine: mode, Version: "v1.0.0-beta.17", CloudComputeTokenEnv: "MY_CLOUD_TOKEN"}.Resolve()
 			s, err := New(cfg, o).Status(context.Background())
 			must(t, err)
 			if s.Mode != cfg.Mode || s.Address != cfg.Address || !s.Reachable || s.Version != "v0.20.5" || s.CLIVersion != "v0.1.0" || !s.VersionMismatch || !s.ConfiguredVersionMismatch || s.CacheSizeBytes == nil || *s.CacheSizeBytes != 4096 {
@@ -349,7 +349,7 @@ func TestStatusUnreachableAndUnknownCache(t *testing.T) {
 
 func TestCloudStatusMissingTokenAndRedaction(t *testing.T) {
 	o, dir := fakeHost(t)
-	cfg := config.DaggerConfig{Engine: "cloud", CloudTokenEnv: "MY_TOKEN"}.Resolve()
+	cfg := config.DaggerConfig{Engine: "cloud", CloudComputeTokenEnv: "MY_TOKEN"}.Resolve()
 	s, err := New(cfg, o).Status(context.Background())
 	must(t, err)
 	if s.Reachable || !strings.Contains(s.ReachabilityError, "token is not set") {

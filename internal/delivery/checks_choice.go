@@ -328,7 +328,7 @@ func checksRerunPath(push, n int) string {
 
 // RerunChecksNow starts a Dagger Cloud rerun of every check of the current
 // push's pull request, from the workstream's checkout and with the token
-// cloud_token_env names. The request is recorded before the command runs.
+// cloud_api_token_env names. The request is recorded before the command runs.
 func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, named int) (ChecksRerunRecord, string, error) {
 	push, reason, err := pushNamed(repository, stream, named)
 	if err != nil || reason != "" {
@@ -339,7 +339,7 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 		return ChecksRerunRecord{}, "the service has no Dagger Cloud rerun runner", nil
 	}
 	if err := rerunner.CanRerun(); err != nil {
-		return ChecksRerunRecord{}, err.Error() + "; set the environment variable dagger.cloud_token_env names", nil
+		return ChecksRerunRecord{}, err.Error() + "; set the environment variable dagger.cloud_api_token_env names", nil
 	}
 	cfg := s.About(repository)
 	if cfg == nil {

@@ -70,7 +70,7 @@ func sessionTraceFixture(t *testing.T, token, dagger string) (*Service, *Client,
 	extra := ""
 	if token != "" {
 		t.Setenv(sessionTraceToken, token)
-		extra = "\n[dagger]\ncloud_token_env = '" + sessionTraceToken + "'\n" + dagger
+		extra = "\n[dagger]\ncloud_compute_token_env = '" + sessionTraceToken + "'\n" + dagger
 	}
 	s, c, opts, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
 		if extra != "" {

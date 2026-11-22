@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// flowTokenEnv names the environment variable the project's cloud_token_env
+	// flowTokenEnv names the environment variable the project's cloud_api_token_env
 	// points at, and flowToken is what it holds.
 	flowTokenEnv = "OSMIA_FLOW_CLOUD_TOKEN"
 	flowToken    = "flow-cloud-token"
@@ -201,7 +201,7 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	t.Setenv(flowTokenEnv, flowToken)
 
 	clock := &flowClock{at: demoStart}
-	b := newBriefFixtureAt(t, "[dagger]\ncloud_token_env = \""+flowTokenEnv+"\"\n[events]\nwindow = \"1ms\"\nprogress_window = \"1ms\"\n", clock.Now)
+	b := newBriefFixtureAt(t, "[dagger]\ncloud_api_token_env = \""+flowTokenEnv+"\"\n[events]\nwindow = \"1ms\"\nprogress_window = \"1ms\"\n", clock.Now)
 	j := &flowJourney{briefJourney: b, clock: clock, checks: &countingChecks{}, rerunLog: rerunLog, traceLog: traceLog}
 	j.host = newCloudHost(j.clock)
 	j.fork, j.pulls = fixturekit.PublicationFork(t, b.clone, func() string { commit, _ := j.forkBranch(t); return commit })

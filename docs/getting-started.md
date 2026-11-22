@@ -152,8 +152,9 @@ are found.
 Secrets come from an optional environment file, `~/.config/osmia/osmia.env`;
 the unit starts without it. Put one `KEY=value` per line, such as
 `GITHUB_TOKEN`, `TS_AUTHKEY` for the first tailnet login, and the Dagger Cloud
-token variable that [`dagger.cloud_token_env`](configuration.md#top-level-configtoml)
-names:
+token variables that
+[`dagger.cloud_compute_token_env` and `dagger.cloud_api_token_env`](configuration.md#dagger-engine)
+name:
 
 ```sh
 install -D -m 0600 /dev/null ~/.config/osmia/osmia.env

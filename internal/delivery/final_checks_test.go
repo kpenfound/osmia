@@ -763,6 +763,65 @@ func TestFinalChecksResumeAfterARestartWithoutRepeatingARerunOrANotice(t *testin
 	}
 }
 
+func TestFinalChecksRecordARefusedRerunAsIncompleteAndRequestItAgainAfterTheWait(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t)
+	refuse := filepath.Join(t.TempDir(), "refuse")
+	fixturekit.Must(t, os.WriteFile(refuse, nil, 0600))
+	script := fmt.Sprintf("#!/bin/sh\nprintf 'args=%%s\\n' \"$*\" >> '%s'\nif [ -e '%s' ]; then echo 'Error: fetch Cloud checks for github.com/acme/widgets: GetOrgChecks: unauthorized; invalid API token type' >&2; exit 1; fi\n", f.rerunLog, refuse)
+	fixturekit.Must(t, os.WriteFile(f.program, []byte(script), 0700))
+	f.afterWait()
+	original, _ := f.failingRun()
+
+	// Dagger Cloud refuses the request: the run is incomplete at once, with
+	// the refusal and the token to check, and the original failure decides
+	// nothing.
+	run, err := f.check()
+	if err == nil || run.Status != ChecksIncomplete || !strings.Contains(run.Error, "Dagger Cloud refused the rerun") || !strings.Contains(run.Error, "dagger.cloud_api_token_env") || len(run.Reruns) != 1 || !strings.Contains(run.Reruns[0].Error, "invalid API token type") || len(run.Failed) != 0 {
+		t.Fatalf("run %+v: %v", run, err)
+	}
+	request, err := ReadFinalCheckRerun(f.repo, stream, 1, 1)
+	fixturekit.Must(t, err)
+	if !request.refused() || request.Attempt != 1 || len(f.rerunCalls()) != 1 {
+		t.Fatalf("rerun record %+v, calls %d", request, len(f.rerunCalls()))
+	}
+
+	// Nothing is requested again before the incomplete run's wait ends.
+	f.clock.Advance(FinalCheckDelay(1) - time.Minute)
+	if _, err := f.check(); err == nil || len(f.rerunCalls()) != 1 {
+		t.Fatalf("checks before the wait: %v, calls %d", err, len(f.rerunCalls()))
+	}
+
+	// After the wait, and after a restart, the request is made again.
+	f.clock.Advance(time.Minute)
+	f.restart()
+	if run, err := f.check(); err == nil || run.Status != ChecksIncomplete || len(f.rerunCalls()) != 2 {
+		t.Fatalf("second refusal %+v: %v, calls %d", run, err, len(f.rerunCalls()))
+	}
+	if n, _, err := f.reviewer.IncompleteChecks(stream, 1, reviewedCommit); err != nil || n != 2 {
+		t.Fatalf("incomplete runs %d, %v", n, err)
+	}
+
+	// Once Dagger Cloud accepts it, the rerun is made and settles the push as
+	// a made rerun does.
+	fixturekit.Must(t, os.Remove(refuse))
+	f.clock.Advance(FinalCheckDelay(2))
+	if waiting := f.mustWait(); !strings.Contains(waiting.Reason, "the failed checks were rerun") {
+		t.Fatalf("waiting %v", waiting)
+	}
+	request, err = ReadFinalCheckRerun(f.repo, stream, 1, 1)
+	fixturekit.Must(t, err)
+	if request.refused() || request.Attempt != 3 || len(f.rerunCalls()) != 3 {
+		t.Fatalf("rerun record %+v, calls %d", request, len(f.rerunCalls()))
+	}
+	f.clock.Advance(10 * time.Minute)
+	f.api.setWithChecks(92, f.loaded(), f.done(40, "success", f.clock.Now().Sub(f.pushedAt)))
+	run = f.mustComplete()
+	if run.Status != "passed" || len(run.Reruns) != 1 || run.Reruns[0].Original.ID != original.ID || len(run.Flaky) != 2 || len(f.rerunCalls()) != 3 {
+		t.Fatalf("run %+v, calls %d", run, len(f.rerunCalls()))
+	}
+}
+
 func TestFinalChecksNeverRerunWhenTheRerunRecordExistsWithoutItsResult(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
