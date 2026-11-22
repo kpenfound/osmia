@@ -689,3 +689,87 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 		})
 	}
 }
+
+func TestUnitReviewRequestCarriesProtocolAndOneDecisionRule(t *testing.T) {
+	t.Parallel()
+	checks := &fakeChecks{Outcomes: passing()}
+	f, stream, repository := newChecksFixture(t, "review-decision-rule", checks)
+	runChecks(t, f.s, repository, stream)
+	req := reviewTurn(t, f, repository, stream)
+
+	system := req.SystemPrompt
+	for _, want := range []string{
+		"You are the unit reviewer",
+		"Review the exact candidate identity your prompt gives",
+		"the project's checks on this exact candidate", "cite it as evidence rather than re-deriving",
+		"Test passing is decided by the service-owned check gate",
+		"rebased onto a feature branch that moved", "in scope",
+		"read-only view", "workstream_diff",
+		"factory_context", "record_discovery",
+		"Call ask when a decision is needed", "end the turn",
+		"Otherwise call verdict",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("system prompt lacks %q:\n%s", want, system)
+		}
+	}
+	if !strings.Contains(req.Prompt, "The candidate identity is:") || !strings.Contains(req.Prompt, "Review this exact candidate") {
+		t.Errorf("review prompt lacks the candidate identity:\n%s", req.Prompt)
+	}
+
+	// The materiality rule: written rules, nothing else, make a standards finding material.
+	for _, want := range []string{
+		"when the task or an acceptance item does not hold",
+		"when the change reaches beyond what the task needs",
+		"when it breaks a written rule",
+		"the project's charter, its AGENTS.md or contributor documents, and the skills configured on your role",
+		"never blocks", "decide satisfactory and note the call in the summary",
+		"Formatting and lint belong to the checks",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("system prompt lacks the materiality rule %q:\n%s", want, system)
+		}
+	}
+
+	// How to review belongs to the role's skills, under Osmia's protocol.
+	for _, want := range []string{
+		"skills configured on your role", "pr-review", "file_read", "the path the skill list gives",
+		"When no skills are listed",
+		"Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask",
+		"you still call ask when you need a decision, and you report only through verdict",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("system prompt lacks the skills hand-off %q:\n%s", want, system)
+		}
+	}
+	for _, gone := range []string{"Code style, formatting and lint belong to the checks, not", "A finding is material only when"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("system prompt keeps the old materiality wording %q", gone)
+		}
+	}
+
+	// The composed request reads one way: a written-rule breach is a failing task
+	// part named with its rule and source, and code smells stay in the summary.
+	scope := coreadapter.Scope{Workstream: "stream", Unit: "resume", Thread: "reviewer-resume", Turn: "review-1", Role: reviewerRole}
+	verdict := (&reviewerReports{}).tool(scope).Description
+	if !strings.Contains(verdict, "every acceptance item holds") || !strings.Contains(verdict, "names the acceptance item or part of the task that does not hold") {
+		t.Fatalf("verdict tool description changed: %s", verdict)
+	}
+	for _, want := range []string{
+		"a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task",
+		"naming the rule and where it is written",
+		"Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary",
+	} {
+		if !strings.Contains(req.Prompt, want) {
+			t.Errorf("review prompt lacks %q:\n%s", want, req.Prompt)
+		}
+	}
+	for name, text := range map[string]string{"system prompt": system, "review prompt": req.Prompt} {
+		if strings.Contains(text, "names the task or acceptance item that does not hold") {
+			t.Errorf("%s still limits findings to acceptance items", name)
+		}
+	}
+	if !strings.Contains(system, "report the breach as a failing part of the task, naming the rule and where it is written") {
+		t.Errorf("system prompt does not report a breach as a failing task part:\n%s", system)
+	}
+}

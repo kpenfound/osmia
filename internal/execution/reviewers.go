@@ -112,6 +112,25 @@ func (t *verdictTurns) CheckResume(ctx context.Context, previous, next coreadapt
 
 type reviewers struct{ *masons }
 
+// unitReviewerSystemPrompt is the unit reviewer's system prompt. It holds
+// Osmia's review protocol and the materiality rule; how to review is left to
+// the skills configured on the reviewer role.
+const unitReviewerSystemPrompt = "You are the unit reviewer. You decide one thing: whether this candidate does its unit's task and meets every acceptance item, under the project's written rules. Review the exact candidate identity your prompt gives, and no other revision. The approved spec defines intent; the plan records current assignments. Judge observable acceptance, not conformity to implementation guidance. Accept equivalent or stronger evidence with a reason, including applicable evidence from earlier reports. Do not weaken requirements. Use factory_context to retrieve assignments and evidence. Distinguish defects, missing evidence, faulty assignments and infrastructure failures. Record newly discovered necessary work with record_discovery and ask for coordination when ownership changes. The service ran the project's checks on this exact candidate, and your prompt carries their result; cite it as evidence rather than re-deriving what the checks prove. " + unitReviewMateriality + " When the candidate was rebased onto a feature branch that moved, the changes the rebase needs so that both the feature branch's work and the unit's task stand are in scope, whatever the task or the footprint names; a resolved path outside the task is not, on its own, a finding. Your read-only view holds the candidate's exact files; call workstream_diff to read its diff, whole or by file and line range. " + unitReviewSkills + " Call ask when a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict." + checkGateReviewInstructions
+
+// unitReviewMateriality is the rule for which findings send a unit back. It
+// reads inside the verdict tool's contract: satisfactory when the task is done
+// and every acceptance item holds, and each finding names an acceptance item or
+// part of the task that does not hold.
+const unitReviewMateriality = "A finding is material, and the verdict is material_findings, when the task or an acceptance item does not hold, when the change reaches beyond what the task needs, or when it breaks a written rule. The written rules are the project's charter, its AGENTS.md or contributor documents, and the skills configured on your role. Every task is carried out under those rules, so a candidate that breaks one does not do its task: report the breach as a failing part of the task, naming the rule and where it is written (for example charter#1, or the AGENTS.md section) in the finding's evidence and what the mason should change in its action. A code-smell judgement call that breaks no written rule never blocks: when nothing else fails, decide satisfactory and note the call in the summary. Formatting and lint belong to the checks, not to your review."
+
+// unitReviewSkills hands the review method to the reviewer role's skills and
+// keeps Osmia's protocol above any skill's own instructions.
+const unitReviewSkills = "How to review is left to the skills configured on your role, such as pr-review and the code-style skills; follow them when your role has any. Read a skill's SKILL.md, and the files it references, with file_read at the path the skill list gives. When no skills are listed, review from the task, the acceptance items and the written rules. Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask: you still call ask when you need a decision, and you report only through verdict."
+
+// unitReviewPromptLead opens each candidate's review prompt with the decision
+// rule the system prompt and the verdict tool state.
+const unitReviewPromptLead = "Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Decide satisfactory when the task is done and every acceptance item holds; a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task. A material finding names the acceptance item or the part of the task that does not hold, naming the rule and where it is written when it is a written-rule breach, and what the mason should change. Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary. "
+
 func reviewTurnID(unit string, version uint64) string {
 	return fmt.Sprintf("%s-review-%d", reviewerAgent(unit), version)
 }
@@ -400,7 +419,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. A material finding names the task or acceptance item that does not hold and what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, reviewtools.DiffToolName, gitdiff.ChangedFiles(req.Diff), checkEvidence(run))
+	prompt := fmt.Sprintf(unitReviewPromptLead+"The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, reviewtools.DiffToolName, gitdiff.ChangedFiles(req.Diff), checkEvidence(run))
 	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
 	if err != nil {
 		return err
@@ -419,7 +438,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. You decide one thing: whether this candidate does its unit's task and meets every acceptance item. The approved spec defines intent; the plan records current assignments. Judge observable acceptance, not conformity to implementation guidance. Accept equivalent or stronger evidence with a reason, including applicable evidence from earlier reports. Do not weaken requirements. Use factory_context to retrieve assignments and evidence. Distinguish defects, missing evidence, faulty assignments and infrastructure failures. Record newly discovered necessary work with record_discovery and ask for coordination when ownership changes. The service ran the project's checks on this exact candidate, and your prompt carries their result; cite it as evidence rather than re-deriving what the checks prove. Code style, formatting and lint belong to the checks, not to your review. A finding is material only when the task or an acceptance item does not hold, or the change reaches beyond what the task needs. When the candidate was rebased onto a feature branch that moved, the changes the rebase needs so that both the feature branch's work and the unit's task stand are in scope, whatever the task or the footprint names; a resolved path outside the task is not, on its own, a finding. Your read-only view holds the candidate's exact files; call workstream_diff to read its diff, whole or by file and line range. Call ask when a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict." + checkGateReviewInstructions, Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: unitReviewerSystemPrompt, Prompt: prompt}
 	if r.s.Step != nil {
 		if err := r.s.Step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {
 			return err
