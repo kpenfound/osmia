@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -32,6 +39,9 @@ func newCrossRepoStall(t *testing.T) *crossRepoStall {
 	s, chief, g := workgroupFeedFixture(t, true, 2)
 	clock := &fixedClock{At: demoStart}
 	s.options.Reconciliation.Now = clock.Now
+	key := gateKey(t, true)
+	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: key, Timeout: "20s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold, OwnerThreshold: config.DefaultJevOwnerThreshold}
+	s.jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: (&jevfixture.Transitions{}).Factory(), Getenv: os.Getenv}
 	s.router = s.newRouter()
 	return &crossRepoStall{s: s, repo: s.projects[0].repository, other: s.projects[1].repository, chief: chief, g: g, clock: clock, log: &exitLog{}}
 }
@@ -136,5 +146,118 @@ func TestAnUnapprovedWorkgroupExplainsAMemberOnlyWhileTheOwnerIsAsked(t *testing
 	f.quietFor(3 * time.Hour)
 	if got := streamStalls(f.pass(t), stream); len(got) != 0 {
 		t.Fatalf("a member whose workgroup approval the owner is asked for raised %+v", got)
+	}
+}
+
+// seedChange records the workgroup's change journal at the revision, in the
+// workgroup trace under its host.
+func (f *crossRepoStall) seedChange(t *testing.T, c lifecycle.WorkgroupChange, revision int, at time.Time) {
+	t.Helper()
+	data, err := json.Marshal(c)
+	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.chief.Project(), Workstream: f.g.Members[0], At: at, Actor: stallSeeder, Cause: "seed"}
+	must(t, f.chief.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
+}
+
+// changeStalls returns the exits on the subject among exits.
+func changeStalls(exits []router.Exit, subject string) []router.Exit {
+	var out []router.Exit
+	for _, x := range exits {
+		if x.Subject == subject {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// A change of a cross-repo workgroup, whose journal is in the workgroup trace,
+// stalls on the member that leads the workgroup: the leader's project raises it,
+// the chief of staff is told through the leader's outbox, and a stall nobody
+// clears ends on the leader's recovery card, whose approval ends the change in
+// the workgroup's journal.
+func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
+	ctx := context.Background()
+	f := newCrossRepoStall(t)
+	change := lifecycle.WorkgroupChange{ID: "c1", Workgroup: f.g.ID, Host: f.g.Members[0], Request: lifecycle.ChangeRequest{Key: "c1", Kind: "amend", Scope: "workgroup", Change: "Rename the field"}, State: "drafting", Failure: "member history is unavailable"}
+	f.seedChange(t, change, 1, demoStart)
+	subject := lifecycle.WorkgroupChangeDocument("c1")
+
+	f.quietFor(44 * time.Minute)
+	if got := changeStalls(f.pass(t), subject); len(got) != 0 {
+		t.Fatalf("a change drafted for 44 minutes raised %+v", got)
+	}
+	f.quietFor(46 * time.Minute)
+	got := changeStalls(f.pass(t), subject)
+	if len(got) != 1 || got[0].Workstream != stream || got[0].Repo != f.repo || got[0].Trigger != intake.TriggerStalled || len(got[0].Targets) != 1 {
+		t.Fatalf("a change drafted for 46 minutes raised %+v", got)
+	}
+	x := got[0]
+	if x.Evidence.Facts["state"] != "drafting" || x.Evidence.Facts["held"] != change.Failure || x.Evidence.Facts["minutes_quiet"] != 46 {
+		t.Fatalf("the change's evidence %+v", x.Evidence.Facts)
+	}
+	if res, err := f.s.RouteExit(ctx, x); err != nil || !res.Committed || res.Target != intake.TargetWait {
+		t.Fatalf("the change's stalled exit = %+v, %v", res, err)
+	}
+	outbox, err := f.repo.Outbox(stream)
+	must(t, err)
+	told := 0
+	for _, e := range outbox {
+		if strings.Contains(e.Event.Body, "Workgroup change c1 has sat drafting for 46 minutes") {
+			told++
+		}
+	}
+	if told != 1 {
+		t.Fatalf("the chief of staff was told of the change %d times through the leader, want 1", told)
+	}
+	// The other member's project does not lead the workgroup.
+	other := f.watch()
+	other.repository = f.other
+	f.log.reset()
+	must(t, other.Pass(ctx))
+	for _, x := range f.log.occurrences() {
+		if x.Subject == subject {
+			t.Fatalf("the member that does not lead the workgroup raised %+v", x)
+		}
+	}
+
+	f.quietFor(46*time.Minute + 50*time.Minute)
+	if again := changeStalls(f.pass(t), subject); len(again) != 0 {
+		t.Fatalf("a decided stall of the change was raised again: %+v", again)
+	}
+	var card *InboxEntry
+	for _, e := range recoveryEntriesOf(t, f.s, f.repo, stream) {
+		if e.Recovery != nil && e.Recovery.Subject == subject {
+			card = &e
+		}
+	}
+	if card == nil || card.Recovery.From != "drafting" || card.Recovery.Version != 1 || card.Recovery.Target != "failed" || card.Recovery.Origin != api.RecoveryStall {
+		t.Fatalf("the change's card is %+v", card)
+	}
+	if _, apiErr := f.s.approveRecovery(ctx, string(stream), recoveryRequestOf(t, *card)); apiErr != nil {
+		t.Fatalf("approving the change's card: %s", apiErr.Message)
+	}
+	changes, err := lifecycle.ReadChanges(f.chief, f.g.Members[0])
+	must(t, err)
+	if len(changes) != 1 || changes[0].State != "failed" {
+		t.Fatalf("the approved card left the workgroup's change %+v", changes)
+	}
+}
+
+// The first project amendment request of a cross-repo workgroup that was not
+// drafted into a change stalls on the leader too.
+func TestACrossRepoAmendmentRequestStallsOnItsLeader(t *testing.T) {
+	ctx := context.Background()
+	f := newCrossRepoStall(t)
+	_, err := trace.FileProjectAmendment(ctx, f.chief, trace.ProjectAmendment{Workgroup: f.g.ID, Origin: fixturekit.Quiet, Role: "mason", Requester: stallSeeder, Citations: []string{"criterion 1"}, Change: "Widen the contract", Reason: "the slice cannot meet it"}, demoStart)
+	must(t, err)
+	subject := lifecycle.WorkgroupChangeDocument("contract-1")
+	f.quietFor(44 * time.Minute)
+	if got := changeStalls(f.pass(t), subject); len(got) != 0 {
+		t.Fatalf("a request filed 44 minutes ago raised %+v", got)
+	}
+	f.quietFor(46 * time.Minute)
+	got := changeStalls(f.pass(t), subject)
+	if len(got) != 1 || got[0].Workstream != stream || got[0].Evidence.Facts["state"] != "requested" {
+		t.Fatalf("a request filed 46 minutes ago raised %+v", got)
 	}
 }

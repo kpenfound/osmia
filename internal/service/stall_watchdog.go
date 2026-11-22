@@ -149,6 +149,10 @@ func (w stallWatch) Pass(ctx context.Context) error {
 			failed = append(failed, fmt.Errorf("workgroup changes of %s: %w", stream, err))
 		}
 	}
+	watched := slices.DeleteFunc(slices.Clone(streams), func(s config.WorkstreamID) bool { return s == librarian })
+	if err := w.crossRepoChanges(ctx, p, watched); err != nil {
+		failed = append(failed, err)
+	}
 	return errors.Join(failed...)
 }
 
