@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/intake"
+	"strings"
 	"sync"
+
+	"github.com/kpenfound/osmia/internal/intake"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -176,8 +178,12 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 	if !matched {
 		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: "the request differs from the immutable workgroup approval"}
 	}
+	var resealed []string
 	if !decision.Complete {
 		if err := s.prepareGroupApproval(ctx, decision); err != nil {
+			return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
+		}
+		if resealed, err = s.resealFailedMembers(ctx, decision); err != nil {
 			return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
@@ -186,7 +192,57 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 	if err != nil {
 		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 	}
+	if len(resealed) > 0 {
+		out.Detail = strings.Join(resealed, "; ") + "; the entire workgroup remains unratified until every member is sealed"
+	}
 	return out, true, nil
+}
+
+// resealFailedMembers records again, as its next revision, the pinned
+// ratification of every member of the group approval whose latest sealing
+// failed, so the sealer seals that member afresh, as the owner's ratification
+// of a single workstream again does. It returns what it asked for.
+func (s *Service) resealFailedMembers(ctx context.Context, decision trace.GroupApproval) ([]string, error) {
+	var resealed []string
+	for _, member := range decision.Members {
+		repo, err := s.approvalMemberRepository(ctx, member.Project)
+		if err != nil {
+			return nil, err
+		}
+		latest, found, err := latestRatification(repo, member.Workstream)
+		if err != nil || !found {
+			return nil, err
+		}
+		z := &sealer{S: s.intake().SealerDependencies(), Repository: repo}
+		op, requested, err := z.Sealing(member.Workstream, latest)
+		if err != nil {
+			return nil, err
+		}
+		if !requested || op.Result == nil {
+			continue
+		}
+		input, err := decodeSeal(op.Operation)
+		if err != nil {
+			return nil, err
+		}
+		outcome, err := z.Outcome(member.Workstream, input.Seal, op.Operation.ID)
+		if err != nil {
+			return nil, err
+		}
+		if outcome == nil || outcome.Outcome != "failed" {
+			continue
+		}
+		o, api := s.shedAction(string(member.Workstream), InShedState, SketchedState)
+		if api != nil {
+			return nil, fmt.Errorf("reseal %s: %s", member.Workstream, api.Message)
+		}
+		out, api := s.intake().Sealing(ctx, o, latest, fmt.Sprintf("member %s is approved at %s", member.Workstream, latest.Revision))
+		if api != nil {
+			return nil, fmt.Errorf("reseal %s: %s", member.Workstream, api.Message)
+		}
+		resealed = append(resealed, out.Detail)
+	}
+	return resealed, nil
 }
 
 // groupApprovalPass publishes completion only after every exact pinned sealing
