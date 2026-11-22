@@ -273,25 +273,31 @@ func ExitQuestions(trigger string) []router.Question { return triggerSpecs[trigg
 // Draft exhausted
 
 // exhaustedExit is the exit of a handed-in workstream none of whose drafts
-// was accepted. MaxDrafts stays a hard limit: one more draft is not offered, so
-// the exit has the one target, which stops drafting with a notice to the chief
-// of staff.
-func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.WorkflowState, n int, last trace.Transition, reason, body string) router.Exit {
+// in its current run, drafts first to n, was accepted. MaxDrafts stays a hard
+// limit: one more draft is not offered, so the exit has the one target, which
+// stops drafting with a notice to the chief of staff. A move to sketched by
+// the owner or the chief of staff starts the next run. Each run's stop has its
+// own transition and notice.
+func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.WorkflowState, n, first, drafts int, last trace.Transition, reason, body string) router.Exit {
 	targets := []router.Target{
-		ExitTarget(TriggerDraftExhausted, router.Target{Name: TargetExhausted, State: "exhausted", Description: "Stop drafting."}),
+		ExitTarget(TriggerDraftExhausted, router.Target{Name: TargetExhausted, State: DraftExhausted, Description: "Stop drafting."}),
+	}
+	id := "draft-exhausted"
+	if first > 1 {
+		id = fmt.Sprintf("draft-%d-exhausted", n)
 	}
 	return router.Exit{
 		Repo: d.Repository, Project: d.Repository.Project(), Workstream: stream, Machine: WorkstreamMachine,
 		Subject: DraftSubject, From: state.Value, Version: state.Version,
 		Trigger: TriggerDraftExhausted, Cause: last.ID, HeaderCause: last.ID, Actor: DraftingActor,
 		Default: TargetExhausted, Targets: targets, Questions: ExitQuestions(TriggerDraftExhausted),
-		TransitionID: func(router.Target) string { return "draft-exhausted" },
+		TransitionID: func(router.Target) string { return id },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice("draft-exhausted", "chief", body)}, Reason: reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id, "chief", body)}, Reason: reason}, nil
 		},
 		Evidence: router.Evidence{
 			Intent:  "The workstream was handed in and the architect drafts its spec and plan.",
-			Facts:   map[string]any{"drafts": n, "max_drafts": MaxDrafts},
+			Facts:   map[string]any{"drafts": drafts, "max_drafts": MaxDrafts},
 			Records: []router.Entry{{Kind: "last draft", ID: last.ID, Text: last.Reason}},
 		},
 	}
