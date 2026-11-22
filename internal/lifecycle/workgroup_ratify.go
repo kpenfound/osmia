@@ -385,7 +385,7 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 			}
 			next.Turn = fmt.Sprintf("project-spec-draft-%d", state.Version+1)
 			input = next
-			if err := s.RequestProjectSpecDraft(ctx, wt, host, state, input, 1); err != nil {
+			if err := s.RequestProjectSpecDraft(ctx, wt, host, state, input, 1, ProjectSpecDraftActor); err != nil {
 				return ProjectSpecDraftInput{}, false, err
 			}
 		} else if input.Turn == "" {
@@ -399,27 +399,171 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 		if found && len(next.Guarded) == 0 {
 			return ProjectSpecDraftInput{}, false, nil
 		}
-		// Initial draft failures remain terminal. A guarded redraft can retry on
-		// a later pass, retaining its request identity and member revisions.
+		problems := ""
 		if !found && state.Value != "" {
-			return ProjectSpecDraftInput{}, false, nil
+			// A refused first draft is asked for again with its problems,
+			// up to ProjectSpecDraftAttempts in a row; after that the chief
+			// of staff is told, and the next draft waits for its request.
+			if state.Value != "failed" {
+				return ProjectSpecDraftInput{}, false, nil
+			}
+			failures, last, err := ProjectSpecDraftFailures(wt, host)
+			if err != nil {
+				return ProjectSpecDraftInput{}, false, err
+			}
+			if failures >= ProjectSpecDraftAttempts {
+				return ProjectSpecDraftInput{}, false, s.ReportProjectSpecDraftFailure(ctx, members, last, failures)
+			}
+			problems = last.Reason
 		}
-		if state.Value == "failed" && maps.Equal(input.Guarded, next.Guarded) {
+		// A guarded redraft retries on a later pass, retaining its request
+		// identity and member revisions.
+		if found && state.Value == "failed" && maps.Equal(input.Guarded, next.Guarded) {
 			next = input
 		}
 		next.Turn = fmt.Sprintf("project-spec-draft-%d", state.Version+1)
+		next.Problems, next.Note = problems, ""
 		input = next
-		if err := s.RequestProjectSpecDraft(ctx, wt, host, state, input, revision+1); err != nil {
+		if err := s.RequestProjectSpecDraft(ctx, wt, host, state, input, revision+1, ProjectSpecDraftActor); err != nil {
 			return ProjectSpecDraftInput{}, false, err
 		}
 	}
 	return input, true, nil
 }
 
+// ReportProjectSpecDraftFailure tells the chief of staff, through the
+// workgroup leader's own events, that the workgroup's first project spec was
+// refused failures times in a row and that the next draft waits for its
+// request. It is recorded once per refusal: the leader's trace keeps the
+// refusal's identity as the state of the same subject.
+func (s *Controller) ReportProjectSpecDraftFailure(ctx context.Context, members []trace.CrossRepoMember, failure trace.Transition, failures int) error {
+	streams := make([]config.WorkstreamID, 0, len(members))
+	for _, m := range members {
+		streams = append(streams, m.Workstream)
+	}
+	leader := LeastWorkstream(streams)
+	i := slices.IndexFunc(members, func(m trace.CrossRepoMember) bool { return m.Workstream == leader })
+	repo := members[i].Project
+	id := failure.ID + "-reported"
+	transitions, err := trace.Read[trace.Transition](repo, leader)
+	if err != nil {
+		return err
+	}
+	if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+		return nil
+	}
+	state, err := repo.Workflow(leader, ProjectSpecDraftSubject)
+	if err != nil {
+		return err
+	}
+	body := fmt.Sprintf("The workgroup spec could not be drafted: the architect's last %d drafts were refused, most recently because %s. No member's committee review starts until a workgroup spec is recorded, so every member stays sketched. The service asks for no further draft on its own. Ask for another with move_workstream to sketched on any member, with a note telling the architect what to change, and tell the owner in plain words what happened.", failures, failure.Reason)
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: leader, At: s.Now(), Actor: ProjectSpecDraftActor, Cause: failure.ID}, Subject: ProjectSpecDraftSubject, From: state.Value, To: id, Reason: failure.Reason},
+		Events:     []trace.Event{trace.Notice(id, "chief", body)}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
+}
+
+// RequestProjectSpecDraftAgain asks the architect for another draft of the
+// workgroup's first project spec with note, after the service stopped asking
+// on its own. The draft runs on the leader's next service pass. It is refused
+// while a draft runs, once a project spec is recorded, and when no draft has
+// failed.
+func (s *Controller) RequestProjectSpecDraftAgain(ctx context.Context, id config.WorkgroupID, note string, by trace.Actor) (string, *APIError) {
+	busy := &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup %s is busy; ask again in a moment", id)}
+	authority, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
+	if err != nil {
+		if authority != nil {
+			authority.Close()
+		}
+		if errors.Is(err, trace.ErrLocked) {
+			return "", busy
+		}
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read workgroup %s: %v", id, err)}
+	}
+	groups, _, err := trace.Workgroups(authority)
+	authority.Close()
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read workgroup %s: %v", id, err)}
+	}
+	i := slices.IndexFunc(groups, func(g trace.Workgroup) bool { return g.ID == id })
+	if i < 0 {
+		return "", &APIError{Code: NotFound, Message: fmt.Sprintf("workgroup %s is not recorded", id)}
+	}
+	g := groups[i]
+	members, err := s.CrossRepoMemberRepos(ctx, g)
+	if errors.Is(err, errWorkgroupJoining) || errors.Is(err, trace.ErrLocked) {
+		return "", busy
+	}
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the members of workgroup %s: %v", id, err)}
+	}
+	wt, err := trace.OpenWorkgroupTrace(s.Current().Root, id, members)
+	if wt != nil && err != nil {
+		wt.Close()
+	}
+	if errors.Is(err, trace.ErrLocked) {
+		return "", busy
+	}
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot open workgroup %s: %v", id, err)}
+	}
+	defer wt.Close()
+	lock := s.GroupApprovalLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	host := g.Members[0]
+	if _, _, approved, err := trace.ReadGroupApproval(wt, host); err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the approval of workgroup %s", id)}
+	} else if approved {
+		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup %s is approved; its workgroup spec changes only by amendment", id)}
+	}
+	spec, found, err := trace.ProjectSpecFor(wt, id)
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workgroup spec of %s", id)}
+	}
+	state, err := wt.Workflow(host, ProjectSpecDraftSubject)
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workgroup spec draft of %s", id)}
+	}
+	switch {
+	case found:
+		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workgroup %s already has a workgroup spec; its members' committee reviews run from it", id)}
+	case state.Value == "drafting":
+		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the architect is drafting the workgroup spec of %s now; the committee reviews start once it is recorded", id)}
+	case state.Value != "failed":
+		return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the workgroup spec of %s is drafted once every member is sketched; nothing has failed to retry", id)}
+	}
+	_, last, err := ProjectSpecDraftFailures(wt, host)
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workgroup spec draft of %s", id)}
+	}
+	_, revision, err := ReadProjectSpecDraftInput(wt, host)
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workgroup spec draft of %s", id)}
+	}
+	next, err := s.SnapshotProjectSpecDraft(members, spec)
+	if err != nil {
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the members' drafts of %s: %v", id, err)}
+	}
+	next.Turn = fmt.Sprintf("project-spec-draft-%d", state.Version+1)
+	next.Problems, next.Note = last.Reason, note
+	if err := s.RequestProjectSpecDraft(ctx, wt, host, state, next, revision+1, by); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return "", busy
+		}
+		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot ask for another draft of the workgroup spec of %s: %v", id, err)}
+	}
+	return "the architect drafts the workgroup spec again with your note on the next service pass; each member's committee review starts once it is recorded", nil
+}
+
 // RequestProjectSpecDraft creates the workgroup's shared chief-of-staff
-// thread's architect counterpart if missing, and enqueues the one draft
-// turn.
-func (s *Controller) RequestProjectSpecDraft(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, state trace.WorkflowState, input ProjectSpecDraftInput, revision int) error {
+// thread's architect counterpart if missing, and records the drafting
+// transition with the turn's pinned input. by is the service for a draft it
+// asks for on its own, or whoever asked for another draft with a note.
+func (s *Controller) RequestProjectSpecDraft(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, state trace.WorkflowState, input ProjectSpecDraftInput, revision int, by trace.Actor) error {
 	if _, err := wt.Thread(host, architectAgent); errors.Is(err, os.ErrNotExist) {
 		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: architectAgent, Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: ProjectSpecDraftActor, Cause: "project-spec-draft"}, Role: architectRole, ThreadID: architectThread}
 		if err := wt.CreateThread(ctx, identity); err != nil {
@@ -428,7 +572,14 @@ func (s *Controller) RequestProjectSpecDraft(ctx context.Context, wt *trace.Repo
 	} else if err != nil {
 		return err
 	}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: input.Turn, Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: ProjectSpecDraftActor, Cause: "project-spec-draft"}, Subject: ProjectSpecDraftSubject, From: state.Value, To: "drafting", Reason: "every member is sketched; the architect is asked for the project spec"}}
+	cause, reason := "project-spec-draft", "every member is sketched; the architect is asked for the project spec"
+	switch {
+	case input.Note != "":
+		cause, reason = ProjectSpecDraftRequestCause, "the architect is asked for another draft of the project spec: "+input.Note
+	case input.Problems != "":
+		reason = "the previous draft was refused; the architect is asked again with its problems"
+	}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: input.Turn, Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: by, Cause: cause}, Subject: ProjectSpecDraftSubject, From: state.Value, To: "drafting", Reason: reason}}
 	data, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -459,7 +610,7 @@ func (s *Controller) DispatchProjectSpecDraft(ctx context.Context, wt *trace.Rep
 		return err
 	}
 	if !queuedTurn(t, turn) {
-		if err := s.EnqueueProjectSpecDraft(ctx, wt, g, host, members, turn); err != nil {
+		if err := s.EnqueueProjectSpecDraft(ctx, wt, g, host, members, input); err != nil {
 			return err
 		}
 	}
@@ -494,12 +645,13 @@ func (s *Controller) DispatchProjectSpecDraft(ctx context.Context, wt *trace.Rep
 	}
 	return s.RecordProjectSpecDraft(ctx, wt, g, host, turn, result)
 }
-func (s *Controller) EnqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, turn string) error {
+func (s *Controller) EnqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, input ProjectSpecDraftInput) error {
+	turn := input.Turn
 	profile, _, err := s.RoleExecution(s.Current(), architectRole)
 	if err != nil {
 		return err
 	}
-	prompt, err := s.ProjectSpecDraftPrompt(members)
+	prompt, err := s.ProjectSpecDraftPrompt(ctx, members, input)
 	if err != nil {
 		return err
 	}
@@ -536,7 +688,7 @@ func (s *Controller) ProjectSpecDraftTurns(wt *trace.Repository, g trace.Workgro
 		if scope.Workstream != string(host) {
 			return nil, errors.New("turn scope denied")
 		}
-		return []coreadapter.Tool{s.ProjectSpecDraftTool(g, host, input.Turn)}, nil
+		return []coreadapter.Tool{s.ProjectSpecDraftTool(wt, g, host, input.Turn)}, nil
 	}, Hosts: hosts, Engine: engine}
 	return s.MemoryTurns(turns, s.About(wt), wt)
 }
@@ -575,7 +727,7 @@ func StageProjectSpecView(members []trace.CrossRepoMember, workspace string, inp
 		if err != nil {
 			return err
 		}
-		files["charter.md"] = fmt.Sprintf("Project %s; citations: %s/charter#<n>\nEach member's charter governs its slice, plan and units; the workgroup spec and contracts must satisfy every member charter.\n\n%s", m.Project.Project(), m.Project.Project(), charterDoc.Content)
+		files["charter.md"] = fmt.Sprintf("Project %s; %s\nEach member's charter governs its slice, plan and units; the workgroup spec and contracts must satisfy every member charter.\n\n%s", m.Project.Project(), CharterCitationGuide(m.Project.Project(), charterDoc.Content), charterDoc.Content)
 
 		for name, content := range files {
 			path := filepath.Join(dir, filepath.FromSlash(name))
@@ -594,8 +746,8 @@ func StageProjectSpecView(members []trace.CrossRepoMember, workspace string, inp
 // turn's output directory, which the service records once the turn
 // completes. It returns the verdict the service would give the delivered
 // draft if the turn ended now.
-func (s *Controller) ProjectSpecDraftTool(g trace.Workgroup, host config.WorkstreamID, turn string) coreadapter.Tool {
-	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the project spec: behavior, contracts, graph and each member's own contract-criteria numbers. Returns the verdict the service would give the delivered project spec if your turn ended now: valid, or invalid with its problem.", Effect: coreadapter.ToolMemory, InputSchema: json.RawMessage(`{"type":"object","properties":{"behavior":{"type":"string"},"contracts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"],"additionalProperties":false}},"graph":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"type":{"type":"string"}},"required":["from","to","type"],"additionalProperties":false}},"slices":{"type":"array","items":{"type":"object","properties":{"workstream":{"type":"string"},"contract_criteria":{"type":"array","items":{"type":"integer"}}},"required":["workstream"],"additionalProperties":false}}},"required":["behavior","slices"],"additionalProperties":false}`), Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+func (s *Controller) ProjectSpecDraftTool(wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, turn string) coreadapter.Tool {
+	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the project spec: behavior, contracts, graph and each member's own contract-criteria numbers. Returns the verdict the service would give the delivered project spec if your turn ended now: valid, or invalid with its problem.", Effect: coreadapter.ToolMemory, InputSchema: json.RawMessage(`{"type":"object","properties":{"behavior":{"type":"string"},"contracts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"],"additionalProperties":false}},"graph":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"type":{"type":"string"}},"required":["from","to","type"],"additionalProperties":false}},"slices":{"type":"array","items":{"type":"object","properties":{"workstream":{"type":"string"},"contract_criteria":{"type":"array","items":{"type":"integer"}}},"required":["workstream"],"additionalProperties":false}}},"required":["behavior","slices"],"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var draft ProjectSpecDraft
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
@@ -623,6 +775,8 @@ func (s *Controller) ProjectSpecDraftTool(g trace.Workgroup, host config.Workstr
 		status := draftStatus{Delivered: "project-spec.json", Verdict: draftValid}
 		if err := trace.ValidateProjectSpec(full, g.Members); err != nil {
 			status.Verdict, status.Problems = draftInvalid, []string{err.Error()}
+		} else if problems := ProjectSpecCharterProblems(ctx, wt, g, full); len(problems) > 0 {
+			status.Verdict, status.Problems = draftInvalid, problems
 		}
 		status.Next = draftNext[status.Verdict]
 		return json.Marshal(status)
@@ -631,16 +785,26 @@ func (s *Controller) ProjectSpecDraftTool(g trace.Workgroup, host config.Workstr
 func ProjectSpecDraftSystemPrompt() string {
 	return fmt.Sprintf("You are the architect drafting the shared workgroup spec across the owner-selected projects. The member list is fixed: cover every selected project, with its workstream, contracts and graph. Never add or drop a member. Each member workstream's own spec and plan are already drafted and sketched, independently, in its own repo; your job is to add only what spans them: the intended cross-repo behaviour, the named contracts at the seams between repos, the dependency graph between members, and, for each member, which of its own already-numbered acceptance criteria are contract sections (read-only to that member's own workers). You hold no version-control tool and no way to ask a question in this step: use only what is in your view, and deliver with %s. Do not restate or retype a member's own spec or plan text; the service fills each member's own slice content in automatically from what is already recorded.", ProjectSpecDraftTool)
 }
-func (s *Controller) ProjectSpecDraftPrompt(members []trace.CrossRepoMember) (string, error) {
+func (s *Controller) ProjectSpecDraftPrompt(ctx context.Context, members []trace.CrossRepoMember, input ProjectSpecDraftInput) (string, error) {
 	var b strings.Builder
 	b.WriteString("Draft the project spec of this workgroup from its members' own already-sketched specs and plans.\n\nYour view holds, for each member workstream, its handed input, its project-labelled charter.md, its own drafted spec.md and plan.json, under members/<workstream>/.\n\n")
 	for _, m := range members {
-		b.WriteString("Member " + string(m.Workstream) + " project " + string(m.Project.Project()) + " (citations " + string(m.Project.Project()) + "/charter#<n>)\n")
+		doc, err := m.Project.Charter(ctx)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString("Member " + string(m.Workstream) + " project " + string(m.Project.Project()) + " (" + CharterCitationGuide(m.Project.Project(), doc.Content) + ")\n")
+	}
+	if input.Problems != "" {
+		b.WriteString("\nYour previous draft was refused: " + input.Problems + "\nDeliver a draft without these problems.\n")
+	}
+	if input.Note != "" {
+		b.WriteString("\nAsked of this draft: " + input.Note + "\n")
 	}
 	fmt.Fprintf(&b, `
 Deliver with %s: {"behavior": "...", "contracts": [{"name": "...", "text": "..."}], "graph": [{"from": "...", "to": "...", "type": "contract|hard_block|merge_order"}], "slices": [{"workstream": "...", "contract_criteria": [1, 2]}]}.
 
-- The workgroup spec and contracts must satisfy every member charter. Each member charter governs its own slice, plan and units. Read every members/<workstream>/charter.md. Cite another project with its displayed project ID.
+- The workgroup spec and contracts must satisfy every member charter. Each member charter governs its own slice, plan and units. Read every members/<workstream>/charter.md. A charter rule is a numbered list item; cite only a rule its charter numbers, with its project ID. A charter with no numbered rules has nothing to cite. Your delivery's verdict names any citation that does not resolve.
 - behavior: the intended cross-repo behaviour as prose, including what spans the members' own repos.
 - contracts: the named interfaces at the seams between members' repos, each with its full text.
 - graph: a dependency edge between two members is optional; every edge must name two members from the list above and one of the three types.
@@ -743,7 +907,7 @@ func (s *Controller) FailProjectSpecDraft(ctx context.Context, wt *trace.Reposit
 	if err != nil {
 		return err
 	}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("project-spec-draft-failed-%d", state.Version), Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: ProjectSpecDraftActor, Cause: "project-spec-draft"}, Subject: ProjectSpecDraftSubject, From: state.Value, To: "failed", Reason: reason}, Events: []trace.Event{trace.Notice(fmt.Sprintf("project-spec-draft-failed-%d", state.Version), "chief", "The architect could not draft the workgroup's project spec: "+reason+". Guarded contract redrafts will retry on a later service pass.")}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("project-spec-draft-failed-%d", state.Version), Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: ProjectSpecDraftActor, Cause: "project-spec-draft"}, Subject: ProjectSpecDraftSubject, From: state.Value, To: "failed", Reason: reason}}
 	_, err = wt.Transact(ctx, tx)
 	return err
 }
@@ -810,6 +974,20 @@ func LeastWorkstream(streams []config.WorkstreamID) config.WorkstreamID {
 		}
 	}
 	return least
+}
+
+// CharterCitationGuide tells the architect how to cite a member charter: the
+// citation form and the rule numbers it has, or that it has none.
+func CharterCitationGuide(project config.ProjectID, content string) string {
+	rules := charter.Parse(content).Rules
+	if len(rules) == 0 {
+		return "its charter has no numbered rules, so nothing in it can be cited"
+	}
+	numbers := make([]string, 0, len(rules))
+	for _, r := range rules {
+		numbers = append(numbers, fmt.Sprint(r.Number))
+	}
+	return fmt.Sprintf("citations: %s/charter#<n> for rule %s", project, strings.Join(numbers, ", "))
 }
 
 // ProjectSpecCharterProblems resolves shared citations at home and slice citations

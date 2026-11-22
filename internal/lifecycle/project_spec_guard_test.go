@@ -574,44 +574,6 @@ func TestProjectSpecContractGuardLeavesOrdinaryEditsMechanical(t *testing.T) {
 	}
 	assertGuardRatifiable(t, f, id, 2, 2)
 }
-func TestProjectSpecInitialDraftFailureRemainsTerminal(t *testing.T) {
-	t.Parallel()
-	f := newCrossRepoRatifyFixture(t)
-	defer f.stop(t)
-	var calls atomic.Int32
-	f.engine.Mu.Lock()
-	f.engine.Turns["project-spec-draft-1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		calls.Add(1)
-		return &agent.Result{ClaudeID: "no-project-spec", ResultText: "No delivery", SessionDir: req.SessionDir, NumTurns: 1}, nil
-	}
-	f.engine.Mu.Unlock()
-	id, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatal(api)
-	}
-	eventually(t, "the project spec draft failure", func() bool {
-		wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-		must(t, err)
-		defer wt.Close()
-		groups, _, err := trace.Workgroups(wt)
-		must(t, err)
-		state, err := wt.Workflow(groups[0].Members[0], projectSpecDraftSubject)
-		must(t, err)
-		return state.Value == "failed"
-	})
-	haltGuardControllers(t, f)
-	for range 3 {
-		must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
-	}
-	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	must(t, err)
-	defer wt.Close()
-	_, found, err := trace.ProjectSpecFor(wt, id)
-	must(t, err)
-	if calls.Load() != 1 || found {
-		t.Fatalf("initial failure retried or recorded: calls=%d spec=%v", calls.Load(), found)
-	}
-}
 func TestProjectSpecContractGuardDefersHeldMembers(t *testing.T) {
 	t.Parallel()
 	for _, hold := range []string{"joining", "retired"} {

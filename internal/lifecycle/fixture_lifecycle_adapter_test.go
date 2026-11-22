@@ -156,7 +156,7 @@ func (s *Service) projectSpecTurnDirectoryFor(host config.WorkstreamID) string {
 	return s.lifecycle().ProjectSpecTurnDirectoryFor(host)
 }
 func (s *Service) enqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, turn string) error {
-	return s.lifecycle().EnqueueProjectSpecDraft(ctx, wt, g, host, members, turn)
+	return s.lifecycle().EnqueueProjectSpecDraft(ctx, wt, g, host, members, lifecycle.ProjectSpecDraftInput{Turn: turn})
 }
 
 var memberSpecAndPlan = lifecycle.MemberSpecAndPlan
