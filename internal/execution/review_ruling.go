@@ -196,9 +196,9 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 	if err != nil {
 		return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "cannot read contested transition"}
 	}
-	if moveContest(contest, unit) || checksContest(contest, unit) || contest.Cause == questionWaitContestCause {
-		// A move, incomplete checks or an uncertain question wait leaves no
-		// findings to rule on. A ruling moves the unit on, and a move to
+	if moveContest(contest, unit) || checksContest(contest, unit) || rebaseContest(contest, unit) || contest.Cause == questionWaitContestCause {
+		// A move, incomplete checks, refused rebases or an uncertain question wait
+		// leaves no findings to rule on. A ruling moves the unit on, and a move to
 		// reviewing runs its checks before review.
 		to := map[string]string{"review": UnitReviewing, "revise": UnitImplementing}[req.Decision]
 		out, api := s.moveUnit(ctx, repo, stream, unit, UnitMoveRequest{To: to, Note: req.Note}, actor, "", judgment)

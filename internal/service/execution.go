@@ -159,6 +159,8 @@ var failedReview = execution.FailedReview
 
 var checksContest = execution.ChecksContest
 
+var rebaseContest = execution.RebaseContest
+
 type UnitCheckSelection = execution.UnitCheckSelection
 
 type building = execution.Building

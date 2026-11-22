@@ -356,10 +356,14 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
 				return err
 			}
-			if last.Status() != "idle" {
+			verdict := last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == verdictOutcome
+			if last.Status() == "failed" && !verdict {
+				return r.contestFailedTurn(ctx, stream, unit, state, last)
+			}
+			if last.Status() != "idle" && !verdict {
 				return nil
 			}
-			if last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != verdictOutcome {
+			if !verdict {
 				return r.contestMissingVerdict(ctx, stream, unit, state, last)
 			}
 			return r.finishReview(ctx, stream, unit, state, last)
@@ -441,6 +445,21 @@ func (r *reviewers) contestMissingVerdict(ctx context.Context, stream config.Wor
 		Evidence: router.Evidence{Records: []router.Entry{{Kind: "review turn", ID: last.Request.TurnID, Text: reason}}},
 	})
 	return err
+}
+
+// contestFailedTurn contests a unit whose review turn failed without an
+// exhausted infrastructure failure and without a verdict: it timed out, reached
+// its turn limit or failed behaviourally. The reason says what ended the turn,
+// and the router may instead have the candidate reviewed once more. The contest
+// is raised once per turn.
+func (r *reviewers) contestFailedTurn(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn) error {
+	id := failureContestID(last.Response.ID)
+	transitions, err := trace.Read[trace.Transition](r.repository, stream)
+	if err != nil || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+		return err
+	}
+	reason := fmt.Sprintf("the %s turn %s of unit %s ended without a verdict because %s", reviewerRole, last.Request.TurnID, unit, endedBy(last))
+	return r.s.contestTurn(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, id, reason, "the review turn failed", true)
 }
 
 func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate string) (string, error) {
