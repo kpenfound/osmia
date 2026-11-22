@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -72,6 +73,19 @@ type followUp struct {
 	FiredTurn string `json:"fired_turn,omitempty"`
 	// Replaces is the reason of the unfired follow-up this one replaced.
 	Replaces string `json:"replaces,omitempty"`
+	// Refires counts how often the follow-up was put back to pending
+	// because the turn it fired ended failed or interrupted.
+	Refires int `json:"refires,omitempty"`
+}
+
+// maxFollowUpRefires bounds how often a follow-up whose turn ended failed
+// or interrupted fires again.
+const maxFollowUpRefires = 3
+
+// followUpRefireDelay is how long after its turn ended a follow-up fires
+// again for the nth time: 5, 10 and then 20 minutes.
+func followUpRefireDelay(n int) time.Duration {
+	return minFollowUp << (n - 1)
 }
 
 // followUpActed records that a stall notice's turn ended its quiet itself:
@@ -339,6 +353,9 @@ type followUps struct {
 	// service, when not nil, supplies the holds the summary of queued work
 	// reads.
 	service *Service
+	// archived, when not nil, returns the archive record of a workstream
+	// the owner or the chief archived.
+	archived func(raw string) (runtime.Archive, bool)
 }
 
 // stallLookback bounds how long after a stall notice's turn completed its
@@ -372,16 +389,18 @@ func (f followUps) stream(ctx context.Context, r *trace.Repository, host config.
 		return err
 	}
 	now := f.now()
+	var failed []error
 	for _, q := range th.Turns {
 		if q.CompletedAt.IsZero() || q.Status() != "idle" || !stallTurn(q) || now.Sub(q.CompletedAt) > stallLookback || recs.turns[q.Request.TurnID] || recs.acted[q.Request.TurnID] {
 			continue
 		}
 		if _, err := scheduleFollowUp(ctx, r, host, th.Identity.ThreadID, q.Request.TurnID, "", stallFollowUpReason, f.window, now); err != nil {
-			return err
+			failed = append(failed, fmt.Errorf("check-back of turn %s: %w", q.Request.TurnID, err))
+			continue
 		}
 		recs.turns[q.Request.TurnID] = true
 		if recs, err = readFollowUps(r, host); err != nil {
-			return err
+			return errors.Join(append(failed, err)...)
 		}
 	}
 	ids := make([]string, 0, len(recs.latest))
@@ -390,15 +409,55 @@ func (f followUps) stream(ctx context.Context, r *trace.Repository, host config.
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
+		x, err := f.refire(ctx, r, host, th, recs.latest[id], recs.revision[id])
+		if err != nil {
+			failed = append(failed, fmt.Errorf("follow-up %s: %w", id, err))
+			continue
+		}
+		if x.State != recs.latest[id].State {
+			recs.latest[id], recs.revision[id] = x, recs.revision[id]+1
+		}
+	}
+	for _, id := range ids {
 		x := recs.latest[id]
 		if x.State != followUpPending || now.Before(x.Due) {
 			continue
 		}
 		if err := f.fire(ctx, r, host, th, x, recs.revision[id], now); err != nil {
-			return err
+			// One follow-up that cannot fire does not hold back the others.
+			failed = append(failed, fmt.Errorf("follow-up %s: %w", id, err))
 		}
 	}
-	return nil
+	return errors.Join(failed...)
+}
+
+// refire puts x back to pending when the turn it fired ended failed or
+// interrupted within stallLookback and it has fired again fewer than
+// maxFollowUpRefires times, due followUpRefireDelay after that turn ended. It returns x as recorded.
+func (f followUps) refire(ctx context.Context, r *trace.Repository, host config.WorkstreamID, th trace.Thread, x followUp, revision int) (followUp, error) {
+	if x.State != followUpFired || x.FiredTurn == "" || x.Refires >= maxFollowUpRefires {
+		return x, nil
+	}
+	i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == x.FiredTurn })
+	if i < 0 || th.Turns[i].CompletedAt.IsZero() || f.now().Sub(th.Turns[i].CompletedAt) > stallLookback {
+		return x, nil
+	}
+	ended := th.Turns[i]
+	if status := ended.Status(); status != "failed" && status != "interrupted" {
+		return x, nil
+	}
+	again := x
+	again.State, again.FiredTurn, again.Refires = followUpPending, "", x.Refires+1
+	again.Due = ended.CompletedAt.Add(followUpRefireDelay(again.Refires))
+	err := recordFollowUp(ctx, r, host, revision+1, again, followUpActor, x.FiredTurn, f.now())
+	if errors.Is(err, trace.ErrConflict) {
+		// The chief replaced the follow-up meanwhile; the newer one stands.
+		return x, nil
+	}
+	if err != nil {
+		return x, err
+	}
+	return again, nil
 }
 
 // fire queues the turn of x's revision on the chief thread, unless a pass
@@ -455,6 +514,12 @@ func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x follo
 		}
 	}
 	for _, member := range members {
+		if f.archived != nil {
+			if a, ok := f.archived(string(member)); ok {
+				fmt.Fprintf(&b, "\nWorkstream %s: archived (%s).\n", member, archiveResolution(a))
+				continue
+			}
+		}
 		target, stream, refusal, err := r.ChiefMember(host, member)
 		if err != nil {
 			return "", err
@@ -463,7 +528,17 @@ func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x follo
 			fmt.Fprintf(&b, "\nWorkstream %s: %s.\n", member, refusal)
 			continue
 		}
+		if retired, err := r.MemberRetired(member); err != nil {
+			return "", err
+		} else if retired {
+			fmt.Fprintf(&b, "\nWorkstream %s: archived (retired from the workgroup).\n", member)
+			continue
+		}
 		summary, err := f.summary(target, stream, x.ScheduledAt)
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, trace.ErrMemberRetired) {
+			fmt.Fprintf(&b, "\nWorkstream %s: archived (its trace was removed).\n", member)
+			continue
+		}
 		if err != nil {
 			return "", err
 		}
@@ -471,6 +546,16 @@ func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x follo
 	}
 	b.WriteString("\n" + stallTurnRule + "\n")
 	return b.String(), nil
+}
+
+// archiveResolution names the state an archived workstream ended in and,
+// when recorded, how it was resolved.
+func archiveResolution(a runtime.Archive) string {
+	parts := []string{emptyAsNone(a.State)}
+	if a.ResolutionEvidence != "" {
+		parts = append(parts, a.ResolutionEvidence)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // maxFollowUpChanges bounds the transitions a follow-up turn's prompt lists
@@ -562,7 +647,7 @@ func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repo
 	}
 	s := p.s
 	cfg := s.current()
-	f := followUps{now: s.now, window: followUpWindow(cfg), service: s, system: s.followUpSystem,
+	f := followUps{now: s.now, window: followUpWindow(cfg), service: s, system: s.followUpSystem, archived: s.archivedWorkstream,
 		profile: func() (coreadapter.Profile, error) {
 			_, profile, err := s.chiefOverride(cfg)
 			return profile, err
