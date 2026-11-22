@@ -93,6 +93,12 @@ func turnSkills(settings ExecutionSettings, backend string) []string {
 	return nil
 }
 
+// TurnSkills are the skill references a turn on backend is given, the ones the
+// execution boundary holds its request to.
+func TurnSkills(settings ExecutionSettings, backend string) []string {
+	return turnSkills(settings, backend)
+}
+
 // SessionExecutor is the core-facing execution seam. Check must reject boundaries
 // it cannot enforce. Run must use Request.Env as the complete environment, without
 // host inheritance or expansion, and must not add tools, mounts or credentials.

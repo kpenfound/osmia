@@ -34,13 +34,22 @@ type SkillSource interface {
 	SkillDirs() []string
 }
 
+// SkillPreparing is an Engine that returns the prepared directory of each skill
+// reference, in the order given. These are the directories a turn given the
+// references may read, and they lie inside SkillDirs.
+type SkillPreparing interface {
+	SkillSource
+	PrepareSkills(ctx context.Context, refs []string) ([]string, error)
+}
+
 // CoreEngine is the production Engine: every enforcer runs its turns with
 // Runner.
 type CoreEngine struct{ Runner agent.Runner }
 
 var (
-	_ Engine      = CoreEngine{}
-	_ SkillSource = CoreEngine{}
+	_ Engine         = CoreEngine{}
+	_ SkillSource    = CoreEngine{}
+	_ SkillPreparing = CoreEngine{}
 )
 
 // SkillDirs are the runner's skill directories, or none when it has no skill
@@ -50,6 +59,15 @@ func (e CoreEngine) SkillDirs() []string {
 		return nil
 	}
 	return e.Runner.SkillMountDirs
+}
+
+// PrepareSkills prepares refs with the runner's skill preparer, the one that
+// prepares them for a session.
+func (e CoreEngine) PrepareSkills(ctx context.Context, refs []string) ([]string, error) {
+	if e.Runner.Skills == nil {
+		return nil, unsupported("skills", "execution engine prepares no skills")
+	}
+	return e.Runner.Skills.Prepare(ctx, refs)
 }
 
 func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error) {

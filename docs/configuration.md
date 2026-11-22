@@ -1251,6 +1251,17 @@ app-server does not accept the skills (a Codex older than the
 minimum named under "Building the Osmia template", for example);
 Osmia never runs it without them.
 
+A turn given skills can read its skill directories through `file_read`, the
+read-only file tool, even when the role has no shell. Beside
+paths in the turn's view, `file_read` accepts the absolute path where a skill
+directory is mounted: a skill's `SKILL.md` and the files it references, and a
+listing of a directory. The directories are those of the references the turn
+was given, taken from the same resolution that mounts them, never from the
+path asked for. A path that leaves a skill directory by `..` or by a symlink,
+another skill's directory, version control metadata and every other absolute
+path are refused, and a turn with no skills reads only its view. The reads
+add no write or shell access and copy nothing into the view or worktree.
+
 Osmia clones a missing reference when a turn needs it, with the service's own
 `git` and credentials and without prompting. A failed clone fails the turn. A
 clone last fetched more than `skills.refresh` ago is pulled

@@ -2,6 +2,7 @@ package adaptertest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/kpenfound/agentcore/agent"
@@ -33,6 +34,9 @@ type Engine struct {
 	// Skills are the directories the engine's prepared skills live in; none
 	// means it prepares no skills.
 	Skills []string
+	// SkillPlugins maps a skill reference to the directory the engine prepares
+	// it in.
+	SkillPlugins map[string]string
 
 	mu sync.Mutex
 }
@@ -49,6 +53,19 @@ func (f *Engine) CheckResume(ctx context.Context, previous, next a.Profile, sess
 }
 
 func (f *Engine) SkillDirs() []string { return f.Skills }
+
+// PrepareSkills returns the directory of each reference in SkillPlugins.
+func (f *Engine) PrepareSkills(_ context.Context, refs []string) ([]string, error) {
+	var dirs []string
+	for _, ref := range refs {
+		dir, ok := f.SkillPlugins[ref]
+		if !ok {
+			return nil, fmt.Errorf("skill %q is not prepared", ref)
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs, nil
+}
 
 // Released reports whether every prepared session was released.
 func (f *Engine) Released() bool {

@@ -53,6 +53,13 @@ func (e resumableEngine) SkillDirs() []string {
 	return nil
 }
 
+func (e resumableEngine) PrepareSkills(ctx context.Context, refs []string) ([]string, error) {
+	if source, ok := e.Engine.(coreadapter.SkillPreparing); ok {
+		return source.PrepareSkills(ctx, refs)
+	}
+	return nil, &coreadapter.UnsupportedError{Capability: "skills", Reason: "execution engine prepares no skills"}
+}
+
 func (e resumableEngine) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
 	if checker, ok := e.Engine.(coreadapter.ResumeChecker); ok {
 		return checker.CheckResume(ctx, previous, next, session)
