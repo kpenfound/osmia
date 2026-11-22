@@ -80,6 +80,9 @@ type WorkgroupChange struct {
 	Retired   []config.WorkstreamID                       `json:"retired,omitempty"`
 	Followups map[config.WorkstreamID]config.WorkstreamID `json:"followups,omitempty"`
 	Failure   string                                      `json:"failure,omitempty"`
+	// FailureSettled is true once a failed change's requester has its ruling
+	// and the chief of staff its notice.
+	FailureSettled bool `json:"failure_settled,omitempty"`
 	// Attempt counts the retries of the change's drafting and debate. Each
 	// retry queues its turns afresh under new turn IDs.
 	Attempt int `json:"attempt,omitempty"`
@@ -730,6 +733,37 @@ func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c
 	return err
 }
 
+// ChangeNoticeSubject is the workflow subject of a member workstream that
+// records each workgroup change notice written to its events.
+const ChangeNoticeSubject = "workgroup-change-notice"
+
+// ChangeFailureNotice tells the chief of staff that workgroup change c failed,
+// through the events of the workgroup's leading live member: the leader's own
+// project trace for a cross-repo workgroup, or wt for a same-repo one. The
+// event delivery path carries them to the shared thread. It is written once
+// per failed attempt.
+func (s *Controller) ChangeFailureNotice(ctx context.Context, wt *trace.Repository, g trace.Workgroup, c WorkgroupChange) error {
+	leader := s.ChangeLeader(s.ChangeMembers(g, wt))
+	if leader == "" {
+		return nil
+	}
+	repo := wt
+	if ChangeSharedRepository(g, wt) {
+		r, err := s.ChangeMemberRepository(wt, leader)
+		if err != nil {
+			return err
+		}
+		repo = r
+	}
+	lever := "Request a new change once its failure is addressed."
+	if c.Request.Kind == "amend" && c.Decision == nil && len(c.Applied) == 0 {
+		lever = fmt.Sprintf("retry_change with id %s starts its drafting and debate again; or request a new change once its failure is addressed.", c.ID)
+	}
+	body := fmt.Sprintf("Workgroup change %s (%s, requested: %s) failed before it was applied: %s. Nothing of it was applied and the recorded workgroup spec is unchanged. %s Tell the owner in plain words what happened.", c.ID, c.Request.Kind, c.Request.Change, strings.TrimRight(c.Failure, ". "), lever)
+	id := ChangeIdentity(fmt.Sprintf("change-%s-failed-%d", c.ID, c.Attempt))
+	return s.NoticeChief(ctx, repo, leader, ChangeNoticeSubject, id, WorkgroupChangeDocument(c.ID), c.Failure, body, amendmentActor)
+}
+
 // Summary presents the actual proposed intent with its mechanical impact.
 // Unchanged sections stay out of the delta so there is one reviewable gate.
 func (c WorkgroupChange) Summary() string {
@@ -925,7 +959,7 @@ func (s *Controller) RetryChange(ctx context.Context, host config.WorkstreamID, 
 	}); later {
 		return c, &APIError{Code: Conflict, Message: "another workgroup change is pending; decide it first"}
 	}
-	c.State, c.Failure, c.Debate, c.Reply, c.Attempt = "drafting", "", nil, "", c.Attempt+1
+	c.State, c.Failure, c.Debate, c.Reply, c.Attempt, c.FailureSettled = "drafting", "", nil, "", c.Attempt+1, false
 	if err := s.SaveChange(ctx, wt, &c); err != nil {
 		return c, &APIError{Code: Internal, Message: err.Error()}
 	}
