@@ -13,10 +13,11 @@ by queries over the spans alone:
    workstreams that departed fared against those that followed it.
 
 [Configuration](configuration.md#optional-telemetry) turns telemetry on and
-points it at a collector. [`deploy/telemetry`](../deploy/telemetry/README.md)
-runs a collector, ClickHouse and Grafana for it. The
-[queries](#queries) below run against the `otel_traces` table that stack
-writes.
+points it at a collector. Spans go over OTLP to an OpenTelemetry collector
+whose ClickHouse exporter writes the `otel.otel_traces` table, and Grafana
+queries that table. The lab runs this collector, ClickHouse and Grafana stack
+from the Apiary repository. The [queries](#queries) below run against that
+table.
 
 ## What is sent
 
@@ -392,8 +393,8 @@ no connection and sends no span.
 
 ## Queries
 
-The queries run against the `otel.otel_traces` table the collector in
-[`deploy/telemetry`](../deploy/telemetry/README.md) creates. They use these
+The queries run against the `otel.otel_traces` table that the collector's
+ClickHouse exporter writes. They use these
 columns: `Timestamp` (the span start), `Duration` (nanoseconds), `SpanName`,
 `TraceId` and `SpanAttributes`. `SpanAttributes` is a `Map(String, String)`, so
 every value reads as text: an integer such as `osmia.pool.limit` is converted
