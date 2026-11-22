@@ -342,7 +342,7 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		}
 		out = append(out, entries...)
 	}
-	if err := add(HeldNoticesEntry(repository, w.Workstream)); err != nil {
+	if err := add(s.HeldNoticesEntry(ctx, repository, w.Workstream)); err != nil {
 		return nil, err
 	}
 	if e, open := s.LoopEntry(repository, w.Workstream); open {
@@ -371,13 +371,29 @@ func (s *Controller) LoopEntry(repository *trace.Repository, stream config.Works
 	return e, true
 }
 
-// heldNoticesEntry is the workstream's notices the chief of staff no longer
+// HeldNoticesEntry is the workstream's notices the chief of staff no longer
 // receives because events.MaxDeliveryFailures turns delivering them failed,
 // opened when the first of them was recorded. A message to the chief of
 // staff answers it: once the chief completes a turn answering the owner,
-// they are delivered again.
-func HeldNoticesEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
-	chief, err := repository.ChiefOfStaffThread(stream)
+// they are delivered again. The notices wait in the workstream's own outbox
+// and are judged against the thread they are delivered to: the shared chief's
+// thread in the workgroup trace for a member of a cross-repo workgroup. A
+// workgroup still joining its members, or whose trace another process holds,
+// shows no card until a later read.
+func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
+	target, closeTarget := repository, func() {}
+	if s.ChiefRepositoryForRead != nil {
+		var err error
+		target, _, _, closeTarget, err = s.ChiefRepositoryForRead(ctx, repository, stream)
+		if errors.Is(err, ErrWorkgroupJoining) || errors.Is(err, trace.ErrLocked) {
+			return InboxEntry{}, false, nil
+		}
+		if err != nil {
+			return InboxEntry{}, false, err
+		}
+	}
+	chief, err := target.ChiefOfStaffThread(stream)
+	closeTarget()
 	if errors.Is(err, os.ErrNotExist) {
 		return InboxEntry{}, false, nil
 	}
