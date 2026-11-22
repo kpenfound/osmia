@@ -177,8 +177,12 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("in-shed move does not explain the wait: %v", api)
 	}
 	note := "Cite no charter rule; neither charter numbers any."
-	var prompt atomic.Value
-	scriptProjectSpecTurn(f, "project-spec-draft-7", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	var requested, prompt atomic.Value
+	scriptProjectSpecTurn(f, "project-spec-draft-7", func(_ context.Context, req agent.Request, _ *mcp.ClientSession) error {
+		requested.Store(req.Prompt)
+		return nil
+	})
+	scriptProjectSpecTurn(f, "project-spec-draft-9", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		prompt.Store(req.Prompt)
 		_, err := callTool(ctx, tools, ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
@@ -194,11 +198,19 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("second request while drafting: %v", api)
 	}
 	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	if projectSpecRecorded(t, f, id) {
+		t.Fatal("a refused requested draft was recorded")
+	}
+	if p, _ := requested.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
+		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
+	}
+	// The automatic retry of a requested run keeps the request's note.
+	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	if !projectSpecRecorded(t, f, id) {
-		t.Fatal("requested draft not recorded")
+		t.Fatal("retry of the requested draft not recorded")
 	}
 	if p, _ := prompt.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
-		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
+		t.Fatalf("retry prompt lacks the note or the refusal: %s", p)
 	}
 	recorded := "The workgroup spec is recorded; each member's committee review starts now."
 	must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))

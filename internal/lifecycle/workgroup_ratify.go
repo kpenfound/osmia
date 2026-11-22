@@ -404,7 +404,7 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 		if found && len(next.Guarded) == 0 {
 			return ProjectSpecDraftInput{}, false, nil
 		}
-		problems := ""
+		problems, note := "", ""
 		switch {
 		case state.Value == "failed":
 			// A refused first draft or guarded redraft is asked for again
@@ -418,7 +418,9 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 			if failures >= ProjectSpecDraftAttempts {
 				return ProjectSpecDraftInput{}, false, s.ReportProjectSpecDraftFailure(ctx, members, last, failures, found)
 			}
-			problems = last.Reason
+			// The note of a requested draft stays with the automatic retries
+			// of its run.
+			problems, note = last.Reason, input.Note
 		case !found && state.Value != "":
 			return ProjectSpecDraftInput{}, false, nil
 		}
@@ -428,7 +430,7 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 			next = input
 		}
 		next.Turn = fmt.Sprintf("project-spec-draft-%d", state.Version+1)
-		next.Problems, next.Note = problems, ""
+		next.Problems, next.Note = problems, note
 		input = next
 		if err := s.RequestProjectSpecDraft(ctx, wt, host, state, input, revision+1, ProjectSpecDraftActor); err != nil {
 			return ProjectSpecDraftInput{}, false, err
@@ -665,7 +667,7 @@ func (s *Controller) RequestProjectSpecDraft(ctx context.Context, wt *trace.Repo
 	}
 	cause, reason := "project-spec-draft", "every member is sketched; the architect is asked for the project spec"
 	switch {
-	case input.Note != "":
+	case by != ProjectSpecDraftActor:
 		cause, reason = ProjectSpecDraftRequestCause, "the architect is asked for another draft of the project spec: "+input.Note
 	case input.Problems != "":
 		reason = "the previous draft was refused; the architect is asked again with its problems"
