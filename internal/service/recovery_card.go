@@ -184,7 +184,7 @@ func (s *Service) recoveryCards(repo *trace.Repository, stream config.Workstream
 			return nil
 		}
 		seen[move.Occurrence] = true
-		state, err := recoverySubjectState(repo, stream, move.Subject)
+		state, err := s.recoverySubjectState(repo, stream, move.Subject)
 		if err != nil {
 			return err
 		}
@@ -405,9 +405,9 @@ func dependencyOf(subject string) (config.WorkstreamID, string, bool) {
 // recoverySubjectState returns the state and version of the subject a recovery
 // move pins: a workgroup change's state and journal revision, or the subject's
 // workflow state.
-func recoverySubjectState(repo *trace.Repository, stream config.WorkstreamID, subject string) (trace.WorkflowState, error) {
+func (s *Service) recoverySubjectState(repo *trace.Repository, stream config.WorkstreamID, subject string) (trace.WorkflowState, error) {
 	if id, ok := changeOfSubject(subject); ok {
-		return changeState(repo, stream, id)
+		return s.changeState(repo, stream, id)
 	}
 	return repo.RawWorkflow(stream, subject)
 }

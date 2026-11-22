@@ -67,16 +67,99 @@ type changeWatch struct {
 // subject is the subject the change's stall is raised on.
 func (c changeWatch) subject() string { return lifecycle.WorkgroupChangeDocument(c.id) }
 
+// changeJournal is one workgroup change journal as the watchdog reads it, and
+// the project workstream its stalls are raised on.
+type changeJournal struct {
+	// trace holds the journal, the delta threads of its changes and the
+	// amendment requests of its workgroup: the project's own trace, or the
+	// trace of a cross-repo workgroup.
+	trace *trace.Repository
+	// host is the workstream trace keeps the journal under.
+	host config.WorkstreamID
+	// at is the workstream of the project that a change's stall is raised on,
+	// whose outbox tells the chief of staff and whose records hold the
+	// recovery card: the host itself, or the member that leads a cross-repo
+	// workgroup.
+	at config.WorkstreamID
+}
+
 // changes raises the stalls of the workgroup changes the stream hosts that have
 // not moved for the window with nothing to explain it, and of the first project
 // amendment request of its workgroup that was not drafted into a change while
 // no change is ahead of it.
 func (w stallWatch) changes(ctx context.Context, p *stallPass, host config.WorkstreamID) error {
-	changes, err := lifecycle.ReadChanges(w.repository, host)
+	return w.journal(ctx, p, changeJournal{trace: w.repository, host: host, at: host}, func() (config.WorkgroupID, error) {
+		groups, _, err := trace.Workgroups(w.repository)
+		if err != nil {
+			return "", err
+		}
+		g, ok := trace.WorkgroupOf(groups, host)
+		if !ok || len(g.Members) == 0 || g.Members[0] != host {
+			return "", nil
+		}
+		return g.ID, nil
+	})
+}
+
+// crossRepoChanges raises the stalls of the changes and amendment requests of
+// each cross-repo workgroup that a workstream of streams leads: its least
+// member that is not archived, which runs the workgroup's changes. Their
+// journal is in the workgroup trace; their stalls are raised on the leader. A
+// workgroup whose trace another process holds is read at a later pass.
+func (w stallWatch) crossRepoChanges(ctx context.Context, p *stallPass, streams []config.WorkstreamID) error {
+	seen := map[config.WorkgroupID]bool{}
+	var failed []error
+	for _, stream := range streams {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		id, err := w.repository.CrossRepoWorkgroupOf(stream)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("workgroup of %s: %w", stream, err))
+			continue
+		}
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := w.crossRepoGroupChanges(ctx, p, id, streams); err != nil && !errors.Is(err, trace.ErrLocked) {
+			failed = append(failed, fmt.Errorf("workgroup changes of %s: %w", id, err))
+		}
+	}
+	return errors.Join(failed...)
+}
+
+// crossRepoGroupChanges raises the stalls of cross-repo workgroup id's changes
+// when a workstream of streams leads it.
+func (w stallWatch) crossRepoGroupChanges(ctx context.Context, p *stallPass, id config.WorkgroupID, streams []config.WorkstreamID) error {
+	g, _, err := w.repository.CrossRepoWorkgroup(id)
+	if err != nil || len(g.Members) < 2 {
+		return err
+	}
+	leader := w.s.lifecycle().ChangeLeader(g.Members[1:])
+	if leader == "" || !slices.Contains(streams, leader) {
+		return nil
+	}
+	wt, err := trace.OpenWorkgroupAuthority(w.s.current().Root, id)
+	if err != nil {
+		if wt != nil {
+			wt.Close()
+		}
+		return err
+	}
+	defer wt.Close()
+	return w.journal(ctx, p, changeJournal{trace: wt, host: g.Members[0], at: leader}, func() (config.WorkgroupID, error) { return id, nil })
+}
+
+// journal raises the stalls of the changes of one journal, and of the first
+// amendment request of the workgroup whose requests the journal drafts, which
+// workgroup returns; it returns nothing when the journal drafts none.
+func (w stallWatch) journal(ctx context.Context, p *stallPass, j changeJournal, workgroup func() (config.WorkgroupID, error)) error {
+	changes, err := lifecycle.ReadChanges(j.trace, j.host)
 	if err != nil {
 		return err
 	}
-	moved, err := changeRevisionTimes(w.repository, host)
+	moved, err := changeRevisionTimes(j.trace, j.host)
 	if err != nil {
 		return err
 	}
@@ -89,32 +172,28 @@ func (w stallWatch) changes(ctx context.Context, p *stallPass, host config.Works
 			continue
 		}
 		watch := changeWatch{id: c.ID, what: "workgroup change " + c.ID, state: c.State, version: uint64(c.Revision), since: moved[lifecycle.WorkgroupChangeDocument(c.ID)], failure: c.Failure, endable: lifecycle.StalledChangeEndable(c.State)}
-		if err := w.change(ctx, p, host, watch); err != nil {
+		if err := w.change(ctx, p, j, watch); err != nil {
 			return err
 		}
 	}
 	if pending {
 		return nil
 	}
-	requests, _, err := trace.ProjectAmendments(w.repository)
+	requests, _, err := trace.ProjectAmendments(j.trace)
 	if err != nil || len(requests) == 0 {
 		return err
 	}
-	groups, _, err := trace.Workgroups(w.repository)
-	if err != nil {
+	group, err := workgroup()
+	if err != nil || group == "" {
 		return err
-	}
-	g, ok := trace.WorkgroupOf(groups, host)
-	if !ok || len(g.Members) == 0 || g.Members[0] != host {
-		return nil
 	}
 	for _, r := range requests {
 		id := "contract-" + r.ID
-		if r.Workgroup != g.ID || slices.ContainsFunc(changes, func(c lifecycle.WorkgroupChange) bool { return c.ID == id }) {
+		if r.Workgroup != group || slices.ContainsFunc(changes, func(c lifecycle.WorkgroupChange) bool { return c.ID == id }) {
 			continue
 		}
-		watch := changeWatch{id: id, what: fmt.Sprintf("project amendment request %s of workgroup %s", r.ID, g.ID), state: "requested", since: r.At}
-		return w.change(ctx, p, host, watch)
+		watch := changeWatch{id: id, what: fmt.Sprintf("project amendment request %s of workgroup %s", r.ID, group), state: "requested", since: r.At}
+		return w.change(ctx, p, j, watch)
 	}
 	return nil
 }
@@ -140,9 +219,10 @@ func changeRevisionTimes(repository *trace.Repository, host config.WorkstreamID)
 // stall, identified by the change's revision and the time it last moved. A
 // stall the router decided that still stands a further window later, on a
 // change that can still be ended, has the owner's recovery card.
-func (w stallWatch) change(ctx context.Context, p *stallPass, host config.WorkstreamID, c changeWatch) error {
+func (w stallWatch) change(ctx context.Context, p *stallPass, j changeJournal, c changeWatch) error {
+	host := j.at
 	key := stallKey(w.repository.Project(), host, c.subject())
-	turn, done, err := w.changeTurns(host, c.id)
+	turn, done, err := changeTurns(j, c.id)
 	if err != nil {
 		return err
 	}
@@ -184,8 +264,8 @@ func (w stallWatch) change(ctx context.Context, p *stallPass, host config.Workst
 // changeTurns returns the latest time a delta turn of the change that is
 // running or queued was queued, claimed or attempted, and when the latest of
 // them finished.
-func (w stallWatch) changeTurns(host config.WorkstreamID, id string) (time.Time, time.Time, error) {
-	threads, err := w.repository.Threads(host)
+func changeTurns(j changeJournal, id string) (time.Time, time.Time, error) {
+	threads, err := j.trace.Threads(j.host)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
@@ -297,10 +377,35 @@ func (w stallWatch) openChangeRecovery(ctx context.Context, host config.Workstre
 	return err
 }
 
-// changeState is the state and revision of the workgroup change the host's
-// journal holds, as a recovery card pins it; zero when the journal holds none.
-func changeState(repo *trace.Repository, host config.WorkstreamID, id string) (trace.WorkflowState, error) {
-	changes, err := lifecycle.ReadChanges(repo, host)
+// changeState is the state and revision of the workgroup change id as the
+// recovery card of stream pins it: from the journal stream hosts, or, for the
+// member of a cross-repo workgroup, from the workgroup trace's journal; zero
+// when the journal holds none.
+func (s *Service) changeState(repo *trace.Repository, stream config.WorkstreamID, id string) (trace.WorkflowState, error) {
+	journal, host := repo, stream
+	group, err := repo.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return trace.WorkflowState{}, err
+	}
+	if group != "" {
+		g, _, err := repo.CrossRepoWorkgroup(group)
+		if err != nil {
+			return trace.WorkflowState{}, err
+		}
+		if len(g.Members) == 0 {
+			return trace.WorkflowState{}, nil
+		}
+		wt, err := trace.OpenWorkgroupAuthority(s.current().Root, group)
+		if err != nil {
+			if wt != nil {
+				wt.Close()
+			}
+			return trace.WorkflowState{}, err
+		}
+		defer wt.Close()
+		journal, host = wt, g.Members[0]
+	}
+	changes, err := lifecycle.ReadChanges(journal, host)
 	if err != nil {
 		return trace.WorkflowState{}, err
 	}

@@ -41,7 +41,10 @@ type Dependencies struct {
 	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
 	ChiefOverride        func(cfg *config.Config) (string, coreadapter.Profile, error)
 	ChiefRepository      func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
-	ContestedEntry       func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
+	// ChiefRepositoryForRead is ChiefRepository for reading the chief of
+	// staff's thread; it needs no live member to supply context.
+	ChiefRepositoryForRead func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
+	ContestedEntry         func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
 	// ContestedGate returns the gate of the contested unit's open card when Jev
 	// may decide it, or nil. A card whose unit carries a binding Jev judgment
 	// the service could not carry out returns that judgment instead.

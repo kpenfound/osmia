@@ -149,6 +149,10 @@ func (w stallWatch) Pass(ctx context.Context) error {
 			failed = append(failed, fmt.Errorf("workgroup changes of %s: %w", stream, err))
 		}
 	}
+	watched := slices.DeleteFunc(slices.Clone(streams), func(s config.WorkstreamID) bool { return s == librarian })
+	if err := w.crossRepoChanges(ctx, p, watched); err != nil {
+		failed = append(failed, err)
+	}
 	return errors.Join(failed...)
 }
 
@@ -193,8 +197,8 @@ type stallReading struct {
 	unitsHeld bool
 	unitCards map[string]bool
 	// groupCard is whether the owner's approval of the shared workgroup explains
-	// the quiet: the workgroup is not approved and the workstream is not
-	// ratified yet.
+	// the quiet: the owner is asked for it, with every member's ratification
+	// card in the inbox, and the workstream is not ratified yet.
 	groupCard bool
 	// paused is whether a pause covers the workstream.
 	paused bool
@@ -692,12 +696,16 @@ func (w stallWatch) readCards(ctx context.Context, r *stallReading, status trace
 		}
 	}
 	// A shared workgroup that the owner has not approved is the owner's to
-	// decide while the workstream is not ratified yet; after that it explains
-	// nothing.
-	if approved, err := w.repository.GroupApproved(status.Workstream); err != nil {
-		return err
-	} else if !approved && !ratifiedOrLater(r.feature.Value) {
-		r.card, r.groupCard = true, true
+	// decide only while the owner is asked for it, with every member's
+	// ratification card in the inbox, and the workstream is not ratified yet.
+	if !ratifiedOrLater(r.feature.Value) {
+		asked, err := w.s.intake().GroupApprovalAsked(ctx, w.repository, status.Workstream)
+		if err != nil {
+			return err
+		}
+		if asked {
+			r.card, r.groupCard = true, true
+		}
 	}
 	return nil
 }
