@@ -12,10 +12,10 @@ base = "dag://osmia-dev/test-runtime"
 # result cache and reading that log back after each package: the service
 # tests' log outgrows the engine's memory.
 goflags = "-count=1 -timeout=30m"
-# Keep factory state out of module discovery, including any go.mod files left
-# in session directories.
-test = ["**", "!.bees"]
-generate = ["**", "!.bees/**"]
+# Keep factory state and local agent worktrees out of module discovery,
+# including any go.mod files left in session directories.
+test = ["**", "!.bees", "!.claude"]
+generate = ["**", "!.bees/**", "!.claude/**"]
 
 [modules.release]
 source = ".dagger/modules/osmia-release"
