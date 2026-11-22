@@ -245,6 +245,136 @@ func TestRejectedContractDeltaResumesOnlyItsParkedRequester(t *testing.T) {
 		t.Fatal("rejecting the impact changed approved intent")
 	}
 }
+
+// changeFailureNotices returns the notices on stream's outbox that tell the
+// chief of staff workgroup change id failed.
+func changeFailureNotices(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string) []string {
+	t.Helper()
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	var bodies []string
+	for _, e := range entries {
+		if strings.Contains(e.Event.Body, "Workgroup change "+id+" ") && strings.Contains(e.Event.Body, "failed before it was applied") {
+			bodies = append(bodies, e.Event.Body)
+		}
+	}
+	return bodies
+}
+
+func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
+	t.Parallel()
+	f, stream, repo := newApprovedFixture(t, "failed-contract")
+	defer repo.Close()
+	f.s.setSole(runtimeFor(repo))
+	ctx := context.Background()
+	groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
+	must(t, err)
+	g, _ := trace.WorkgroupOf(groups, stream)
+	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), serviceActor)
+	must(t, err)
+	st, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	paused := trace.UnitSubject("resume") + "_waiting_project_amendment_" + string(g.ID) + "_1"
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: paused, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.s.now(), Actor: trace.Actor{Kind: "service", ID: masonRole}, Cause: "project-amendment-1"},
+		Subject: trace.UnitSubject("resume"), From: st.Value, To: UnitWaiting, Reason: "the protected contract request parks only this origin",
+	}})
+	must(t, err)
+	th, err := repo.Thread(stream, masonAgent("resume"))
+	must(t, err)
+	c, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "failed-delta", Kind: "amend", Scope: "workgroup", Change: "Change the offset type"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	c = currentChange(t, f.s, stream, c.ID)
+	c.Requester = &trace.ProjectAmendment{ID: "1", Workgroup: g.ID, Origin: stream, Requester: trace.Actor{Kind: "agent", ID: masonAgent("resume")}, Citations: []string{"spec#1"}, Change: "Change the offset type", Reason: "The consumer requested another type"}
+	must(t, f.s.saveChange(ctx, repo, &c))
+	if api := f.s.endStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision), "the architect never delivered the delta"); api != nil {
+		t.Fatal(api)
+	}
+	advance := func() {
+		t.Helper()
+		wt, g, _, close, err := f.s.changeContext(ctx, string(stream))
+		must(t, err)
+		defer close()
+		must(t, f.s.advanceChanges(ctx, wt, g))
+	}
+	advance()
+	advance()
+	resumed, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if resumed.Value != UnitImplementing {
+		t.Fatalf("the failed change left its requester %s", resumed.Value)
+	}
+	now, err := repo.Thread(stream, masonAgent("resume"))
+	must(t, err)
+	if len(now.Turns) != len(th.Turns)+1 {
+		t.Fatalf("the requester received %d rulings", len(now.Turns)-len(th.Turns))
+	}
+	if prompt := now.Turns[len(now.Turns)-1].Request.Prompt; !strings.Contains(prompt, "failed before it was applied") || !strings.Contains(prompt, "the architect never delivered the delta") {
+		t.Fatalf("the requester's ruling does not carry the failure: %s", prompt)
+	}
+	notices := changeFailureNotices(t, repo, stream, c.ID)
+	if len(notices) != 1 || !strings.Contains(notices[0], "the architect never delivered the delta") || !strings.Contains(notices[0], "retry_change") {
+		t.Fatalf("chief notices of the failed change: %v", notices)
+	}
+	if got := currentChange(t, f.s, stream, c.ID); !got.FailureSettled {
+		t.Fatalf("the failed change is not settled: %+v", got)
+	}
+	// A retried change that fails again is reported again.
+	retried, api := f.s.retryChange(ctx, stream, c.ID)
+	if api != nil {
+		t.Fatal(api)
+	}
+	if retried.FailureSettled {
+		t.Fatal("a retried change kept its settled failure")
+	}
+	if api := f.s.endStalledChange(ctx, stream, c.ID, "drafting", uint64(retried.Revision), "the retry stalled too"); api != nil {
+		t.Fatal(api)
+	}
+	advance()
+	if notices := changeFailureNotices(t, repo, stream, c.ID); len(notices) != 2 || !slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, "the retry stalled too.") }) {
+		t.Fatalf("chief notices after the retried change failed: %v", notices)
+	}
+}
+
+func TestFailedCrossRepoChangeTellsTheChiefThroughTheLeader(t *testing.T) {
+	t.Parallel()
+	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{options: func(opts *Options) {
+		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action == deltaTurnAction }
+	}})
+	defer f.stop(t)
+	ctx := context.Background()
+	f.startOwner(t)
+	packet := f.awaitPacket(t)
+	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	must(t, err)
+	f.awaitApproved(t)
+	c, api := f.s.requestChange(ctx, string(f.stream2), ChangeRequest{Key: "failed-shared-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
+	if api != nil {
+		t.Fatal(api)
+	}
+	lifecycleAwait(t, f, "the stalled change ends", func() bool {
+		latest := currentChange(t, f.s, f.stream2, c.ID)
+		return latest.State == "failed" || f.s.endStalledChange(ctx, f.stream2, c.ID, latest.State, uint64(latest.Revision), "the delta turns never ran") == nil
+	})
+	leader, leaderProject, other, otherProject := f.stream1, f.project, f.stream2, f.project2
+	if f.stream2 < f.stream1 {
+		leader, leaderProject, other, otherProject = f.stream2, f.project2, f.stream1, f.project
+	}
+	leaderRepo, otherRepo := mustRepo(t, f.s, leaderProject), mustRepo(t, f.s, otherProject)
+	lifecycleAwait(t, f, "the leader's events tell the chief", func() bool {
+		return len(changeFailureNotices(t, leaderRepo, leader, c.ID)) > 0
+	})
+	notices := changeFailureNotices(t, leaderRepo, leader, c.ID)
+	if len(notices) != 1 || !strings.Contains(notices[0], "the delta turns never ran") || !strings.Contains(notices[0], "retry_change") {
+		t.Fatalf("chief notices of the failed shared change: %v", notices)
+	}
+	if got := changeFailureNotices(t, otherRepo, other, c.ID); len(got) != 0 {
+		t.Fatalf("the failure was told through a member other than the leader: %v", got)
+	}
+}
+
 func TestCancelUpstreamIncludesDependentsInSharedImpact(t *testing.T) {
 	t.Parallel()
 	f := newProductionDesignFixture(t)

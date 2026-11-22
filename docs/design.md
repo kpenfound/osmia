@@ -322,6 +322,15 @@ workgroup; merged branches and historical decisions remain intact. An archived
 member's slice is frozen and the delta leaves it unchanged; the impact summary
 shows that member unchanged.
 
+A change whose draft or debate turn ends without recording its result, or that
+is ended from its recovery card, fails before it is presented and changes
+nothing. A role whose request became the change receives the failure as its
+ruling, the way it receives a rejection, and its waiting unit resumes against
+the recorded spec. The chief of staff is told once per failed attempt, with the
+failure and whether `retry_change` applies, through the events of the
+workgroup's leading live member: in that member's own project for a cross-repo
+workgroup.
+
 The owner can also cancel a workgroup or a member in that conversation. One
 impact summary includes cancellation of its transitive dependents and asks
 whether open pull requests should be closed or left as drafts. Cancellation

@@ -476,7 +476,7 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 		return err
 	}
 	if len(requests) == 0 && !slices.ContainsFunc(changes, func(c WorkgroupChange) bool {
-		return c.State != "applied" && c.State != "rejected" && c.State != "failed"
+		return c.State != "applied" && c.State != "rejected" && c.State != "failed" || c.State == "failed" && !c.FailureSettled
 	}) {
 		return nil
 	}
@@ -582,6 +582,22 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 				if err := s.HoldChange(ctx, wt, &c, err.Error()); err != nil {
 					return err
 				}
+			}
+		case "failed":
+			if c.FailureSettled {
+				continue
+			}
+			// The requester hears the failure the way it hears a rejection,
+			// and the chief of staff is told through a member's events.
+			if err := s.SettleChangeRequester(ctx, c); err != nil && !errors.Is(err, trace.ErrMemberRetired) {
+				return err
+			}
+			if err := s.ChangeFailureNotice(ctx, wt, g, c); err != nil {
+				return err
+			}
+			c.FailureSettled = true
+			if err := s.SaveChange(ctx, wt, &c); err != nil {
+				return err
 			}
 		case "rejected", "applied":
 			if err := s.SettleChangeRequester(ctx, c); err != nil {

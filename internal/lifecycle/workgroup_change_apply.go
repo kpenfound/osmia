@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
@@ -383,9 +384,12 @@ func (s *Controller) CancelChangeMember(ctx context.Context, repo *trace.Reposit
 
 // A protected contract request parks its origin just like a local amendment.
 // An applied delta already queues changed workers; a rejected delta or an
-// unchanged origin instead resumes its preserved stage with the decision.
+// unchanged origin instead resumes its preserved stage with the decision. A
+// failed change resumes it with the failure, once per failed attempt, so a
+// change retried after it failed still delivers its later decision.
 func (s *Controller) SettleChangeRequester(ctx context.Context, c WorkgroupChange) error {
-	if c.Requester == nil || c.Decision == nil {
+	failed := c.State == "failed"
+	if c.Requester == nil || c.Decision == nil && !failed {
 		return nil
 	}
 	pa := *c.Requester
@@ -412,7 +416,11 @@ func (s *Controller) SettleChangeRequester(ctx context.Context, c WorkgroupChang
 	if err != nil {
 		return err
 	}
-	req := trace.Amendment{Header: trace.Header{ID: "group-" + c.ID, Workstream: pa.Origin, Unit: th.Identity.Unit}, Requester: pa.Requester, Role: th.Identity.Role, Thread: th.Identity.ThreadID, QuestionID: pa.QuestionID, Citations: pa.Citations, Change: pa.Change, Reason: pa.Reason}
+	ruling := "group-" + c.ID
+	if failed {
+		ruling = fmt.Sprintf("group-%s-failed-%d", c.ID, c.Attempt)
+	}
+	req := trace.Amendment{Header: trace.Header{ID: ruling, Workstream: pa.Origin, Unit: th.Identity.Unit}, Requester: pa.Requester, Role: th.Identity.Role, Thread: th.Identity.ThreadID, QuestionID: pa.QuestionID, Citations: pa.Citations, Change: pa.Change, Reason: pa.Reason}
 	if pa.QuestionID != "" {
 		questions, err := repo.Questions(pa.Origin)
 		if err != nil {
@@ -443,6 +451,13 @@ func (s *Controller) SettleChangeRequester(ctx context.Context, c WorkgroupChang
 	}
 	a := amendmentDebate{Debate: &debate{S: s.Intake().DebateDependencies(), Repository: repo}}
 	cause := WorkgroupChangeDocument(c.ID)
+	if failed {
+		decision := AmendmentDecision{Decision: "reject", Actor: amendmentActor.ID, Note: "Workgroup change " + c.ID + " failed before it was applied: " + strings.TrimRight(c.Failure, ". ") + ". The recorded project spec is unchanged; continue against it."}
+		if err := a.DeliverRuling(ctx, pa.Origin, req, decision, cause, "The workgroup change failed, so the recorded project spec stays as it is."); err != nil {
+			return err
+		}
+		return a.ResumeUnit(ctx, pa.Origin, req, cause, "closed", amendmentActor.ID, transitions)
+	}
 	verb := map[string]string{"approve": "approved", "reject": "rejected"}[c.Decision.Decision]
 	decision := AmendmentDecision{Decision: c.Decision.Decision, Actor: "owner", Note: "The owner " + verb + " the workgroup impact summary. " + c.Reply}
 	if err := a.DeliverRuling(ctx, pa.Origin, req, decision, cause, "The impact summary decision preserves the recorded project spec until an approved delta is applied."); err != nil {
