@@ -29,7 +29,7 @@ func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {
 
 func TestAcceptanceFactoryInstructions(t *testing.T) {
 	t.Parallel()
-	assertAcceptanceDraftInstructions(t, architectPrompt("handed/stdin", 1, "", false, nil))
+	assertAcceptanceDraftInstructions(t, architectPrompt("handed/stdin", 1, "", false, "", nil))
 	for _, role := range []string{architectRole, committeeRole} {
 		policy := factoryInstructions(coreadapter.Scope{Role: role})
 		for _, want := range []string{"whole check suite to pass or run", "asking a reviewer to show which tests ran", "engineering defect to correct", "service-owned check gate already runs checks with smart-check selection"} {
