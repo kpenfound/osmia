@@ -75,6 +75,17 @@ func (f *shedFixture) replyOperations(t *testing.T, stream config.WorkstreamID) 
 }
 
 // acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledgedReplies returns the reply operations once every one of them is
 // acknowledged, for assertions reached through an awaited shed state.
 func (f *shedFixture) acknowledgedReplies(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
