@@ -60,7 +60,7 @@ func (r *Repository) documentSeq(scope config.WorkstreamID, id, path string) (in
 		return 0, false, fmt.Errorf("%w: trace repository is closed", ErrLocked)
 	}
 	var seq int64
-	err = target.reads.QueryRowContext(context.Background(), "SELECT seq FROM records WHERE schema = 'osmia.trace.document' AND path = ? AND id = ? ORDER BY seq DESC LIMIT 1", scopePath(Header{Workstream: scope})+"documents.jsonl", id).Scan(&seq)
+	err = target.reads.QueryRowContext(context.Background(), latestDocumentSeqQuery, scopePath(Header{Workstream: scope})+"documents.jsonl", id).Scan(&seq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

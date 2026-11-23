@@ -228,6 +228,17 @@ func (r *Repository) latestDocument(ctx context.Context, q querier, scope config
 	return d, nil
 }
 
+// The latest revision of a document, by its stored path and identity. Both
+// queries order by revision so that SQLite answers them from the unique
+// (path, id, revision) index with a single lookup. A document's revisions are
+// committed in order, so its highest revision is also its highest seq;
+// ordering by seq instead makes SQLite walk the (path, seq) index through
+// every document of the scope.
+const (
+	latestDocumentSeqQuery  = "SELECT seq FROM records WHERE path = ? AND id = ? AND schema = 'osmia.trace.document' ORDER BY revision DESC LIMIT 1"
+	latestDocumentByIDQuery = "SELECT body, revision FROM records WHERE path = ? AND id = ? AND schema = 'osmia.trace.document' ORDER BY revision DESC LIMIT 1"
+)
+
 // latestDocumentByID selects by stored identity, so even malformed JSON in
 // the latest revision is decoded and reported instead of hiding that revision.
 // The unique (path, id, revision) index supports this lookup without the
@@ -242,7 +253,7 @@ func (r *Repository) latestDocumentByID(scope config.WorkstreamID, id, path stri
 	}
 	var body string
 	var revision int
-	err = target.reads.QueryRowContext(context.Background(), "SELECT body, revision FROM records WHERE schema = 'osmia.trace.document' AND path = ? AND id = ? ORDER BY seq DESC LIMIT 1", scopePath(Header{Workstream: scope})+"documents.jsonl", id).Scan(&body, &revision)
+	err = target.reads.QueryRowContext(context.Background(), latestDocumentByIDQuery, scopePath(Header{Workstream: scope})+"documents.jsonl", id).Scan(&body, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Document{}, fs.ErrNotExist
 	}
