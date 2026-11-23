@@ -38,6 +38,14 @@ func (g *escalationGate) Start(ctx context.Context, server *mcp.Server) (coreada
 	return g.base.Start(ctx, server)
 }
 
+// A new comment here
+// A new comment here
+// A new comment here
+// A new comment here
+// A new comment here
+// A new comment here
+// A new comment here
+// A new comment here
 func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
