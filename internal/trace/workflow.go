@@ -225,6 +225,28 @@ func (v *workflowView) clone() *workflowView {
 	return c
 }
 
+// readWorkflowView requires r.mu. It returns the workstream's checked
+// workflow view for reading only: once the workflow is cached, the cached view
+// itself, which the caller must not change and must not keep after it
+// releases r.mu. A commit replaces the cached workflow rather than changing
+// it, so the view stays consistent while r.mu is held.
+func (r *Repository) readWorkflowView(stream config.WorkstreamID) (*workflowView, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return nil, err
+	}
+	if r.stream != stream {
+		return nil, fmt.Errorf("unknown workstream %s", stream)
+	}
+	if _, err := r.workstreamManifest(stream); err != nil {
+		return nil, err
+	}
+	if c := r.workflows[stream]; c != nil {
+		return c.view, nil
+	}
+	_, v, err := r.loadWorkflow(stream)
+	return v, err
+}
+
 // loadWorkflow requires r.mu. It returns the workstream's checked workflow,
 // which the caller may change. The workflow is read and checked against the
 // records it names once per handle; the handle keeps it current as it
@@ -558,7 +580,7 @@ func (r *Repository) RawWorkflow(stream config.WorkstreamID, subject string) (Wo
 	if !key(subject) {
 		return WorkflowState{}, fmt.Errorf("invalid workflow subject")
 	}
-	_, v, err := target.loadWorkflow(stream)
+	v, err := target.readWorkflowView(stream)
 	if err != nil {
 		return WorkflowState{}, err
 	}
@@ -577,7 +599,7 @@ func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]Work
 		target.mu.Unlock()
 		return nil, err
 	}
-	_, v, err := target.loadWorkflow(stream)
+	v, err := target.readWorkflowView(stream)
 	if err != nil {
 		target.mu.Unlock()
 		return nil, err

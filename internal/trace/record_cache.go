@@ -168,6 +168,9 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 // resetCache drops every cached record. It requires r.cache.mu.
 func (r *Repository) resetCache() {
 	r.cache.loaded, r.cache.seq, r.cache.records, r.cache.errs, r.cache.latest, r.cache.documents, r.cache.origins = false, 0, nil, nil, nil, nil, nil
+	r.manifestsMu.Lock()
+	r.manifests = nil
+	r.manifestsMu.Unlock()
 }
 
 // querier runs a query on a database or in a transaction.
