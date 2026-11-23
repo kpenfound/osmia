@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -95,6 +96,12 @@ type Repository struct {
 	// once written, under createdMu.
 	createdMu sync.Mutex
 	created   map[config.WorkstreamID]time.Time
+	// manifests holds each manifest last checked, with the stored bytes it
+	// was checked from, by file name, under manifestsMu.
+	manifestsMu sync.Mutex
+	manifests   map[string]checkedManifest
+	// manifestDecodes counts the manifests this handle read and checked.
+	manifestDecodes atomic.Uint64
 	// decoded counts the stored records this handle decoded.
 	decoded        atomic.Uint64
 	workgroupReads atomic.Uint64
@@ -762,12 +769,41 @@ type manifestRecord struct {
 	Title      string `json:"title,omitempty"`
 }
 
+// checkedManifest is a manifest that passed its checks and the stored bytes
+// it was decoded from.
+type checkedManifest struct {
+	data           []byte
+	schema, stream string
+	manifest       manifestRecord
+}
+
+// readManifest reads the stored manifest name on every call, so a manifest
+// that went missing or was damaged is reported at once. Stored bytes equal to
+// the ones this handle last checked for the same schema and workstream
+// return that check's result without decoding them again.
 func (r *Repository) readManifest(name, schema string, stream config.WorkstreamID) (manifestRecord, error) {
 	data, err := r.file(name)
 	if err != nil {
 		return manifestRecord{}, err
 	}
-	return r.decodeManifest(name, data, schema, stream)
+	r.manifestsMu.Lock()
+	c, ok := r.manifests[name]
+	r.manifestsMu.Unlock()
+	if ok && c.schema == schema && c.stream == string(stream) && bytes.Equal(c.data, data) {
+		return c.manifest, nil
+	}
+	m, err := r.decodeManifest(name, data, schema, stream)
+	if err != nil {
+		return manifestRecord{}, err
+	}
+	r.manifestDecodes.Add(1)
+	r.manifestsMu.Lock()
+	if r.manifests == nil {
+		r.manifests = map[string]checkedManifest{}
+	}
+	r.manifests[name] = checkedManifest{data: bytes.Clone(data), schema: schema, stream: string(stream), manifest: m}
+	r.manifestsMu.Unlock()
+	return m, nil
 }
 
 func (r *Repository) decodeManifest(name string, data []byte, schema string, stream config.WorkstreamID) (manifestRecord, error) {
