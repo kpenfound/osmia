@@ -3,6 +3,20 @@ set -euo pipefail
 
 readonly TEMPLATE='osmia:latest'
 
+# The oldest Codex release whose app-server answers skills/extraRoots/set, the
+# request that gives a Codex turn its role's skills (openai/codex, the
+# app-server protocol of rust-v0.136.0).
+readonly CODEX_MIN_VERSION='0.136.0'
+
+# version_at_least <version> <minimum> succeeds when the leading
+# major.minor.patch of version is at least minimum. A prerelease suffix is
+# ignored.
+version_at_least() {
+    local have=${1%%[-+]*} want=$2
+    [[ $have =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    [[ $(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n 1) == "$want" ]]
+}
+
 if [[ $# -ne 0 ]]; then
     printf 'Usage: %s\n' "$0" >&2
     exit 2
@@ -324,7 +338,13 @@ curl -fsSL https://dl.dagger.io/dagger/install.sh -o "$installer"
 sh "$installer"
 INSTALL
 
-sbx exec "$sandbox" codex --version
+codex_version_output=$(sbx exec "$sandbox" codex --version)
+printf '%s\n' "$codex_version_output"
+codex_version=$(awk 'match($0, /[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*/) {print substr($0, RSTART, RLENGTH); exit}' <<<"$codex_version_output")
+if ! version_at_least "$codex_version" "$CODEX_MIN_VERSION"; then
+    printf 'Codex %s is older than %s, the first release that supports skills/extraRoots/set; refusing to save template.\n' "${codex_version:-of unknown version}" "$CODEX_MIN_VERSION" >&2
+    exit 1
+fi
 sbx exec "$sandbox" claude --version
 dagger_version=$(sbx exec "$sandbox" dagger version)
 printf '%s\n' "$dagger_version"

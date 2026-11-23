@@ -215,7 +215,7 @@ type Role struct {
 	CPUs   int    `toml:"cpus" json:"cpus,omitempty"`
 	Memory string `toml:"memory" json:"memory,omitempty"`
 	// Skills are git references (<url>[@<ref>][#<sub/dir>]) of skills given
-	// to the role's Claude turns.
+	// to the role's Claude and Codex turns.
 	Skills []string `toml:"skills" json:"skills,omitempty"`
 }
 

@@ -79,6 +79,21 @@ func TestConfigValidateAcceptsAValidFile(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAcceptsRoleSkillLists(t *testing.T) {
+	const base = "https://github.com/kpenfound/skills#"
+	list := func(names ...string) string {
+		return "[\"" + base + strings.Join(names, "\", \""+base) + "\"]"
+	}
+	file := filepath.Join(shortDir(t), "staged.toml")
+	writeFile(t, file, validTopLevel+
+		"[roles.mason]\nskills = "+list("behavioral-testing", "simple-code", "no-deltas", "lint-discipline", "unslop", "typescript-best-practices")+"\n"+
+		"[roles.reviewer]\nskills = "+list("pr-review", "simple-code", "no-deltas", "behavioral-testing")+"\n")
+	code, out, diag := validateRun(t, "config", "validate", "--config", file)
+	if code != 0 || diag != "" || !strings.Contains(out, file) {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, diag)
+	}
+}
+
 func TestConfigValidateWarnsAndStillSucceeds(t *testing.T) {
 	dir := shortDir(t)
 	file := filepath.Join(dir, "staged.toml")

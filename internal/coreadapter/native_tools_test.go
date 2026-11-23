@@ -78,3 +78,19 @@ func TestNetworkGrantsNoWebTools(t *testing.T) {
 		}
 	}
 }
+
+func TestSkillsReachOnlyClaudeAndCodexTurns(t *testing.T) {
+	settings := ExecutionSettings{Skills: []string{"https://github.com/acme/skills#tdd"}}
+	for backend, want := range map[string]bool{"": true, "claude": true, "codex": true, "opencode": false, "pi": false, "other": false} {
+		if got := len(turnSkills(settings, backend)) != 0; got != want {
+			t.Errorf("%q given skills: %v, want %v", backend, got, want)
+		}
+		skillTool := backend == "" || backend == "claude"
+		if got := slices.Contains(allowedTools(backend, nil, nil, true), "Skill"); got != skillTool {
+			t.Errorf("%q allowed Skill tool: %v, want %v", backend, got, skillTool)
+		}
+		if got := slices.Contains(nativeTools(backend, Capabilities{}, true), "Skill"); got != skillTool {
+			t.Errorf("%q native Skill tool: %v, want %v", backend, got, skillTool)
+		}
+	}
+}

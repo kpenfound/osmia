@@ -50,8 +50,8 @@ type ExecutionSettings struct {
 	// token. The turn's sandbox runs its own Dagger CLI on Dagger Cloud with
 	// DaggerCloudEnvironment. Empty is no Dagger Cloud.
 	DaggerCloudTokenEnv string
-	// Skills are the skill references of the role. Only a Claude turn is
-	// given them.
+	// Skills are the skill references of the role. Only a Claude or Codex turn
+	// is given them.
 	Skills []string
 }
 
@@ -84,12 +84,19 @@ func DaggerCloudEnvironment(settings ExecutionSettings, getenv func(string) stri
 }
 
 // turnSkills are the skills a turn on backend is given: the settings' skills
-// for Claude and none for any other backend.
+// for Claude and Codex and none for any other backend.
 func turnSkills(settings ExecutionSettings, backend string) []string {
-	if backend != "" && backend != agent.AgentClaude {
-		return nil
+	switch backend {
+	case "", agent.AgentClaude, agent.AgentCodex:
+		return settings.Skills
 	}
-	return settings.Skills
+	return nil
+}
+
+// TurnSkills are the skill references a turn on backend is given, the ones the
+// execution boundary holds its request to.
+func TurnSkills(settings ExecutionSettings, backend string) []string {
+	return turnSkills(settings, backend)
 }
 
 // SessionExecutor is the core-facing execution seam. Check must reject boundaries
@@ -240,7 +247,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 	if len(t.Sandbox.Verified.Capabilities.Tools) != 0 && len(servers) == 0 {
 		return agent.Request{}, unsupported("tools", "granted tools require a service MCP endpoint")
 	}
-	req.Profile.AllowedTools = allowedTools(servers, t.Sandbox.Verified.Capabilities.Tools, len(req.Profile.Skills) != 0)
+	req.Profile.AllowedTools = allowedTools(p.Backend, servers, t.Sandbox.Verified.Capabilities.Tools, len(req.Profile.Skills) != 0)
 	if err := req.Profile.Validate(); err != nil {
 		return agent.Request{}, unsupported("sandbox", err.Error())
 	}
@@ -276,11 +283,12 @@ func AllowedTools(servers, tools []string) []string {
 	return allowed
 }
 
-// allowedTools is AllowedTools followed, for a turn given skills, by Claude's
-// Skill tool, so a turn that runs without permission prompts may load them.
-func allowedTools(servers, tools []string, skills bool) []string {
+// allowedTools is AllowedTools followed, for a Claude turn given skills, by
+// Claude's Skill tool, so a turn that runs without permission prompts may load
+// them. No other backend has that tool.
+func allowedTools(backend string, servers, tools []string, skills bool) []string {
 	allowed := AllowedTools(servers, tools)
-	if skills {
+	if skills && (backend == "" || backend == agent.AgentClaude) {
 		allowed = append(allowed, skillTool)
 	}
 	return allowed

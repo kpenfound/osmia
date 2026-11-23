@@ -223,7 +223,9 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			return result, err
 		}
 	}
-	tools := append(fileTools(view), r.Tools...)
+	// The readable skill directories come from the turn's own skill set,
+		// the one the execution boundary holds the request to, never from input.
+		tools := append(fileTools(view, NewSkillReader(r.Engine, coreadapter.TurnSkills(selected.Execution, input.Profile.Backend))), r.Tools...)
 	if r.ViewTools != nil {
 		viewTools, toolErr := r.ViewTools(ctx, input.Scope, view)
 		if toolErr != nil {
@@ -321,16 +323,29 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	return result, err
 }
 
-func fileTools(view *FileView) []coreadapter.Tool {
+// fileTools are the turn's file tools. A turn given skills also reads files
+// inside its skill directories through file_read, at their absolute paths;
+// skills is nil for a turn with none.
+func fileTools(view *FileView, skills *SkillReader) []coreadapter.Tool {
+	description := "Read a file in this turn's view, or list a directory's entries; \".\" is the view's root"
+	if skills != nil {
+		description += ". A file or directory inside one of this turn's skill directories is read at its absolute path"
+	}
 	return []coreadapter.Tool{
-		{Name: "file_read", Description: "Read a file in this turn's view, or list a directory's entries; \".\" is the view's root", Effect: coreadapter.ToolRead,
+		{Name: "file_read", Description: description, Effect: coreadapter.ToolRead,
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
-			Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+			Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 				var input struct{ Path string }
 				if err := json.Unmarshal(raw, &input); err != nil {
 					return nil, err
 				}
-				data, err := view.Read(input.Path)
+				var data []byte
+				var err error
+				if skills != nil && filepath.IsAbs(input.Path) {
+					data, err = skills.Read(ctx, input.Path)
+				} else {
+					data, err = view.Read(input.Path)
+				}
 				if err != nil {
 					return nil, err
 				}

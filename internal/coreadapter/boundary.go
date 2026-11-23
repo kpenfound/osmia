@@ -34,13 +34,22 @@ type SkillSource interface {
 	SkillDirs() []string
 }
 
+// SkillPreparing is an Engine that returns the prepared directory of each skill
+// reference, in the order given. These are the directories a turn given the
+// references may read, and they lie inside SkillDirs.
+type SkillPreparing interface {
+	SkillSource
+	PrepareSkills(ctx context.Context, refs []string) ([]string, error)
+}
+
 // CoreEngine is the production Engine: every enforcer runs its turns with
 // Runner.
 type CoreEngine struct{ Runner agent.Runner }
 
 var (
-	_ Engine      = CoreEngine{}
-	_ SkillSource = CoreEngine{}
+	_ Engine         = CoreEngine{}
+	_ SkillSource    = CoreEngine{}
+	_ SkillPreparing = CoreEngine{}
 )
 
 // SkillDirs are the runner's skill directories, or none when it has no skill
@@ -50,6 +59,15 @@ func (e CoreEngine) SkillDirs() []string {
 		return nil
 	}
 	return e.Runner.SkillMountDirs
+}
+
+// PrepareSkills prepares refs with the runner's skill preparer, the one that
+// prepares them for a session.
+func (e CoreEngine) PrepareSkills(ctx context.Context, refs []string) ([]string, error) {
+	if e.Runner.Skills == nil {
+		return nil, unsupported("skills", "execution engine prepares no skills")
+	}
+	return e.Runner.Skills.Prepare(ctx, refs)
 }
 
 func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error) {
@@ -316,7 +334,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
 		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || !slices.Equal(req.Profile.Skills, turnSkills(settings, req.Profile.Agent)) || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image || req.Profile.SandboxCPUs != settings.CPUs || req.Profile.SandboxMemory != settings.Memory ||
-		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, allowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools, len(req.Profile.Skills) != 0)) ||
+		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, allowedTools(req.Profile.Agent, slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools, len(req.Profile.Skills) != 0)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
 		return nil, unsupported("execution request", "request widens the service boundary")
 	}
@@ -457,7 +475,7 @@ func viewLocation(view string) string {
 // environment, one MCP server grant per scoped endpoint and the settings'
 // Dagger engine, with role-selected native tools and no VCS. A Dagger turn's
 // view mount is marked as holding only an empty repository. A turn with skill
-// directories also holds the Skill tool.
+// directories also holds the Skill tool when it runs on Claude.
 func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry, skillDirs []string) (agent.Grants, error) {
 	mode := settings.Mode
 	access := agent.ReadOnly
