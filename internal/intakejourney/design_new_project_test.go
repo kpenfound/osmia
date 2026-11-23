@@ -15,6 +15,36 @@ import (
 )
 
 // A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// A design session opened for a new project is hosted in an existing project
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
+// and its brief may describe the project to create. draft_brief records a
+// valid new_project alone or beside existing projects, refuses an invalid one
 // and its brief may describe the project to create. draft_brief records a
 // valid new_project alone or beside existing projects, refuses an invalid one
 // and a brief with neither, and the design view returns the latest new_project.
